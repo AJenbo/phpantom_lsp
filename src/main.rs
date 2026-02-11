@@ -1,11 +1,16 @@
 use phpantom_lsp::Backend;
-use tower_lsp::LspService;
-use tower_lsp::Server;
+use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() {
-    let (service, socket) = LspService::new(|_client| Backend::new());
-    Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
+    env_logger::init();
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| Backend::new(client));
+
+    Server::new(stdin, stdout, socket)
         .serve(service)
         .await;
 }
