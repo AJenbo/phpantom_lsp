@@ -2,6 +2,7 @@
 name = "phpantom_lsp"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 tower-lsp = "0.18"
