@@ -124,10 +124,10 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
-        if let Some(change) = params.content_changes.first() {
-            if let Ok(mut files) = self.open_files.lock() {
-                files.insert(uri, change.text.clone());
-            }
+        if let Some(change) = params.content_changes.first()
+            && let Ok(mut files) = self.open_files.lock()
+        {
+            files.insert(uri, change.text.clone());
         }
     }
 
@@ -143,7 +143,11 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri.to_string();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let position = params.text_document_position_params.position;
 
         let content = if let Ok(files) = self.open_files.lock() {
@@ -152,34 +156,28 @@ impl LanguageServer for Backend {
             None
         };
 
-        if let Some(content) = content {
-            if let Some(word) = self.get_word_at_position(&content, position) {
-                if word == "PHPantom" {
-                    return Ok(Some(Hover {
-                        contents: HoverContents::Scalar(MarkedString::String(
-                            "Welcome to PHPantomLSP!".to_string(),
-                        )),
-                        range: None,
-                    }));
-                }
-            }
+        if let Some(content) = content
+            && let Some(word) = self.get_word_at_position(&content, position)
+            && word == "PHPantom"
+        {
+            return Ok(Some(Hover {
+                contents: HoverContents::Scalar(MarkedString::String(
+                    "Welcome to PHPantomLSP!".to_string(),
+                )),
+                range: None,
+            }));
         }
 
         Ok(None)
     }
 
-    async fn completion(
-        &self,
-        _params: CompletionParams,
-    ) -> Result<Option<CompletionResponse>> {
-        Ok(Some(CompletionResponse::Array(vec![
-            CompletionItem {
-                label: "PHPantomLSP".to_string(),
-                kind: Some(CompletionItemKind::TEXT),
-                detail: Some("PHPantomLSP completion".to_string()),
-                insert_text: Some("PHPantomLSP".to_string()),
-                ..CompletionItem::default()
-            },
-        ])))
+    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        Ok(Some(CompletionResponse::Array(vec![CompletionItem {
+            label: "PHPantomLSP".to_string(),
+            kind: Some(CompletionItemKind::TEXT),
+            detail: Some("PHPantomLSP completion".to_string()),
+            insert_text: Some("PHPantomLSP".to_string()),
+            ..CompletionItem::default()
+        }])))
     }
 }
