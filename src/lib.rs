@@ -79,6 +79,14 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
+                    trigger_characters: None,
+                    all_commit_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
+                }),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
@@ -158,5 +166,20 @@ impl LanguageServer for Backend {
         }
 
         Ok(None)
+    }
+
+    async fn completion(
+        &self,
+        _params: CompletionParams,
+    ) -> Result<Option<CompletionResponse>> {
+        Ok(Some(CompletionResponse::Array(vec![
+            CompletionItem {
+                label: "PHPantomLSP".to_string(),
+                kind: Some(CompletionItemKind::TEXT),
+                detail: Some("PHPantomLSP completion".to_string()),
+                insert_text: Some("PHPantomLSP".to_string()),
+                ..CompletionItem::default()
+            },
+        ])))
     }
 }

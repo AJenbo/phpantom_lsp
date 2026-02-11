@@ -28,6 +28,9 @@ async fn test_initialize_capabilities() {
     // Check that hover is supported
     assert!(result.capabilities.hover_provider.is_some());
 
+    // Check that completion is supported
+    assert!(result.capabilities.completion_provider.is_some());
+
     // Check text document sync
     assert!(result.capabilities.text_document_sync.is_some());
 }
@@ -140,6 +143,51 @@ async fn test_hover_on_other_word_returns_none() {
 
     let hover_result = backend.hover(hover_params).await.unwrap();
     assert!(hover_result.is_none());
+}
+
+#[tokio::test]
+async fn test_completion_returns_phpantomlsp() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = "<?php\n$x = \n".to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 1,
+                character: 5,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].label, "PHPantomLSP");
+            assert_eq!(items[0].kind, Some(CompletionItemKind::TEXT));
+            assert_eq!(items[0].detail.as_deref(), Some("PHPantomLSP completion"));
+            assert_eq!(items[0].insert_text.as_deref(), Some("PHPantomLSP"));
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
 }
 
 #[tokio::test]

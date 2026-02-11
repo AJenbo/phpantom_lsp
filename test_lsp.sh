@@ -43,10 +43,14 @@ with open("example.php", "r") as f:
     send "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"${FILE_URI}\"},\"position\":{\"line\":23,\"character\":9}}}"
     sleep 1
 
-    # 6. Shutdown
-    send '{"jsonrpc":"2.0","id":4,"method":"shutdown"}'
+    # 6. Request completions at line 20, character 11
+    send "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"${FILE_URI}\"},\"position\":{\"line\":20,\"character\":11}}}"
+    sleep 1
+
+    # 7. Shutdown
+    send '{"jsonrpc":"2.0","id":5,"method":"shutdown"}'
     sleep 0.5
 
-    # 7. Exit
+    # 8. Exit
     send '{"jsonrpc":"2.0","method":"exit","params":{}}'
 } | cargo run 2>/dev/null
