@@ -116,42 +116,6 @@ impl Backend {
         }
     }
 
-    fn get_word_at_position(&self, content: &str, position: Position) -> Option<String> {
-        let lines: Vec<&str> = content.lines().collect();
-        if position.line as usize >= lines.len() {
-            return None;
-        }
-
-        let line = lines[position.line as usize];
-        let chars: Vec<char> = line.chars().collect();
-
-        if position.character as usize > chars.len() {
-            return None;
-        }
-
-        let pos = position.character as usize;
-
-        // Find word boundaries
-        let mut start = pos;
-        let mut end = pos;
-
-        // Move start backward to word boundary
-        while start > 0 && chars[start - 1].is_alphanumeric() {
-            start -= 1;
-        }
-
-        // Move end forward to word boundary
-        while end < chars.len() && chars[end].is_alphanumeric() {
-            end += 1;
-        }
-
-        if start < end {
-            Some(chars[start..end].iter().collect())
-        } else {
-            None
-        }
-    }
-
     /// Extract a string representation of a type hint from the AST.
     fn extract_hint_string(hint: &Hint) -> String {
         match hint {
@@ -453,7 +417,6 @@ impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
                     trigger_characters: Some(vec![
@@ -533,35 +496,6 @@ impl LanguageServer for Backend {
 
         self.log(MessageType::INFO, format!("Closed file: {}", uri))
             .await;
-    }
-
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = params
-            .text_document_position_params
-            .text_document
-            .uri
-            .to_string();
-        let position = params.text_document_position_params.position;
-
-        let content = if let Ok(files) = self.open_files.lock() {
-            files.get(&uri).cloned()
-        } else {
-            None
-        };
-
-        if let Some(content) = content
-            && let Some(word) = self.get_word_at_position(&content, position)
-            && word == "PHPantom"
-        {
-            return Ok(Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::String(
-                    "Welcome to PHPantomLSP!".to_string(),
-                )),
-                range: None,
-            }));
-        }
-
-        Ok(None)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {

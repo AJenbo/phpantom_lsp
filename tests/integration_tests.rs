@@ -25,10 +25,6 @@ async fn test_initialize_capabilities() {
 
     let caps = result.capabilities;
     assert!(
-        caps.hover_provider.is_some(),
-        "Hover provider should be enabled"
-    );
-    assert!(
         caps.completion_provider.is_some(),
         "Completion provider should be enabled"
     );
@@ -39,7 +35,7 @@ async fn test_did_open_stores_file() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///test.php").unwrap();
-    let text = "<?php\necho 'hello';\n".to_string();
+    let text = "<?php\nclass Stored { function m() {} }\n".to_string();
 
     let params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
@@ -52,99 +48,13 @@ async fn test_did_open_stores_file() {
 
     backend.did_open(params).await;
 
-    // Verify by requesting a hover (which accesses stored content)
-    let hover_params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 0,
-                character: 0,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-
-    let result = backend.hover(hover_params).await;
-    assert!(result.is_ok());
-}
-
-#[tokio::test]
-async fn test_hover_on_phpantom() {
-    let backend = create_test_backend();
-
-    let uri = Url::parse("file:///test.php").unwrap();
-    let text = "<?php\nPHPantom\n".to_string();
-
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let hover_params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 3,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-
-    let result = backend.hover(hover_params).await.unwrap();
+    // Verify the file was stored by checking the AST map has an entry
+    let classes = backend.get_classes_for_uri(&uri.to_string());
     assert!(
-        result.is_some(),
-        "Hover should return a result for PHPantom"
+        classes.is_some(),
+        "AST map should have an entry after did_open"
     );
-
-    if let Some(hover) = result {
-        match hover.contents {
-            HoverContents::Scalar(MarkedString::String(s)) => {
-                assert_eq!(s, "Welcome to PHPantomLSP!");
-            }
-            _ => panic!("Unexpected hover content type"),
-        }
-    }
-}
-
-#[tokio::test]
-async fn test_hover_on_other_word_returns_none() {
-    let backend = create_test_backend();
-
-    let uri = Url::parse("file:///test.php").unwrap();
-    let text = "<?php\nhelloworld\n".to_string();
-
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let hover_params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 3,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-
-    let result = backend.hover(hover_params).await.unwrap();
-    assert!(
-        result.is_none(),
-        "Hover should return None for non-PHPantom words"
-    );
+    assert_eq!(classes.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -201,7 +111,7 @@ async fn test_did_change_updates_content() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///test.php").unwrap();
-    let initial_text = "<?php\nPHPantom\n".to_string();
+    let initial_text = "<?php\nclass A { function first() {} }\n".to_string();
 
     let open_params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
@@ -213,7 +123,10 @@ async fn test_did_change_updates_content() {
     };
     backend.did_open(open_params).await;
 
-    // Change the content to something else
+    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    assert_eq!(classes[0].methods.len(), 1);
+
+    // Change the content to add a second method
     let change_params = DidChangeTextDocumentParams {
         text_document: VersionedTextDocumentIdentifier {
             uri: uri.clone(),
@@ -222,27 +135,17 @@ async fn test_did_change_updates_content() {
         content_changes: vec![TextDocumentContentChangeEvent {
             range: None,
             range_length: None,
-            text: "<?php\nhelloworld\n".to_string(),
+            text: "<?php\nclass A { function first() {} function second() {} }\n".to_string(),
         }],
     };
     backend.did_change(change_params).await;
 
-    // Hover should now return None since "PHPantom" is gone
-    let hover_params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 3,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-
-    let result = backend.hover(hover_params).await.unwrap();
-    assert!(
-        result.is_none(),
-        "After change, hover should not find PHPantom"
+    // Verify content was updated by checking the re-parsed AST
+    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    assert_eq!(
+        classes[0].methods.len(),
+        2,
+        "After change, class should have 2 methods"
     );
 }
 
@@ -251,7 +154,7 @@ async fn test_did_close_removes_file() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///test.php").unwrap();
-    let text = "<?php\nPHPantom\n".to_string();
+    let text = "<?php\nclass Z { function z() {} }\n".to_string();
 
     let open_params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
@@ -263,26 +166,19 @@ async fn test_did_close_removes_file() {
     };
     backend.did_open(open_params).await;
 
+    assert!(backend.get_classes_for_uri(&uri.to_string()).is_some());
+
     // Close the file
     let close_params = DidCloseTextDocumentParams {
         text_document: TextDocumentIdentifier { uri: uri.clone() },
     };
     backend.did_close(close_params).await;
 
-    // Hover should return None since the file is closed
-    let hover_params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 1,
-                character: 3,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-
-    let result = backend.hover(hover_params).await.unwrap();
-    assert!(result.is_none(), "After close, hover should return None");
+    // AST map entry should be removed after close
+    assert!(
+        backend.get_classes_for_uri(&uri.to_string()).is_none(),
+        "After close, AST map should not have an entry"
+    );
 }
 
 // ─── AST Parsing Tests ─────────────────────────────────────────────────────
