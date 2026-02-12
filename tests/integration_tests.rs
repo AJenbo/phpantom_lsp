@@ -693,7 +693,11 @@ async fn test_completion_method_insert_text_with_required_params() {
                 .iter()
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
-            assert_eq!(method_items.len(), 4, "Should have 4 method completions (3 original + test)");
+            assert_eq!(
+                method_items.len(),
+                4,
+                "Should have 4 method completions (3 original + test)"
+            );
 
             // Find specific methods by filter_text (method name)
             let update_text = method_items
@@ -1383,7 +1387,11 @@ async fn test_completion_class_with_only_properties() {
                 .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
                 .collect();
             // Class has 2 properties + test method, but we check properties
-            assert_eq!(property_items.len(), 2, "Should return 2 property completions");
+            assert_eq!(
+                property_items.len(),
+                2,
+                "Should return 2 property completions"
+            );
             let labels: Vec<&str> = property_items.iter().map(|i| i.label.as_str()).collect();
             assert!(labels.contains(&"name"));
             assert!(labels.contains(&"value"));
@@ -2093,7 +2101,10 @@ async fn test_completion_new_self_variable() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return results for $new = new self");
+    assert!(
+        result.is_some(),
+        "Completion should return results for $new = new self"
+    );
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2102,8 +2113,14 @@ async fn test_completion_new_self_variable() {
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
-            assert!(method_names.contains(&"build"), "Should include non-static 'build'");
-            assert!(!method_names.contains(&"create"), "Should exclude static 'create' via ->");
+            assert!(
+                method_names.contains(&"build"),
+                "Should include non-static 'build'"
+            );
+            assert!(
+                !method_names.contains(&"create"),
+                "Should exclude static 'create' via ->"
+            );
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -2149,7 +2166,10 @@ async fn test_completion_new_static_variable() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return results for $inst = new static");
+    assert!(
+        result.is_some(),
+        "Completion should return results for $inst = new static"
+    );
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2158,7 +2178,10 @@ async fn test_completion_new_static_variable() {
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
-            assert!(method_names.contains(&"build"), "Should include non-static 'build'");
+            assert!(
+                method_names.contains(&"build"),
+                "Should include non-static 'build'"
+            );
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -2204,7 +2227,10 @@ async fn test_completion_new_classname_variable() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return results for $w = new Widget");
+    assert!(
+        result.is_some(),
+        "Completion should return results for $w = new Widget"
+    );
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2311,7 +2337,10 @@ async fn test_completion_property_chain_self_type() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should resolve $this->parent-> via self type hint");
+    assert!(
+        result.is_some(),
+        "Completion should resolve $this->parent-> via self type hint"
+    );
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2369,7 +2398,10 @@ async fn test_completion_classname_double_colon() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should resolve Registry:: to Registry class");
+    assert!(
+        result.is_some(),
+        "Completion should resolve Registry:: to Registry class"
+    );
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2385,9 +2417,18 @@ async fn test_completion_classname_double_colon() {
                 .collect();
 
             // Only static method should appear for ::
-            assert!(method_names.contains(&"instance"), "Should include static 'instance'");
-            assert!(!method_names.contains(&"get"), "Should exclude non-static 'get'");
-            assert!(constant_names.contains(&"VERSION"), "Should include constant");
+            assert!(
+                method_names.contains(&"instance"),
+                "Should include static 'instance'"
+            );
+            assert!(
+                !method_names.contains(&"get"),
+                "Should exclude non-static 'get'"
+            );
+            assert!(
+                constant_names.contains(&"VERSION"),
+                "Should include constant"
+            );
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -2433,7 +2474,10 @@ async fn test_completion_param_type_hint_resolves() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should resolve $other via parameter type hint");
+    assert!(
+        result.is_some(),
+        "Completion should resolve $other via parameter type hint"
+    );
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2574,9 +2618,18 @@ async fn test_completion_static_double_colon() {
                 .map(|i| i.label.as_str())
                 .collect();
             // Only static method for ::
-            assert!(method_names.contains(&"create"), "Should include static 'create'");
-            assert!(!method_names.contains(&"run"), "Should exclude non-static 'run'");
-            assert!(constant_names.contains(&"MAX"), "Should include constant 'MAX'");
+            assert!(
+                method_names.contains(&"create"),
+                "Should include static 'create'"
+            );
+            assert!(
+                !method_names.contains(&"run"),
+                "Should exclude non-static 'run'"
+            );
+            assert!(
+                constant_names.contains(&"MAX"),
+                "Should include constant 'MAX'"
+            );
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
