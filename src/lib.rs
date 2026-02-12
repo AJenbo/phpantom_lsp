@@ -48,6 +48,26 @@ pub struct PropertyInfo {
     pub is_static: bool,
 }
 
+/// Stores extracted constant information from a parsed PHP class.
+#[derive(Debug, Clone)]
+pub struct ConstantInfo {
+    /// The constant name (e.g. "MAX_SIZE", "STATUS_ACTIVE").
+    pub name: String,
+    /// Optional type hint string (e.g. "string", "int").
+    pub type_hint: Option<String>,
+}
+
+/// Describes the access operator that triggered completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessKind {
+    /// Completion triggered after `->` (instance access).
+    Arrow,
+    /// Completion triggered after `::` (static access).
+    DoubleColon,
+    /// No specific access operator detected (e.g. inside class body).
+    Other,
+}
+
 /// Stores extracted class information from a parsed PHP file.
 /// All data is owned so we don't depend on the parser's arena lifetime.
 #[derive(Debug, Clone)]
@@ -58,6 +78,8 @@ pub struct ClassInfo {
     pub methods: Vec<MethodInfo>,
     /// The properties defined directly in this class.
     pub properties: Vec<PropertyInfo>,
+    /// The constants defined directly in this class.
+    pub constants: Vec<ConstantInfo>,
     /// Byte offset where the class body starts (left brace).
     pub start_offset: u32,
     /// Byte offset where the class body ends (right brace).
@@ -249,6 +271,7 @@ impl Backend {
 
                     let mut methods = Vec::new();
                     let mut properties = Vec::new();
+                    let mut constants = Vec::new();
 
                     for member in class.members.iter() {
                         match member {
@@ -272,6 +295,16 @@ impl Backend {
                                 let mut prop_infos = Self::extract_property_info(property);
                                 properties.append(&mut prop_infos);
                             }
+                            ClassLikeMember::Constant(constant) => {
+                                let type_hint =
+                                    constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
+                                for item in constant.items.iter() {
+                                    constants.push(ConstantInfo {
+                                        name: item.name.value.to_string(),
+                                        type_hint: type_hint.clone(),
+                                    });
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -283,6 +316,7 @@ impl Backend {
                         name: class_name,
                         methods,
                         properties,
+                        constants,
                         start_offset,
                         end_offset,
                     });
@@ -331,6 +365,34 @@ impl Backend {
         classes
             .iter()
             .find(|c| offset >= c.start_offset && offset <= c.end_offset)
+    }
+
+    /// Detect the access operator before the cursor position by scanning
+    /// backwards past any partial identifier the user may have typed.
+    pub fn detect_access_kind(content: &str, position: Position) -> AccessKind {
+        let lines: Vec<&str> = content.lines().collect();
+        if position.line as usize >= lines.len() {
+            return AccessKind::Other;
+        }
+
+        let line = lines[position.line as usize];
+        let chars: Vec<char> = line.chars().collect();
+        let col = (position.character as usize).min(chars.len());
+
+        // Walk backwards past any identifier characters the user may have typed
+        let mut i = col;
+        while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+            i -= 1;
+        }
+
+        // Now check for `->` or `::`
+        if i >= 2 && chars[i - 2] == '-' && chars[i - 1] == '>' {
+            AccessKind::Arrow
+        } else if i >= 2 && chars[i - 2] == ':' && chars[i - 1] == ':' {
+            AccessKind::DoubleColon
+        } else {
+            AccessKind::Other
+        }
     }
 
     /// Build the label showing the full method signature.
@@ -525,9 +587,19 @@ impl LanguageServer for Backend {
             && let Some(class_info) = Self::find_class_at_offset(&classes, offset)
         {
             let mut items: Vec<CompletionItem> = Vec::new();
+            let access_kind = Self::detect_access_kind(&content, position);
 
-            // Add method completions
+            // Add method completions (filtered by access kind)
             for method in &class_info.methods {
+                let include = match access_kind {
+                    AccessKind::Arrow => !method.is_static,
+                    AccessKind::DoubleColon => method.is_static,
+                    AccessKind::Other => true,
+                };
+                if !include {
+                    continue;
+                }
+
                 let label = Self::build_method_label(method);
 
                 items.push(CompletionItem {
@@ -540,8 +612,17 @@ impl LanguageServer for Backend {
                 });
             }
 
-            // Add property completions
+            // Add property completions (filtered by access kind)
             for property in &class_info.properties {
+                let include = match access_kind {
+                    AccessKind::Arrow => !property.is_static,
+                    AccessKind::DoubleColon => property.is_static,
+                    AccessKind::Other => true,
+                };
+                if !include {
+                    continue;
+                }
+
                 let detail = if let Some(ref th) = property.type_hint {
                     format!("Class: {} — {}", class_info.name, th)
                 } else {
@@ -555,6 +636,26 @@ impl LanguageServer for Backend {
                     insert_text: Some(property.name.clone()),
                     ..CompletionItem::default()
                 });
+            }
+
+            // Add constant completions (only for `::` or unqualified access)
+            if access_kind == AccessKind::DoubleColon || access_kind == AccessKind::Other {
+                for constant in &class_info.constants {
+                    let detail = if let Some(ref th) = constant.type_hint {
+                        format!("Class: {} — {}", class_info.name, th)
+                    } else {
+                        format!("Class: {}", class_info.name)
+                    };
+
+                    items.push(CompletionItem {
+                        label: constant.name.clone(),
+                        kind: Some(CompletionItemKind::CONSTANT),
+                        detail: Some(detail),
+                        insert_text: Some(constant.name.clone()),
+                        filter_text: Some(constant.name.clone()),
+                        ..CompletionItem::default()
+                    });
+                }
             }
 
             if !items.is_empty() {
