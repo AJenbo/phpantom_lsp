@@ -7,8 +7,9 @@ A PHP Language Server Protocol (LSP) implementation in Rust.
 ## Features
 
 - LSP lifecycle management (initialize, shutdown, document sync)
-- Hover support
 - Basic completion
+
+<img width="683" height="339" alt="image" src="https://github.com/user-attachments/assets/65e8220d-5d94-466f-aea7-2f239a8d4b19" />
 
 ## Building
 
