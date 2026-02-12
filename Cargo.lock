@@ -858,6 +858,7 @@ dependencies = [
  "env_logger",
  "log",
  "mago-database",
+ "mago-span",
  "mago-syntax",
  "serde",
  "serde_json",

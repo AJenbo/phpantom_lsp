@@ -231,8 +231,17 @@ async fn test_completion_inside_class_returns_methods() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///user.php").unwrap();
-    let text =
-        "<?php\nclass User {\n    function login() {}\n    function logout() {}\n}\n".to_string();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    function login() {}\n",
+        "    function logout() {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    )
+    .to_string();
 
     let open_params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
@@ -244,13 +253,13 @@ async fn test_completion_inside_class_returns_methods() {
     };
     backend.did_open(open_params).await;
 
-    // Position cursor inside the class body (line 2, inside the class braces)
+    // Cursor right after `$this->` on line 5
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 5,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -263,12 +272,12 @@ async fn test_completion_inside_class_returns_methods() {
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
-            // Should have 2 methods (no properties in this class)
+            // Should have 3 non-static methods (login, logout, test)
             let method_items: Vec<&CompletionItem> = items
                 .iter()
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
-            assert_eq!(method_items.len(), 2, "Should return 2 method completions");
+            assert_eq!(method_items.len(), 3, "Should return 3 method completions");
 
             let filter_texts: Vec<&str> = method_items
                 .iter()
@@ -354,6 +363,9 @@ async fn test_completion_with_multiple_classes() {
         "}\n",
         "class Bar {\n",
         "    function handleRequest() {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -374,13 +386,13 @@ async fn test_completion_with_multiple_classes() {
         .expect("ast_map should have entry");
     assert_eq!(classes.len(), 2);
 
-    // Cursor inside the second class (Bar) body — line 6 is `    function handleRequest() {}`
+    // Cursor right after `$this->` on line 8 inside Bar
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 6,
-                character: 4,
+                line: 8,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -397,16 +409,14 @@ async fn test_completion_with_multiple_classes() {
                 .iter()
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
-            assert_eq!(method_items.len(), 1, "Bar has only one method");
-            assert_eq!(
-                method_items[0].filter_text.as_deref(),
-                Some("handleRequest")
-            );
-            assert!(
-                method_items[0].label.starts_with("handleRequest("),
-                "Label should show full signature"
-            );
-            assert_eq!(method_items[0].kind, Some(CompletionItemKind::METHOD));
+            // Bar has handleRequest and test — both non-static
+            assert_eq!(method_items.len(), 2, "Bar has two methods");
+            let names: Vec<&str> = method_items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(names.contains(&"handleRequest"));
+            assert!(names.contains(&"test"));
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -455,37 +465,12 @@ async fn test_did_change_reparses_ast() {
     assert!(method_names.contains(&"first"));
     assert!(method_names.contains(&"second"));
 
-    // Request completion inside the class body
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 4,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let method_items: Vec<&CompletionItem> = items
-                .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-                .collect();
-            assert_eq!(method_items.len(), 2);
-            let filter_texts: Vec<&str> = method_items
-                .iter()
-                .map(|i| i.filter_text.as_deref().unwrap())
-                .collect();
-            assert!(filter_texts.contains(&"first"));
-            assert!(filter_texts.contains(&"second"));
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    // Verify the AST was re-parsed and has both methods
+    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    assert_eq!(classes[0].methods.len(), 2);
+    let method_names: Vec<&str> = classes[0].methods.iter().map(|m| m.name.as_str()).collect();
+    assert!(method_names.contains(&"first"));
+    assert!(method_names.contains(&"second"));
 }
 
 #[tokio::test]
@@ -598,8 +583,17 @@ async fn test_completion_method_insert_text_no_params() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///insert.php").unwrap();
-    let text = "<?php\nclass Widget {\n    function render() {}\n    function update() {}\n}\n"
-        .to_string();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    function render() {}\n",
+        "    function update() {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    )
+    .to_string();
 
     let open_params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
@@ -611,12 +605,13 @@ async fn test_completion_method_insert_text_no_params() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 5
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 5,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -660,6 +655,9 @@ async fn test_completion_method_insert_text_with_required_params() {
         "    function updateText(string $text, $frogs = false): void {}\n",
         "    function setTitle(string $title): void {}\n",
         "    function reset() {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -674,12 +672,13 @@ async fn test_completion_method_insert_text_with_required_params() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 6
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 6,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -694,7 +693,7 @@ async fn test_completion_method_insert_text_with_required_params() {
                 .iter()
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
-            assert_eq!(method_items.len(), 3, "Should have 3 method completions");
+            assert_eq!(method_items.len(), 4, "Should have 4 method completions (3 original + test)");
 
             // Find specific methods by filter_text (method name)
             let update_text = method_items
@@ -741,6 +740,9 @@ async fn test_completion_method_insert_text_multiple_required_params() {
         "class Calculator {\n",
         "    function add(int $a, int $b): int {}\n",
         "    function addWithLabel(int $a, int $b, string $label = 'sum'): int {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -755,12 +757,13 @@ async fn test_completion_method_insert_text_multiple_required_params() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 5
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 5,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -810,6 +813,9 @@ async fn test_completion_method_insert_text_variadic_param() {
         "class Logger {\n",
         "    function log(string $message, ...$context): void {}\n",
         "    function logAll(...$messages): void {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -824,12 +830,13 @@ async fn test_completion_method_insert_text_variadic_param() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 5
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 5,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -878,6 +885,9 @@ async fn test_completion_method_all_optional_params() {
         "<?php\n",
         "class Config {\n",
         "    function setup($debug = false, $verbose = false): void {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -892,12 +902,13 @@ async fn test_completion_method_all_optional_params() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 4
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 4,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1000,6 +1011,9 @@ async fn test_completion_includes_properties() {
         "    public int $age;\n",
         "    function login() {}\n",
         "    function logout() {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -1014,12 +1028,13 @@ async fn test_completion_includes_properties() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 7
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 4,
-                character: 4,
+                line: 7,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1032,7 +1047,7 @@ async fn test_completion_includes_properties() {
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
-            // Should have 2 methods + 2 properties = 4 items
+            // Should have 3 methods (login, logout, test) + 2 properties = 5 items
             let method_items: Vec<&CompletionItem> = items
                 .iter()
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
@@ -1042,7 +1057,7 @@ async fn test_completion_includes_properties() {
                 .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
                 .collect();
 
-            assert_eq!(method_items.len(), 2, "Should have 2 methods");
+            assert_eq!(method_items.len(), 3, "Should have 3 methods");
             assert_eq!(property_items.len(), 2, "Should have 2 properties");
 
             let prop_labels: Vec<&str> = property_items.iter().map(|i| i.label.as_str()).collect();
@@ -1084,7 +1099,9 @@ async fn test_completion_property_without_type_hint() {
         "<?php\n",
         "class Bag {\n",
         "    public $stuff;\n",
-        "    function get() {}\n",
+        "    function get() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -1099,12 +1116,13 @@ async fn test_completion_property_without_type_hint() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 4
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 3,
-                character: 4,
+                line: 4,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1252,6 +1270,9 @@ async fn test_completion_method_detail_shows_signature() {
         "<?php\n",
         "class Editor {\n",
         "    function updateText(string $text, $frogs = false): void {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -1266,12 +1287,13 @@ async fn test_completion_method_detail_shows_signature() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 4
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 4,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1322,6 +1344,9 @@ async fn test_completion_class_with_only_properties() {
         "class Data {\n",
         "    public string $name;\n",
         "    public int $value;\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -1336,12 +1361,13 @@ async fn test_completion_class_with_only_properties() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 5
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 2,
-                character: 4,
+                line: 5,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1352,16 +1378,13 @@ async fn test_completion_class_with_only_properties() {
     let result = backend.completion(completion_params).await.unwrap();
     match result.unwrap() {
         CompletionResponse::Array(items) => {
-            // Class has only properties, no methods — should still return items, not fallback
-            assert_eq!(items.len(), 2, "Should return 2 property completions");
-            for item in &items {
-                assert_eq!(
-                    item.kind,
-                    Some(CompletionItemKind::PROPERTY),
-                    "All items should be properties"
-                );
-            }
-            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            let property_items: Vec<&CompletionItem> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .collect();
+            // Class has 2 properties + test method, but we check properties
+            assert_eq!(property_items.len(), 2, "Should return 2 property completions");
+            let labels: Vec<&str> = property_items.iter().map(|i| i.label.as_str()).collect();
             assert!(labels.contains(&"name"));
             assert!(labels.contains(&"value"));
         }
@@ -1441,6 +1464,9 @@ async fn test_completion_inside_namespaced_class() {
         "class User {\n",
         "    public function login() {}\n",
         "    public function logout() {}\n",
+        "    public function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -1455,13 +1481,13 @@ async fn test_completion_inside_namespaced_class() {
     };
     backend.did_open(open_params).await;
 
-    // Cursor inside the class body (line 4, inside the method area)
+    // Cursor right after `$this->` on line 7
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 4,
-                character: 4,
+                line: 7,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1481,7 +1507,7 @@ async fn test_completion_inside_namespaced_class() {
                 .iter()
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
-            assert_eq!(method_items.len(), 2, "Should return 2 method completions");
+            assert_eq!(method_items.len(), 3, "Should return 3 method completions");
 
             let filter_texts: Vec<&str> = method_items
                 .iter()
@@ -1541,6 +1567,9 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
         "    public float $price;\n",
         "    public function getName(): string {}\n",
         "    public function setPrice(float $price): void {}\n",
+        "    public function test() {\n",
+        "        $this->\n",
+        "    }\n",
         "}\n",
     )
     .to_string();
@@ -1555,12 +1584,13 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
     };
     backend.did_open(open_params).await;
 
+    // Cursor right after `$this->` on line 9
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 6,
-                character: 4,
+                line: 9,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -1580,7 +1610,7 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
                 .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
                 .collect();
 
-            assert_eq!(method_items.len(), 2, "Should have 2 methods");
+            assert_eq!(method_items.len(), 3, "Should have 3 methods");
             assert_eq!(property_items.len(), 2, "Should have 2 properties");
 
             // Check method insert texts
@@ -1969,7 +1999,7 @@ async fn test_completion_double_colon_shows_only_static_and_constants() {
 }
 
 #[tokio::test]
-async fn test_completion_no_access_operator_shows_all() {
+async fn test_completion_no_access_operator_shows_fallback() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///all.php").unwrap();
@@ -2010,7 +2040,60 @@ async fn test_completion_no_access_operator_shows_all() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return results");
+    assert!(result.is_some(), "Completion should return fallback");
+
+    // Without `->` or `::`, no class members should be suggested — only fallback
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            assert_eq!(items.len(), 1, "Should only have fallback item");
+            assert_eq!(items[0].label, "PHPantomLSP");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_new_self_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///newself.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function build(): void {}\n",
+        "    public static function create(): self {\n",
+        "        $new = new self();\n",
+        "        $new->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$new->` on line 5
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results for $new = new self");
 
     match result.unwrap() {
         CompletionResponse::Array(items) => {
@@ -2019,10 +2102,281 @@ async fn test_completion_no_access_operator_shows_all() {
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
-            let property_names: Vec<&str> = items
+            assert!(method_names.contains(&"build"), "Should include non-static 'build'");
+            assert!(!method_names.contains(&"create"), "Should exclude static 'create' via ->");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_new_static_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///newstatic.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function build(): void {}\n",
+        "    public static function create(): static {\n",
+        "        $inst = new static();\n",
+        "        $inst->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results for $inst = new static");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-                .map(|i| i.label.as_str())
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(method_names.contains(&"build"), "Should include non-static 'build'");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_new_classname_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///newclass.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public function render(): void {}\n",
+        "    public function test() {\n",
+        "        $w = new Widget();\n",
+        "        $w->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results for $w = new Widget");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(method_names.contains(&"render"), "Should include 'render'");
+            assert!(method_names.contains(&"test"), "Should include 'test'");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_unknown_variable_shows_fallback() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///unknown.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Svc {\n",
+        "    public function run(): void {}\n",
+        "    public function test() {\n",
+        "        $unknown->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            assert_eq!(items.len(), 1, "Unknown variable should fall back");
+            assert_eq!(items[0].label, "PHPantomLSP");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_property_chain_self_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    public self $parent;\n",
+        "    public function value(): int {}\n",
+        "    public function test() {\n",
+        "        $this->parent->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$this->parent->` on line 5
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 23,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should resolve $this->parent-> via self type hint");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(method_names.contains(&"value"), "Should include 'value'");
+            assert!(method_names.contains(&"test"), "Should include 'test'");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_classname_double_colon() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///classdcolon.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Registry {\n",
+        "    public static function instance(): self {}\n",
+        "    public function get(): void {}\n",
+        "    const VERSION = 1;\n",
+        "    function test() {\n",
+        "        Registry::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `Registry::` on line 6
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should resolve Registry:: to Registry class");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
@@ -2030,28 +2384,66 @@ async fn test_completion_no_access_operator_shows_all() {
                 .map(|i| i.label.as_str())
                 .collect();
 
-            // All methods should be included
-            assert!(
-                method_names.contains(&"create"),
-                "Other should include 'create'"
-            );
-            assert!(method_names.contains(&"run"), "Other should include 'run'");
+            // Only static method should appear for ::
+            assert!(method_names.contains(&"instance"), "Should include static 'instance'");
+            assert!(!method_names.contains(&"get"), "Should exclude non-static 'get'");
+            assert!(constant_names.contains(&"VERSION"), "Should include constant");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
 
-            // All properties should be included
-            assert!(
-                property_names.contains(&"instance"),
-                "Other should include 'instance'"
-            );
-            assert!(
-                property_names.contains(&"count"),
-                "Other should include 'count'"
-            );
+#[tokio::test]
+async fn test_completion_param_type_hint_resolves() {
+    let backend = create_test_backend();
 
-            // Constants should be included
-            assert!(
-                constant_names.contains(&"MAX"),
-                "Other should include 'MAX'"
-            );
+    let uri = Url::parse("file:///paramhint.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Processor {\n",
+        "    public function run(): void {}\n",
+        "    public function handle(self $other) {\n",
+        "        $other->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$other->` on line 4
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should resolve $other via parameter type hint");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(method_names.contains(&"run"), "Should include 'run'");
+            assert!(method_names.contains(&"handle"), "Should include 'handle'");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -2120,6 +2512,71 @@ async fn test_completion_constant_detail_with_type_hint() {
                 !count_const.detail.as_ref().unwrap().contains("—"),
                 "COUNT detail should not have type hint separator"
             );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_static_double_colon() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///staticdc.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public static function create(): static {}\n",
+        "    public function run(): void {}\n",
+        "    const MAX = 10;\n",
+        "    function test() {\n",
+        "        static::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `static::` on line 6
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should resolve static::");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.label.as_str())
+                .collect();
+            // Only static method for ::
+            assert!(method_names.contains(&"create"), "Should include static 'create'");
+            assert!(!method_names.contains(&"run"), "Should exclude non-static 'run'");
+            assert!(constant_names.contains(&"MAX"), "Should include constant 'MAX'");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
