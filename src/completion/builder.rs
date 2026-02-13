@@ -7,7 +7,36 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::types::*;
 
+/// PHP magic methods that should not appear in completion results.
+/// These are invoked implicitly by the language runtime rather than
+/// called directly by user code.
+const MAGIC_METHODS: &[&str] = &[
+    "__construct",
+    "__destruct",
+    "__clone",
+    "__get",
+    "__set",
+    "__isset",
+    "__unset",
+    "__call",
+    "__callStatic",
+    "__invoke",
+    "__toString",
+    "__sleep",
+    "__wakeup",
+    "__serialize",
+    "__unserialize",
+    "__set_state",
+    "__debugInfo",
+];
+
 impl Backend {
+    /// Check whether a method name is a PHP magic method that should be
+    /// excluded from completion results.
+    fn is_magic_method(name: &str) -> bool {
+        MAGIC_METHODS.iter().any(|&m| m.eq_ignore_ascii_case(name))
+    }
+
     /// Build the label showing the full method signature.
     ///
     /// Example: `regularCode(string $text, $frogs = false): string`
@@ -56,8 +85,12 @@ impl Backend {
     ) -> Vec<CompletionItem> {
         let mut items: Vec<CompletionItem> = Vec::new();
 
-        // Methods — filtered by static / instance
+        // Methods — filtered by static / instance, excluding magic methods
         for method in &target_class.methods {
+            if Self::is_magic_method(&method.name) {
+                continue;
+            }
+
             let include = match access_kind {
                 AccessKind::Arrow => !method.is_static,
                 AccessKind::DoubleColon => method.is_static,

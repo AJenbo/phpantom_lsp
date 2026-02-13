@@ -135,7 +135,7 @@ pub fn resolve_class_path(
             // Empty prefix matches everything (root namespace fallback)
             Some(name)
         } else {
-            name.strip_prefix(&mapping.prefix).map(|rest| rest)
+            name.strip_prefix(&mapping.prefix)
         };
 
         if let Some(relative_class) = relative {

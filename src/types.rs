@@ -1,8 +1,8 @@
-/// Data types used throughout the PHPantomLSP server.
-///
-/// This module contains all the "model" structs and enums that represent
-/// extracted PHP information (classes, methods, properties, constants)
-/// as well as completion-related types (AccessKind, CompletionTarget).
+//! Data types used throughout the PHPantomLSP server.
+//!
+//! This module contains all the "model" structs and enums that represent
+//! extracted PHP information (classes, methods, properties, constants)
+//! as well as completion-related types (AccessKind, CompletionTarget).
 
 /// Stores extracted parameter information from a parsed PHP method.
 #[derive(Debug, Clone)]
