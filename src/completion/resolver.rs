@@ -10,6 +10,12 @@
 ///   - Property chains: `$this->prop` → follow property type hints
 ///   - Variable assignments: `$var = new ClassName(…)` → resolve class
 ///   - Parameter type hints: `function f(Foo $x)` → resolve from hint
+///
+/// When a class cannot be found in the local `all_classes` slice, the
+/// `class_loader` callback is invoked. This allows the caller (typically
+/// the completion handler) to provide cross-file resolution — searching
+/// the full `ast_map` and, if necessary, loading files from disk via
+/// PSR-4 autoload mappings.
 use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
@@ -22,28 +28,34 @@ impl Backend {
     /// Determine which class (if any) the completion subject refers to.
     ///
     /// `current_class` is the class the cursor is inside (if any).
-    /// `all_classes` is every class we know about in this file.
+    /// `all_classes` is every class we know about in the current file.
     /// `content` + `cursor_offset` are used for variable-type resolution.
+    /// `class_loader` is a fallback that can search across files / load
+    /// classes on demand (e.g. via PSR-4).
     ///
-    /// Returns the `ClassInfo` to use for completion, or `None` if we
-    /// cannot determine the type.
-    pub fn resolve_target_class<'a>(
+    /// Returns an owned `ClassInfo` if the type could be resolved.
+    pub fn resolve_target_class(
         subject: &str,
         access_kind: AccessKind,
-        current_class: Option<&'a ClassInfo>,
-        all_classes: &'a [ClassInfo],
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
         content: &str,
         cursor_offset: u32,
-    ) -> Option<&'a ClassInfo> {
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
         // ── Keywords that always mean "current class" ──
         if subject == "$this" || subject == "self" || subject == "static" {
-            return current_class;
+            return current_class.cloned();
         }
 
         // ── Bare class name (for `::`) ──
         if access_kind == AccessKind::DoubleColon && !subject.starts_with('$') {
             let lookup = subject.rsplit('\\').next().unwrap_or(subject);
-            return all_classes.iter().find(|c| c.name == lookup);
+            if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
+                return Some(cls.clone());
+            }
+            // Try cross-file / PSR-4 with the full subject
+            return class_loader(subject);
         }
 
         // ── Property-chain: $this->prop  or  $this?->prop ──
@@ -52,7 +64,8 @@ impl Backend {
             .or_else(|| subject.strip_prefix("$this?->"))
         {
             if let Some(cc) = current_class
-                && let Some(resolved) = Self::resolve_property_type(prop_name, cc, all_classes)
+                && let Some(resolved) =
+                    Self::resolve_property_type(prop_name, cc, all_classes, class_loader)
             {
                 return Some(resolved);
             }
@@ -62,8 +75,14 @@ impl Backend {
         // ── Variable like `$var` — resolve via assignments / parameter hints ──
         if subject.starts_with('$') {
             if let Some(cc) = current_class
-                && let Some(resolved) =
-                    Self::resolve_variable_type(subject, cc, all_classes, content, cursor_offset)
+                && let Some(resolved) = Self::resolve_variable_type(
+                    subject,
+                    cc,
+                    all_classes,
+                    content,
+                    cursor_offset,
+                    class_loader,
+                )
             {
                 return Some(resolved);
             }
@@ -74,30 +93,48 @@ impl Backend {
     }
 
     /// Look up a property's type hint in `class_info` and find the
-    /// corresponding class in `all_classes`.
-    pub(crate) fn resolve_property_type<'a>(
+    /// corresponding class in `all_classes` (or via `class_loader`).
+    pub(crate) fn resolve_property_type(
         prop_name: &str,
         class_info: &ClassInfo,
-        all_classes: &'a [ClassInfo],
-    ) -> Option<&'a ClassInfo> {
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
         let prop = class_info.properties.iter().find(|p| p.name == prop_name)?;
         let type_hint = prop.type_hint.as_deref()?;
-        Self::type_hint_to_class(type_hint, &class_info.name, all_classes)
+        Self::type_hint_to_class(type_hint, &class_info.name, all_classes, class_loader)
     }
 
     /// Map a type-hint string to a `ClassInfo`, treating `self` / `static`
     /// as the owning class.  Strips a leading `?` for nullable types.
-    pub(crate) fn type_hint_to_class<'a>(
+    ///
+    /// First searches `all_classes` (the current file), then falls back to
+    /// the `class_loader` callback for cross-file resolution.
+    pub(crate) fn type_hint_to_class(
         type_hint: &str,
         owning_class_name: &str,
-        all_classes: &'a [ClassInfo],
-    ) -> Option<&'a ClassInfo> {
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
         let hint = type_hint.strip_prefix('?').unwrap_or(type_hint);
+
+        // self / static always refer to the owning class
         if hint == "self" || hint == "static" {
-            return all_classes.iter().find(|c| c.name == owning_class_name);
+            return all_classes
+                .iter()
+                .find(|c| c.name == owning_class_name)
+                .cloned()
+                .or_else(|| class_loader(owning_class_name));
         }
+
+        // Try local (current-file) lookup by last segment
         let lookup = hint.rsplit('\\').next().unwrap_or(hint);
-        all_classes.iter().find(|c| c.name == lookup)
+        if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
+            return Some(cls.clone());
+        }
+
+        // Fallback: cross-file / PSR-4 with the full hint string
+        class_loader(hint)
     }
 
     /// Resolve the type of `$variable` by re-parsing the file and walking
@@ -106,13 +143,14 @@ impl Backend {
     /// Looks at:
     ///   1. Assignments: `$var = new ClassName(…)` / `new self` / `new static`
     ///   2. Method parameter type hints
-    fn resolve_variable_type<'a>(
+    fn resolve_variable_type(
         var_name: &str,
         current_class: &ClassInfo,
-        all_classes: &'a [ClassInfo],
+        all_classes: &[ClassInfo],
         content: &str,
         cursor_offset: u32,
-    ) -> Option<&'a ClassInfo> {
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
         let arena = Bump::new();
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
@@ -125,16 +163,18 @@ impl Backend {
             current_class,
             all_classes,
             cursor_offset,
+            class_loader,
         )
     }
 
-    fn resolve_variable_in_statements<'a, 'b>(
+    fn resolve_variable_in_statements<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
         var_name: &str,
         current_class: &ClassInfo,
-        all_classes: &'a [ClassInfo],
+        all_classes: &[ClassInfo],
         cursor_offset: u32,
-    ) -> Option<&'a ClassInfo> {
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
         for stmt in statements {
             match stmt {
                 Statement::Class(class) => {
@@ -156,6 +196,7 @@ impl Backend {
                                         &type_str,
                                         &current_class.name,
                                         all_classes,
+                                        class_loader,
                                     );
                                 }
                             }
@@ -170,6 +211,7 @@ impl Backend {
                                         &current_class.name,
                                         all_classes,
                                         cursor_offset,
+                                        class_loader,
                                     )
                                 {
                                     return Some(cls);
@@ -185,6 +227,7 @@ impl Backend {
                         current_class,
                         all_classes,
                         cursor_offset,
+                        class_loader,
                     ) {
                         return Some(cls);
                     }
@@ -197,32 +240,35 @@ impl Backend {
 
     /// Walk a block's statements looking for the *last* assignment to
     /// `$var_name` that occurs *before* the cursor.
-    fn find_assignment_type_in_block<'a, 'b>(
+    fn find_assignment_type_in_block<'b>(
         block: &'b Block<'b>,
         var_name: &str,
         current_class_name: &str,
-        all_classes: &'a [ClassInfo],
+        all_classes: &[ClassInfo],
         cursor_offset: u32,
-    ) -> Option<&'a ClassInfo> {
-        let mut result: Option<&'a ClassInfo> = None;
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
+        let mut result: Option<ClassInfo> = None;
         Self::walk_statements_for_assignments(
             block.statements.iter(),
             var_name,
             current_class_name,
             all_classes,
             cursor_offset,
+            class_loader,
             &mut result,
         );
         result
     }
 
-    fn walk_statements_for_assignments<'a, 'b>(
+    fn walk_statements_for_assignments<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
         var_name: &str,
         current_class_name: &str,
-        all_classes: &'a [ClassInfo],
+        all_classes: &[ClassInfo],
         cursor_offset: u32,
-        result: &mut Option<&'a ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        result: &mut Option<ClassInfo>,
     ) {
         for stmt in statements {
             // Only consider statements whose start is before the cursor
@@ -237,6 +283,7 @@ impl Backend {
                         var_name,
                         current_class_name,
                         all_classes,
+                        class_loader,
                         result,
                     );
                 }
@@ -248,6 +295,7 @@ impl Backend {
                         current_class_name,
                         all_classes,
                         cursor_offset,
+                        class_loader,
                         result,
                     );
                 }
@@ -259,6 +307,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                         for else_if in body.else_if_clauses.iter() {
@@ -268,6 +317,7 @@ impl Backend {
                                 current_class_name,
                                 all_classes,
                                 cursor_offset,
+                                class_loader,
                                 result,
                             );
                         }
@@ -278,6 +328,7 @@ impl Backend {
                                 current_class_name,
                                 all_classes,
                                 cursor_offset,
+                                class_loader,
                                 result,
                             );
                         }
@@ -289,6 +340,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                         for else_if in body.else_if_clauses.iter() {
@@ -298,6 +350,7 @@ impl Backend {
                                 current_class_name,
                                 all_classes,
                                 cursor_offset,
+                                class_loader,
                                 result,
                             );
                         }
@@ -308,6 +361,7 @@ impl Backend {
                                 current_class_name,
                                 all_classes,
                                 cursor_offset,
+                                class_loader,
                                 result,
                             );
                         }
@@ -321,6 +375,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -331,6 +386,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -343,6 +399,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -353,6 +410,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -365,6 +423,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -375,6 +434,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -386,6 +446,7 @@ impl Backend {
                         current_class_name,
                         all_classes,
                         cursor_offset,
+                        class_loader,
                         result,
                     );
                 }
@@ -396,6 +457,7 @@ impl Backend {
                         current_class_name,
                         all_classes,
                         cursor_offset,
+                        class_loader,
                         result,
                     );
                     for catch in try_stmt.catch_clauses.iter() {
@@ -405,6 +467,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -415,6 +478,7 @@ impl Backend {
                             current_class_name,
                             all_classes,
                             cursor_offset,
+                            class_loader,
                             result,
                         );
                     }
@@ -425,13 +489,14 @@ impl Backend {
     }
 
     /// Helper: treat a single statement as an iterator of one and recurse.
-    fn check_statement_for_assignments<'a, 'b>(
+    fn check_statement_for_assignments<'b>(
         stmt: &'b Statement<'b>,
         var_name: &str,
         current_class_name: &str,
-        all_classes: &'a [ClassInfo],
+        all_classes: &[ClassInfo],
         cursor_offset: u32,
-        result: &mut Option<&'a ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        result: &mut Option<ClassInfo>,
     ) {
         Self::walk_statements_for_assignments(
             std::iter::once(stmt),
@@ -439,18 +504,20 @@ impl Backend {
             current_class_name,
             all_classes,
             cursor_offset,
+            class_loader,
             result,
         );
     }
 
     /// If `expr` is an assignment whose LHS matches `$var_name` and whose
     /// RHS is a `new …` instantiation, resolve the class.
-    fn check_expression_for_assignment<'a, 'b>(
+    fn check_expression_for_assignment<'b>(
         expr: &'b Expression<'b>,
         var_name: &str,
         current_class_name: &str,
-        all_classes: &'a [ClassInfo],
-        result: &mut Option<&'a ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        result: &mut Option<ClassInfo>,
     ) {
         if let Expression::Assignment(assignment) = expr {
             if !assignment.operator.is_assign() {
@@ -473,8 +540,12 @@ impl Backend {
                     _ => None,
                 };
                 if let Some(name) = class_name
-                    && let Some(cls) =
-                        Self::type_hint_to_class(name, current_class_name, all_classes)
+                    && let Some(cls) = Self::type_hint_to_class(
+                        name,
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    )
                 {
                     *result = Some(cls);
                 }

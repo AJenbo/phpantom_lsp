@@ -89,6 +89,15 @@ impl Backend {
                 continue;
             }
 
+            // Static properties accessed via `::` need the `$` prefix
+            // (e.g. `self::$path`), while instance properties via `->`
+            // use the bare name (e.g. `$this->path`).
+            let display_name = if access_kind == AccessKind::DoubleColon {
+                format!("${}", property.name)
+            } else {
+                property.name.clone()
+            };
+
             let detail = if let Some(ref th) = property.type_hint {
                 format!("Class: {} — {}", target_class.name, th)
             } else {
@@ -96,10 +105,11 @@ impl Backend {
             };
 
             items.push(CompletionItem {
-                label: property.name.clone(),
+                label: display_name.clone(),
                 kind: Some(CompletionItemKind::PROPERTY),
                 detail: Some(detail),
-                insert_text: Some(property.name.clone()),
+                insert_text: Some(display_name.clone()),
+                filter_text: Some(display_name),
                 ..CompletionItem::default()
             });
         }
