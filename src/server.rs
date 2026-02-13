@@ -230,7 +230,8 @@ impl LanguageServer for Backend {
                 );
 
                 if let Some(target_class) = resolved {
-                    let items = Self::build_completion_items(&target_class, target.access_kind);
+                    let merged = Self::resolve_class_with_inheritance(&target_class, &class_loader);
+                    let items = Self::build_completion_items(&merged, target.access_kind);
                     if !items.is_empty() {
                         return Ok(Some(CompletionResponse::Array(items)));
                     }

@@ -22,6 +22,7 @@ use mago_syntax::ast::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
+use crate::types::Visibility;
 use crate::types::*;
 
 impl Backend {
@@ -551,5 +552,77 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Resolve a class together with all inherited members from its parent
+    /// chain.
+    ///
+    /// Walks up the `extends` chain via `class_loader`, collecting public and
+    /// protected methods, properties, and constants from each ancestor.
+    /// If a child already defines a member with the same name as a parent
+    /// member, the child's version wins (even if the signatures differ).
+    ///
+    /// Private members are never inherited.
+    ///
+    /// A depth limit of 20 prevents infinite loops from circular inheritance.
+    pub(crate) fn resolve_class_with_inheritance(
+        class: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> ClassInfo {
+        let mut merged = class.clone();
+
+        let mut current = class.clone();
+        let mut depth = 0;
+        const MAX_DEPTH: u32 = 20;
+
+        while let Some(ref parent_name) = current.parent_class {
+            depth += 1;
+            if depth > MAX_DEPTH {
+                break;
+            }
+
+            let parent = if let Some(p) = class_loader(parent_name) {
+                p
+            } else {
+                break;
+            };
+
+            // Merge parent methods — skip private, skip if child already has one with same name
+            for method in &parent.methods {
+                if method.visibility == Visibility::Private {
+                    continue;
+                }
+                if merged.methods.iter().any(|m| m.name == method.name) {
+                    continue;
+                }
+                merged.methods.push(method.clone());
+            }
+
+            // Merge parent properties
+            for property in &parent.properties {
+                if property.visibility == Visibility::Private {
+                    continue;
+                }
+                if merged.properties.iter().any(|p| p.name == property.name) {
+                    continue;
+                }
+                merged.properties.push(property.clone());
+            }
+
+            // Merge parent constants
+            for constant in &parent.constants {
+                if constant.visibility == Visibility::Private {
+                    continue;
+                }
+                if merged.constants.iter().any(|c| c.name == constant.name) {
+                    continue;
+                }
+                merged.constants.push(constant.clone());
+            }
+
+            current = parent;
+        }
+
+        merged
     }
 }

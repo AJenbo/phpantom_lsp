@@ -93,7 +93,13 @@ impl Backend {
 
         // Read and parse the file
         let content = std::fs::read_to_string(&file_path).ok()?;
-        let classes = self.parse_php(&content);
+        let mut classes = self.parse_php(&content);
+
+        // Also parse use statements and namespace so we can resolve parent
+        // class names to fully-qualified names for inheritance resolution.
+        let file_use_map = self.parse_use_statements(&content);
+        let file_namespace = self.parse_namespace(&content);
+        Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
 
         // Find the target class in the parsed results
         let result = classes.iter().find(|c| c.name == last_segment).cloned();
@@ -102,7 +108,13 @@ impl Backend {
         // Use a file:// URI as the key (consistent with LSP document URIs).
         let uri = format!("file://{}", file_path.display());
         if let Ok(mut map) = self.ast_map.lock() {
-            map.insert(uri, classes);
+            map.insert(uri.clone(), classes);
+        }
+        if let Ok(mut map) = self.use_map.lock() {
+            map.insert(uri.clone(), file_use_map);
+        }
+        if let Ok(mut map) = self.namespace_map.lock() {
+            map.insert(uri, file_namespace);
         }
 
         result

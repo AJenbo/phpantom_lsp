@@ -4,6 +4,16 @@
 //! extracted PHP information (classes, methods, properties, constants)
 //! as well as completion-related types (AccessKind, CompletionTarget).
 
+/// Visibility of a class member (method, property, or constant).
+///
+/// In PHP, members without an explicit visibility modifier default to `Public`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Protected,
+    Private,
+}
+
 /// Stores extracted parameter information from a parsed PHP method.
 #[derive(Debug, Clone)]
 pub struct ParameterInfo {
@@ -30,6 +40,8 @@ pub struct MethodInfo {
     pub return_type: Option<String>,
     /// Whether the method is static.
     pub is_static: bool,
+    /// Visibility of the method (public, protected, or private).
+    pub visibility: Visibility,
 }
 
 /// Stores extracted property information from a parsed PHP class.
@@ -42,6 +54,8 @@ pub struct PropertyInfo {
     pub type_hint: Option<String>,
     /// Whether the property is static.
     pub is_static: bool,
+    /// Visibility of the property (public, protected, or private).
+    pub visibility: Visibility,
 }
 
 /// Stores extracted constant information from a parsed PHP class.
@@ -51,6 +65,8 @@ pub struct ConstantInfo {
     pub name: String,
     /// Optional type hint string (e.g. "string", "int").
     pub type_hint: Option<String>,
+    /// Visibility of the constant (public, protected, or private).
+    pub visibility: Visibility,
 }
 
 /// Describes the access operator that triggered completion.
@@ -90,4 +106,7 @@ pub struct ClassInfo {
     pub start_offset: u32,
     /// Byte offset where the class body ends (right brace).
     pub end_offset: u32,
+    /// The parent class name from the `extends` clause, if any.
+    /// This is the raw name as written in source (e.g. "BaseClass", "Foo\\Bar").
+    pub parent_class: Option<String>,
 }

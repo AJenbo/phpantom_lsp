@@ -11,6 +11,7 @@ use mago_syntax::ast::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
+use crate::types::Visibility;
 use crate::types::*;
 
 impl Backend {
@@ -82,8 +83,28 @@ impl Backend {
     }
 
     /// Extract property information from a class member Property node.
+    /// Extract visibility from a set of modifiers.
+    /// Defaults to `Public` if no visibility modifier is present.
+    pub(crate) fn extract_visibility<'a>(
+        modifiers: impl Iterator<Item = &'a Modifier<'a>>,
+    ) -> Visibility {
+        for m in modifiers {
+            if m.is_private() {
+                return Visibility::Private;
+            }
+            if m.is_protected() {
+                return Visibility::Protected;
+            }
+            if m.is_public() {
+                return Visibility::Public;
+            }
+        }
+        Visibility::Public
+    }
+
     pub(crate) fn extract_property_info(property: &Property) -> Vec<PropertyInfo> {
         let is_static = property.modifiers().iter().any(|m| m.is_static());
+        let visibility = Self::extract_visibility(property.modifiers().iter());
 
         let type_hint = property.hint().map(|h| Self::extract_hint_string(h));
 
@@ -104,6 +125,7 @@ impl Backend {
                     name,
                     type_hint: type_hint.clone(),
                     is_static,
+                    visibility,
                 }
             })
             .collect()
@@ -287,6 +309,12 @@ impl Backend {
                 Statement::Class(class) => {
                     let class_name = class.name.value.to_string();
 
+                    // Extract parent class name from `extends` clause
+                    let parent_class = class
+                        .extends
+                        .as_ref()
+                        .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
+
                     let mut methods = Vec::new();
                     let mut properties = Vec::new();
                     let mut constants = Vec::new();
@@ -301,12 +329,14 @@ impl Backend {
                                     .as_ref()
                                     .map(|rth| Self::extract_hint_string(&rth.hint));
                                 let is_static = method.modifiers.iter().any(|m| m.is_static());
+                                let visibility = Self::extract_visibility(method.modifiers.iter());
 
                                 methods.push(MethodInfo {
                                     name,
                                     parameters,
                                     return_type,
                                     is_static,
+                                    visibility,
                                 });
                             }
                             ClassLikeMember::Property(property) => {
@@ -316,10 +346,13 @@ impl Backend {
                             ClassLikeMember::Constant(constant) => {
                                 let type_hint =
                                     constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
+                                let visibility =
+                                    Self::extract_visibility(constant.modifiers.iter());
                                 for item in constant.items.iter() {
                                     constants.push(ConstantInfo {
                                         name: item.name.value.to_string(),
                                         type_hint: type_hint.clone(),
+                                        visibility,
                                     });
                                 }
                             }
@@ -337,6 +370,7 @@ impl Backend {
                         constants,
                         start_offset,
                         end_offset,
+                        parent_class,
                     });
                 }
                 Statement::Namespace(namespace) => {
@@ -406,6 +440,11 @@ impl Backend {
             }
         }
 
+        // Post-process: resolve parent_class short names to fully-qualified
+        // names using the file's use_map and namespace so that cross-file
+        // inheritance resolution can find parent classes via PSR-4.
+        Self::resolve_parent_class_names(&mut classes, &use_map, &namespace);
+
         let uri_string = uri.to_string();
 
         if let Ok(mut map) = self.ast_map.lock() {
@@ -416,6 +455,63 @@ impl Backend {
         }
         if let Ok(mut map) = self.namespace_map.lock() {
             map.insert(uri_string, namespace);
+        }
+    }
+
+    /// Resolve `parent_class` short names in a list of `ClassInfo` to
+    /// fully-qualified names using the file's `use_map` and `namespace`.
+    ///
+    /// Rules (matching PHP name resolution):
+    ///   1. Already fully-qualified (`\Foo\Bar`) → strip leading `\`
+    ///   2. Qualified (`Foo\Bar`) → if first segment is in use_map, expand it;
+    ///      otherwise prepend current namespace
+    ///   3. Unqualified (`Bar`) → check use_map; otherwise prepend namespace
+    ///   4. No namespace and not in use_map → keep as-is
+    pub(crate) fn resolve_parent_class_names(
+        classes: &mut [ClassInfo],
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+    ) {
+        for class in classes.iter_mut() {
+            if let Some(ref parent) = class.parent_class {
+                let resolved = Self::resolve_name(parent, use_map, namespace);
+                class.parent_class = Some(resolved);
+            }
+        }
+    }
+
+    /// Resolve a class name to its fully-qualified form given a use_map and
+    /// namespace context.
+    fn resolve_name(
+        name: &str,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+    ) -> String {
+        // 1. Already fully-qualified
+        if let Some(stripped) = name.strip_prefix('\\') {
+            return stripped.to_string();
+        }
+
+        // 2/3. Check if the (first segment of the) name is in the use_map
+        if let Some(pos) = name.find('\\') {
+            // Qualified name — check first segment
+            let first = &name[..pos];
+            let rest = &name[pos..]; // includes leading '\'
+            if let Some(fqn) = use_map.get(first) {
+                return format!("{}{}", fqn, rest);
+            }
+        } else {
+            // Unqualified name — check directly
+            if let Some(fqn) = use_map.get(name) {
+                return fqn.clone();
+            }
+        }
+
+        // 4. Prepend current namespace if available
+        if let Some(ns) = namespace {
+            format!("{}\\{}", ns, name)
+        } else {
+            name.to_string()
         }
     }
 }

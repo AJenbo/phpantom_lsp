@@ -30,6 +30,7 @@ mod util;
 // from the crate root, e.g. `use phpantom_lsp::{Backend, AccessKind}`.
 pub use types::{
     AccessKind, ClassInfo, CompletionTarget, ConstantInfo, MethodInfo, ParameterInfo, PropertyInfo,
+    Visibility,
 };
 
 // ─── Backend ────────────────────────────────────────────────────────────────
