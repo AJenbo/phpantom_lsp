@@ -199,6 +199,25 @@ impl Backend {
             }
         }
 
+        // Sort all items alphabetically (case-insensitive) and assign
+        // sort_text so the editor preserves this ordering.
+        items.sort_by(|a, b| {
+            a.filter_text
+                .as_deref()
+                .unwrap_or(&a.label)
+                .to_lowercase()
+                .cmp(
+                    &b.filter_text
+                        .as_deref()
+                        .unwrap_or(&b.label)
+                        .to_lowercase(),
+                )
+        });
+
+        for (i, item) in items.iter_mut().enumerate() {
+            item.sort_text = Some(format!("{:05}", i));
+        }
+
         items
     }
 }
