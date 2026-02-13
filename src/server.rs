@@ -73,7 +73,7 @@ impl LanguageServer for Backend {
             self.log(
                 MessageType::INFO,
                 format!(
-                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s) from composer.json",
+                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s)",
                     mapping_count
                 ),
             )
