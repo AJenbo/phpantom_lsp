@@ -77,20 +77,19 @@ impl Backend {
         for fqn in &candidates {
             if let Some(file_path) = composer::resolve_class_path(&mappings, &workspace_root, fqn) {
                 // 6. Read the target file and find the definition line.
-                if let Some(target_content) = std::fs::read_to_string(&file_path).ok() {
+                if let Ok(target_content) = std::fs::read_to_string(&file_path) {
                     let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
                     if let Some(target_position) =
                         Self::find_definition_position(&target_content, short_name)
+                        && let Ok(target_uri) = Url::from_file_path(&file_path)
                     {
-                        if let Some(target_uri) = Url::from_file_path(&file_path).ok() {
-                            return Some(Location {
-                                uri: target_uri,
-                                range: Range {
-                                    start: target_position,
-                                    end: target_position,
-                                },
-                            });
-                        }
+                        return Some(Location {
+                            uri: target_uri,
+                            range: Range {
+                                start: target_position,
+                                end: target_position,
+                            },
+                        });
                     }
                 }
             }

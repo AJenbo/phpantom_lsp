@@ -162,10 +162,10 @@ impl LanguageServer for Backend {
             None
         };
 
-        if let Some(content) = content {
-            if let Some(location) = self.resolve_definition(&uri, &content, position) {
-                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
-            }
+        if let Some(content) = content
+            && let Some(location) = self.resolve_definition(&uri, &content, position)
+        {
+            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
         }
 
         Ok(None)
