@@ -388,6 +388,30 @@ impl Backend {
                     let is_static = method.modifiers.iter().any(|m| m.is_static());
                     let visibility = Self::extract_visibility(method.modifiers.iter());
 
+                    // Extract promoted properties from constructor parameters.
+                    // A promoted property is a constructor parameter with a
+                    // visibility modifier (e.g. `public`, `private`, `protected`).
+                    if name == "__construct" {
+                        for param in method.parameter_list.parameters.iter() {
+                            if param.is_promoted_property() {
+                                let raw_name = param.variable.name.to_string();
+                                let prop_name =
+                                    raw_name.strip_prefix('$').unwrap_or(&raw_name).to_string();
+                                let type_hint =
+                                    param.hint.as_ref().map(|h| Self::extract_hint_string(h));
+                                let prop_visibility =
+                                    Self::extract_visibility(param.modifiers.iter());
+
+                                properties.push(PropertyInfo {
+                                    name: prop_name,
+                                    type_hint,
+                                    is_static: false,
+                                    visibility: prop_visibility,
+                                });
+                            }
+                        }
+                    }
+
                     methods.push(MethodInfo {
                         name,
                         parameters,
@@ -401,8 +425,7 @@ impl Backend {
                     properties.append(&mut prop_infos);
                 }
                 ClassLikeMember::Constant(constant) => {
-                    let type_hint =
-                        constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
+                    let type_hint = constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
                     let visibility = Self::extract_visibility(constant.modifiers.iter());
                     for item in constant.items.iter() {
                         constants.push(ConstantInfo {

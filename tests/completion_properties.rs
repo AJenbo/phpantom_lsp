@@ -285,3 +285,138 @@ async fn test_completion_constant_detail_with_type_hint() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_completion_promoted_properties_appear_in_this() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class ShoppingCartService {\n",
+        "    private IShoppingCart $regular;\n",
+        "\n",
+        "    public function __construct(\n",
+        "        private IShoppingCart $promoted,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function doWork(): void {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$this->` on line 9
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                names.contains(&"regular"),
+                "Should contain regular property 'regular', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"promoted"),
+                "Should contain promoted property 'promoted', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_promoted_property_type_resolves_for_chaining() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(string $msg): void {}\n",
+        "    public function error(string $msg): void {}\n",
+        "}\n",
+        "class Service {\n",
+        "    public function __construct(\n",
+        "        private Logger $logger,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $this->logger->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$this->logger->` on line 11
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 24,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve promoted property type for chaining"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                names.iter().any(|n| n.starts_with("info(")),
+                "Should contain Logger method 'info', got: {:?}",
+                names
+            );
+            assert!(
+                names.iter().any(|n| n.starts_with("error(")),
+                "Should contain Logger method 'error', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

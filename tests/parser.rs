@@ -613,10 +613,173 @@ interface Factory {
     assert_eq!(classes[0].name, "Factory");
     assert_eq!(classes[0].methods.len(), 2);
 
-    let create = classes[0].methods.iter().find(|m| m.name == "create").unwrap();
+    let create = classes[0]
+        .methods
+        .iter()
+        .find(|m| m.name == "create")
+        .unwrap();
     assert!(create.is_static);
     assert_eq!(create.return_type.as_deref(), Some("static"));
 
-    let build = classes[0].methods.iter().find(|m| m.name == "build").unwrap();
+    let build = classes[0]
+        .methods
+        .iter()
+        .find(|m| m.name == "build")
+        .unwrap();
     assert!(!build.is_static);
+}
+
+// ─── Promoted Property Tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_parse_php_promoted_properties_basic() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Service {
+    public function __construct(
+        private IShoppingCart $cart,
+        protected Logger $logger,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    assert_eq!(
+        cls.properties.len(),
+        2,
+        "Should extract 2 promoted properties"
+    );
+
+    let cart = cls.properties.iter().find(|p| p.name == "cart").unwrap();
+    assert_eq!(cart.type_hint.as_deref(), Some("IShoppingCart"));
+    assert_eq!(cart.visibility, Visibility::Private);
+    assert!(!cart.is_static);
+
+    let logger = cls.properties.iter().find(|p| p.name == "logger").unwrap();
+    assert_eq!(logger.type_hint.as_deref(), Some("Logger"));
+    assert_eq!(logger.visibility, Visibility::Protected);
+    assert!(!logger.is_static);
+}
+
+#[tokio::test]
+async fn test_parse_php_promoted_properties_mixed_with_regular() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class ShoppingCartService {
+    private IShoppingCart $regular;
+
+    public function __construct(
+        private IShoppingCart $promoted,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    assert_eq!(
+        cls.properties.len(),
+        2,
+        "Should have regular + promoted property"
+    );
+
+    let regular = cls.properties.iter().find(|p| p.name == "regular").unwrap();
+    assert_eq!(regular.type_hint.as_deref(), Some("IShoppingCart"));
+    assert_eq!(regular.visibility, Visibility::Private);
+
+    let promoted = cls
+        .properties
+        .iter()
+        .find(|p| p.name == "promoted")
+        .unwrap();
+    assert_eq!(promoted.type_hint.as_deref(), Some("IShoppingCart"));
+    assert_eq!(promoted.visibility, Visibility::Private);
+}
+
+#[tokio::test]
+async fn test_parse_php_promoted_property_public_visibility() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Config {
+    public function __construct(
+        public string $name,
+        public int $value,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    assert_eq!(cls.properties.len(), 2);
+
+    for prop in &cls.properties {
+        assert_eq!(prop.visibility, Visibility::Public);
+    }
+
+    let name = cls.properties.iter().find(|p| p.name == "name").unwrap();
+    assert_eq!(name.type_hint.as_deref(), Some("string"));
+
+    let value = cls.properties.iter().find(|p| p.name == "value").unwrap();
+    assert_eq!(value.type_hint.as_deref(), Some("int"));
+}
+
+#[tokio::test]
+async fn test_parse_php_non_promoted_constructor_params_ignored() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Service {
+    public function __construct(
+        private string $promoted,
+        string $regularParam,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    assert_eq!(
+        cls.properties.len(),
+        1,
+        "Only promoted params (with visibility) should become properties"
+    );
+    assert_eq!(cls.properties[0].name, "promoted");
+}
+
+#[tokio::test]
+async fn test_parse_php_promoted_property_readonly() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class User {
+    public function __construct(
+        public readonly string $name,
+        private readonly int $id,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    assert_eq!(
+        cls.properties.len(),
+        2,
+        "readonly promoted params are still promoted"
+    );
+
+    let name = cls.properties.iter().find(|p| p.name == "name").unwrap();
+    assert_eq!(name.visibility, Visibility::Public);
+    assert_eq!(name.type_hint.as_deref(), Some("string"));
+
+    let id = cls.properties.iter().find(|p| p.name == "id").unwrap();
+    assert_eq!(id.visibility, Visibility::Private);
+    assert_eq!(id.type_hint.as_deref(), Some("int"));
 }
