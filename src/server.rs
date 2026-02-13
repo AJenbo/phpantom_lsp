@@ -45,6 +45,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -142,6 +143,32 @@ impl LanguageServer for Backend {
 
         self.log(MessageType::INFO, format!("Closed file: {}", uri))
             .await;
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        let content = if let Ok(files) = self.open_files.lock() {
+            files.get(&uri).cloned()
+        } else {
+            None
+        };
+
+        if let Some(content) = content {
+            if let Some(location) = self.resolve_definition(&uri, &content, position) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+            }
+        }
+
+        Ok(None)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {

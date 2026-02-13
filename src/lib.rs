@@ -19,6 +19,7 @@ use tower_lsp::Client;
 
 mod completion;
 pub mod composer;
+mod definition;
 mod parser;
 mod server;
 pub mod types;

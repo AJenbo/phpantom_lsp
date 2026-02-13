@@ -206,12 +206,7 @@ impl Backend {
                 .as_deref()
                 .unwrap_or(&a.label)
                 .to_lowercase()
-                .cmp(
-                    &b.filter_text
-                        .as_deref()
-                        .unwrap_or(&b.label)
-                        .to_lowercase(),
-                )
+                .cmp(&b.filter_text.as_deref().unwrap_or(&b.label).to_lowercase())
         });
 
         for (i, item) in items.iter_mut().enumerate() {
