@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
+use crate::types::AccessKind;
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -231,7 +232,15 @@ impl LanguageServer for Backend {
 
                 if let Some(target_class) = resolved {
                     let merged = Self::resolve_class_with_inheritance(&target_class, &class_loader);
-                    let items = Self::build_completion_items(&merged, target.access_kind);
+                    // `parent::` is syntactically `::` but semantically
+                    // different: it shows both static and instance members
+                    // while excluding private ones.
+                    let effective_access = if target.subject == "parent" {
+                        AccessKind::ParentDoubleColon
+                    } else {
+                        target.access_kind
+                    };
+                    let items = Self::build_completion_items(&merged, effective_access);
                     if !items.is_empty() {
                         return Ok(Some(CompletionResponse::Array(items)));
                     }

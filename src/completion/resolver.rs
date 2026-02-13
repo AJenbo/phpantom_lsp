@@ -49,6 +49,22 @@ impl Backend {
             return current_class.cloned();
         }
 
+        // ── `parent::` — resolve to the current class's parent ──
+        if subject == "parent" {
+            if let Some(cc) = current_class
+                && let Some(ref parent_name) = cc.parent_class
+            {
+                // Try local lookup first
+                let lookup = parent_name.rsplit('\\').next().unwrap_or(parent_name);
+                if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
+                    return Some(cls.clone());
+                }
+                // Fall back to cross-file / PSR-4
+                return class_loader(parent_name);
+            }
+            return None;
+        }
+
         // ── Bare class name (for `::`) ──
         if access_kind == AccessKind::DoubleColon && !subject.starts_with('$') {
             let lookup = subject.rsplit('\\').next().unwrap_or(subject);

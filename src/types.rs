@@ -76,6 +76,12 @@ pub enum AccessKind {
     Arrow,
     /// Completion triggered after `::` (static access).
     DoubleColon,
+    /// Completion triggered after `parent::`.
+    ///
+    /// This is an oddball: it shows both static **and** instance methods
+    /// (since PHP allows `parent::nonStaticMethod()` from a child class),
+    /// plus constants and static properties — but excludes private members.
+    ParentDoubleColon,
     /// No specific access operator detected (e.g. inside class body).
     Other,
 }

@@ -1,10 +1,12 @@
 /// Completion item building.
 ///
 /// This module contains the logic for constructing LSP `CompletionItem`s from
-/// resolved `ClassInfo`, filtered by the `AccessKind` (arrow vs double-colon).
+/// resolved `ClassInfo`, filtered by the `AccessKind` (arrow, double-colon,
+/// or parent double-colon).
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::types::Visibility;
 use crate::types::*;
 
 /// PHP magic methods that should not appear in completion results.
@@ -78,6 +80,8 @@ impl Backend {
     ///
     /// - `Arrow` access: returns only non-static methods and properties.
     /// - `DoubleColon` access: returns only static methods, static properties, and constants.
+    /// - `ParentDoubleColon` access: returns both static and non-static methods,
+    ///   static properties, and constants — but excludes private members.
     /// - `Other` access: returns all members.
     pub(crate) fn build_completion_items(
         target_class: &ClassInfo,
@@ -91,9 +95,18 @@ impl Backend {
                 continue;
             }
 
+            // parent:: excludes private members
+            if access_kind == AccessKind::ParentDoubleColon
+                && method.visibility == Visibility::Private
+            {
+                continue;
+            }
+
             let include = match access_kind {
                 AccessKind::Arrow => !method.is_static,
                 AccessKind::DoubleColon => method.is_static,
+                // parent:: shows both static and non-static methods
+                AccessKind::ParentDoubleColon => true,
                 AccessKind::Other => true,
             };
             if !include {
@@ -113,19 +126,28 @@ impl Backend {
 
         // Properties — filtered by static / instance
         for property in &target_class.properties {
+            // parent:: excludes private members
+            if access_kind == AccessKind::ParentDoubleColon
+                && property.visibility == Visibility::Private
+            {
+                continue;
+            }
+
             let include = match access_kind {
                 AccessKind::Arrow => !property.is_static,
-                AccessKind::DoubleColon => property.is_static,
+                AccessKind::DoubleColon | AccessKind::ParentDoubleColon => property.is_static,
                 AccessKind::Other => true,
             };
             if !include {
                 continue;
             }
 
-            // Static properties accessed via `::` need the `$` prefix
-            // (e.g. `self::$path`), while instance properties via `->`
+            // Static properties accessed via `::` or `parent::` need the `$`
+            // prefix (e.g. `self::$path`), while instance properties via `->`
             // use the bare name (e.g. `$this->path`).
-            let display_name = if access_kind == AccessKind::DoubleColon {
+            let display_name = if access_kind == AccessKind::DoubleColon
+                || access_kind == AccessKind::ParentDoubleColon
+            {
                 format!("${}", property.name)
             } else {
                 property.name.clone()
@@ -147,9 +169,19 @@ impl Backend {
             });
         }
 
-        // Constants — only for `::` or unqualified access
-        if access_kind == AccessKind::DoubleColon || access_kind == AccessKind::Other {
+        // Constants — only for `::`, `parent::`, or unqualified access
+        if access_kind == AccessKind::DoubleColon
+            || access_kind == AccessKind::ParentDoubleColon
+            || access_kind == AccessKind::Other
+        {
             for constant in &target_class.constants {
+                // parent:: excludes private members
+                if access_kind == AccessKind::ParentDoubleColon
+                    && constant.visibility == Visibility::Private
+                {
+                    continue;
+                }
+
                 let detail = if let Some(ref th) = constant.type_hint {
                     format!("Class: {} — {}", target_class.name, th)
                 } else {
