@@ -315,50 +315,8 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let mut methods = Vec::new();
-                    let mut properties = Vec::new();
-                    let mut constants = Vec::new();
-
-                    for member in class.members.iter() {
-                        match member {
-                            ClassLikeMember::Method(method) => {
-                                let name = method.name.value.to_string();
-                                let parameters = Self::extract_parameters(&method.parameter_list);
-                                let return_type = method
-                                    .return_type_hint
-                                    .as_ref()
-                                    .map(|rth| Self::extract_hint_string(&rth.hint));
-                                let is_static = method.modifiers.iter().any(|m| m.is_static());
-                                let visibility = Self::extract_visibility(method.modifiers.iter());
-
-                                methods.push(MethodInfo {
-                                    name,
-                                    parameters,
-                                    return_type,
-                                    is_static,
-                                    visibility,
-                                });
-                            }
-                            ClassLikeMember::Property(property) => {
-                                let mut prop_infos = Self::extract_property_info(property);
-                                properties.append(&mut prop_infos);
-                            }
-                            ClassLikeMember::Constant(constant) => {
-                                let type_hint =
-                                    constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
-                                let visibility =
-                                    Self::extract_visibility(constant.modifiers.iter());
-                                for item in constant.items.iter() {
-                                    constants.push(ConstantInfo {
-                                        name: item.name.value.to_string(),
-                                        type_hint: type_hint.clone(),
-                                        visibility,
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    let (methods, properties, constants) =
+                        Self::extract_class_like_members(class.members.iter());
 
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
@@ -373,12 +331,92 @@ impl Backend {
                         parent_class,
                     });
                 }
+                Statement::Interface(iface) => {
+                    let iface_name = iface.name.value.to_string();
+
+                    // Interfaces use `extends` for parent interfaces;
+                    // take the first one for single-inheritance resolution.
+                    let parent_class = iface
+                        .extends
+                        .as_ref()
+                        .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
+
+                    let (methods, properties, constants) =
+                        Self::extract_class_like_members(iface.members.iter());
+
+                    let start_offset = iface.left_brace.start.offset;
+                    let end_offset = iface.right_brace.end.offset;
+
+                    classes.push(ClassInfo {
+                        name: iface_name,
+                        methods,
+                        properties,
+                        constants,
+                        start_offset,
+                        end_offset,
+                        parent_class,
+                    });
+                }
                 Statement::Namespace(namespace) => {
                     Self::extract_classes_from_statements(namespace.statements().iter(), classes);
                 }
                 _ => {}
             }
         }
+    }
+
+    /// Extract methods, properties, and constants from class-like members.
+    ///
+    /// This is shared between `Statement::Class` and `Statement::Interface`
+    /// since both use the same `ClassLikeMember` representation.
+    fn extract_class_like_members<'a>(
+        members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    ) -> (Vec<MethodInfo>, Vec<PropertyInfo>, Vec<ConstantInfo>) {
+        let mut methods = Vec::new();
+        let mut properties = Vec::new();
+        let mut constants = Vec::new();
+
+        for member in members {
+            match member {
+                ClassLikeMember::Method(method) => {
+                    let name = method.name.value.to_string();
+                    let parameters = Self::extract_parameters(&method.parameter_list);
+                    let return_type = method
+                        .return_type_hint
+                        .as_ref()
+                        .map(|rth| Self::extract_hint_string(&rth.hint));
+                    let is_static = method.modifiers.iter().any(|m| m.is_static());
+                    let visibility = Self::extract_visibility(method.modifiers.iter());
+
+                    methods.push(MethodInfo {
+                        name,
+                        parameters,
+                        return_type,
+                        is_static,
+                        visibility,
+                    });
+                }
+                ClassLikeMember::Property(property) => {
+                    let mut prop_infos = Self::extract_property_info(property);
+                    properties.append(&mut prop_infos);
+                }
+                ClassLikeMember::Constant(constant) => {
+                    let type_hint =
+                        constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
+                    let visibility = Self::extract_visibility(constant.modifiers.iter());
+                    for item in constant.items.iter() {
+                        constants.push(ConstantInfo {
+                            name: item.name.value.to_string(),
+                            type_hint: type_hint.clone(),
+                            visibility,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        (methods, properties, constants)
     }
 
     /// Update the ast_map, use_map, and namespace_map for a given file URI
@@ -412,7 +450,7 @@ impl Backend {
                             Statement::Use(use_stmt) => {
                                 Self::extract_use_items(&use_stmt.items, &mut use_map);
                             }
-                            Statement::Class(_) => {
+                            Statement::Class(_) | Statement::Interface(_) => {
                                 Self::extract_classes_from_statements(
                                     std::iter::once(inner),
                                     &mut classes,
@@ -433,7 +471,7 @@ impl Backend {
                         }
                     }
                 }
-                Statement::Class(_) => {
+                Statement::Class(_) | Statement::Interface(_) => {
                     Self::extract_classes_from_statements(std::iter::once(statement), &mut classes);
                 }
                 _ => {}

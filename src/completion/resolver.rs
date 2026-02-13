@@ -200,41 +200,32 @@ impl Backend {
                     if cursor_offset < start || cursor_offset > end {
                         continue;
                     }
-                    for member in class.members.iter() {
-                        if let ClassLikeMember::Method(method) = member {
-                            // Check parameter type hints first
-                            for param in method.parameter_list.parameters.iter() {
-                                let pname = param.variable.name.to_string();
-                                if pname == var_name
-                                    && let Some(hint) = &param.hint
-                                {
-                                    let type_str = Self::extract_hint_string(hint);
-                                    return Self::type_hint_to_class(
-                                        &type_str,
-                                        &current_class.name,
-                                        all_classes,
-                                        class_loader,
-                                    );
-                                }
-                            }
-                            if let MethodBody::Concrete(block) = &method.body {
-                                let blk_start = block.left_brace.start.offset;
-                                let blk_end = block.right_brace.end.offset;
-                                if cursor_offset >= blk_start
-                                    && cursor_offset <= blk_end
-                                    && let Some(cls) = Self::find_assignment_type_in_block(
-                                        block,
-                                        var_name,
-                                        &current_class.name,
-                                        all_classes,
-                                        cursor_offset,
-                                        class_loader,
-                                    )
-                                {
-                                    return Some(cls);
-                                }
-                            }
-                        }
+                    if let Some(cls) = Self::resolve_variable_in_members(
+                        class.members.iter(),
+                        var_name,
+                        current_class,
+                        all_classes,
+                        cursor_offset,
+                        class_loader,
+                    ) {
+                        return Some(cls);
+                    }
+                }
+                Statement::Interface(iface) => {
+                    let start = iface.left_brace.start.offset;
+                    let end = iface.right_brace.end.offset;
+                    if cursor_offset < start || cursor_offset > end {
+                        continue;
+                    }
+                    if let Some(cls) = Self::resolve_variable_in_members(
+                        iface.members.iter(),
+                        var_name,
+                        current_class,
+                        all_classes,
+                        cursor_offset,
+                        class_loader,
+                    ) {
+                        return Some(cls);
                     }
                 }
                 Statement::Namespace(ns) => {
@@ -250,6 +241,57 @@ impl Backend {
                     }
                 }
                 _ => {}
+            }
+        }
+        None
+    }
+
+    /// Resolve a variable's type by scanning class-like members for parameter
+    /// type hints and assignment expressions.
+    ///
+    /// Shared between `Statement::Class` and `Statement::Interface`.
+    fn resolve_variable_in_members<'b>(
+        members: impl Iterator<Item = &'b ClassLikeMember<'b>>,
+        var_name: &str,
+        current_class: &ClassInfo,
+        all_classes: &[ClassInfo],
+        cursor_offset: u32,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
+        for member in members {
+            if let ClassLikeMember::Method(method) = member {
+                // Check parameter type hints first
+                for param in method.parameter_list.parameters.iter() {
+                    let pname = param.variable.name.to_string();
+                    if pname == var_name
+                        && let Some(hint) = &param.hint
+                    {
+                        let type_str = Self::extract_hint_string(hint);
+                        return Self::type_hint_to_class(
+                            &type_str,
+                            &current_class.name,
+                            all_classes,
+                            class_loader,
+                        );
+                    }
+                }
+                if let MethodBody::Concrete(block) = &method.body {
+                    let blk_start = block.left_brace.start.offset;
+                    let blk_end = block.right_brace.end.offset;
+                    if cursor_offset >= blk_start
+                        && cursor_offset <= blk_end
+                        && let Some(cls) = Self::find_assignment_type_in_block(
+                            block,
+                            var_name,
+                            &current_class.name,
+                            all_classes,
+                            cursor_offset,
+                            class_loader,
+                        )
+                    {
+                        return Some(cls);
+                    }
+                }
             }
         }
         None

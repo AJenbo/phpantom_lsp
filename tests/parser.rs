@@ -482,3 +482,141 @@ async fn test_parse_php_extracts_visibility() {
         "No modifier defaults to public"
     );
 }
+
+// ─── Interface Parsing Tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_parse_php_extracts_interface_methods() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+interface Loggable {
+    public function log(string $message): void;
+    public function getLogLevel(): int;
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Loggable");
+    assert_eq!(classes[0].methods.len(), 2);
+    assert_eq!(classes[0].methods[0].name, "log");
+    assert_eq!(classes[0].methods[0].return_type.as_deref(), Some("void"));
+    assert_eq!(classes[0].methods[1].name, "getLogLevel");
+    assert_eq!(classes[0].methods[1].return_type.as_deref(), Some("int"));
+}
+
+#[tokio::test]
+async fn test_parse_php_extracts_interface_constants() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+interface HasStatus {
+    const STATUS_ACTIVE = 1;
+    const STATUS_INACTIVE = 0;
+    public function getStatus(): int;
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "HasStatus");
+    assert_eq!(classes[0].constants.len(), 2);
+    assert_eq!(classes[0].constants[0].name, "STATUS_ACTIVE");
+    assert_eq!(classes[0].constants[1].name, "STATUS_INACTIVE");
+    assert_eq!(classes[0].methods.len(), 1);
+    assert_eq!(classes[0].methods[0].name, "getStatus");
+}
+
+#[tokio::test]
+async fn test_parse_php_interface_extends() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+interface Readable {
+    public function read(): string;
+}
+interface Writable extends Readable {
+    public function write(string $data): void;
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 2);
+
+    let readable = classes.iter().find(|c| c.name == "Readable").unwrap();
+    assert!(readable.parent_class.is_none());
+    assert_eq!(readable.methods.len(), 1);
+
+    let writable = classes.iter().find(|c| c.name == "Writable").unwrap();
+    assert_eq!(writable.parent_class.as_deref(), Some("Readable"));
+    assert_eq!(writable.methods.len(), 1);
+    assert_eq!(writable.methods[0].name, "write");
+}
+
+#[tokio::test]
+async fn test_parse_php_interface_inside_namespace() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+namespace App\Contracts;
+
+interface Repository {
+    public function find(int $id): mixed;
+    public function save(object $entity): void;
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Repository");
+    assert_eq!(classes[0].methods.len(), 2);
+    assert_eq!(classes[0].methods[0].name, "find");
+    assert_eq!(classes[0].methods[1].name, "save");
+}
+
+#[tokio::test]
+async fn test_parse_php_class_and_interface_together() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+interface Cacheable {
+    public function getCacheKey(): string;
+    const TTL = 3600;
+}
+
+class UserRepository implements Cacheable {
+    public function getCacheKey(): string { return 'users'; }
+    public function findAll(): array { return []; }
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 2);
+
+    let iface = classes.iter().find(|c| c.name == "Cacheable").unwrap();
+    assert_eq!(iface.methods.len(), 1);
+    assert_eq!(iface.constants.len(), 1);
+    assert_eq!(iface.constants[0].name, "TTL");
+
+    let class = classes.iter().find(|c| c.name == "UserRepository").unwrap();
+    assert_eq!(class.methods.len(), 2);
+}
+
+#[tokio::test]
+async fn test_parse_php_interface_static_method() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+interface Factory {
+    public static function create(): static;
+    public function build(): object;
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Factory");
+    assert_eq!(classes[0].methods.len(), 2);
+
+    let create = classes[0].methods.iter().find(|m| m.name == "create").unwrap();
+    assert!(create.is_static);
+    assert_eq!(create.return_type.as_deref(), Some("static"));
+
+    let build = classes[0].methods.iter().find(|m| m.name == "build").unwrap();
+    assert!(!build.is_static);
+}

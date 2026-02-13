@@ -4,6 +4,143 @@ use common::create_test_backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
+// ─── Interface Completion Tests ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_interface_type_hint_resolves_methods() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///iface.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Loggable {\n",
+        "    public function log(string $message): void;\n",
+        "    public function getLogLevel(): int;\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(Loggable $logger): void {\n",
+        "        $logger->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$logger->` on line 7
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for interface-typed parameter"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                names.iter().any(|n| n.starts_with("log(")),
+                "Should contain interface method 'log', got: {:?}",
+                names
+            );
+            assert!(
+                names.iter().any(|n| n.starts_with("getLogLevel(")),
+                "Should contain interface method 'getLogLevel', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected Array response"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_interface_constant_via_double_colon() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///iface_const.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface HasStatus {\n",
+        "    const STATUS_ACTIVE = 1;\n",
+        "    const STATUS_INACTIVE = 0;\n",
+        "    public function getStatus(): int;\n",
+        "}\n",
+        "class Foo {\n",
+        "    public function bar(): void {\n",
+        "        HasStatus::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `HasStatus::` on line 8
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for interface constant access"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                names.contains(&"STATUS_ACTIVE"),
+                "Should contain constant 'STATUS_ACTIVE', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"STATUS_INACTIVE"),
+                "Should contain constant 'STATUS_INACTIVE', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected Array response"),
+    }
+}
+
+// ─── Basic Completion Tests ─────────────────────────────────────────────────
+
 #[tokio::test]
 async fn test_completion_returns_phpantomlsp() {
     let backend = create_test_backend();
