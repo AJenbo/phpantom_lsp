@@ -2598,3 +2598,365 @@ async fn test_goto_definition_new_self_in_nested_method() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Goto Definition: new ClassName()->method() ─────────────────────────────
+
+#[tokio::test]
+async fn test_goto_definition_new_classname_arrow_method_same_file() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SessionManager {\n",
+        "    public function callCustomCreator(): void {}\n",
+        "    public function boot(): void {\n",
+        "        new SessionManager()->callCustomCreator();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "callCustomCreator" in `new SessionManager()->callCustomCreator()` on line 4
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve `new SessionManager()->callCustomCreator()` to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "callCustomCreator is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_parenthesized_new_arrow_method_same_file() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SessionManager {\n",
+        "    public function callCustomCreator(): void {}\n",
+        "    public function boot(): void {\n",
+        "        (new SessionManager())->callCustomCreator();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "callCustomCreator" in `(new SessionManager())->callCustomCreator()` on line 4
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve `(new SessionManager())->callCustomCreator()` to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "callCustomCreator is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_new_classname_arrow_method_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/SessionManager.php",
+            concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "\n",
+                "class SessionManager {\n",
+                "    public function callCustomCreator(): void {}\n",
+                "    public function boot(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\SessionManager;\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        new SessionManager()->callCustomCreator();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "callCustomCreator" on line 5
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve `new SessionManager()->callCustomCreator()` cross-file"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("src/SessionManager.php"),
+                "Should point to SessionManager.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "callCustomCreator is on line 4 in SessionManager.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_parenthesized_new_arrow_method_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/SessionManager.php",
+            concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "\n",
+                "class SessionManager {\n",
+                "    public function callCustomCreator(): void {}\n",
+                "    public function boot(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\SessionManager;\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        (new SessionManager())->callCustomCreator();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "callCustomCreator" on line 5
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve `(new SessionManager())->callCustomCreator()` cross-file"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("src/SessionManager.php"),
+                "Should point to SessionManager.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "callCustomCreator is on line 4 in SessionManager.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_new_namespaced_classname_arrow_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class Widget {\n",
+        "    public function render(): void {}\n",
+        "}\n",
+        "\n",
+        "class Page {\n",
+        "    public function show(): void {\n",
+        "        (new Widget())->render();\n",
+        "        new Widget()->render();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "render" in `(new Widget())->render()` on line 9
+    let params1 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 24,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params1).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve `(new Widget())->render()` to render declaration"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 4, "render is on line 4");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Click on "render" in `new Widget()->render()` on line 10
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 10,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve `new Widget()->render()` to render declaration"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 4, "render is on line 4");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

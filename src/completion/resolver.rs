@@ -45,7 +45,7 @@ impl Backend {
     #[allow(clippy::too_many_arguments)]
     pub fn resolve_target_class(
         subject: &str,
-        access_kind: AccessKind,
+        _access_kind: AccessKind,
         current_class: Option<&ClassInfo>,
         all_classes: &[ClassInfo],
         content: &str,
@@ -74,8 +74,12 @@ impl Backend {
             return None;
         }
 
-        // ── Bare class name (for `::`) ──
-        if access_kind == AccessKind::DoubleColon && !subject.starts_with('$') {
+        // ── Bare class name (for `::` or `->` from `new ClassName()`) ──
+        if !subject.starts_with('$')
+            && !subject.contains("->")
+            && !subject.contains("::")
+            && !subject.ends_with("()")
+        {
             let lookup = subject.rsplit('\\').next().unwrap_or(subject);
             if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
                 return Some(cls.clone());

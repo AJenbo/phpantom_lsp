@@ -39,6 +39,90 @@ pub(crate) fn skip_balanced_parens_back(chars: &[char], pos: usize) -> Option<us
     None
 }
 
+/// Check if the `new` keyword (followed by whitespace) appears immediately
+/// before the identifier starting at position `ident_start`.
+///
+/// Returns the class name (possibly with namespace) if `new` is found.
+pub(crate) fn check_new_keyword_before(
+    chars: &[char],
+    ident_start: usize,
+    class_name: &str,
+) -> Option<String> {
+    let mut j = ident_start;
+    // Skip whitespace between `new` and the class name.
+    while j > 0 && chars[j - 1] == ' ' {
+        j -= 1;
+    }
+    // Check for the `new` keyword.
+    if j >= 3 && chars[j - 3] == 'n' && chars[j - 2] == 'e' && chars[j - 1] == 'w' {
+        // Verify word boundary before `new` (start of line, whitespace, `(`, etc.).
+        let before_ok = j == 3 || {
+            let prev = chars[j - 4];
+            !prev.is_alphanumeric() && prev != '_'
+        };
+        if before_ok {
+            // Strip leading `\` from FQN if present.
+            let name = class_name.strip_prefix('\\').unwrap_or(class_name);
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Try to extract a class name from a parenthesized `new` expression:
+/// `(new ClassName(...))`.
+///
+/// `open` is the position of the outer `(`, `close` is one past the
+/// outer `)`.  The function looks inside for the pattern
+/// `new ClassName(...)`.
+pub(crate) fn extract_new_expression_inside_parens(
+    chars: &[char],
+    open: usize,
+    close: usize,
+) -> Option<String> {
+    // Content is chars[open+1 .. close-1].
+    let inner_start = open + 1;
+    let inner_end = close - 1;
+    if inner_start >= inner_end {
+        return None;
+    }
+
+    // Skip whitespace inside the opening `(`.
+    let mut k = inner_start;
+    while k < inner_end && chars[k] == ' ' {
+        k += 1;
+    }
+
+    // Check for `new` keyword.
+    if k + 3 >= inner_end {
+        return None;
+    }
+    if chars[k] != 'n' || chars[k + 1] != 'e' || chars[k + 2] != 'w' {
+        return None;
+    }
+    k += 3;
+
+    // Must be followed by whitespace.
+    if k >= inner_end || chars[k] != ' ' {
+        return None;
+    }
+    while k < inner_end && chars[k] == ' ' {
+        k += 1;
+    }
+
+    // Read the class name (may include `\` for namespaces).
+    let name_start = k;
+    while k < inner_end && (chars[k].is_alphanumeric() || chars[k] == '_' || chars[k] == '\\') {
+        k += 1;
+    }
+    if k == name_start {
+        return None;
+    }
+    let class_name: String = chars[name_start..k].iter().collect();
+    let name = class_name.strip_prefix('\\').unwrap_or(&class_name);
+    Some(name.to_string())
+}
+
 impl Backend {
     /// Convert an LSP Position (line, character) to a byte offset in content.
     pub(crate) fn position_to_offset(content: &str, position: Position) -> Option<u32> {

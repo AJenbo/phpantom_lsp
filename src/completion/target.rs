@@ -7,7 +7,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::types::*;
-use crate::util::skip_balanced_parens_back;
+use crate::util::{
+    check_new_keyword_before, extract_new_expression_inside_parens, skip_balanced_parens_back,
+};
 
 impl Backend {
     /// Detect the access operator before the cursor position and extract
@@ -68,6 +70,8 @@ impl Backend {
     ///   - `app()->` (function call)
     ///   - `$this->getService()->` (method call chain)
     ///   - `ClassName::make()->` (static method call)
+    ///   - `new ClassName()->` (instantiation, PHP 8.4+)
+    ///   - `(new ClassName())->` (parenthesized instantiation)
     fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String {
         // Position just before the `->`
         let end = arrow_pos;
@@ -78,8 +82,9 @@ impl Backend {
             i -= 1;
         }
 
-        // ── Function / method call: detect `)` before the operator ──
-        // e.g. `app()->`, `$this->getService()->`, `Class::make()->`
+        // ── Function / method call or `new` expression: detect `)` ──
+        // e.g. `app()->`, `$this->getService()->`, `Class::make()->`,
+        //      `new Foo()->`, `(new Foo())->`
         if i > 0
             && chars[i - 1] == ')'
             && let Some(call_subject) = Self::extract_call_subject(chars, i)
@@ -128,6 +133,7 @@ impl Backend {
     ///   - `"app()"` for a standalone function call
     ///   - `"$this->getService()"` for an instance method call
     ///   - `"ClassName::make()"` for a static method call
+    ///   - `"ClassName"` for `new ClassName()` instantiation
     fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<String> {
         let open = skip_balanced_parens_back(chars, paren_end)?;
         if open == 0 {
@@ -136,14 +142,23 @@ impl Backend {
 
         // Read the function / method name before `(`
         let mut i = open;
-        while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+        while i > 0
+            && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '\\')
+        {
             i -= 1;
         }
         if i == open {
-            // No identifier before `(` — can't resolve
-            return None;
+            // No identifier before `(` — check if the contents inside the
+            // balanced parens form a `(new ClassName(...))` expression.
+            return extract_new_expression_inside_parens(chars, open, paren_end);
         }
         let func_name: String = chars[i..open].iter().collect();
+
+        // ── `new ClassName()` instantiation ──
+        // Check if the `new` keyword immediately precedes the class name.
+        if let Some(class_name) = check_new_keyword_before(chars, i, &func_name) {
+            return Some(class_name);
+        }
 
         // Check what precedes the function name to determine the kind of
         // call expression.
