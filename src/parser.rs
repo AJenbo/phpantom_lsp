@@ -11,8 +11,19 @@ use mago_syntax::ast::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
+use crate::docblock;
 use crate::types::Visibility;
 use crate::types::*;
+
+/// Context for resolving PHPDoc type annotations from docblock comments.
+///
+/// Bundles the program's trivia (comments/whitespace) and the raw source
+/// text so that extraction functions can look up the `/** ... */` comment
+/// preceding any AST node and parse `@return` / `@var` tags from it.
+pub(crate) struct DocblockCtx<'a> {
+    pub trivias: &'a [Trivia<'a>],
+    pub content: &'a str,
+}
 
 impl Backend {
     /// Extract a string representation of a type hint from the AST.
@@ -138,8 +149,17 @@ impl Backend {
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
 
+        let doc_ctx = DocblockCtx {
+            trivias: program.trivia.as_slice(),
+            content,
+        };
+
         let mut classes = Vec::new();
-        Self::extract_classes_from_statements(program.statements.iter(), &mut classes);
+        Self::extract_classes_from_statements(
+            program.statements.iter(),
+            &mut classes,
+            Some(&doc_ctx),
+        );
         classes
     }
 
@@ -152,8 +172,18 @@ impl Backend {
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
 
+        let doc_ctx = DocblockCtx {
+            trivias: program.trivia.as_slice(),
+            content,
+        };
+
         let mut functions = Vec::new();
-        Self::extract_functions_from_statements(program.statements.iter(), &mut functions, &None);
+        Self::extract_functions_from_statements(
+            program.statements.iter(),
+            &mut functions,
+            &None,
+            Some(&doc_ctx),
+        );
         functions
     }
 
@@ -323,16 +353,31 @@ impl Backend {
         statements: impl Iterator<Item = &'a Statement<'a>>,
         functions: &mut Vec<FunctionInfo>,
         current_namespace: &Option<String>,
+        doc_ctx: Option<&DocblockCtx<'a>>,
     ) {
         for statement in statements {
             match statement {
                 Statement::Function(func) => {
                     let name = func.name.value.to_string();
                     let parameters = Self::extract_parameters(&func.parameter_list);
-                    let return_type = func
+                    let native_return_type = func
                         .return_type_hint
                         .as_ref()
                         .map(|rth| Self::extract_hint_string(&rth.hint));
+
+                    // Apply PHPDoc `@return` override for the function.
+                    let return_type = if let Some(ctx) = doc_ctx {
+                        let doc_type =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, func)
+                                .and_then(docblock::extract_return_type);
+
+                        docblock::resolve_effective_type(
+                            native_return_type.as_deref(),
+                            doc_type.as_deref(),
+                        )
+                    } else {
+                        native_return_type
+                    };
 
                     functions.push(FunctionInfo {
                         name,
@@ -356,6 +401,7 @@ impl Backend {
                         namespace.statements().iter(),
                         functions,
                         &effective_ns,
+                        doc_ctx,
                     );
                 }
                 // Recurse into block statements `{ ... }` to find nested
@@ -365,6 +411,7 @@ impl Backend {
                         block.statements.iter(),
                         functions,
                         current_namespace,
+                        doc_ctx,
                     );
                 }
                 // Recurse into `if` bodies — this is critical for the very
@@ -377,6 +424,7 @@ impl Backend {
                         &if_stmt.body,
                         functions,
                         current_namespace,
+                        doc_ctx,
                     );
                 }
                 _ => {}
@@ -391,6 +439,7 @@ impl Backend {
         body: &'a IfBody<'a>,
         functions: &mut Vec<FunctionInfo>,
         current_namespace: &Option<String>,
+        doc_ctx: Option<&DocblockCtx<'a>>,
     ) {
         match body {
             IfBody::Statement(body) => {
@@ -398,12 +447,14 @@ impl Backend {
                     std::iter::once(body.statement),
                     functions,
                     current_namespace,
+                    doc_ctx,
                 );
                 for else_if in body.else_if_clauses.iter() {
                     Self::extract_functions_from_statements(
                         std::iter::once(else_if.statement),
                         functions,
                         current_namespace,
+                        doc_ctx,
                     );
                 }
                 if let Some(else_clause) = &body.else_clause {
@@ -411,6 +462,7 @@ impl Backend {
                         std::iter::once(else_clause.statement),
                         functions,
                         current_namespace,
+                        doc_ctx,
                     );
                 }
             }
@@ -419,12 +471,14 @@ impl Backend {
                     body.statements.iter(),
                     functions,
                     current_namespace,
+                    doc_ctx,
                 );
                 for else_if in body.else_if_clauses.iter() {
                     Self::extract_functions_from_statements(
                         else_if.statements.iter(),
                         functions,
                         current_namespace,
+                        doc_ctx,
                     );
                 }
                 if let Some(else_clause) = &body.else_clause {
@@ -432,6 +486,7 @@ impl Backend {
                         else_clause.statements.iter(),
                         functions,
                         current_namespace,
+                        doc_ctx,
                     );
                 }
             }
@@ -441,6 +496,7 @@ impl Backend {
     pub(crate) fn extract_classes_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         classes: &mut Vec<ClassInfo>,
+        doc_ctx: Option<&DocblockCtx<'a>>,
     ) {
         for statement in statements {
             match statement {
@@ -454,7 +510,7 @@ impl Backend {
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
                     let (methods, properties, constants) =
-                        Self::extract_class_like_members(class.members.iter());
+                        Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
@@ -480,7 +536,7 @@ impl Backend {
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
                     let (methods, properties, constants) =
-                        Self::extract_class_like_members(iface.members.iter());
+                        Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
                     let start_offset = iface.left_brace.start.offset;
                     let end_offset = iface.right_brace.end.offset;
@@ -496,7 +552,11 @@ impl Backend {
                     });
                 }
                 Statement::Namespace(namespace) => {
-                    Self::extract_classes_from_statements(namespace.statements().iter(), classes);
+                    Self::extract_classes_from_statements(
+                        namespace.statements().iter(),
+                        classes,
+                        doc_ctx,
+                    );
                 }
                 _ => {}
             }
@@ -507,8 +567,12 @@ impl Backend {
     ///
     /// This is shared between `Statement::Class` and `Statement::Interface`
     /// since both use the same `ClassLikeMember` representation.
+    ///
+    /// When `doc_ctx` is provided, PHPDoc `@return` and `@var` tags are used
+    /// to refine (or supply) type information for methods and properties.
     fn extract_class_like_members<'a>(
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+        doc_ctx: Option<&DocblockCtx<'a>>,
     ) -> (Vec<MethodInfo>, Vec<PropertyInfo>, Vec<ConstantInfo>) {
         let mut methods = Vec::new();
         let mut properties = Vec::new();
@@ -519,12 +583,27 @@ impl Backend {
                 ClassLikeMember::Method(method) => {
                     let name = method.name.value.to_string();
                     let parameters = Self::extract_parameters(&method.parameter_list);
-                    let return_type = method
+                    let native_return_type = method
                         .return_type_hint
                         .as_ref()
                         .map(|rth| Self::extract_hint_string(&rth.hint));
                     let is_static = method.modifiers.iter().any(|m| m.is_static());
                     let visibility = Self::extract_visibility(method.modifiers.iter());
+
+                    // Look up the PHPDoc `@return` tag (if any) and apply
+                    // type override logic.
+                    let return_type = if let Some(ctx) = doc_ctx {
+                        let doc_type =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
+                                .and_then(docblock::extract_return_type);
+
+                        docblock::resolve_effective_type(
+                            native_return_type.as_deref(),
+                            doc_type.as_deref(),
+                        )
+                    } else {
+                        native_return_type
+                    };
 
                     // Extract promoted properties from constructor parameters.
                     // A promoted property is a constructor parameter with a
@@ -560,6 +639,21 @@ impl Backend {
                 }
                 ClassLikeMember::Property(property) => {
                     let mut prop_infos = Self::extract_property_info(property);
+
+                    // Apply PHPDoc `@var` override for each property.
+                    if let Some(ctx) = doc_ctx
+                        && let Some(doc_text) =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, member)
+                        && let Some(doc_type) = docblock::extract_var_type(doc_text)
+                    {
+                        for prop in &mut prop_infos {
+                            prop.type_hint = docblock::resolve_effective_type(
+                                prop.type_hint.as_deref(),
+                                Some(&doc_type),
+                            );
+                        }
+                    }
+
                     properties.append(&mut prop_infos);
                 }
                 ClassLikeMember::Constant(constant) => {
@@ -586,6 +680,11 @@ impl Backend {
         let arena = Bump::new();
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
+
+        let doc_ctx = DocblockCtx {
+            trivias: program.trivia.as_slice(),
+            content,
+        };
 
         // Extract all three in a single parse pass
         let mut classes = Vec::new();
@@ -615,6 +714,7 @@ impl Backend {
                                 Self::extract_classes_from_statements(
                                     std::iter::once(inner),
                                     &mut classes,
+                                    Some(&doc_ctx),
                                 );
                             }
                             Statement::Namespace(inner_ns) => {
@@ -626,6 +726,7 @@ impl Backend {
                                 Self::extract_classes_from_statements(
                                     inner_ns.statements().iter(),
                                     &mut classes,
+                                    Some(&doc_ctx),
                                 );
                             }
                             _ => {}
@@ -633,7 +734,11 @@ impl Backend {
                     }
                 }
                 Statement::Class(_) | Statement::Interface(_) => {
-                    Self::extract_classes_from_statements(std::iter::once(statement), &mut classes);
+                    Self::extract_classes_from_statements(
+                        std::iter::once(statement),
+                        &mut classes,
+                        Some(&doc_ctx),
+                    );
                 }
                 _ => {}
             }
@@ -647,6 +752,7 @@ impl Backend {
             program.statements.iter(),
             &mut functions,
             &namespace,
+            Some(&doc_ctx),
         );
         if !functions.is_empty()
             && let Ok(mut fmap) = self.global_functions.lock()
