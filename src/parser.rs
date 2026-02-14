@@ -520,8 +520,9 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
-                    // Extract @property and @method tags from the class-level docblock.
+                    // Extract @property, @method, and @mixin tags from the class-level docblock.
                     // These declare magic properties/methods accessible via __get/__set/__call.
+                    let mut mixins = Vec::new();
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, class)
@@ -548,6 +549,8 @@ impl Backend {
                                 methods.push(method_info);
                             }
                         }
+
+                        mixins = docblock::extract_mixin_tags(doc_text);
                     }
 
                     let start_offset = class.left_brace.start.offset;
@@ -562,6 +565,7 @@ impl Backend {
                         end_offset,
                         parent_class,
                         used_traits,
+                        mixins,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -578,6 +582,7 @@ impl Backend {
                         Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
                     // Extract @property and @method tags from the interface-level docblock.
+                    let mut mixins = Vec::new();
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, iface)
@@ -602,6 +607,8 @@ impl Backend {
                                 methods.push(method_info);
                             }
                         }
+
+                        mixins = docblock::extract_mixin_tags(doc_text);
                     }
 
                     let start_offset = iface.left_brace.start.offset;
@@ -616,6 +623,7 @@ impl Backend {
                         end_offset,
                         parent_class,
                         used_traits,
+                        mixins,
                     });
                 }
                 Statement::Trait(trait_def) => {
@@ -625,6 +633,7 @@ impl Backend {
                         Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
 
                     // Extract @property and @method tags from the trait-level docblock.
+                    let mut mixins = Vec::new();
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) = docblock::get_docblock_text_for_node(
                             ctx.trivias,
@@ -652,6 +661,8 @@ impl Backend {
                                 methods.push(method_info);
                             }
                         }
+
+                        mixins = docblock::extract_mixin_tags(doc_text);
                     }
 
                     let start_offset = trait_def.left_brace.start.offset;
@@ -666,6 +677,7 @@ impl Backend {
                         end_offset,
                         parent_class: None,
                         used_traits,
+                        mixins,
                     });
                 }
                 Statement::Namespace(namespace) => {
@@ -970,6 +982,13 @@ impl Backend {
                 .used_traits
                 .iter()
                 .map(|t| Self::resolve_name(t, use_map, namespace))
+                .collect();
+
+            // Resolve mixin names to fully-qualified names
+            class.mixins = class
+                .mixins
+                .iter()
+                .map(|m| Self::resolve_name(m, use_map, namespace))
                 .collect();
         }
     }

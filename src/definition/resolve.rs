@@ -815,8 +815,14 @@ impl Backend {
         // Walk up the parent chain.
         let mut current = class.clone();
         for _ in 0..MAX_DEPTH {
-            let parent_name = current.parent_class.as_ref()?;
-            let parent = class_loader(parent_name)?;
+            let parent_name = match current.parent_class.as_ref() {
+                Some(name) => name.clone(),
+                None => break,
+            };
+            let parent = match class_loader(&parent_name) {
+                Some(p) => p,
+                None => break,
+            };
             if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some() {
                 return Some(parent);
             }
@@ -827,6 +833,13 @@ impl Backend {
                 return Some(found);
             }
             current = parent;
+        }
+
+        // Check @mixin classes — these have the lowest precedence.
+        if let Some(found) =
+            Self::find_declaring_in_mixins(&class.mixins, member_name, class_loader, 0)
+        {
+            return Some(found);
         }
 
         None
@@ -864,6 +877,54 @@ impl Backend {
                 class_loader,
                 depth + 1,
             ) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
+    /// Search through `@mixin` class names for one that declares `member_name`.
+    ///
+    /// Mixin classes are resolved with their full inheritance chain (parent
+    /// classes, traits) so that inherited members are found.  Only public
+    /// members are considered since mixins proxy via magic methods.
+    /// Mixin classes can themselves declare `@mixin`, so this recurses up
+    /// to a depth limit.
+    fn find_declaring_in_mixins(
+        mixin_names: &[String],
+        member_name: &str,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        depth: usize,
+    ) -> Option<ClassInfo> {
+        const MAX_MIXIN_DEPTH: usize = 10;
+        if depth > MAX_MIXIN_DEPTH {
+            return None;
+        }
+
+        for mixin_name in mixin_names {
+            let mixin_class = if let Some(c) = class_loader(mixin_name) {
+                c
+            } else {
+                continue;
+            };
+
+            // Try to find the declaring class within the mixin's own
+            // hierarchy (itself, its traits, its parents).
+            if let Some(found) = Self::find_declaring_class(&mixin_class, member_name, class_loader)
+            {
+                return Some(found);
+            }
+
+            // Recurse into mixins declared by this mixin class.
+            if !mixin_class.mixins.is_empty()
+                && let Some(found) = Self::find_declaring_in_mixins(
+                    &mixin_class.mixins,
+                    member_name,
+                    class_loader,
+                    depth + 1,
+                )
+            {
                 return Some(found);
             }
         }

@@ -41,6 +41,21 @@ use crate::types::*;
 /// the resolution chain.  Reduces clippy `type_complexity` warnings.
 pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
 
+/// Bundles the common parameters threaded through variable-type resolution.
+///
+/// Introducing this struct avoids passing 7–10 individual arguments to
+/// every helper in the resolution chain, which keeps clippy happy and
+/// makes call-sites much easier to read.
+struct VarResolutionCtx<'a> {
+    var_name: &'a str,
+    current_class: &'a ClassInfo,
+    all_classes: &'a [ClassInfo],
+    content: &'a str,
+    cursor_offset: u32,
+    class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    function_loader: FunctionLoaderFn<'a>,
+}
+
 impl Backend {
     /// Determine which class (if any) the completion subject refers to.
     ///
@@ -205,19 +220,19 @@ impl Backend {
 
             // Resolve the left-hand side to a class (recursively handles
             // $this, $var, property chains, nested calls, etc.)
+            //
+            // IMPORTANT: the `ends_with(')')` check must come before the
+            // `$this->` property-chain check, otherwise an LHS like
+            // `$this->getFactory()` would be misinterpreted as a property
+            // access on `getFactory()` instead of a method call.
             let lhs_classes: Vec<ClassInfo> = if lhs == "$this" || lhs == "self" || lhs == "static"
             {
                 current_class.cloned().into_iter().collect()
-            } else if let Some(prop) = lhs
-                .strip_prefix("$this->")
-                .or_else(|| lhs.strip_prefix("$this?->"))
-            {
-                current_class
-                    .map(|cc| Self::resolve_property_types(prop, cc, all_classes, class_loader))
-                    .unwrap_or_default()
             } else if lhs.ends_with(')') {
                 // LHS is itself a call expression (e.g. `app()` in
-                // `app()->make(…)`).  Recursively resolve it.
+                // `app()->make(…)`, or `$this->getFactory()` in
+                // `$this->getFactory()->create(…)`).
+                // Recursively resolve it.
                 if let Some((inner_body, inner_args)) = split_call_subject(lhs) {
                     Self::resolve_call_return_types(
                         inner_body,
@@ -230,6 +245,13 @@ impl Backend {
                 } else {
                     vec![]
                 }
+            } else if let Some(prop) = lhs
+                .strip_prefix("$this->")
+                .or_else(|| lhs.strip_prefix("$this?->"))
+            {
+                current_class
+                    .map(|cc| Self::resolve_property_types(prop, cc, all_classes, class_loader))
+                    .unwrap_or_default()
             } else {
                 // Could be a variable — for now, skip complex chains
                 vec![]
@@ -490,45 +512,34 @@ impl Backend {
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
 
-        // Walk top-level (and namespace-nested) statements to find the
-        // class + method containing the cursor.
-        Self::resolve_variable_in_statements(
-            program.statements.iter(),
+        let ctx = VarResolutionCtx {
             var_name,
             current_class,
             all_classes,
+            content,
             cursor_offset,
             class_loader,
             function_loader,
-        )
+        };
+
+        // Walk top-level (and namespace-nested) statements to find the
+        // class + method containing the cursor.
+        Self::resolve_variable_in_statements(program.statements.iter(), &ctx)
     }
 
     fn resolve_variable_in_statements<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
-        var_name: &str,
-        current_class: &ClassInfo,
-        all_classes: &[ClassInfo],
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &VarResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
         for stmt in statements {
             match stmt {
                 Statement::Class(class) => {
                     let start = class.left_brace.start.offset;
                     let end = class.right_brace.end.offset;
-                    if cursor_offset < start || cursor_offset > end {
+                    if ctx.cursor_offset < start || ctx.cursor_offset > end {
                         continue;
                     }
-                    let results = Self::resolve_variable_in_members(
-                        class.members.iter(),
-                        var_name,
-                        current_class,
-                        all_classes,
-                        cursor_offset,
-                        class_loader,
-                        function_loader,
-                    );
+                    let results = Self::resolve_variable_in_members(class.members.iter(), ctx);
                     if !results.is_empty() {
                         return results;
                     }
@@ -536,32 +547,16 @@ impl Backend {
                 Statement::Interface(iface) => {
                     let start = iface.left_brace.start.offset;
                     let end = iface.right_brace.end.offset;
-                    if cursor_offset < start || cursor_offset > end {
+                    if ctx.cursor_offset < start || ctx.cursor_offset > end {
                         continue;
                     }
-                    let results = Self::resolve_variable_in_members(
-                        iface.members.iter(),
-                        var_name,
-                        current_class,
-                        all_classes,
-                        cursor_offset,
-                        class_loader,
-                        function_loader,
-                    );
+                    let results = Self::resolve_variable_in_members(iface.members.iter(), ctx);
                     if !results.is_empty() {
                         return results;
                     }
                 }
                 Statement::Namespace(ns) => {
-                    let results = Self::resolve_variable_in_statements(
-                        ns.statements().iter(),
-                        var_name,
-                        current_class,
-                        all_classes,
-                        cursor_offset,
-                        class_loader,
-                        function_loader,
-                    );
+                    let results = Self::resolve_variable_in_statements(ns.statements().iter(), ctx);
                     if !results.is_empty() {
                         return results;
                     }
@@ -581,27 +576,22 @@ impl Backend {
     /// types in conditional branches.
     fn resolve_variable_in_members<'b>(
         members: impl Iterator<Item = &'b ClassLikeMember<'b>>,
-        var_name: &str,
-        current_class: &ClassInfo,
-        all_classes: &[ClassInfo],
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &VarResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
         for member in members {
             if let ClassLikeMember::Method(method) = member {
                 // Check parameter type hints first
                 for param in method.parameter_list.parameters.iter() {
                     let pname = param.variable.name.to_string();
-                    if pname == var_name
+                    if pname == ctx.var_name
                         && let Some(hint) = &param.hint
                     {
                         let type_str = Self::extract_hint_string(hint);
                         let resolved = Self::type_hint_to_classes(
                             &type_str,
-                            &current_class.name,
-                            all_classes,
-                            class_loader,
+                            &ctx.current_class.name,
+                            ctx.all_classes,
+                            ctx.class_loader,
                         );
                         if !resolved.is_empty() {
                             return resolved;
@@ -611,16 +601,8 @@ impl Backend {
                 if let MethodBody::Concrete(block) = &method.body {
                     let blk_start = block.left_brace.start.offset;
                     let blk_end = block.right_brace.end.offset;
-                    if cursor_offset >= blk_start && cursor_offset <= blk_end {
-                        let results = Self::find_assignment_types_in_block(
-                            block,
-                            var_name,
-                            &current_class.name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
-                        );
+                    if ctx.cursor_offset >= blk_start && ctx.cursor_offset <= blk_end {
+                        let results = Self::find_assignment_types_in_block(block, ctx);
                         if !results.is_empty() {
                             return results;
                         }
@@ -639,25 +621,10 @@ impl Backend {
     /// if/else/try/catch/loops) add to the list.
     fn find_assignment_types_in_block<'b>(
         block: &'b Block<'b>,
-        var_name: &str,
-        current_class_name: &str,
-        all_classes: &[ClassInfo],
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &VarResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
         let mut results: Vec<ClassInfo> = Vec::new();
-        Self::walk_statements_for_assignments(
-            block.statements.iter(),
-            var_name,
-            current_class_name,
-            all_classes,
-            cursor_offset,
-            class_loader,
-            function_loader,
-            &mut results,
-            false,
-        );
+        Self::walk_statements_for_assignments(block.statements.iter(), ctx, &mut results, false);
         results
     }
 
@@ -669,21 +636,15 @@ impl Backend {
     /// is being unconditionally reassigned).  When `conditional` is `true`,
     /// a new assignment **adds** to the list (the variable *might* be this
     /// type).
-    #[allow(clippy::too_many_arguments)]
     fn walk_statements_for_assignments<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
-        var_name: &str,
-        current_class_name: &str,
-        all_classes: &[ClassInfo],
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &VarResolutionCtx<'_>,
         results: &mut Vec<ClassInfo>,
         conditional: bool,
     ) {
         for stmt in statements {
             // Only consider statements whose start is before the cursor
-            if stmt.span().start.offset >= cursor_offset {
+            if stmt.span().start.offset >= ctx.cursor_offset {
                 continue;
             }
 
@@ -691,11 +652,7 @@ impl Backend {
                 Statement::Expression(expr_stmt) => {
                     Self::check_expression_for_assignment(
                         expr_stmt.expression,
-                        var_name,
-                        current_class_name,
-                        all_classes,
-                        class_loader,
-                        function_loader,
+                        ctx,
                         results,
                         conditional,
                     );
@@ -705,12 +662,7 @@ impl Backend {
                 Statement::Block(block) => {
                     Self::walk_statements_for_assignments(
                         block.statements.iter(),
-                        var_name,
-                        current_class_name,
-                        all_classes,
-                        cursor_offset,
-                        class_loader,
-                        function_loader,
+                        ctx,
                         results,
                         conditional,
                     );
@@ -718,26 +670,11 @@ impl Backend {
                 // ── Conditional blocks: recurse with conditional = true ──
                 Statement::If(if_stmt) => match &if_stmt.body {
                     IfBody::Statement(body) => {
-                        Self::check_statement_for_assignments(
-                            body.statement,
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
-                            results,
-                            true,
-                        );
+                        Self::check_statement_for_assignments(body.statement, ctx, results, true);
                         for else_if in body.else_if_clauses.iter() {
                             Self::check_statement_for_assignments(
                                 else_if.statement,
-                                var_name,
-                                current_class_name,
-                                all_classes,
-                                cursor_offset,
-                                class_loader,
-                                function_loader,
+                                ctx,
                                 results,
                                 true,
                             );
@@ -745,12 +682,7 @@ impl Backend {
                         if let Some(else_clause) = &body.else_clause {
                             Self::check_statement_for_assignments(
                                 else_clause.statement,
-                                var_name,
-                                current_class_name,
-                                all_classes,
-                                cursor_offset,
-                                class_loader,
-                                function_loader,
+                                ctx,
                                 results,
                                 true,
                             );
@@ -759,24 +691,14 @@ impl Backend {
                     IfBody::ColonDelimited(body) => {
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
+                            ctx,
                             results,
                             true,
                         );
                         for else_if in body.else_if_clauses.iter() {
                             Self::walk_statements_for_assignments(
                                 else_if.statements.iter(),
-                                var_name,
-                                current_class_name,
-                                all_classes,
-                                cursor_offset,
-                                class_loader,
-                                function_loader,
+                                ctx,
                                 results,
                                 true,
                             );
@@ -784,12 +706,7 @@ impl Backend {
                         if let Some(else_clause) = &body.else_clause {
                             Self::walk_statements_for_assignments(
                                 else_clause.statements.iter(),
-                                var_name,
-                                current_class_name,
-                                all_classes,
-                                cursor_offset,
-                                class_loader,
-                                function_loader,
+                                ctx,
                                 results,
                                 true,
                             );
@@ -798,27 +715,12 @@ impl Backend {
                 },
                 Statement::Foreach(foreach) => match &foreach.body {
                     ForeachBody::Statement(inner) => {
-                        Self::check_statement_for_assignments(
-                            inner,
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
-                            results,
-                            true,
-                        );
+                        Self::check_statement_for_assignments(inner, ctx, results, true);
                     }
                     ForeachBody::ColonDelimited(body) => {
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
+                            ctx,
                             results,
                             true,
                         );
@@ -826,27 +728,12 @@ impl Backend {
                 },
                 Statement::While(while_stmt) => match &while_stmt.body {
                     WhileBody::Statement(inner) => {
-                        Self::check_statement_for_assignments(
-                            inner,
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
-                            results,
-                            true,
-                        );
+                        Self::check_statement_for_assignments(inner, ctx, results, true);
                     }
                     WhileBody::ColonDelimited(body) => {
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
+                            ctx,
                             results,
                             true,
                         );
@@ -854,66 +741,31 @@ impl Backend {
                 },
                 Statement::For(for_stmt) => match &for_stmt.body {
                     ForBody::Statement(inner) => {
-                        Self::check_statement_for_assignments(
-                            inner,
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
-                            results,
-                            true,
-                        );
+                        Self::check_statement_for_assignments(inner, ctx, results, true);
                     }
                     ForBody::ColonDelimited(body) => {
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
+                            ctx,
                             results,
                             true,
                         );
                     }
                 },
                 Statement::DoWhile(dw) => {
-                    Self::check_statement_for_assignments(
-                        dw.statement,
-                        var_name,
-                        current_class_name,
-                        all_classes,
-                        cursor_offset,
-                        class_loader,
-                        function_loader,
-                        results,
-                        true,
-                    );
+                    Self::check_statement_for_assignments(dw.statement, ctx, results, true);
                 }
                 Statement::Try(try_stmt) => {
                     Self::walk_statements_for_assignments(
                         try_stmt.block.statements.iter(),
-                        var_name,
-                        current_class_name,
-                        all_classes,
-                        cursor_offset,
-                        class_loader,
-                        function_loader,
+                        ctx,
                         results,
                         true,
                     );
                     for catch in try_stmt.catch_clauses.iter() {
                         Self::walk_statements_for_assignments(
                             catch.block.statements.iter(),
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
+                            ctx,
                             results,
                             true,
                         );
@@ -921,12 +773,7 @@ impl Backend {
                     if let Some(finally) = &try_stmt.finally_clause {
                         Self::walk_statements_for_assignments(
                             finally.block.statements.iter(),
-                            var_name,
-                            current_class_name,
-                            all_classes,
-                            cursor_offset,
-                            class_loader,
-                            function_loader,
+                            ctx,
                             results,
                             true,
                         );
@@ -938,29 +785,13 @@ impl Backend {
     }
 
     /// Helper: treat a single statement as an iterator of one and recurse.
-    #[allow(clippy::too_many_arguments)]
     fn check_statement_for_assignments<'b>(
         stmt: &'b Statement<'b>,
-        var_name: &str,
-        current_class_name: &str,
-        all_classes: &[ClassInfo],
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &VarResolutionCtx<'_>,
         results: &mut Vec<ClassInfo>,
         conditional: bool,
     ) {
-        Self::walk_statements_for_assignments(
-            std::iter::once(stmt),
-            var_name,
-            current_class_name,
-            all_classes,
-            cursor_offset,
-            class_loader,
-            function_loader,
-            results,
-            conditional,
-        );
+        Self::walk_statements_for_assignments(std::iter::once(stmt), ctx, results, conditional);
     }
 
     /// If `expr` is an assignment whose LHS matches `$var_name` and whose
@@ -972,17 +803,18 @@ impl Backend {
     /// the new type is appended (the variable *might* be this type).
     ///
     /// Duplicate class names are suppressed automatically.
-    #[allow(clippy::too_many_arguments)]
     fn check_expression_for_assignment<'b>(
         expr: &'b Expression<'b>,
-        var_name: &str,
-        current_class_name: &str,
-        all_classes: &[ClassInfo],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &VarResolutionCtx<'_>,
         results: &mut Vec<ClassInfo>,
         conditional: bool,
     ) {
+        let var_name = ctx.var_name;
+        let current_class_name: &str = &ctx.current_class.name;
+        let all_classes = ctx.all_classes;
+        let content = ctx.content;
+        let class_loader = ctx.class_loader;
+        let function_loader = ctx.function_loader;
         /// Push one or more resolved classes into `results`.
         ///
         /// * `conditional == false` → unconditional assignment: **clear**
@@ -1090,7 +922,12 @@ impl Backend {
                     Call::Method(method_call) => {
                         // `$var = $obj->method()` — resolve the object, find the
                         // method, and use its return type.
-                        // For now, handle the common case of `$this->method()`.
+                        //
+                        // We handle the common `$this->method()` case via the
+                        // AST, and for everything else (chained calls like
+                        // `app()->make(...)`, `$factory->create()`, etc.) we
+                        // fall back to text-based resolution which already
+                        // handles arbitrary nesting.
                         if let Expression::Variable(Variable::Direct(dv)) = method_call.object
                             && dv.name == "$this"
                             && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
@@ -1106,6 +943,33 @@ impl Backend {
                                     class_loader,
                                 );
                                 push_results(results, resolved, conditional);
+                            }
+                        } else {
+                            // General case: extract the RHS call expression text
+                            // from the source and delegate to the text-based
+                            // resolver that already handles chains like
+                            // `app()->make(Foo::class)`, `$obj->method()`, etc.
+                            let rhs_span = assignment.rhs.span();
+                            let start = rhs_span.start.offset as usize;
+                            let end = rhs_span.end.offset as usize;
+                            if end <= content.len() {
+                                let rhs_text = content[start..end].trim();
+                                if rhs_text.ends_with(')')
+                                    && let Some((call_body, args_text)) =
+                                        split_call_subject(rhs_text)
+                                {
+                                    let current_class =
+                                        all_classes.iter().find(|c| c.name == current_class_name);
+                                    let resolved = Self::resolve_call_return_types(
+                                        call_body,
+                                        args_text,
+                                        current_class,
+                                        all_classes,
+                                        class_loader,
+                                        function_loader,
+                                    );
+                                    push_results(results, resolved, conditional);
+                                }
                             }
                         }
                     }
@@ -1224,6 +1088,14 @@ impl Backend {
             current = parent;
         }
 
+        // 3. Merge members from @mixin classes.
+        //    Mixin members have the lowest precedence — they only fill in
+        //    members that are not already provided by the class itself,
+        //    its traits, or its parent chain.  This models the PHP pattern
+        //    where `@mixin` documents that magic methods (__call, __get,
+        //    etc.) proxy to another class.
+        Self::merge_mixins_into(&mut merged, &class.mixins, class_loader);
+
         merged
     }
 
@@ -1239,6 +1111,93 @@ impl Backend {
     /// Private trait members *are* merged (unlike parent class private
     /// members), because PHP copies trait members into the using class
     /// regardless of visibility.
+    /// Merge public members from `@mixin` classes into `merged`.
+    ///
+    /// Mixins are resolved with full inheritance (the mixin class itself
+    /// may extend another class, use traits, etc.), and only **public**
+    /// members that don't already exist in `merged` are added.  This
+    /// gives mixins the lowest precedence in the resolution chain:
+    ///
+    ///   class own > traits > parent chain > mixins
+    ///
+    /// Mixin classes can themselves declare `@mixin`, so this recurses
+    /// up to a depth limit to handle mixin chains.
+    fn merge_mixins_into(
+        merged: &mut ClassInfo,
+        mixin_names: &[String],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) {
+        const MAX_MIXIN_DEPTH: u32 = 10;
+        Self::merge_mixins_into_recursive(merged, mixin_names, class_loader, 0, MAX_MIXIN_DEPTH);
+    }
+
+    fn merge_mixins_into_recursive(
+        merged: &mut ClassInfo,
+        mixin_names: &[String],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        depth: u32,
+        max_depth: u32,
+    ) {
+        if depth > max_depth {
+            return;
+        }
+
+        for mixin_name in mixin_names {
+            let mixin_class = if let Some(c) = class_loader(mixin_name) {
+                c
+            } else {
+                continue;
+            };
+
+            // Resolve the mixin class with its own inheritance so we see
+            // all of its inherited/trait members too.
+            let resolved_mixin = Self::resolve_class_with_inheritance(&mixin_class, class_loader);
+
+            // Only merge public members — mixins proxy via magic methods
+            // which only expose public API.
+            for method in &resolved_mixin.methods {
+                if method.visibility != Visibility::Public {
+                    continue;
+                }
+                if merged.methods.iter().any(|m| m.name == method.name) {
+                    continue;
+                }
+                merged.methods.push(method.clone());
+            }
+
+            for property in &resolved_mixin.properties {
+                if property.visibility != Visibility::Public {
+                    continue;
+                }
+                if merged.properties.iter().any(|p| p.name == property.name) {
+                    continue;
+                }
+                merged.properties.push(property.clone());
+            }
+
+            for constant in &resolved_mixin.constants {
+                if constant.visibility != Visibility::Public {
+                    continue;
+                }
+                if merged.constants.iter().any(|c| c.name == constant.name) {
+                    continue;
+                }
+                merged.constants.push(constant.clone());
+            }
+
+            // Recurse into mixins declared by the mixin class itself.
+            if !mixin_class.mixins.is_empty() {
+                Self::merge_mixins_into_recursive(
+                    merged,
+                    &mixin_class.mixins,
+                    class_loader,
+                    depth + 1,
+                    max_depth,
+                );
+            }
+        }
+    }
+
     fn merge_traits_into(
         merged: &mut ClassInfo,
         trait_names: &[String],

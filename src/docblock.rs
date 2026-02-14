@@ -42,6 +42,56 @@ pub fn extract_return_type(docblock: &str) -> Option<String> {
     extract_tag_type(docblock, "@return")
 }
 
+/// Extract all `@mixin` tags from a class-level docblock.
+///
+/// PHPDoc `@mixin` tags declare that the annotated class exposes public
+/// members from another class via magic methods (`__call`, `__get`, etc.).
+/// The format is:
+///
+///   - `@mixin ClassName`
+///   - `@mixin \Fully\Qualified\ClassName`
+///
+/// Returns a list of cleaned class name strings (leading `\` stripped).
+pub fn extract_mixin_tags(docblock: &str) -> Vec<String> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        let rest = if let Some(r) = trimmed.strip_prefix("@mixin") {
+            r
+        } else {
+            continue;
+        };
+
+        // The tag must be followed by whitespace.
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+
+        // The class name is the first whitespace-delimited token.
+        let class_name = match rest.split_whitespace().next() {
+            Some(name) => name,
+            None => continue,
+        };
+
+        let cleaned = clean_type(class_name);
+        if !cleaned.is_empty() {
+            results.push(cleaned);
+        }
+    }
+
+    results
+}
+
 /// Extract the type from a `@var` PHPDoc tag.
 ///
 /// Used for property type annotations like:
@@ -1401,5 +1451,78 @@ mod tests {
     fn conditional_no_return_tag() {
         let doc = "/** Just a comment */";
         assert_eq!(extract_conditional_return_type(doc), None);
+    }
+
+    // ─── @mixin tag extraction ──────────────────────────────────────────────
+
+    #[test]
+    fn mixin_tag_simple() {
+        let doc = concat!("/**\n", " * @mixin ShoppingCart\n", " */",);
+        let mixins = extract_mixin_tags(doc);
+        assert_eq!(mixins, vec!["ShoppingCart"]);
+    }
+
+    #[test]
+    fn mixin_tag_fqn() {
+        let doc = concat!("/**\n", " * @mixin \\App\\Models\\ShoppingCart\n", " */",);
+        let mixins = extract_mixin_tags(doc);
+        assert_eq!(mixins, vec!["App\\Models\\ShoppingCart"]);
+    }
+
+    #[test]
+    fn mixin_tag_multiple() {
+        let doc = concat!(
+            "/**\n",
+            " * @mixin ShoppingCart\n",
+            " * @mixin Wishlist\n",
+            " */",
+        );
+        let mixins = extract_mixin_tags(doc);
+        assert_eq!(mixins, vec!["ShoppingCart", "Wishlist"]);
+    }
+
+    #[test]
+    fn mixin_tag_none_when_missing() {
+        let doc = "/** Just a comment */";
+        let mixins = extract_mixin_tags(doc);
+        assert!(mixins.is_empty());
+    }
+
+    #[test]
+    fn mixin_tag_with_description() {
+        let doc = concat!(
+            "/**\n",
+            " * @mixin ShoppingCart Some extra description\n",
+            " */",
+        );
+        let mixins = extract_mixin_tags(doc);
+        assert_eq!(mixins, vec!["ShoppingCart"]);
+    }
+
+    #[test]
+    fn mixin_tag_generic_stripped() {
+        let doc = concat!("/**\n", " * @mixin Collection<int, Model>\n", " */",);
+        let mixins = extract_mixin_tags(doc);
+        assert_eq!(mixins, vec!["Collection"]);
+    }
+
+    #[test]
+    fn mixin_tag_mixed_with_other_tags() {
+        let doc = concat!(
+            "/**\n",
+            " * @property string $name\n",
+            " * @mixin ShoppingCart\n",
+            " * @method int getId()\n",
+            " */",
+        );
+        let mixins = extract_mixin_tags(doc);
+        assert_eq!(mixins, vec!["ShoppingCart"]);
+    }
+
+    #[test]
+    fn mixin_tag_empty_after_tag() {
+        let doc = concat!("/**\n", " * @mixin\n", " */",);
+        let mixins = extract_mixin_tags(doc);
+        assert!(mixins.is_empty());
     }
 }

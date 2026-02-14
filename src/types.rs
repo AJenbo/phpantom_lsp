@@ -205,4 +205,9 @@ pub struct ClassInfo {
     /// Trait names used by this class via `use TraitName;` statements.
     /// These are resolved to fully-qualified names during post-processing.
     pub used_traits: Vec<String>,
+    /// Class names from `@mixin` docblock tags.
+    /// These declare that this class exposes public members from the listed
+    /// classes via magic methods (`__call`, `__get`, `__set`, etc.).
+    /// Resolved to fully-qualified names during post-processing.
+    pub mixins: Vec<String>,
 }

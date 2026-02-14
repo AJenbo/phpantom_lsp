@@ -1603,3 +1603,159 @@ async fn test_goto_definition_inline_conditional_return_non_null() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Variable assigned from chained method call ─────────────────────────────
+
+/// Test: `$conn = $this->getDatabase()->getConnection(); $conn->`
+/// should resolve the variable through the chained method calls and
+/// offer methods from Connection.
+#[tokio::test]
+async fn test_completion_variable_assigned_from_chained_method_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Connection {\n",
+        "    public function query(string $sql): void {}\n",
+        "    public function beginTransaction(): void {}\n",
+        "}\n",
+        "\n",
+        "class Database {\n",
+        "    public function getConnection(): Connection {\n",
+        "        return new Connection();\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function getDatabase(): Database {\n",
+        "        return new Database();\n",
+        "    }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $conn = $this->getDatabase()->getConnection();\n",
+        "        $conn->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Trigger completion after `$conn->` on line 19
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 19,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(result.is_some(), "Should return completions");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<String> = items
+                .iter()
+                .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
+                .collect();
+            assert!(
+                names.iter().any(|n| n == "query"),
+                "Should include 'query' from Connection class via chained method call. Got: {:?}",
+                names
+            );
+            assert!(
+                names.iter().any(|n| n == "beginTransaction"),
+                "Should include 'beginTransaction' from Connection class via chained method call. Got: {:?}",
+                names
+            );
+        }
+        other => panic!("Expected Array, got: {:?}", other),
+    }
+}
+
+/// Test: `$conn = $this->getDatabase()->getConnection(); $conn->query()`
+/// should resolve go-to-definition through the chained method call variable.
+#[tokio::test]
+async fn test_goto_definition_variable_from_chained_method_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Connection {\n",
+        "    public function query(string $sql): void {}\n",
+        "    public function beginTransaction(): void {}\n",
+        "}\n",
+        "\n",
+        "class Database {\n",
+        "    public function getConnection(): Connection {\n",
+        "        return new Connection();\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function getDatabase(): Database {\n",
+        "        return new Database();\n",
+        "    }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $conn = $this->getDatabase()->getConnection();\n",
+        "        $conn->query('SELECT 1');\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "query" in `$conn->query('SELECT 1')` on line 19
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 19,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve definition via chained method call variable"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "query() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
