@@ -1,8 +1,8 @@
 # PHPantomLSP
 
-A PHP Language Server Protocol (LSP) implementation in Rust.
+A fast, lightweight PHP language server that stays out of your way. Using only a few MB of RAM regardless of project size, fully usable in milliseconds, without requiring high-end hardware.
 
-> **Note:** This project is in early development. Features are minimal.
+> **Note:** This project is in active development.
 
 ## Features
 
@@ -10,15 +10,26 @@ A PHP Language Server Protocol (LSP) implementation in Rust.
 
 - Full text document sync (open, change, close)
 
+### Type Resolution
+
+Both completion and go-to-definition draw from a shared type resolution engine:
+
+- `$this`, `self`, `static`, and `parent` keyword resolution
+- Variable type inference from assignments (`$var = new Foo()`) and parameter type hints
+- Property chain and method call chaining (e.g. `$this->getService()->doSomething()`)
+- Function and static method call return type resolution (e.g. `app()->`, `Class::make()->`)
+- Inheritance-aware: walks the class hierarchy including traits
+- Enum case resolution
+- Union types: `A|B` in return types, property types, and parameter hints are split into individual candidates
+- Ambiguous variables: when a variable is assigned different types in conditional branches, all possible types are tried
+- PHPDoc support: `@return`, `@property`, `@method`, `@mixin`
+- PHPStan conditional return types: annotations like `@return ($abstract is class-string<TClass> ? TClass : mixed)` are resolved based on call-site arguments
+
 ### Completion
 
 - Instance member completion via `->` (methods and properties)
-- Static member completion via `::` (static methods, static properties, and constants)
+- Static member completion via `::` (static methods, static properties, constants, and enum cases)
 - `parent::` completion (static and non-static members, excluding private)
-- `$this`, `self`, and `static` keyword resolution to the current class
-- Property chain resolution (e.g. `$this->service->`)
-- Variable type resolution from assignments (`$var = new Foo()`) and parameter type hints
-- Inheritance-aware completion — walks the class hierarchy to include inherited members
 - Magic method filtering (`__construct`, `__destruct`, etc. are excluded from results)
 - Full method signature display in completion labels (parameters, types, return type)
 
@@ -26,16 +37,29 @@ A PHP Language Server Protocol (LSP) implementation in Rust.
 
 ### Go to Definition
 
-- Jump to class, interface, trait, and enum definitions
+- Jump to class, interface, trait, enum, and standalone function definitions
+- Jump to method, property, and constant definitions on a class
 - Same-file and cross-file definition lookup
 - Fully-qualified, partially-qualified, and unqualified name resolution via `use` statements and the current namespace
 
 ### PHP Parsing
 
-- Extracts classes, interfaces, methods, properties, and constants
-- Parses visibility modifiers, static modifiers, type hints, and parameter info
+- Extracts classes, interfaces, traits, and enums
+- Parses methods, properties, and constants with visibility, static modifiers, and type hints
+- Extracts standalone function definitions (global and namespaced)
 - Supports constructor-promoted properties
 - Parses `use` statements and namespace declarations
+
+#### PHPDoc Parsing
+
+Built on [Mago](https://github.com/carthage-software/mago)'s PHP parser.
+
+- `@return` type extraction with compatibility checks against native type hints
+- `@var` type annotations
+- `@property` virtual property declarations
+- `@method` virtual method declarations
+- `@mixin` class delegation tags
+- PHPStan style conditional return type expressions (recursive/nested conditionals)
 
 ### Composer / PSR-4 Integration
 
@@ -93,4 +117,4 @@ See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
