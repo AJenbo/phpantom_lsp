@@ -4195,3 +4195,184 @@ async fn test_goto_definition_union_return_type_cross_file() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Property vs Method Disambiguation ──────────────────────────────────────
+
+/// When a class has both a property `$id` and a method `id()`, goto-definition
+/// on `$user->id` (no parentheses) should navigate to the *property*, not the
+/// method.
+#[tokio::test]
+async fn test_goto_definition_property_preferred_over_method_without_parens() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    //                                           line
+    let text = concat!(
+        "<?php\n",                              // 0
+        "class User {\n",                       // 1
+        "    public int $id;\n",                // 2  ← property declaration
+        "    public string $name;\n",           // 3
+        "\n",                                   // 4
+        "    public function id(): int {\n",    // 5  ← method declaration
+        "        return $this->id;\n",          // 6
+        "    }\n",                              // 7
+        "\n",                                   // 8
+        "    public function test(): void {\n", // 9
+        "        $user = new User();\n",        // 10
+        "        $val = $user->id;\n",          // 11 ← property access (no parens)
+        "        $val2 = $user->id();\n",       // 12 ← method call (with parens)
+        "    }\n",                              // 13
+        "}\n",                                  // 14
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // ── Case 1: `$user->id` (no parens) → should go to the $id property on line 2
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 24, // on "id" in `$user->id`
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $user->id to the property declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "$user->id (no parens) should go to the $id property on line 2, not the id() method on line 5"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // ── Case 2: `$user->id()` (with parens) → should go to the id() method on line 5
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: 25, // on "id" in `$user->id()`
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $user->id() to the method declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 5,
+                "$user->id() (with parens) should go to the id() method on line 5, not the $id property on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Same disambiguation but via `$this->` inside the class itself.
+#[tokio::test]
+async fn test_goto_definition_this_property_vs_method_disambiguation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                 // 0
+        "class Order {\n",                         // 1
+        "    public float $total;\n",              // 2  ← property
+        "\n",                                      // 3
+        "    public function total(): float {\n",  // 4  ← method
+        "        return $this->total;\n",          // 5  ← property access
+        "    }\n",                                 // 6
+        "\n",                                      // 7
+        "    public function display(): void {\n", // 8
+        "        echo $this->total;\n",            // 9  ← property access
+        "        echo $this->total();\n",          // 10 ← method call
+        "    }\n",                                 // 11
+        "}\n",                                     // 12
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `$this->total` on line 9 (no parens) → property on line 2
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 23, // on "total" in `$this->total`
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "$this->total (no parens) should go to the $total property on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // `$this->total()` on line 10 (with parens) → method on line 4
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 10,
+                character: 23, // on "total" in `$this->total()`
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 4,
+                "$this->total() (with parens) should go to the total() method on line 4"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

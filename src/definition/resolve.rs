@@ -32,6 +32,19 @@ enum MemberKind {
     Constant,
 }
 
+/// Hint about whether the member access looks like a method call or a property
+/// access.  Used to disambiguate when a class has both a method and a property
+/// with the same name (e.g. `id()` method vs `$id` property).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberAccessHint {
+    /// Followed by `(` — looks like a method call.
+    MethodCall,
+    /// No `(` after the name — looks like a property / constant access.
+    PropertyAccess,
+    /// Cannot determine (fallback to original order).
+    Unknown,
+}
+
 impl Backend {
     /// Handle a "go to definition" request.
     ///
@@ -337,6 +350,9 @@ impl Backend {
             return None;
         }
 
+        // Determine whether this looks like a method call or property access.
+        let access_hint = Self::detect_member_access_hint(content, position, member_name);
+
         // 4. Try each candidate class and pick the first one where the
         //    member actually exists (directly or via inheritance).
         for target_class in &candidates {
@@ -345,10 +361,11 @@ impl Backend {
                     .unwrap_or_else(|| target_class.clone());
 
             // Check that the member is actually present on the declaring class.
-            let member_kind = match Self::classify_member(&declaring_class, member_name) {
-                Some(k) => k,
-                None => continue, // member not on this candidate, try next
-            };
+            let member_kind =
+                match Self::classify_member(&declaring_class, member_name, access_hint) {
+                    Some(k) => k,
+                    None => continue, // member not on this candidate, try next
+                };
 
             // Locate the file that contains the declaring class.
             if let Some((class_uri, class_content)) =
@@ -374,7 +391,7 @@ impl Backend {
         let declaring_class = Self::find_declaring_class(target_class, member_name, &class_loader)
             .unwrap_or_else(|| target_class.clone());
 
-        let member_kind = Self::classify_member(&declaring_class, member_name)?;
+        let member_kind = Self::classify_member(&declaring_class, member_name, access_hint)?;
 
         let (class_uri, class_content) =
             self.find_class_file_content(&declaring_class.name, uri, content)?;
@@ -653,17 +670,103 @@ impl Backend {
     /// checking the class's parsed information.
     ///
     /// Returns `None` if the member is not found in the class.
-    fn classify_member(class: &ClassInfo, member_name: &str) -> Option<MemberKind> {
-        if class.methods.iter().any(|m| m.name == member_name) {
-            return Some(MemberKind::Method);
-        }
-        if class.properties.iter().any(|p| p.name == member_name) {
-            return Some(MemberKind::Property);
-        }
-        if class.constants.iter().any(|c| c.name == member_name) {
-            return Some(MemberKind::Constant);
+    fn classify_member(
+        class: &ClassInfo,
+        member_name: &str,
+        hint: MemberAccessHint,
+    ) -> Option<MemberKind> {
+        let has_method = class.methods.iter().any(|m| m.name == member_name);
+        let has_property = class.properties.iter().any(|p| p.name == member_name);
+        let has_constant = class.constants.iter().any(|c| c.name == member_name);
+
+        match hint {
+            MemberAccessHint::PropertyAccess => {
+                // Prefer property/constant over method when there's no `()`.
+                if has_property {
+                    return Some(MemberKind::Property);
+                }
+                if has_constant {
+                    return Some(MemberKind::Constant);
+                }
+                if has_method {
+                    return Some(MemberKind::Method);
+                }
+            }
+            MemberAccessHint::MethodCall => {
+                // Prefer method when followed by `()`.
+                if has_method {
+                    return Some(MemberKind::Method);
+                }
+                if has_property {
+                    return Some(MemberKind::Property);
+                }
+                if has_constant {
+                    return Some(MemberKind::Constant);
+                }
+            }
+            MemberAccessHint::Unknown => {
+                // Default order: method, property, constant.
+                if has_method {
+                    return Some(MemberKind::Method);
+                }
+                if has_property {
+                    return Some(MemberKind::Property);
+                }
+                if has_constant {
+                    return Some(MemberKind::Constant);
+                }
+            }
         }
         None
+    }
+
+    /// Determine whether the member name at the given position is followed by
+    /// `(` (indicating a method call) or not (indicating property / constant
+    /// access).
+    fn detect_member_access_hint(
+        content: &str,
+        position: Position,
+        member_name: &str,
+    ) -> MemberAccessHint {
+        let lines: Vec<&str> = content.lines().collect();
+        let line = match lines.get(position.line as usize) {
+            Some(l) => *l,
+            None => return MemberAccessHint::Unknown,
+        };
+        let chars: Vec<char> = line.chars().collect();
+        let col = (position.character as usize).min(chars.len());
+
+        // Find the end of the member name by walking right from the cursor.
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+
+        let mut end = col;
+        // If cursor is on a word char, walk right to end of word.
+        if end < chars.len() && is_word_char(chars[end]) {
+            while end < chars.len() && is_word_char(chars[end]) {
+                end += 1;
+            }
+        } else if end > 0 && is_word_char(chars[end - 1]) {
+            // Cursor is just past the word; `end` is already correct.
+        } else {
+            // Try to find the member name by searching forward from col.
+            if let Some(idx) = line[col..].find(member_name) {
+                end = col + idx + member_name.len();
+            } else {
+                return MemberAccessHint::Unknown;
+            }
+        }
+
+        // Skip whitespace after the word.
+        let mut i = end;
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        if i < chars.len() && chars[i] == '(' {
+            MemberAccessHint::MethodCall
+        } else {
+            MemberAccessHint::PropertyAccess
+        }
     }
 
     /// Walk up the inheritance chain to find the class that actually declares
@@ -679,7 +782,7 @@ impl Backend {
         const MAX_DEPTH: usize = 20;
 
         // Check if this class directly declares the member.
-        if Self::classify_member(class, member_name).is_some() {
+        if Self::classify_member(class, member_name, MemberAccessHint::Unknown).is_some() {
             return Some(class.clone());
         }
 
@@ -695,7 +798,7 @@ impl Backend {
         for _ in 0..MAX_DEPTH {
             let parent_name = current.parent_class.as_ref()?;
             let parent = class_loader(parent_name)?;
-            if Self::classify_member(&parent, member_name).is_some() {
+            if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some() {
                 return Some(parent);
             }
             // Check traits used by the parent class.
@@ -731,7 +834,8 @@ impl Backend {
             } else {
                 continue;
             };
-            if Self::classify_member(&trait_info, member_name).is_some() {
+            if Self::classify_member(&trait_info, member_name, MemberAccessHint::Unknown).is_some()
+            {
                 return Some(trait_info);
             }
             // Recurse into traits used by this trait.

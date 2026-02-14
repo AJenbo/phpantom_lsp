@@ -1243,6 +1243,7 @@ impl Backend {
 ///     a null default).
 ///   - `is SomeType`: not statically resolvable from AST; falls through
 ///     to the else branch.
+///
 /// Split a call-expression subject into the call body and any textual
 /// arguments.  Handles both `"app()"` → `("app", "")` and
 /// `"app(A::class)"` → `("app", "A::class")`.
