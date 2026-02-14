@@ -1031,6 +1031,41 @@ impl Backend {
             }
         }
 
+        // Fallback: for methods, check if this is a magic method
+        // declared via a `@method` tag in the class docblock.
+        // Lines look like: ` * @method ReturnType methodName(params...)`
+        if kind == MemberKind::Method {
+            // The method name is followed by `(` in a @method tag.
+            let method_pattern = member_name;
+            for (line_idx, line) in content.lines().enumerate() {
+                if let Some(col) = line.find(method_pattern) {
+                    // Verify the character after the name is `(` (method call syntax).
+                    let after_pos = col + method_pattern.len();
+                    if after_pos >= line.len() {
+                        continue;
+                    }
+                    let after_char = line.as_bytes()[after_pos];
+                    if after_char != b'(' {
+                        continue;
+                    }
+
+                    // Verify the character before is a word boundary (whitespace)
+                    // to avoid matching partial names.
+                    if col > 0 && !is_word_boundary(line.as_bytes()[col - 1]) {
+                        continue;
+                    }
+
+                    let trimmed = line.trim().trim_start_matches('*').trim();
+                    if trimmed.starts_with("@method") {
+                        return Some(Position {
+                            line: line_idx as u32,
+                            character: col as u32,
+                        });
+                    }
+                }
+            }
+        }
+
         None
     }
 

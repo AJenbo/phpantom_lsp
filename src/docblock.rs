@@ -1,11 +1,11 @@
 //! PHPDoc block parsing.
 //!
 //! This module extracts type information from PHPDoc comments (`/** ... */`),
-//! specifically `@return` and `@var` tags.  It also provides a compatibility
-//! check so that a docblock type only overrides a native type hint when the
-//! native hint is broad enough to be refined (e.g. `object`, `mixed`, or
-//! another class name) and is *not* a concrete scalar that could never be
-//! an object.
+//! specifically `@return`, `@var`, `@property`, and `@method` tags.  It also
+//! provides a compatibility check so that a docblock type only overrides a
+//! native type hint when the native hint is broad enough to be refined
+//! (e.g. `object`, `mixed`, or another class name) and is *not* a concrete
+//! scalar that could never be an object.
 //!
 //! Additionally, it supports PHPStan conditional return type annotations
 //! such as:
@@ -16,7 +16,7 @@
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
-use crate::types::{ConditionalReturnType, ParamCondition};
+use crate::types::{ConditionalReturnType, MethodInfo, ParamCondition, ParameterInfo, Visibility};
 
 /// Scalar / built-in type names that can never be an object and therefore
 /// must not be overridden by a class-name docblock annotation.
@@ -135,6 +135,215 @@ pub fn extract_property_tags(docblock: &str) -> Vec<(String, String)> {
     }
 
     results
+}
+
+/// Extract all `@method` tags from a class-level docblock.
+///
+/// PHPDoc `@method` tags declare magic methods that are accessible via
+/// `__call` / `__callStatic`.  The format is:
+///
+///   - `@method ReturnType methodName(ParamType $param, ...)`
+///   - `@method static ReturnType methodName(ParamType $param, ...)`
+///   - `@method methodName(ParamType $param, ...)`  (no return type)
+///
+/// Returns a list of `MethodInfo` structs.  Parameters are parsed with
+/// type hints and default-value detection where possible.
+pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        let rest = match trimmed.strip_prefix("@method") {
+            Some(r) => r,
+            None => continue,
+        };
+
+        // The tag must be followed by whitespace.
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+
+        // Check for optional `static` keyword.
+        let (is_static, rest) = if let Some(after_static) = rest.strip_prefix("static") {
+            // "static" must be followed by whitespace or `(` to avoid
+            // matching a method literally named "staticFoo".
+            if after_static.is_empty() {
+                continue;
+            }
+            let next_char = after_static.chars().next().unwrap();
+            if next_char.is_whitespace() || next_char == '(' {
+                (true, after_static.trim_start())
+            } else {
+                (false, rest)
+            }
+        } else {
+            (false, rest)
+        };
+
+        // Find the opening parenthesis — the method name is the token
+        // immediately before it.
+        let paren_pos = match rest.find('(') {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let before_paren = &rest[..paren_pos];
+        let after_paren = &rest[paren_pos + 1..]; // after '('
+
+        // Split `before_paren` into optional return type + method name.
+        // The method name is the last whitespace-delimited token.
+        let before_paren = before_paren.trim();
+        if before_paren.is_empty() {
+            continue;
+        }
+
+        let (return_type_raw, method_name) =
+            if let Some(last_space) = before_paren.rfind(|c: char| c.is_whitespace()) {
+                let ret = before_paren[..last_space].trim();
+                let name = before_paren[last_space..].trim();
+                (Some(ret), name)
+            } else {
+                // Only one token — that's the method name, no return type.
+                (None, before_paren)
+            };
+
+        if method_name.is_empty() {
+            continue;
+        }
+
+        let return_type = return_type_raw.map(clean_type);
+        let return_type = match return_type {
+            Some(ref s) if s.is_empty() => None,
+            other => other,
+        };
+
+        // Parse parameters from the content between `(` and `)`.
+        let params_str = if let Some(close_paren) = after_paren.rfind(')') {
+            after_paren[..close_paren].trim()
+        } else {
+            after_paren.trim()
+        };
+
+        let parameters = if params_str.is_empty() {
+            Vec::new()
+        } else {
+            parse_method_tag_params(params_str)
+        };
+
+        results.push(MethodInfo {
+            name: method_name.to_string(),
+            parameters,
+            return_type,
+            is_static,
+            visibility: Visibility::Public,
+        });
+    }
+
+    results
+}
+
+/// Parse the parameter list from a `@method` tag.
+///
+/// Handles formats like:
+///   - `string $abstract, callable():mixed $mockDefinition = null`
+///   - `array<string, mixed> $data, string $connection = null`
+///
+/// Splits on commas while respecting `<>` and `()` nesting.
+fn parse_method_tag_params(params_str: &str) -> Vec<ParameterInfo> {
+    let parts = split_params(params_str);
+    let mut result = Vec::new();
+
+    for part in &parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // Check for default value: ` = ...` after the variable name.
+        // We look for the last `$` to find the variable name, then check
+        // if `=` follows.
+        let has_default = part.contains('=');
+
+        // Check for variadic `...`
+        let is_variadic = part.contains("...");
+
+        // Find the parameter name (token starting with `$`).
+        // Scan tokens right-to-left to find the `$name` token (it may be
+        // followed by `= default`).
+        let dollar_pos = part.rfind('$');
+        let (type_hint, param_name) = if let Some(dp) = dollar_pos {
+            let name_and_rest = &part[dp..];
+            // The name ends at whitespace, `=`, `)`, or end of string.
+            let name_end = name_and_rest
+                .find(|c: char| c.is_whitespace() || c == '=' || c == ')')
+                .unwrap_or(name_and_rest.len());
+            let name = &name_and_rest[..name_end];
+
+            let before = part[..dp].trim().trim_end_matches("...");
+            let type_str = if before.is_empty() {
+                None
+            } else {
+                Some(clean_type(before))
+            };
+            let type_str = match type_str {
+                Some(ref s) if s.is_empty() => None,
+                other => other,
+            };
+
+            (type_str, name.to_string())
+        } else {
+            // No `$` found — treat the whole thing as a name-less param.
+            // This is unusual but we handle it gracefully.
+            continue;
+        };
+
+        let is_required = !has_default && !is_variadic;
+
+        result.push(ParameterInfo {
+            name: param_name,
+            is_required,
+            type_hint,
+            is_variadic,
+            is_reference: false,
+        });
+    }
+
+    result
+}
+
+/// Split a parameter string on commas while respecting `<>` and `()`
+/// nesting so that `array<string, mixed>` is not split.
+fn split_params(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            ',' if depth_angle == 0 && depth_paren == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    // Push the last segment.
+    parts.push(&s[start..]);
+    parts
 }
 
 /// Decide whether a docblock type should override a native type hint.
@@ -543,6 +752,139 @@ fn is_scalar(type_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── @method tag extraction ─────────────────────────────────────────
+
+    #[test]
+    fn method_tag_simple() {
+        let doc = "/** @method MockInterface mock(string $abstract) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].name, "mock");
+        assert_eq!(methods[0].return_type.as_deref(), Some("MockInterface"));
+        assert!(!methods[0].is_static);
+        assert_eq!(methods[0].parameters.len(), 1);
+        assert_eq!(methods[0].parameters[0].name, "$abstract");
+        assert_eq!(
+            methods[0].parameters[0].type_hint.as_deref(),
+            Some("string")
+        );
+        assert!(methods[0].parameters[0].is_required);
+    }
+
+    #[test]
+    fn method_tag_static() {
+        let doc = "/** @method static Decimal getAmountUntilBonusCashIsTriggered() */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].name, "getAmountUntilBonusCashIsTriggered");
+        assert_eq!(methods[0].return_type.as_deref(), Some("Decimal"));
+        assert!(methods[0].is_static);
+        assert!(methods[0].parameters.is_empty());
+    }
+
+    #[test]
+    fn method_tag_no_return_type() {
+        let doc = "/** @method assertDatabaseHas(string $table, array<string, mixed> $data, string $connection = null) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].name, "assertDatabaseHas");
+        assert!(methods[0].return_type.is_none());
+        assert_eq!(methods[0].parameters.len(), 3);
+        assert_eq!(methods[0].parameters[0].name, "$table");
+        assert_eq!(
+            methods[0].parameters[0].type_hint.as_deref(),
+            Some("string")
+        );
+        assert!(methods[0].parameters[0].is_required);
+        assert_eq!(methods[0].parameters[1].name, "$data");
+        assert_eq!(methods[0].parameters[1].type_hint.as_deref(), Some("array"));
+        assert!(methods[0].parameters[1].is_required);
+        assert_eq!(methods[0].parameters[2].name, "$connection");
+        assert_eq!(
+            methods[0].parameters[2].type_hint.as_deref(),
+            Some("string")
+        );
+        assert!(!methods[0].parameters[2].is_required);
+    }
+
+    #[test]
+    fn method_tag_fqn_return_type() {
+        let doc = "/** @method \\Mockery\\MockInterface mock(string $abstract) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(
+            methods[0].return_type.as_deref(),
+            Some("Mockery\\MockInterface")
+        );
+    }
+
+    #[test]
+    fn method_tag_callable_param() {
+        let doc = "/** @method MockInterface mock(string $abstract, callable():mixed $mockDefinition = null) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].parameters.len(), 2);
+        assert_eq!(methods[0].parameters[1].name, "$mockDefinition");
+        assert!(!methods[0].parameters[1].is_required);
+    }
+
+    #[test]
+    fn method_tag_multiple() {
+        let doc = concat!(
+            "/**\n",
+            " * @method \\Mockery\\MockInterface mock(string $abstract, callable():mixed $mockDefinition = null)\n",
+            " * @method assertDatabaseHas(string $table, array<string, mixed> $data, string $connection = null)\n",
+            " * @method assertDatabaseMissing(string $table, array<string, mixed> $data, string $connection = null)\n",
+            " * @method static Decimal getAmountUntilBonusCashIsTriggered()\n",
+            " */",
+        );
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 4);
+        assert_eq!(methods[0].name, "mock");
+        assert!(!methods[0].is_static);
+        assert_eq!(methods[1].name, "assertDatabaseHas");
+        assert!(!methods[1].is_static);
+        assert_eq!(methods[2].name, "assertDatabaseMissing");
+        assert!(!methods[2].is_static);
+        assert_eq!(methods[3].name, "getAmountUntilBonusCashIsTriggered");
+        assert!(methods[3].is_static);
+    }
+
+    #[test]
+    fn method_tag_no_params() {
+        let doc = "/** @method string getName() */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].name, "getName");
+        assert_eq!(methods[0].return_type.as_deref(), Some("string"));
+        assert!(methods[0].parameters.is_empty());
+    }
+
+    #[test]
+    fn method_tag_nullable_return() {
+        let doc = "/** @method ?User findUser(int $id) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].return_type.as_deref(), Some("?User"));
+    }
+
+    #[test]
+    fn method_tag_none_when_missing() {
+        let doc = "/** @property string $name */";
+        let methods = extract_method_tags(doc);
+        assert!(methods.is_empty());
+    }
+
+    #[test]
+    fn method_tag_variadic_param() {
+        let doc = "/** @method void addItems(string ...$items) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].parameters.len(), 1);
+        assert!(methods[0].parameters[0].is_variadic);
+        assert!(!methods[0].parameters[0].is_required);
+    }
 
     // ─── @property tag extraction ───────────────────────────────────────
 

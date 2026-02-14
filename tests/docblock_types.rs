@@ -1691,3 +1691,443 @@ async fn test_goto_definition_property_read_tag() {
         other => panic!("Expected Scalar, got: {:?}", other),
     }
 }
+
+// ─── @method Docblock Tags ──────────────────────────────────────────────────
+
+/// Test: `parse_php` extracts `@method` tags from a class-level docblock
+/// as public `MethodInfo` entries.
+#[tokio::test]
+async fn test_parse_php_class_method_tags() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method \\Mockery\\MockInterface mock(string $abstract, callable():mixed $mockDefinition = null)\n",
+        " * @method assertDatabaseHas(string $table, array<string, mixed> $data, string $connection = null)\n",
+        " * @method static Decimal getAmountUntilBonusCashIsTriggered()\n",
+        " */\n",
+        "class Cart {\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].methods.len(), 3);
+
+    let mock_method = classes[0]
+        .methods
+        .iter()
+        .find(|m| m.name == "mock")
+        .expect("Should have mock method from @method tag");
+    assert_eq!(
+        mock_method.return_type.as_deref(),
+        Some("Mockery\\MockInterface"),
+        "FQN return type should have leading backslash stripped"
+    );
+    assert!(!mock_method.is_static, "mock should not be static");
+    assert_eq!(mock_method.parameters.len(), 2);
+
+    let assert_method = classes[0]
+        .methods
+        .iter()
+        .find(|m| m.name == "assertDatabaseHas")
+        .expect("Should have assertDatabaseHas method from @method tag");
+    assert!(
+        assert_method.return_type.is_none(),
+        "assertDatabaseHas has no return type"
+    );
+    assert_eq!(assert_method.parameters.len(), 3);
+    assert!(!assert_method.parameters[2].is_required);
+
+    let static_method = classes[0]
+        .methods
+        .iter()
+        .find(|m| m.name == "getAmountUntilBonusCashIsTriggered")
+        .expect("Should have getAmountUntilBonusCashIsTriggered method from @method tag");
+    assert_eq!(static_method.return_type.as_deref(), Some("Decimal"));
+    assert!(static_method.is_static);
+    assert!(static_method.parameters.is_empty());
+}
+
+/// Test: `@method` with a class return type enables chained completion.
+/// `$cart->mock("Foo")->` should offer members of `MockInterface`.
+#[tokio::test]
+async fn test_completion_via_method_tag() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "class MockInterface {\n",                                   // 1
+        "    public function shouldReceive(string $name): self {\n", // 2
+        "        return $this;\n",                                   // 3
+        "    }\n",                                                   // 4
+        "    public function andReturn(mixed $value): self {\n",     // 5
+        "        return $this;\n",                                   // 6
+        "    }\n",                                                   // 7
+        "}\n",                                                       // 8
+        "\n",                                                        // 9
+        "/**\n",                                                     // 10
+        " * @method MockInterface mock(string $abstract)\n",         // 11
+        " */\n",                                                     // 12
+        "class TestCase {\n",                                        // 13
+        "    public function test(): void {\n",                      // 14
+        "        $this->mock('Foo')->\n",                            // 15
+        "    }\n",                                                   // 16
+        "}\n",                                                       // 17
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 15,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap().unwrap();
+    let names = completion_names(result);
+    assert!(
+        names.iter().any(|n| n == "shouldReceive"),
+        "Should offer 'shouldReceive' from MockInterface via @method return type. Got: {:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|n| n == "andReturn"),
+        "Should offer 'andReturn' from MockInterface via @method return type. Got: {:?}",
+        names
+    );
+}
+
+/// Test: `@method` tags appear in completion for the class itself.
+/// `$this->` inside a class with `@method` tags should offer those methods.
+#[tokio::test]
+async fn test_completion_method_tag_on_this() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                 // 0
+        "/**\n",                                   // 1
+        " * @method string getName()\n",           // 2
+        " * @method void setName(string $name)\n", // 3
+        " */\n",                                   // 4
+        "class Model {\n",                         // 5
+        "    public function test(): void {\n",    // 6
+        "        $this->\n",                       // 7
+        "    }\n",                                 // 8
+        "}\n",                                     // 9
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 7,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap().unwrap();
+    let names = completion_names(result);
+    assert!(
+        names.iter().any(|n| n == "getName"),
+        "Should offer 'getName' from @method tag on $this->. Got: {:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|n| n == "setName"),
+        "Should offer 'setName' from @method tag on $this->. Got: {:?}",
+        names
+    );
+}
+
+/// Test: `@method static` tags appear in `ClassName::` completion.
+#[tokio::test]
+async fn test_completion_static_method_tag_via_double_colon() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                          // 0
+        "/**\n",                                                            // 1
+        " * @method static Decimal getAmountUntilBonusCashIsTriggered()\n", // 2
+        " */\n",                                                            // 3
+        "class Cart {\n",                                                   // 4
+        "}\n",                                                              // 5
+        "\n",                                                               // 6
+        "function test() {\n",                                              // 7
+        "    Cart::\n",                                                     // 8
+        "}\n",                                                              // 9
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 8,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap().unwrap();
+    let names = completion_names(result);
+    assert!(
+        names
+            .iter()
+            .any(|n| n == "getAmountUntilBonusCashIsTriggered"),
+        "Should offer static @method via `Cart::`. Got: {:?}",
+        names
+    );
+}
+
+/// Test: A real declared method takes precedence over a `@method` tag
+/// with the same name.
+#[tokio::test]
+async fn test_real_method_overrides_method_tag() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method string getName()\n",
+        " */\n",
+        "class Model {\n",
+        "    public function getName(): int { return 42; }\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    // Should have exactly one method named getName, not two.
+    let name_methods: Vec<_> = classes[0]
+        .methods
+        .iter()
+        .filter(|m| m.name == "getName")
+        .collect();
+    assert_eq!(
+        name_methods.len(),
+        1,
+        "Real method should prevent duplicate from @method tag"
+    );
+
+    // The real declaration should win (return type int, not string).
+    assert_eq!(name_methods[0].return_type.as_deref(), Some("int"));
+}
+
+/// Test: Goto definition on a magic method jumps to the `@method` line
+/// in the class docblock.
+#[tokio::test]
+async fn test_goto_definition_method_tag_jumps_to_docblock_line() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                 // 0
+        "/**\n",                                   // 1
+        " * @method string getName()\n",           // 2
+        " * @method void setName(string $name)\n", // 3
+        " */\n",                                   // 4
+        "class Model {\n",                         // 5
+        "    public function test(): void {\n",    // 6
+        "        $this->getName();\n",             // 7
+        "    }\n",                                 // 8
+        "}\n",                                     // 9
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // line 7: "        $this->getName();"
+    //          0       8      15
+    // Click on "getName" (character 15)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 7,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->getName() to @method line"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "@method getName is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+}
+
+/// Test: Goto definition on a chained method from a `@method` return type
+/// resolves to the method declaration in the target class.
+#[tokio::test]
+async fn test_goto_definition_chained_via_method_tag() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "class MockInterface {\n",                                   // 1
+        "    public function shouldReceive(string $name): self {\n", // 2
+        "        return $this;\n",                                   // 3
+        "    }\n",                                                   // 4
+        "}\n",                                                       // 5
+        "\n",                                                        // 6
+        "/**\n",                                                     // 7
+        " * @method MockInterface mock(string $abstract)\n",         // 8
+        " */\n",                                                     // 9
+        "class TestCase {\n",                                        // 10
+        "    public function test(): void {\n",                      // 11
+        "        $this->mock('Foo')->shouldReceive('bar');\n",       // 12
+        "    }\n",                                                   // 13
+        "}\n",                                                       // 14
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // line 12: "        $this->mock('Foo')->shouldReceive('bar');"
+    //           0       8      14          25   30  34
+    // Click on "shouldReceive" (character 29)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->mock('Foo')->shouldReceive() via @method return type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "shouldReceive() is declared on line 2 of MockInterface"
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+}
+
+/// Test: `@method` tags on traits are extracted correctly.
+#[tokio::test]
+async fn test_parse_php_trait_method_tags() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method string greet()\n",
+        " */\n",
+        "trait Greeter {\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].methods.len(), 1);
+    assert_eq!(classes[0].methods[0].name, "greet");
+    assert_eq!(classes[0].methods[0].return_type.as_deref(), Some("string"));
+}
+
+/// Test: `@method` tags on interfaces are extracted correctly.
+#[tokio::test]
+async fn test_parse_php_interface_method_tags() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @method static self create(array $attributes)\n",
+        " */\n",
+        "interface Factory {\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].methods.len(), 1);
+    assert_eq!(classes[0].methods[0].name, "create");
+    assert!(classes[0].methods[0].is_static);
+    assert_eq!(classes[0].methods[0].return_type.as_deref(), Some("self"));
+    assert_eq!(classes[0].methods[0].parameters.len(), 1);
+    assert_eq!(classes[0].methods[0].parameters[0].name, "$attributes");
+}
