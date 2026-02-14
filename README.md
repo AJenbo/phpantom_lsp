@@ -1,6 +1,6 @@
 # PHPantomLSP
 
-A fast, lightweight PHP language server that stays out of your way. Using only a few MB of RAM regardless of project size, fully usable in milliseconds, without requiring high-end hardware.
+A fast, lightweight PHP language server that stays out of your way. Using only a few MB of RAM regardless of project size and fully usable in milliseconds without requiring high-end hardware.
 
 > **Note:** This project is in active development.
 
@@ -10,20 +10,22 @@ A fast, lightweight PHP language server that stays out of your way. Using only a
 
 - Full text document sync (open, change, close)
 
-### Type Resolution
+### PHP Analysis & Type Resolution
 
-Both completion and go-to-definition draw from a shared type resolution engine:
+PHPantom uses a shared analysis engine built on [Mago](https://github.com/carthage-software/mago)'s PHP parser for parsing and type resolution, powering both completion and go-to-definition.
 
-- `$this`, `self`, `static`, and `parent` keyword resolution
-- Variable type inference from assignments (`$var = new Foo()`) and parameter type hints
-- Property chain and method call chaining (e.g. `$this->getService()->doSomething()`)
-- Function and static method call return type resolution (e.g. `app()->`, `Class::make()->`)
-- Inheritance-aware: walks the class hierarchy including traits
-- Enum case resolution
-- Union types: `A|B` in return types, property types, and parameter hints are split into individual candidates
-- Ambiguous variables: when a variable is assigned different types in conditional branches, all possible types are tried
-- PHPDoc support: `@return`, `@property`, `@method`, `@mixin`
-- PHPStan conditional return types: annotations like `@return ($abstract is class-string<TClass> ? TClass : mixed)` are resolved based on call-site arguments
+- Extracts classes, interfaces, traits, enums, and standalone functions
+- Parses methods, properties, constants, and constructor-promoted properties with visibility, static modifiers, and type hints
+- Parses `use` statements and namespace declarations
+- PHPDoc annotations including:
+  - `@return`, `@var`, `@property`, `@method`, `@mixin`
+  - PHPStan-style conditional return types
+- Resolves `$this`, `self`, `static`, and `parent` keywords
+- Infers variable types from assignments and parameter type hints
+- Supports property chains and method call chaining (e.g., `$this->getService()->doSomething()`)
+- Resolves function and static method return types (e.g., `app()->`, `Class::make()->`)
+- Inheritance-aware resolution including traits cases
+- Handles union types (`A|B`) and ambiguous variables across conditional branches
 
 ### Completion
 
@@ -42,31 +44,11 @@ Both completion and go-to-definition draw from a shared type resolution engine:
 - Same-file and cross-file definition lookup
 - Fully-qualified, partially-qualified, and unqualified name resolution via `use` statements and the current namespace
 
-### PHP Parsing
+### Composer Integration
 
-- Extracts classes, interfaces, traits, and enums
-- Parses methods, properties, and constants with visibility, static modifiers, and type hints
-- Extracts standalone function definitions (global and namespaced)
-- Supports constructor-promoted properties
-- Parses `use` statements and namespace declarations
-
-#### PHPDoc Parsing
-
-Built on [Mago](https://github.com/carthage-software/mago)'s PHP parser.
-
-- `@return` type extraction with compatibility checks against native type hints
-- `@var` type annotations
-- `@property` virtual property declarations
-- `@method` virtual method declarations
-- `@mixin` class delegation tags
-- PHPStan style conditional return type expressions (recursive/nested conditionals)
-
-### Composer / PSR-4 Integration
-
-- Parses `composer.json` for PSR-4 autoload mappings (`autoload` and `autoload-dev`)
-- Parses vendor autoload mappings from `vendor/composer/autoload_psr4.php`
-- On-demand class loading from disk via PSR-4 resolution
-- Caches parsed files to avoid redundant parsing
+- Parses `composer.json` for PSR-4 class mapping
+- Parses vendor autoload file and PSR-4 loading
+- Caches parsed files in memory to avoid redundant loading
 
 ## Building
 
