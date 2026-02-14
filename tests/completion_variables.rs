@@ -1224,3 +1224,486 @@ async fn test_completion_union_return_plus_conditional_reassignment_grows_union(
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── PHPStan Conditional Return Type Tests ──────────────────────────────────
+
+/// When a function has a PHPStan conditional return type like
+/// `@return ($abstract is class-string<TClass> ? TClass : mixed)`
+/// and is called with `A::class`, completion should resolve to class A.
+#[tokio::test]
+async fn test_completion_conditional_return_class_string() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///conditional.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class A {\n",
+        "    public function onlyOnA(): void {}\n",
+        "}\n",
+        "\n",
+        "class B {\n",
+        "    public function onlyOnB(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($abstract is class-string<TClass> ? TClass : ($abstract is null ? \\App : mixed))\n",
+        " */\n",
+        "function app($abstract = null, array $parameters = []) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        $obj = app(A::class);\n",
+        "        $obj->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$obj->` on line 17
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 17,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $obj-> after app(A::class)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from A (resolved via class-string<T>)
+            assert!(
+                labels.iter().any(|l| l.starts_with("onlyOnA")),
+                "Should include onlyOnA from A (resolved via class-string conditional), got: {:?}",
+                labels
+            );
+            // Should NOT include members from B
+            assert!(
+                !labels.iter().any(|l| l.starts_with("onlyOnB")),
+                "Should NOT include onlyOnB from B, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When a function has a PHPStan conditional return type and is called
+/// without arguments, it should resolve to the null-default branch.
+/// e.g. `app()` → Application
+#[tokio::test]
+async fn test_completion_conditional_return_null_default() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///conditional_null.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Application {\n",
+        "    public function version(): string {}\n",
+        "    public function boot(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($abstract is class-string<TClass> ? TClass : ($abstract is null ? Application : mixed))\n",
+        " */\n",
+        "function app($abstract = null, array $parameters = []) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        $a = app();\n",
+        "        $a->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$a->` on line 14
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 14,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $a-> after app()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("version")),
+                "Should include version from Application (null-default branch), got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("boot")),
+                "Should include boot from Application (null-default branch), got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When a function has `@return ($guard is null ? Factory : StatefulGuard)`
+/// and is called with a non-null argument like `auth('web')`, completion
+/// should resolve to the else branch (StatefulGuard).
+#[tokio::test]
+async fn test_completion_conditional_return_non_null_argument() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///conditional_auth.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function guard(): void {}\n",
+        "}\n",
+        "\n",
+        "class StatefulGuard {\n",
+        "    public function login(): void {}\n",
+        "    public function logout(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($guard is null ? Factory : StatefulGuard)\n",
+        " */\n",
+        "function auth($guard = null) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        $g = auth('web');\n",
+        "        $g->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$g->` on line 18
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 18,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $g-> after auth('web')"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from StatefulGuard (non-null arg → else branch)
+            assert!(
+                labels.iter().any(|l| l.starts_with("login")),
+                "Should include login from StatefulGuard, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("logout")),
+                "Should include logout from StatefulGuard, got: {:?}",
+                labels
+            );
+            // Should NOT include members from Factory
+            assert!(
+                !labels.iter().any(|l| l.starts_with("guard")),
+                "Should NOT include guard from Factory, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When `app(A::class)->` is used inline (without assigning to a variable),
+/// completion should resolve the conditional return type using the text
+/// arguments and offer members of `A`.
+#[tokio::test]
+async fn test_completion_inline_conditional_return_class_string() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inline_conditional.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SessionManager {\n",
+        "    public function callCustomCreator2(): void {}\n",
+        "    public function driver(): string {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($abstract is class-string<TClass> ? TClass : ($abstract is null ? \\App : mixed))\n",
+        " */\n",
+        "function app($abstract = null, array $parameters = []) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        app(SessionManager::class)->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `app(SessionManager::class)->` on line 13
+    // 8 spaces + "app(SessionManager::class)->" = 8 + 28 = 36
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 36,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for app(SessionManager::class)->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from SessionManager
+            assert!(
+                labels.iter().any(|l| l.starts_with("callCustomCreator2")),
+                "Should include callCustomCreator2 from SessionManager, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("driver")),
+                "Should include driver from SessionManager, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When `auth('web')->` is used inline (without assigning to a variable),
+/// the non-null argument should resolve to the else branch of an `is null`
+/// conditional return type.
+#[tokio::test]
+async fn test_completion_inline_conditional_return_non_null_argument() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inline_auth.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function guard(): void {}\n",
+        "}\n",
+        "\n",
+        "class StatefulGuard {\n",
+        "    public function login(): void {}\n",
+        "    public function logout(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($guard is null ? Factory : StatefulGuard)\n",
+        " */\n",
+        "function auth($guard = null) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        auth('web')->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `auth('web')->` on line 17
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 17,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for auth('web')->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from StatefulGuard (non-null arg → else branch)
+            assert!(
+                labels.iter().any(|l| l.starts_with("login")),
+                "Should include login from StatefulGuard, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("logout")),
+                "Should include logout from StatefulGuard, got: {:?}",
+                labels
+            );
+            // Should NOT include members from Factory
+            assert!(
+                !labels.iter().any(|l| l.starts_with("guard")),
+                "Should NOT include guard from Factory, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When `app()->` is used inline with no arguments, the null-default
+/// branch should be taken, just as when assigned to a variable.
+#[tokio::test]
+async fn test_completion_inline_conditional_return_null_default() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inline_null.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Application {\n",
+        "    public function version(): string {}\n",
+        "    public function boot(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($abstract is class-string<TClass> ? TClass : ($abstract is null ? Application : mixed))\n",
+        " */\n",
+        "function app($abstract = null, array $parameters = []) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        app()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `app()->` on line 13
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for app()->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("version")),
+                "Should include version from Application (null-default branch), got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("boot")),
+                "Should include boot from Application (null-default branch), got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

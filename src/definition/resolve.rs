@@ -532,7 +532,8 @@ impl Backend {
     /// `paren_end` is the position one past the closing `)`.
     ///
     /// Returns subjects such as:
-    ///   - `"app()"` for a standalone function call
+    ///   - `"app()"` for a standalone function call without arguments
+    ///   - `"app(A::class)"` for a function call with arguments (preserved)
     ///   - `"$this->getService()"` for an instance method call
     ///   - `"ClassName::make()"` for a static method call
     ///   - `"ClassName"` for `new ClassName()` instantiation
@@ -541,6 +542,11 @@ impl Backend {
         if open == 0 {
             return None;
         }
+
+        // Capture the argument text between the parentheses for later use
+        // in conditional return-type resolution (e.g. `app(A::class)`).
+        let args_text: String = chars[open + 1..paren_end - 1].iter().collect();
+        let args_text = args_text.trim();
 
         // Read the function / method name before `(`
         let mut i = open;
@@ -586,8 +592,13 @@ impl Backend {
             }
         }
 
-        // Standalone function call: `app()`
-        Some(format!("{}()", func_name))
+        // Standalone function call: preserve arguments for conditional
+        // return-type resolution (e.g. `app(A::class)` instead of `app()`).
+        if args_text.is_empty() {
+            Some(format!("{}()", func_name))
+        } else {
+            Some(format!("{}({})", func_name, args_text))
+        }
     }
 
     /// Extract a `$variable` ending at position `end` (exclusive).

@@ -1461,3 +1461,145 @@ async fn test_goto_definition_guarded_function_return_type_resolution() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Inline Conditional Return Type (no variable assignment) ────────────────
+
+/// Test: `app(SessionManager::class)->callCustomCreator2()` — when a function
+/// with a conditional return type is called inline (not assigned to a variable),
+/// goto-definition should still resolve the class from the text arguments.
+#[tokio::test]
+async fn test_goto_definition_inline_conditional_return_class_string() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SessionManager {\n",
+        "    public function callCustomCreator2(): void {}\n",
+        "    public function driver(): string {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($abstract is class-string<TClass> ? TClass : ($abstract is null ? \\App : mixed))\n",
+        " */\n",
+        "function app($abstract = null, array $parameters = []) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        app(SessionManager::class)->callCustomCreator2();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "callCustomCreator2" in `app(SessionManager::class)->callCustomCreator2()`
+    // on line 13
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 13,
+                character: 36,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve app(SessionManager::class)->callCustomCreator2 via conditional return type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "callCustomCreator2() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Test: `auth('web')->login()` — inline call with non-null argument should
+/// resolve to the else branch of an `is null` conditional return type.
+#[tokio::test]
+async fn test_goto_definition_inline_conditional_return_non_null() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function guard(): void {}\n",
+        "}\n",
+        "\n",
+        "class StatefulGuard {\n",
+        "    public function login(): void {}\n",
+        "    public function logout(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return ($guard is null ? Factory : StatefulGuard)\n",
+        " */\n",
+        "function auth($guard = null) {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        auth('web')->login();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "login" in `auth('web')->login()` on line 17
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 17,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve auth('web')->login via conditional return type (non-null arg)"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "login() is declared on line 6"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

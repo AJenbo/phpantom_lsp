@@ -1,7 +1,7 @@
 /// Type resolution for completion subjects.
 ///
 /// This module contains the logic for resolving a completion subject (e.g.
-/// `$this`, `self`, `$var`, `$this->prop`, `ClassName`) to a concrete
+/// `$this`, `self`, `static`, `$var`, `$this->prop`, `ClassName`) to a concrete
 /// `ClassInfo` so that the correct completion items can be offered.
 ///
 /// Resolution strategies include:
@@ -13,6 +13,9 @@
 ///   - Function call return types: `app()` → look up return type in global_functions
 ///   - Method call return types: `$this->getService()` → look up method return type
 ///   - Static method call return types: `Class::make()` → look up method return type
+///   - **PHPStan conditional return types**: `app(A::class)` where `app`
+///     has `@return ($abstract is class-string<TClass> ? TClass : …)` →
+///     resolve to class `A`.
 ///   - **Ambiguous variables**: when a variable is assigned different types
 ///     in conditional branches (if/else, try/catch, loops), all possible
 ///     types are collected so that member resolution can try each one.
@@ -114,7 +117,7 @@ impl Backend {
         if !subject.starts_with('$')
             && !subject.contains("->")
             && !subject.contains("::")
-            && !subject.ends_with("()")
+            && !subject.ends_with(')')
         {
             let lookup = subject.rsplit('\\').next().unwrap_or(subject);
             if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
@@ -124,18 +127,21 @@ impl Backend {
             return class_loader(subject).into_iter().collect();
         }
 
-        // ── Call expression: subject ends with "()" ──
-        // Handles function calls (`app()`), method calls (`$this->getService()`),
+        // ── Call expression: subject ends with ")" ──
+        // Handles function calls (`app()`, `app(A::class)`),
+        // method calls (`$this->getService()`),
         // and static method calls (`ClassName::make()`).
-        if let Some(call_body) = subject.strip_suffix("()") {
-            return Self::resolve_call_return_types(
-                call_body,
-                current_class,
-                all_classes,
-                class_loader,
-                function_loader,
-            );
-        }
+        if subject.ends_with(')')
+            && let Some((call_body, args_text)) = split_call_subject(subject) {
+                return Self::resolve_call_return_types(
+                    call_body,
+                    args_text,
+                    current_class,
+                    all_classes,
+                    class_loader,
+                    function_loader,
+                );
+            }
 
         // ── Property-chain: $this->prop  or  $this?->prop ──
         if let Some(prop_name) = subject
@@ -185,6 +191,7 @@ impl Backend {
     /// (e.g. `A|B`).
     fn resolve_call_return_types(
         call_body: &str,
+        text_args: &str,
         current_class: Option<&ClassInfo>,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
@@ -259,9 +266,26 @@ impl Backend {
         // ── Standalone function call: app / myHelper ──
         if let Some(fl) = function_loader
             && let Some(func_info) = fl(call_body)
-            && let Some(ref ret) = func_info.return_type
         {
-            return Self::type_hint_to_classes(ret, "", all_classes, class_loader);
+            // If the function has a conditional return type, try to resolve
+            // it using any textual arguments we preserved from the call site
+            // (e.g. `app(SessionManager::class)` → text_args = "SessionManager::class").
+            if let Some(ref cond) = func_info.conditional_return {
+                let resolved_type = if !text_args.is_empty() {
+                    resolve_conditional_with_text_args(cond, &func_info, text_args)
+                } else {
+                    resolve_conditional_without_args(cond, &func_info)
+                };
+                if let Some(ref ty) = resolved_type {
+                    let classes = Self::type_hint_to_classes(ty, "", all_classes, class_loader);
+                    if !classes.is_empty() {
+                        return classes;
+                    }
+                }
+            }
+            if let Some(ref ret) = func_info.return_type {
+                return Self::type_hint_to_classes(ret, "", all_classes, class_loader);
+            }
         }
 
         vec![]
@@ -970,15 +994,37 @@ impl Backend {
                         if let Some(name) = func_name
                             && let Some(fl) = function_loader
                             && let Some(func_info) = fl(&name)
-                            && let Some(ref ret) = func_info.return_type
                         {
-                            let resolved = Self::type_hint_to_classes(
-                                ret,
-                                current_class_name,
-                                all_classes,
-                                class_loader,
-                            );
-                            push_results(results, resolved, conditional);
+                            // Try conditional return type first (PHPStan syntax)
+                            let mut handled = false;
+                            if let Some(ref cond) = func_info.conditional_return {
+                                let resolved_type = resolve_conditional_with_args(
+                                    cond,
+                                    &func_info,
+                                    &func_call.argument_list,
+                                );
+                                if let Some(ref ty) = resolved_type {
+                                    let resolved = Self::type_hint_to_classes(
+                                        ty,
+                                        current_class_name,
+                                        all_classes,
+                                        class_loader,
+                                    );
+                                    if !resolved.is_empty() {
+                                        push_results(results, resolved, conditional);
+                                        handled = true;
+                                    }
+                                }
+                            }
+                            if !handled && let Some(ref ret) = func_info.return_type {
+                                let resolved = Self::type_hint_to_classes(
+                                    ret,
+                                    current_class_name,
+                                    all_classes,
+                                    class_loader,
+                                );
+                                push_results(results, resolved, conditional);
+                            }
                         }
                     }
                     Call::Method(method_call) => {
@@ -1109,4 +1155,285 @@ impl Backend {
 
         merged
     }
+}
+
+// ─── PHPStan Conditional Return Type Resolution ─────────────────────────────
+
+/// Resolve a PHPStan conditional return type given AST-level call-site
+/// arguments.
+///
+/// Walks the conditional tree and matches argument expressions against
+/// the conditions:
+///   - `class-string<T>`: checks if the positional argument is `X::class`
+///     and returns `"X"`.
+///   - `is null`: satisfied when no argument is provided (parameter has
+///     a null default).
+///   - `is SomeType`: not statically resolvable from AST; falls through
+///     to the else branch.
+/// Split a call-expression subject into the call body and any textual
+/// arguments.  Handles both `"app()"` → `("app", "")` and
+/// `"app(A::class)"` → `("app", "A::class")`.
+///
+/// For method / static-method calls the arguments are currently not
+/// preserved by the extractors, so they always arrive as `""`.
+fn split_call_subject(subject: &str) -> Option<(&str, &str)> {
+    // Subject must end with ')'.
+    let inner = subject.strip_suffix(')')?;
+    // Find the matching '(' — for simple subjects (no nested parens in
+    // the call body) this is the first '(' that belongs to the call.
+    // The call body part (before the open-paren) never contains '('
+    // (it's things like `app`, `$this->method`, `ClassName::make`),
+    // so a simple `rfind` is correct.
+    let open = inner.rfind('(')?;
+    let call_body = &inner[..open];
+    let args_text = inner[open + 1..].trim();
+    if call_body.is_empty() {
+        return None;
+    }
+    Some((call_body, args_text))
+}
+
+/// Resolve a conditional return type using **textual** arguments extracted
+/// from the source code (e.g. `"SessionManager::class"`).
+///
+/// This is used when the call is made inline (not assigned to a variable)
+/// and we therefore don't have an AST `ArgumentList` — only the raw text
+/// between the parentheses.
+fn resolve_conditional_with_text_args(
+    conditional: &ConditionalReturnType,
+    func_info: &FunctionInfo,
+    text_args: &str,
+) -> Option<String> {
+    match conditional {
+        ConditionalReturnType::Concrete(ty) => {
+            if ty == "mixed" || ty == "void" || ty == "never" {
+                return None;
+            }
+            Some(ty.clone())
+        }
+        ConditionalReturnType::Conditional {
+            param_name,
+            condition,
+            then_type,
+            else_type,
+        } => {
+            // Find which parameter index corresponds to $param_name
+            let target = format!("${}", param_name);
+            let param_idx = func_info
+                .parameters
+                .iter()
+                .position(|p| p.name == target)
+                .unwrap_or(0);
+
+            // Split the textual arguments by comma (at depth 0) and pick
+            // the one at `param_idx`.
+            let args = split_text_args(text_args);
+            let arg_text = args.get(param_idx).map(|s| s.trim());
+
+            match condition {
+                ParamCondition::ClassString => {
+                    // Check if the argument text matches `X::class`
+                    if let Some(arg) = arg_text
+                        && let Some(class_name) = extract_class_name_from_text(arg)
+                    {
+                        return Some(class_name);
+                    }
+                    // Argument isn't a ::class literal → try else branch
+                    resolve_conditional_with_text_args(else_type, func_info, text_args)
+                }
+                ParamCondition::IsNull => {
+                    if arg_text.is_none() || arg_text == Some("") || arg_text == Some("null") {
+                        // No argument provided or explicitly null → null branch
+                        resolve_conditional_with_text_args(then_type, func_info, text_args)
+                    } else {
+                        // Argument was provided → not null
+                        resolve_conditional_with_text_args(else_type, func_info, text_args)
+                    }
+                }
+                ParamCondition::IsType(_) => {
+                    // Can't statically determine; fall through to else.
+                    resolve_conditional_with_text_args(else_type, func_info, text_args)
+                }
+            }
+        }
+    }
+}
+
+/// Split a textual argument list by commas, respecting nested parentheses
+/// so that `"foo(a, b), c"` splits into `["foo(a, b)", "c"]`.
+fn split_text_args(text: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0;
+    for (i, ch) in text.char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                result.push(&text[start..i]);
+                start = i + 1; // skip the comma
+            }
+            _ => {}
+        }
+    }
+    // Push the last segment (or the only one if there were no commas).
+    if start <= text.len() {
+        let last = &text[start..];
+        if !last.trim().is_empty() {
+            result.push(last);
+        }
+    }
+    result
+}
+
+/// Extract a class name from textual `X::class` syntax.
+///
+/// Matches strings like `"SessionManager::class"`, `"\\App\\Foo::class"`,
+/// returning the class name portion (`"SessionManager"`, `"\\App\\Foo"`).
+fn extract_class_name_from_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let name = trimmed.strip_suffix("::class")?;
+    if name.is_empty() {
+        return None;
+    }
+    // Validate that it looks like a class name (identifiers and backslashes).
+    if name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+    {
+        Some(name.strip_prefix('\\').unwrap_or(name).to_string())
+    } else {
+        None
+    }
+}
+
+fn resolve_conditional_with_args<'b>(
+    conditional: &ConditionalReturnType,
+    func_info: &FunctionInfo,
+    argument_list: &ArgumentList<'b>,
+) -> Option<String> {
+    match conditional {
+        ConditionalReturnType::Concrete(ty) => {
+            if ty == "mixed" || ty == "void" || ty == "never" {
+                return None;
+            }
+            Some(ty.clone())
+        }
+        ConditionalReturnType::Conditional {
+            param_name,
+            condition,
+            then_type,
+            else_type,
+        } => {
+            // Find which parameter index corresponds to $param_name
+            let target = format!("${}", param_name);
+            let param_idx = func_info
+                .parameters
+                .iter()
+                .position(|p| p.name == target)
+                .unwrap_or(0);
+
+            // Get the actual argument expression (if provided)
+            let arg_expr: Option<&Expression<'b>> = argument_list
+                .arguments
+                .iter()
+                .nth(param_idx)
+                .and_then(|arg| match arg {
+                    Argument::Positional(pos) => Some(pos.value),
+                    Argument::Named(named) => {
+                        // Also match named arguments by param name
+                        if named.name.value == param_name.as_str() {
+                            Some(named.value)
+                        } else {
+                            None
+                        }
+                    }
+                });
+
+            match condition {
+                ParamCondition::ClassString => {
+                    // Check if the argument is `X::class`
+                    if let Some(class_name) = arg_expr.and_then(extract_class_string_from_expr) {
+                        return Some(class_name);
+                    }
+                    // Argument isn't a ::class literal → try else branch
+                    resolve_conditional_with_args(else_type, func_info, argument_list)
+                }
+                ParamCondition::IsNull => {
+                    if arg_expr.is_none() {
+                        // No argument provided → param uses default (null)
+                        resolve_conditional_with_args(then_type, func_info, argument_list)
+                    } else {
+                        // Argument was provided → not null
+                        resolve_conditional_with_args(else_type, func_info, argument_list)
+                    }
+                }
+                ParamCondition::IsType(_) => {
+                    // We can't statically determine the type of an
+                    // arbitrary expression; fall through to else.
+                    resolve_conditional_with_args(else_type, func_info, argument_list)
+                }
+            }
+        }
+    }
+}
+
+/// Resolve a conditional return type **without** call-site arguments
+/// (text-based path).  Walks the tree taking the "no argument / null
+/// default" branch at each level.
+fn resolve_conditional_without_args(
+    conditional: &ConditionalReturnType,
+    func_info: &FunctionInfo,
+) -> Option<String> {
+    match conditional {
+        ConditionalReturnType::Concrete(ty) => {
+            if ty == "mixed" || ty == "void" || ty == "never" {
+                return None;
+            }
+            Some(ty.clone())
+        }
+        ConditionalReturnType::Conditional {
+            param_name,
+            condition,
+            then_type,
+            else_type,
+        } => {
+            // Without arguments we check whether the parameter has a
+            // null default — if so, the `is null` branch is taken.
+            let target = format!("${}", param_name);
+            let param = func_info.parameters.iter().find(|p| p.name == target);
+            let has_null_default = param.is_some_and(|p| !p.is_required);
+
+            match condition {
+                ParamCondition::IsNull if has_null_default => {
+                    resolve_conditional_without_args(then_type, func_info)
+                }
+                _ => {
+                    // Try else branch
+                    resolve_conditional_without_args(else_type, func_info)
+                }
+            }
+        }
+    }
+}
+
+/// Extract the class name from an `X::class` expression.
+///
+/// Matches `Expression::Access(Access::ClassConstant(cca))` where the
+/// constant selector is the identifier `class`.
+fn extract_class_string_from_expr(expr: &Expression<'_>) -> Option<String> {
+    if let Expression::Access(Access::ClassConstant(cca)) = expr
+        && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
+        && ident.value == "class"
+    {
+        // Extract the class name from the LHS
+        return match cca.class {
+            Expression::Identifier(class_ident) => Some(class_ident.value().to_string()),
+            Expression::Self_(_) => Some("self".to_string()),
+            Expression::Static(_) => Some("static".to_string()),
+            Expression::Parent(_) => Some("parent".to_string()),
+            _ => None,
+        };
+    }
+    None
 }

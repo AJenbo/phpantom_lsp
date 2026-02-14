@@ -3,7 +3,8 @@
 //! This module contains all the "model" structs and enums that represent
 //! extracted PHP information (classes, methods, properties, constants,
 //! standalone functions) as well as completion-related types
-//! (AccessKind, CompletionTarget).
+//! (AccessKind, CompletionTarget) and PHPStan conditional return type
+//! representations.
 
 /// Visibility of a class member (method, property, or constant).
 ///
@@ -112,6 +113,64 @@ pub struct FunctionInfo {
     /// The namespace this function is declared in, if any.
     /// For example, `Amp\delay` would have namespace `Some("Amp")`.
     pub namespace: Option<String>,
+    /// Optional PHPStan conditional return type parsed from the docblock.
+    ///
+    /// When present, the resolver should use this instead of `return_type`
+    /// and resolve the concrete type based on call-site arguments.
+    ///
+    /// Example docblock:
+    /// ```text
+    /// @return ($abstract is class-string<TClass> ? TClass : \Illuminate\Foundation\Application)
+    /// ```
+    pub conditional_return: Option<ConditionalReturnType>,
+}
+
+// ─── PHPStan Conditional Return Types ───────────────────────────────────────
+
+/// A parsed PHPStan conditional return type expression.
+///
+/// PHPStan allows `@return` annotations that conditionally resolve to
+/// different types based on the value/type of a parameter.  For example:
+///
+/// ```text
+/// @return ($abstract is class-string<TClass> ? TClass
+///           : ($abstract is null ? \Illuminate\Foundation\Application : mixed))
+/// ```
+///
+/// This enum represents the recursive structure of such expressions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionalReturnType {
+    /// A concrete (terminal) type, e.g. `\Illuminate\Foundation\Application`
+    /// or `mixed`.
+    Concrete(String),
+
+    /// A conditional branch:
+    /// `($param is Condition ? ThenType : ElseType)`
+    Conditional {
+        /// The parameter name **without** the `$` prefix (e.g. `"abstract"`).
+        param_name: String,
+        /// The condition being checked.
+        condition: ParamCondition,
+        /// The type when the condition is satisfied.
+        then_type: Box<ConditionalReturnType>,
+        /// The type when the condition is not satisfied.
+        else_type: Box<ConditionalReturnType>,
+    },
+}
+
+/// The kind of condition in a PHPStan conditional return type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParamCondition {
+    /// `$param is class-string<T>` — when the argument is a `::class` constant,
+    /// the return type is the class itself.
+    ClassString,
+
+    /// `$param is null` — typically used for parameters with `= null` defaults
+    /// to return a known concrete type when no argument is provided.
+    IsNull,
+
+    /// `$param is \SomeType` — a general type check (e.g. `\Closure`, `string`).
+    IsType(String),
 }
 
 /// Stores extracted class information from a parsed PHP file.

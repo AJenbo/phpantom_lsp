@@ -6,9 +6,17 @@
 //! native hint is broad enough to be refined (e.g. `object`, `mixed`, or
 //! another class name) and is *not* a concrete scalar that could never be
 //! an object.
+//!
+//! Additionally, it supports PHPStan conditional return type annotations
+//! such as:
+//! ```text
+//! @return ($abstract is class-string<TClass> ? TClass : mixed)
+//! ```
 
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
+
+use crate::types::{ConditionalReturnType, ParamCondition};
 
 /// Scalar / built-in type names that can never be an object and therefore
 /// must not be overridden by a class-name docblock annotation.
@@ -163,6 +171,9 @@ pub fn resolve_effective_type(
 // ─── Internals ──────────────────────────────────────────────────────────────
 
 /// Generic tag extraction: find `@tag TypeName` and return the cleaned type.
+///
+/// **Skips** PHPStan conditional return types (those starting with `(`).
+/// Use [`extract_conditional_return_type`] for those.
 fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
     // Strip the `/**` opening and `*/` closing delimiters so that we only
     // deal with the inner content.  This handles both single-line
@@ -186,6 +197,12 @@ fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
                 continue;
             }
 
+            // PHPStan conditional return types start with `(` — skip them
+            // here; they are handled by `extract_conditional_return_type`.
+            if rest.starts_with('(') {
+                return None;
+            }
+
             // The type is the first whitespace-delimited token.
             let type_str = rest.split_whitespace().next()?;
 
@@ -193,6 +210,197 @@ fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
         }
     }
     None
+}
+
+// ─── PHPStan Conditional Return Types ───────────────────────────────────────
+
+/// Extract a PHPStan conditional return type from a `@return` tag.
+///
+/// Handles annotations like:
+/// ```text
+/// @return ($abstract is class-string<TClass> ? TClass
+///           : ($abstract is null ? \Illuminate\Foundation\Application : mixed))
+/// ```
+///
+/// Returns `None` if the `@return` tag is missing or is not a conditional
+/// (i.e. does not start with `(`).
+pub fn extract_conditional_return_type(docblock: &str) -> Option<ConditionalReturnType> {
+    // Collect the full @return content across multiple lines.
+    let raw = extract_raw_return_content(docblock)?;
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('(') {
+        return None;
+    }
+    parse_conditional_expr(trimmed)
+}
+
+/// Extract the raw content after `@return` from a (possibly multi-line)
+/// docblock, joining continuation lines.
+///
+/// For a conditional return type spanning multiple lines the content after
+/// `@return` is concatenated (with a single space between lines) until the
+/// parentheses are balanced or a new tag is encountered.
+fn extract_raw_return_content(docblock: &str) -> Option<String> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut collecting = false;
+    let mut parts: Vec<String> = Vec::new();
+    let mut paren_depth: i32 = 0;
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if !collecting {
+            if let Some(rest) = trimmed.strip_prefix("@return") {
+                let rest = rest.trim_start();
+                if rest.is_empty() {
+                    continue;
+                }
+                collecting = true;
+                paren_depth += rest.chars().filter(|&c| c == '(').count() as i32;
+                paren_depth -= rest.chars().filter(|&c| c == ')').count() as i32;
+                parts.push(rest.to_string());
+                if paren_depth <= 0 {
+                    break;
+                }
+            }
+        } else {
+            // Stop if we hit another tag
+            if trimmed.starts_with('@') {
+                break;
+            }
+            if trimmed.is_empty() {
+                continue;
+            }
+            paren_depth += trimmed.chars().filter(|&c| c == '(').count() as i32;
+            paren_depth -= trimmed.chars().filter(|&c| c == ')').count() as i32;
+            parts.push(trimmed.to_string());
+            if paren_depth <= 0 {
+                break;
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join(" "))
+}
+
+/// Parse a conditional expression string into a [`ConditionalReturnType`].
+///
+/// Expected format (recursive):
+/// ```text
+/// ($paramName is ConditionType ? ThenType : ElseType)
+/// ```
+///
+/// Where `ThenType` and `ElseType` can each be either a concrete type name
+/// or another parenthesised conditional.
+fn parse_conditional_expr(input: &str) -> Option<ConditionalReturnType> {
+    let s = input.trim();
+
+    // Must be wrapped in parens
+    if !s.starts_with('(') || !s.ends_with(')') {
+        // It's a concrete type
+        let cleaned = clean_type(s);
+        if cleaned.is_empty() {
+            return None;
+        }
+        return Some(ConditionalReturnType::Concrete(cleaned));
+    }
+
+    // Strip outer parens
+    let inner = &s[1..s.len() - 1];
+    let inner = inner.trim();
+
+    // Parse: $paramName is ConditionType ? ThenType : ElseType
+
+    // 1. Extract $paramName
+    let rest = inner.strip_prefix('$')?;
+    let space_idx = rest.find(|c: char| c.is_whitespace())?;
+    let param_name = rest[..space_idx].to_string();
+    let rest = rest[space_idx..].trim_start();
+
+    // 2. Expect "is"
+    let rest = rest.strip_prefix("is")?.trim_start();
+
+    // 3. Extract condition type (everything up to ` ? `)
+    // We need to find ` ? ` but be careful about nested parens
+    let question_pos = find_token_at_depth(rest, '?')?;
+    let condition_str = rest[..question_pos].trim();
+    let rest = rest[question_pos + 1..].trim_start();
+
+    // 4. Parse condition
+    let condition = parse_condition(condition_str);
+
+    // 5. Parse then-type and else-type split by ` : `
+    // We need to find `:` at depth 0
+    let colon_pos = find_token_at_depth(rest, ':')?;
+    let then_str = rest[..colon_pos].trim();
+    let else_str = rest[colon_pos + 1..].trim();
+
+    let then_type = parse_type_or_conditional(then_str)?;
+    let else_type = parse_type_or_conditional(else_str)?;
+
+    Some(ConditionalReturnType::Conditional {
+        param_name,
+        condition,
+        then_type: Box::new(then_type),
+        else_type: Box::new(else_type),
+    })
+}
+
+/// Parse a string that is either a `(...)` conditional or a concrete type.
+fn parse_type_or_conditional(s: &str) -> Option<ConditionalReturnType> {
+    let s = s.trim();
+    if s.starts_with('(') {
+        parse_conditional_expr(s)
+    } else {
+        let cleaned = clean_type(s);
+        if cleaned.is_empty() {
+            return None;
+        }
+        Some(ConditionalReturnType::Concrete(cleaned))
+    }
+}
+
+/// Find the position of `token` (e.g. `?` or `:`) at parenthesis depth 0.
+///
+/// Skips over `<…>` generics and `(…)` nested conditionals.
+fn find_token_at_depth(s: &str, token: char) -> Option<usize> {
+    let mut paren_depth = 0i32;
+    let mut angle_depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '<' => angle_depth += 1,
+            '>' => angle_depth -= 1,
+            c if c == token && paren_depth == 0 && angle_depth == 0 => {
+                return Some(i);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse a condition string like `class-string<TClass>`, `null`, or `\Closure`.
+fn parse_condition(s: &str) -> ParamCondition {
+    let s = s.trim();
+    if s.starts_with("class-string") {
+        ParamCondition::ClassString
+    } else if s.eq_ignore_ascii_case("null") {
+        ParamCondition::IsNull
+    } else {
+        let cleaned = s.strip_prefix('\\').unwrap_or(s);
+        ParamCondition::IsType(cleaned.to_string())
+    }
 }
 
 /// Clean a raw type string from a docblock:
@@ -249,6 +457,18 @@ fn is_scalar(type_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── extract_return_type (skips conditionals) ────────────────────────
+
+    #[test]
+    fn return_type_conditional_is_skipped() {
+        let doc = concat!(
+            "/**\n",
+            " * @return ($abstract is class-string<TClass> ? TClass : mixed)\n",
+            " */",
+        );
+        assert_eq!(extract_return_type(doc), None);
+    }
 
     // ── extract_return_type ─────────────────────────────────────────────
 
@@ -471,5 +691,192 @@ mod tests {
     #[test]
     fn clean_trailing_punctuation() {
         assert_eq!(clean_type("Foo."), "Foo");
+    }
+
+    // ── extract_conditional_return_type ─────────────────────────────────
+
+    #[test]
+    fn conditional_simple_class_string() {
+        let doc = concat!(
+            "/**\n",
+            " * @return ($abstract is class-string<TClass> ? TClass : mixed)\n",
+            " */",
+        );
+        let result = extract_conditional_return_type(doc);
+        assert!(result.is_some(), "Should parse a conditional return type");
+        let cond = result.unwrap();
+        match cond {
+            ConditionalReturnType::Conditional {
+                ref param_name,
+                ref condition,
+                ref then_type,
+                ref else_type,
+            } => {
+                assert_eq!(param_name, "abstract");
+                assert_eq!(*condition, ParamCondition::ClassString);
+                assert_eq!(
+                    **then_type,
+                    ConditionalReturnType::Concrete("TClass".into())
+                );
+                assert_eq!(**else_type, ConditionalReturnType::Concrete("mixed".into()));
+            }
+            _ => panic!("Expected Conditional, got {:?}", cond),
+        }
+    }
+
+    #[test]
+    fn conditional_null_check() {
+        let doc = concat!(
+            "/**\n",
+            " * @return ($guard is null ? \\Illuminate\\Contracts\\Auth\\Factory : \\Illuminate\\Contracts\\Auth\\StatefulGuard)\n",
+            " */",
+        );
+        let result = extract_conditional_return_type(doc).unwrap();
+        match result {
+            ConditionalReturnType::Conditional {
+                param_name,
+                condition,
+                then_type,
+                else_type,
+            } => {
+                assert_eq!(param_name, "guard");
+                assert_eq!(condition, ParamCondition::IsNull);
+                assert_eq!(
+                    *then_type,
+                    ConditionalReturnType::Concrete("Illuminate\\Contracts\\Auth\\Factory".into())
+                );
+                assert_eq!(
+                    *else_type,
+                    ConditionalReturnType::Concrete(
+                        "Illuminate\\Contracts\\Auth\\StatefulGuard".into()
+                    )
+                );
+            }
+            _ => panic!("Expected Conditional"),
+        }
+    }
+
+    #[test]
+    fn conditional_nested() {
+        let doc = concat!(
+            "/**\n",
+            " * @return ($abstract is class-string<TClass> ? TClass : ($abstract is null ? \\Illuminate\\Foundation\\Application : mixed))\n",
+            " */",
+        );
+        let result = extract_conditional_return_type(doc).unwrap();
+        match result {
+            ConditionalReturnType::Conditional {
+                ref param_name,
+                ref condition,
+                ref then_type,
+                ref else_type,
+            } => {
+                assert_eq!(param_name, "abstract");
+                assert_eq!(*condition, ParamCondition::ClassString);
+                assert_eq!(
+                    **then_type,
+                    ConditionalReturnType::Concrete("TClass".into())
+                );
+                // else_type should be another conditional
+                match else_type.as_ref() {
+                    ConditionalReturnType::Conditional {
+                        param_name: inner_param,
+                        condition: inner_cond,
+                        then_type: inner_then,
+                        else_type: inner_else,
+                    } => {
+                        assert_eq!(inner_param, "abstract");
+                        assert_eq!(*inner_cond, ParamCondition::IsNull);
+                        assert_eq!(
+                            **inner_then,
+                            ConditionalReturnType::Concrete(
+                                "Illuminate\\Foundation\\Application".into()
+                            )
+                        );
+                        assert_eq!(
+                            **inner_else,
+                            ConditionalReturnType::Concrete("mixed".into())
+                        );
+                    }
+                    _ => panic!("Expected nested Conditional"),
+                }
+            }
+            _ => panic!("Expected Conditional"),
+        }
+    }
+
+    #[test]
+    fn conditional_multiline() {
+        let doc = concat!(
+            "/**\n",
+            " * Get the available container instance.\n",
+            " *\n",
+            " * @param  string|callable|null  $abstract\n",
+            " * @return ($abstract is class-string<TClass>\n",
+            " *     ? TClass\n",
+            " *     : ($abstract is null\n",
+            " *         ? \\Illuminate\\Foundation\\Application\n",
+            " *         : mixed))\n",
+            " */",
+        );
+        let result = extract_conditional_return_type(doc);
+        assert!(result.is_some(), "Should parse multi-line conditional");
+        match result.unwrap() {
+            ConditionalReturnType::Conditional {
+                param_name,
+                condition,
+                ..
+            } => {
+                assert_eq!(param_name, "abstract");
+                assert_eq!(condition, ParamCondition::ClassString);
+            }
+            _ => panic!("Expected Conditional"),
+        }
+    }
+
+    #[test]
+    fn conditional_is_type() {
+        let doc = concat!(
+            "/**\n",
+            " * @return ($job is \\Closure ? \\Illuminate\\Foundation\\Bus\\PendingClosureDispatch : \\Illuminate\\Foundation\\Bus\\PendingDispatch)\n",
+            " */",
+        );
+        let result = extract_conditional_return_type(doc).unwrap();
+        match result {
+            ConditionalReturnType::Conditional {
+                param_name,
+                condition,
+                then_type,
+                else_type,
+            } => {
+                assert_eq!(param_name, "job");
+                assert_eq!(condition, ParamCondition::IsType("Closure".into()));
+                assert_eq!(
+                    *then_type,
+                    ConditionalReturnType::Concrete(
+                        "Illuminate\\Foundation\\Bus\\PendingClosureDispatch".into()
+                    )
+                );
+                assert_eq!(
+                    *else_type,
+                    ConditionalReturnType::Concrete(
+                        "Illuminate\\Foundation\\Bus\\PendingDispatch".into()
+                    )
+                );
+            }
+            _ => panic!("Expected Conditional"),
+        }
+    }
+
+    #[test]
+    fn conditional_not_present() {
+        let doc = "/** @return Application */";
+        assert_eq!(extract_conditional_return_type(doc), None);
+    }
+
+    #[test]
+    fn conditional_no_return_tag() {
+        let doc = "/** Just a comment */";
+        assert_eq!(extract_conditional_return_type(doc), None);
     }
 }

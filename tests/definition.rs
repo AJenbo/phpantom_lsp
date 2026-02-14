@@ -3676,6 +3676,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
                     parameters: vec![],
                     return_type: Some("Dog|Cat".to_string()),
                     namespace: None,
+                    conditional_return: None,
                 },
             ),
         );

@@ -366,17 +366,24 @@ impl Backend {
                         .map(|rth| Self::extract_hint_string(&rth.hint));
 
                     // Apply PHPDoc `@return` override for the function.
-                    let return_type = if let Some(ctx) = doc_ctx {
-                        let doc_type =
-                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, func)
-                                .and_then(docblock::extract_return_type);
+                    // Also extract PHPStan conditional return types if present.
+                    let (return_type, conditional_return) = if let Some(ctx) = doc_ctx {
+                        let docblock_text =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, func);
 
-                        docblock::resolve_effective_type(
+                        let doc_type = docblock_text.and_then(docblock::extract_return_type);
+
+                        let effective = docblock::resolve_effective_type(
                             native_return_type.as_deref(),
                             doc_type.as_deref(),
-                        )
+                        );
+
+                        let conditional =
+                            docblock_text.and_then(docblock::extract_conditional_return_type);
+
+                        (effective, conditional)
                     } else {
-                        native_return_type
+                        (native_return_type, None)
                     };
 
                     functions.push(FunctionInfo {
@@ -384,6 +391,7 @@ impl Backend {
                         parameters,
                         return_type,
                         namespace: current_namespace.clone(),
+                        conditional_return,
                     });
                 }
                 Statement::Namespace(namespace) => {
