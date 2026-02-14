@@ -1037,6 +1037,21 @@ impl Backend {
                             });
                         }
                     }
+                    // Also look for `case CASE_NAME` (enum cases are stored
+                    // as constants but declared with `case` keyword).
+                    let case_pattern = format!("case {}", member_name);
+                    if let Some(col) = line.find(&case_pattern) {
+                        let before_ok = col == 0 || is_word_boundary(line.as_bytes()[col - 1]);
+                        let after_pos = col + case_pattern.len();
+                        let after_ok =
+                            after_pos >= line.len() || is_word_boundary(line.as_bytes()[after_pos]);
+                        if before_ok && after_ok {
+                            return Some(Position {
+                                line: line_idx as u32,
+                                character: col as u32,
+                            });
+                        }
+                    }
                 }
                 MemberKind::Property => {
                     // Look for `$propertyName` on a line that looks like a

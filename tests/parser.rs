@@ -1089,3 +1089,154 @@ async fn test_parse_functions_mixed_guarded_and_unguarded() {
     assert!(names.contains(&"maybe_defined"));
     assert!(names.contains(&"also_always"));
 }
+
+// ─── Enum Parsing ───────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_parse_php_extracts_backed_enum_cases_as_constants() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum CustomerAvailabilityStatus: int\n",
+        "{\n",
+        "    case CUSTOMER_NOT_IN_AUDIENCE = -1;\n",
+        "    case AVAILABLE_TO_CUSTOMER = 0;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1, "Should parse the enum as a class-like");
+    assert_eq!(classes[0].name, "CustomerAvailabilityStatus");
+    assert_eq!(
+        classes[0].constants.len(),
+        2,
+        "Enum cases should be extracted as constants"
+    );
+
+    let case0 = &classes[0].constants[0];
+    assert_eq!(case0.name, "CUSTOMER_NOT_IN_AUDIENCE");
+    assert_eq!(
+        case0.visibility,
+        phpantom_lsp::types::Visibility::Public,
+        "Enum cases are always public"
+    );
+
+    let case1 = &classes[0].constants[1];
+    assert_eq!(case1.name, "AVAILABLE_TO_CUSTOMER");
+}
+
+#[tokio::test]
+async fn test_parse_php_extracts_unit_enum_cases() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum Color\n",
+        "{\n",
+        "    case Red;\n",
+        "    case Green;\n",
+        "    case Blue;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Color");
+    assert_eq!(
+        classes[0].constants.len(),
+        3,
+        "Unit enum cases should be extracted as constants"
+    );
+
+    let names: Vec<&str> = classes[0]
+        .constants
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["Red", "Green", "Blue"]);
+}
+
+#[tokio::test]
+async fn test_parse_php_extracts_enum_with_methods() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum Suit: string\n",
+        "{\n",
+        "    case Hearts = 'H';\n",
+        "    case Diamonds = 'D';\n",
+        "    case Clubs = 'C';\n",
+        "    case Spades = 'S';\n",
+        "\n",
+        "    public function color(): string\n",
+        "    {\n",
+        "        return match($this) {\n",
+        "            Suit::Hearts, Suit::Diamonds => 'red',\n",
+        "            Suit::Clubs, Suit::Spades => 'black',\n",
+        "        };\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Suit");
+    assert_eq!(classes[0].constants.len(), 4, "Should have 4 enum cases");
+    assert_eq!(classes[0].methods.len(), 1, "Should have 1 method");
+    assert_eq!(classes[0].methods[0].name, "color");
+    assert_eq!(classes[0].methods[0].return_type.as_deref(), Some("string"));
+}
+
+#[tokio::test]
+async fn test_parse_php_extracts_enum_with_constants_and_cases() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum Status: int\n",
+        "{\n",
+        "    const DEFAULT_STATUS = 0;\n",
+        "    case Active = 1;\n",
+        "    case Inactive = 2;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Status");
+    // Both the `const` and the `case` entries should appear as constants.
+    assert_eq!(
+        classes[0].constants.len(),
+        3,
+        "Should have 1 real constant + 2 enum cases"
+    );
+
+    let names: Vec<&str> = classes[0]
+        .constants
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert!(names.contains(&"DEFAULT_STATUS"));
+    assert!(names.contains(&"Active"));
+    assert!(names.contains(&"Inactive"));
+}
+
+#[tokio::test]
+async fn test_parse_php_extracts_enum_inside_namespace() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "namespace App\\Enums;\n",
+        "\n",
+        "enum Direction\n",
+        "{\n",
+        "    case Up;\n",
+        "    case Down;\n",
+        "    case Left;\n",
+        "    case Right;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Direction");
+    assert_eq!(classes[0].constants.len(), 4);
+}

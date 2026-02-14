@@ -559,6 +559,17 @@ impl Backend {
                         return results;
                     }
                 }
+                Statement::Enum(enum_def) => {
+                    let start = enum_def.left_brace.start.offset;
+                    let end = enum_def.right_brace.end.offset;
+                    if ctx.cursor_offset < start || ctx.cursor_offset > end {
+                        continue;
+                    }
+                    let results = Self::resolve_variable_in_members(enum_def.members.iter(), ctx);
+                    if !results.is_empty() {
+                        return results;
+                    }
+                }
                 Statement::Namespace(ns) => {
                     let results = Self::resolve_variable_in_statements(ns.statements().iter(), ctx);
                     if !results.is_empty() {

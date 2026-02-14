@@ -680,6 +680,60 @@ impl Backend {
                         mixins,
                     });
                 }
+                Statement::Enum(enum_def) => {
+                    let enum_name = enum_def.name.value.to_string();
+
+                    let (mut methods, mut properties, constants, used_traits) =
+                        Self::extract_class_like_members(enum_def.members.iter(), doc_ctx);
+
+                    // Extract @property, @method, and @mixin tags from the enum-level docblock.
+                    let mut mixins = Vec::new();
+                    if let Some(ctx) = doc_ctx
+                        && let Some(doc_text) =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, enum_def)
+                    {
+                        for (name, type_str) in docblock::extract_property_tags(doc_text) {
+                            if !properties.iter().any(|p| p.name == name) {
+                                properties.push(PropertyInfo {
+                                    name,
+                                    type_hint: if type_str.is_empty() {
+                                        None
+                                    } else {
+                                        Some(type_str)
+                                    },
+                                    is_static: false,
+                                    visibility: Visibility::Public,
+                                });
+                            }
+                        }
+
+                        for method_info in docblock::extract_method_tags(doc_text) {
+                            if !methods.iter().any(|m| m.name == method_info.name) {
+                                methods.push(method_info);
+                            }
+                        }
+
+                        mixins = docblock::extract_mixin_tags(doc_text);
+                    }
+
+                    // Enums can implement interfaces but cannot extend classes.
+                    let parent_class = None;
+
+                    let start_offset = enum_def.left_brace.start.offset;
+                    let end_offset = enum_def.right_brace.end.offset;
+
+                    classes.push(ClassInfo {
+                        name: enum_name,
+                        methods,
+                        properties,
+                        constants,
+                        start_offset,
+                        end_offset,
+                        parent_class,
+                        used_traits,
+                        mixins,
+                    });
+                }
                 Statement::Namespace(namespace) => {
                     Self::extract_classes_from_statements(
                         namespace.statements().iter(),
@@ -813,12 +867,19 @@ impl Backend {
                         });
                     }
                 }
+                ClassLikeMember::EnumCase(enum_case) => {
+                    let case_name = enum_case.item.name().value.to_string();
+                    constants.push(ConstantInfo {
+                        name: case_name,
+                        type_hint: None,
+                        visibility: Visibility::Public,
+                    });
+                }
                 ClassLikeMember::TraitUse(trait_use) => {
                     for trait_name_ident in trait_use.trait_names.iter() {
                         used_traits.push(trait_name_ident.value().to_string());
                     }
                 }
-                _ => {}
             }
         }
 
@@ -861,7 +922,10 @@ impl Backend {
                             Statement::Use(use_stmt) => {
                                 Self::extract_use_items(&use_stmt.items, &mut use_map);
                             }
-                            Statement::Class(_) | Statement::Interface(_) | Statement::Trait(_) => {
+                            Statement::Class(_)
+                            | Statement::Interface(_)
+                            | Statement::Trait(_)
+                            | Statement::Enum(_) => {
                                 Self::extract_classes_from_statements(
                                     std::iter::once(inner),
                                     &mut classes,
@@ -884,7 +948,10 @@ impl Backend {
                         }
                     }
                 }
-                Statement::Class(_) | Statement::Interface(_) | Statement::Trait(_) => {
+                Statement::Class(_)
+                | Statement::Interface(_)
+                | Statement::Trait(_)
+                | Statement::Enum(_) => {
                     Self::extract_classes_from_statements(
                         std::iter::once(statement),
                         &mut classes,
