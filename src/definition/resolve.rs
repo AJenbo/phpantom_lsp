@@ -683,6 +683,13 @@ impl Backend {
             return Some(class.clone());
         }
 
+        // Check traits used by this class.
+        if let Some(found) =
+            Self::find_declaring_in_traits(&class.used_traits, member_name, class_loader, 0)
+        {
+            return Some(found);
+        }
+
         // Walk up the parent chain.
         let mut current = class.clone();
         for _ in 0..MAX_DEPTH {
@@ -691,7 +698,51 @@ impl Backend {
             if Self::classify_member(&parent, member_name).is_some() {
                 return Some(parent);
             }
+            // Check traits used by the parent class.
+            if let Some(found) =
+                Self::find_declaring_in_traits(&parent.used_traits, member_name, class_loader, 0)
+            {
+                return Some(found);
+            }
             current = parent;
+        }
+
+        None
+    }
+
+    /// Search through a list of trait names for one that declares `member_name`.
+    ///
+    /// Traits can themselves `use` other traits, so this recurses up to a
+    /// depth limit to handle trait composition.
+    fn find_declaring_in_traits(
+        trait_names: &[String],
+        member_name: &str,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        depth: usize,
+    ) -> Option<ClassInfo> {
+        const MAX_TRAIT_DEPTH: usize = 20;
+        if depth > MAX_TRAIT_DEPTH {
+            return None;
+        }
+
+        for trait_name in trait_names {
+            let trait_info = if let Some(t) = class_loader(trait_name) {
+                t
+            } else {
+                continue;
+            };
+            if Self::classify_member(&trait_info, member_name).is_some() {
+                return Some(trait_info);
+            }
+            // Recurse into traits used by this trait.
+            if let Some(found) = Self::find_declaring_in_traits(
+                &trait_info.used_traits,
+                member_name,
+                class_loader,
+                depth + 1,
+            ) {
+                return Some(found);
+            }
         }
 
         None

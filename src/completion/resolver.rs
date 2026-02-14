@@ -132,16 +132,17 @@ impl Backend {
         // method calls (`$this->getService()`),
         // and static method calls (`ClassName::make()`).
         if subject.ends_with(')')
-            && let Some((call_body, args_text)) = split_call_subject(subject) {
-                return Self::resolve_call_return_types(
-                    call_body,
-                    args_text,
-                    current_class,
-                    all_classes,
-                    class_loader,
-                    function_loader,
-                );
-            }
+            && let Some((call_body, args_text)) = split_call_subject(subject)
+        {
+            return Self::resolve_call_return_types(
+                call_body,
+                args_text,
+                current_class,
+                all_classes,
+                class_loader,
+                function_loader,
+            );
+        }
 
         // ── Property-chain: $this->prop  or  $this?->prop ──
         if let Some(prop_name) = subject
@@ -1101,6 +1102,13 @@ impl Backend {
     ) -> ClassInfo {
         let mut merged = class.clone();
 
+        // 1. Merge traits used by this class.
+        //    PHP precedence: class methods > trait methods > inherited methods.
+        //    Since `merged` already contains the class's own members, we only
+        //    add trait members that don't collide with existing ones.
+        Self::merge_traits_into(&mut merged, &class.used_traits, class_loader, 0);
+
+        // 2. Walk up the `extends` chain and merge parent members.
         let mut current = class.clone();
         let mut depth = 0;
         const MAX_DEPTH: u32 = 20;
@@ -1116,6 +1124,10 @@ impl Backend {
             } else {
                 break;
             };
+
+            // Merge traits used by the parent class as well, so that
+            // grandparent-level trait members are visible.
+            Self::merge_traits_into(&mut merged, &parent.used_traits, class_loader, 0);
 
             // Merge parent methods — skip private, skip if child already has one with same name
             for method in &parent.methods {
@@ -1154,6 +1166,67 @@ impl Backend {
         }
 
         merged
+    }
+
+    /// Recursively merge members from the given traits into `merged`.
+    ///
+    /// Traits can themselves `use` other traits (composition), so this
+    /// method recurses up to `MAX_TRAIT_DEPTH` levels.  Members that
+    /// already exist in `merged` (by name) are skipped — this naturally
+    /// implements the PHP precedence rule where the current class's own
+    /// members win over trait members, and earlier-listed traits win
+    /// over later ones.
+    ///
+    /// Private trait members *are* merged (unlike parent class private
+    /// members), because PHP copies trait members into the using class
+    /// regardless of visibility.
+    fn merge_traits_into(
+        merged: &mut ClassInfo,
+        trait_names: &[String],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        depth: u32,
+    ) {
+        const MAX_TRAIT_DEPTH: u32 = 20;
+        if depth > MAX_TRAIT_DEPTH {
+            return;
+        }
+
+        for trait_name in trait_names {
+            let trait_info = if let Some(t) = class_loader(trait_name) {
+                t
+            } else {
+                continue;
+            };
+
+            // Recursively merge traits used by this trait (trait composition).
+            if !trait_info.used_traits.is_empty() {
+                Self::merge_traits_into(merged, &trait_info.used_traits, class_loader, depth + 1);
+            }
+
+            // Merge trait methods — skip if already present
+            for method in &trait_info.methods {
+                if merged.methods.iter().any(|m| m.name == method.name) {
+                    continue;
+                }
+                merged.methods.push(method.clone());
+            }
+
+            // Merge trait properties
+            for property in &trait_info.properties {
+                if merged.properties.iter().any(|p| p.name == property.name) {
+                    continue;
+                }
+                merged.properties.push(property.clone());
+            }
+
+            // Merge trait constants
+            for constant in &trait_info.constants {
+                if merged.constants.iter().any(|c| c.name == constant.name) {
+                    continue;
+                }
+                merged.constants.push(constant.clone());
+            }
+        }
     }
 }
 

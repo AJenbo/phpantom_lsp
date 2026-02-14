@@ -192,4 +192,7 @@ pub struct ClassInfo {
     /// The parent class name from the `extends` clause, if any.
     /// This is the raw name as written in source (e.g. "BaseClass", "Foo\\Bar").
     pub parent_class: Option<String>,
+    /// Trait names used by this class via `use TraitName;` statements.
+    /// These are resolved to fully-qualified names during post-processing.
+    pub used_traits: Vec<String>,
 }

@@ -517,7 +517,7 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let (methods, properties, constants) =
+                    let (methods, properties, constants, used_traits) =
                         Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
                     let start_offset = class.left_brace.start.offset;
@@ -531,6 +531,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class,
+                        used_traits,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -543,7 +544,7 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let (methods, properties, constants) =
+                    let (methods, properties, constants, used_traits) =
                         Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
                     let start_offset = iface.left_brace.start.offset;
@@ -557,6 +558,27 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class,
+                        used_traits,
+                    });
+                }
+                Statement::Trait(trait_def) => {
+                    let trait_name = trait_def.name.value.to_string();
+
+                    let (methods, properties, constants, used_traits) =
+                        Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
+
+                    let start_offset = trait_def.left_brace.start.offset;
+                    let end_offset = trait_def.right_brace.end.offset;
+
+                    classes.push(ClassInfo {
+                        name: trait_name,
+                        methods,
+                        properties,
+                        constants,
+                        start_offset,
+                        end_offset,
+                        parent_class: None,
+                        used_traits,
                     });
                 }
                 Statement::Namespace(namespace) => {
@@ -571,20 +593,28 @@ impl Backend {
         }
     }
 
-    /// Extract methods, properties, and constants from class-like members.
+    /// Extract methods, properties, constants, and used trait names from
+    /// class-like members.
     ///
-    /// This is shared between `Statement::Class` and `Statement::Interface`
-    /// since both use the same `ClassLikeMember` representation.
+    /// This is shared between `Statement::Class`, `Statement::Interface`,
+    /// and `Statement::Trait` since all use the same `ClassLikeMember`
+    /// representation.
     ///
     /// When `doc_ctx` is provided, PHPDoc `@return` and `@var` tags are used
     /// to refine (or supply) type information for methods and properties.
     fn extract_class_like_members<'a>(
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
         doc_ctx: Option<&DocblockCtx<'a>>,
-    ) -> (Vec<MethodInfo>, Vec<PropertyInfo>, Vec<ConstantInfo>) {
+    ) -> (
+        Vec<MethodInfo>,
+        Vec<PropertyInfo>,
+        Vec<ConstantInfo>,
+        Vec<String>,
+    ) {
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
+        let mut used_traits = Vec::new();
 
         for member in members {
             match member {
@@ -675,11 +705,16 @@ impl Backend {
                         });
                     }
                 }
+                ClassLikeMember::TraitUse(trait_use) => {
+                    for trait_name_ident in trait_use.trait_names.iter() {
+                        used_traits.push(trait_name_ident.value().to_string());
+                    }
+                }
                 _ => {}
             }
         }
 
-        (methods, properties, constants)
+        (methods, properties, constants, used_traits)
     }
 
     /// Update the ast_map, use_map, and namespace_map for a given file URI
@@ -718,7 +753,7 @@ impl Backend {
                             Statement::Use(use_stmt) => {
                                 Self::extract_use_items(&use_stmt.items, &mut use_map);
                             }
-                            Statement::Class(_) | Statement::Interface(_) => {
+                            Statement::Class(_) | Statement::Interface(_) | Statement::Trait(_) => {
                                 Self::extract_classes_from_statements(
                                     std::iter::once(inner),
                                     &mut classes,
@@ -741,7 +776,7 @@ impl Backend {
                         }
                     }
                 }
-                Statement::Class(_) | Statement::Interface(_) => {
+                Statement::Class(_) | Statement::Interface(_) | Statement::Trait(_) => {
                     Self::extract_classes_from_statements(
                         std::iter::once(statement),
                         &mut classes,
@@ -834,6 +869,12 @@ impl Backend {
                 let resolved = Self::resolve_name(parent, use_map, namespace);
                 class.parent_class = Some(resolved);
             }
+            // Resolve trait names to fully-qualified names
+            class.used_traits = class
+                .used_traits
+                .iter()
+                .map(|t| Self::resolve_name(t, use_map, namespace))
+                .collect();
         }
     }
 
