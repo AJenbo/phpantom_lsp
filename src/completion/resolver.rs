@@ -468,8 +468,12 @@ impl Backend {
             return results;
         }
 
-        // self / static always refer to the owning class
-        if hint == "self" || hint == "static" {
+        // self / static / $this always refer to the owning class.
+        // In docblocks `@return $this` means "the instance the method is
+        // called on" — identical to `static` for inheritance, but when the
+        // method comes from a `@mixin` the return type is rewritten to the
+        // mixin class name during merge (see `merge_mixins_into_recursive`).
+        if hint == "self" || hint == "static" || hint == "$this" {
             return all_classes
                 .iter()
                 .find(|c| c.name == owning_class_name)
@@ -1162,7 +1166,15 @@ impl Backend {
                 if merged.methods.iter().any(|m| m.name == method.name) {
                     continue;
                 }
-                merged.methods.push(method.clone());
+                let mut method = method.clone();
+                // `@return $this` in the mixin class refers to the mixin
+                // instance, NOT the consuming class.  Rewrite the return
+                // type to the concrete mixin class name so that resolution
+                // produces the mixin class rather than the consumer.
+                if method.return_type.as_deref() == Some("$this") {
+                    method.return_type = Some(mixin_class.name.clone());
+                }
+                merged.methods.push(method);
             }
 
             for property in &resolved_mixin.properties {

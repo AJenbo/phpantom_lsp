@@ -329,7 +329,8 @@ pub fn resolve_class_path(
 fn is_builtin_type(name: &str) -> bool {
     matches!(
         name,
-        "self"
+        "$this"
+            | "self"
             | "static"
             | "parent"
             | "string"

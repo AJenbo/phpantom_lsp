@@ -1908,3 +1908,241 @@ async fn test_completion_mixin_variable_from_chained_method_call() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── @return $this on mixin methods ─────────────────────────────────────────
+
+/// Test: When a mixin class has a method with `@return $this`, chaining on
+/// that method should resolve to the **mixin class** (not the consumer).
+///
+/// In PHP, `@mixin` proxies calls via `__call` to an internal instance of
+/// the mixin class, so `$this` inside the mixin method refers to the mixin
+/// instance.  This contrasts with inheritance where `@return $this` /
+/// `static` resolves to the child class.
+#[tokio::test]
+async fn test_completion_mixin_return_this_resolves_to_mixin_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_return_this.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                            // 0
+        "class QueryBuilder {\n",                                             // 1
+        "    /** @return $this */\n",                                         // 2
+        "    public function where(string $col): static { return $this; }\n", // 3
+        "    public function get(): array { return []; }\n",                  // 4
+        "    public function toSql(): string { return ''; }\n",               // 5
+        "}\n",                                                                // 6
+        "/**\n",                                                              // 7
+        " * @mixin QueryBuilder\n",                                           // 8
+        " */\n",                                                              // 9
+        "class Model {\n",                                                    // 10
+        "    public function save(): bool { return true; }\n",                // 11
+        "    public function test(): void {\n",                               // 12
+        "        $this->where('active')->\n",                                 // 13
+        "    }\n",                                                            // 14
+        "}\n",                                                                // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 33,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // `@return $this` on a mixin method resolves to QueryBuilder,
+            // so we should see QueryBuilder's methods, NOT Model's.
+            assert!(
+                method_names.contains(&"get"),
+                "Chaining after mixin @return $this should show mixin class methods (get), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"toSql"),
+                "Chaining after mixin @return $this should show mixin class methods (toSql), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"where"),
+                "Chaining after mixin @return $this should show mixin class methods (where), got: {:?}",
+                method_names
+            );
+            // Model's own method should NOT appear — the chain resolved
+            // to QueryBuilder, not Model.
+            assert!(
+                !method_names.contains(&"save"),
+                "Chaining after mixin @return $this should NOT show consumer class methods (save), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: `@return $this` on a mixin method — goto-definition on a chained
+/// call should land in the mixin class, not the consumer.
+#[tokio::test]
+async fn test_goto_definition_mixin_return_this_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_return_this_goto.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                            // 0
+        "class QueryBuilder {\n",                                             // 1
+        "    /** @return $this */\n",                                         // 2
+        "    public function where(string $col): static { return $this; }\n", // 3
+        "    public function get(): array { return []; }\n",                  // 4
+        "}\n",                                                                // 5
+        "/**\n",                                                              // 6
+        " * @mixin QueryBuilder\n",                                           // 7
+        " */\n",                                                              // 8
+        "class Model {\n",                                                    // 9
+        "    public function test(): void {\n",                               // 10
+        "        $this->where('active')->get();\n",                           // 11
+        "    }\n",                                                            // 12
+        "}\n",                                                                // 13
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "get" in `$this->where('active')->get()` on line 11
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 35,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve chained call after mixin @return $this"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 4,
+                "get() is declared on line 4 in QueryBuilder, not in Model"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Test: When a child class inherits from a parent that has `@return $this`,
+/// the child resolves to itself (not the parent).  This contrasts with the
+/// mixin case above.
+#[tokio::test]
+async fn test_completion_inherited_return_this_resolves_to_child() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inherit_return_this.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                            // 0
+        "class BaseBuilder {\n",                                              // 1
+        "    /** @return $this */\n",                                         // 2
+        "    public function where(string $col): static { return $this; }\n", // 3
+        "}\n",                                                                // 4
+        "class ModelBuilder extends BaseBuilder {\n",                         // 5
+        "    public function paginate(): array { return []; }\n",             // 6
+        "    public function test(): void {\n",                               // 7
+        "        $this->where('x')->\n",                                      // 8
+        "    }\n",                                                            // 9
+        "}\n",                                                                // 10
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 27,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // For inheritance, @return $this resolves to the child class,
+            // so child-only methods should be visible.
+            assert!(
+                names.contains(&"paginate"),
+                "Inherited @return $this should resolve to child class — 'paginate' expected, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"where"),
+                "Inherited where() should still be visible, got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

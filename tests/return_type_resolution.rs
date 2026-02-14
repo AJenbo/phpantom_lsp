@@ -1759,3 +1759,273 @@ async fn test_goto_definition_variable_from_chained_method_call() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── @return $this docblock support ─────────────────────────────────────────
+
+/// Test: `@return $this` in a docblock resolves the same way as `static`,
+/// enabling fluent method chaining.
+#[tokio::test]
+async fn test_goto_definition_docblock_return_this_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                              // 0
+        "class QueryBuilder {\n",                                               // 1
+        "    /** @return $this */\n",                                           // 2
+        "    public function where(string $col): static { return $this; }\n",   // 3
+        "    /** @return $this */\n",                                           // 4
+        "    public function orderBy(string $col): static { return $this; }\n", // 5
+        "    public function get(): array { return []; }\n",                    // 6
+        "\n",                                                                   // 7
+        "    public function findActive(): void {\n",                           // 8
+        "        $this->where('active')->orderBy('name');\n",                   // 9
+        "    }\n",                                                              // 10
+        "}\n",                                                                  // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "orderBy" in `$this->where('active')->orderBy('name')` on line 9
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve chained method call via '@return $this'"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 5,
+                "orderBy is declared on line 5"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Test: `@return $this` without a native type hint still resolves.
+#[tokio::test]
+async fn test_goto_definition_docblock_return_this_no_native_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Builder {\n",                                    // 1
+        "    /** @return $this */\n",                           // 2
+        "    public function setName(string $name) {\n",        // 3
+        "        return $this;\n",                              // 4
+        "    }\n",                                              // 5
+        "    public function build(): string { return ''; }\n", // 6
+        "\n",                                                   // 7
+        "    public function test(): void {\n",                 // 8
+        "        $this->setName('foo')->build();\n",            // 9
+        "    }\n",                                              // 10
+        "}\n",                                                  // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "build" in `$this->setName('foo')->build()` on line 9
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve chained method via '@return $this' without native hint"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "build() is declared on line 6"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Test: `@return $this` resolves to the child class when called on an
+/// instance of a subclass (same behaviour as `static`).
+#[tokio::test]
+async fn test_completion_docblock_return_this_inherits_to_child() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                               // 0
+        "class BaseBuilder {\n",                                                 // 1
+        "    /** @return $this */\n",                                            // 2
+        "    public function setName(string $name): static { return $this; }\n", // 3
+        "}\n",                                                                   // 4
+        "class ChildBuilder extends BaseBuilder {\n",                            // 5
+        "    public function childOnly(): void {}\n",                            // 6
+        "    public function test(): void {\n",                                  // 7
+        "        $this->setName('x')->\n",                                       // 8
+        "    }\n",                                                               // 9
+        "}\n",                                                                   // 10
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 29,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                names.contains(&"childOnly"),
+                "After @return $this on inherited method, should see child-class methods, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"setName"),
+                "Should still see inherited setName, got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: Completion on a variable assigned from a method with `@return $this`.
+#[tokio::test]
+async fn test_completion_variable_from_return_this_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                              // 0
+        "class Configurator {\n",                                               // 1
+        "    /** @return $this */\n",                                           // 2
+        "    public function setOption(string $k): static { return $this; }\n", // 3
+        "    public function apply(): void {}\n",                               // 4
+        "\n",                                                                   // 5
+        "    public function test(): void {\n",                                 // 6
+        "        $c = $this->setOption('debug');\n",                            // 7
+        "        $c->\n",                                                       // 8
+        "    }\n",                                                              // 9
+        "}\n",                                                                  // 10
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                names.contains(&"setOption"),
+                "Variable from @return $this should offer class methods, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"apply"),
+                "Variable from @return $this should offer class methods, got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
