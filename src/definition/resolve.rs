@@ -585,11 +585,34 @@ impl Backend {
             return Some(class_name);
         }
 
-        // Instance method call: `$this->method()` / `$var->method()`
+        // Build the right-hand side of the call expression, preserving
+        // arguments for conditional return-type resolution.
+        let rhs = if args_text.is_empty() {
+            format!("{}()", func_name)
+        } else {
+            format!("{}({})", func_name, args_text)
+        };
+
+        // Instance method call: `$this->method()` / `$var->method()` /
+        // `app()->method()` (chained call expression)
         if i >= 2 && chars[i - 2] == '-' && chars[i - 1] == '>' {
+            // First check if the LHS is itself a call expression ending
+            // with `)` — e.g. `app()->make(...)` where we need to
+            // recursively resolve `app()`.
+            let arrow_pos = i - 2;
+            let mut j = arrow_pos;
+            while j > 0 && chars[j - 1] == ' ' {
+                j -= 1;
+            }
+            if j > 0
+                && chars[j - 1] == ')'
+                && let Some(inner_call) = Self::extract_call_subject_for_definition(chars, j)
+            {
+                return Some(format!("{}->{}", inner_call, rhs));
+            }
             let inner_subject = Self::extract_simple_var_before(chars, i - 2);
             if !inner_subject.is_empty() {
-                return Some(format!("{}->{}()", inner_subject, func_name));
+                return Some(format!("{}->{}", inner_subject, rhs));
             }
         }
 
@@ -597,7 +620,7 @@ impl Backend {
         if i >= 3 && chars[i - 3] == '?' && chars[i - 2] == '-' && chars[i - 1] == '>' {
             let inner_subject = Self::extract_simple_var_before(chars, i - 3);
             if !inner_subject.is_empty() {
-                return Some(format!("{}?->{}()", inner_subject, func_name));
+                return Some(format!("{}?->{}", inner_subject, rhs));
             }
         }
 
@@ -605,17 +628,13 @@ impl Backend {
         if i >= 2 && chars[i - 2] == ':' && chars[i - 1] == ':' {
             let class_subject = Self::extract_subject_before(chars, i - 2);
             if !class_subject.is_empty() {
-                return Some(format!("{}::{}()", class_subject, func_name));
+                return Some(format!("{}::{}", class_subject, rhs));
             }
         }
 
         // Standalone function call: preserve arguments for conditional
         // return-type resolution (e.g. `app(A::class)` instead of `app()`).
-        if args_text.is_empty() {
-            Some(format!("{}()", func_name))
-        } else {
-            Some(format!("{}({})", func_name, args_text))
-        }
+        Some(rhs)
     }
 
     /// Extract a `$variable` ending at position `end` (exclusive).

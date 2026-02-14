@@ -215,6 +215,21 @@ impl Backend {
                 current_class
                     .map(|cc| Self::resolve_property_types(prop, cc, all_classes, class_loader))
                     .unwrap_or_default()
+            } else if lhs.ends_with(')') {
+                // LHS is itself a call expression (e.g. `app()` in
+                // `app()->make(…)`).  Recursively resolve it.
+                if let Some((inner_body, inner_args)) = split_call_subject(lhs) {
+                    Self::resolve_call_return_types(
+                        inner_body,
+                        inner_args,
+                        current_class,
+                        all_classes,
+                        class_loader,
+                        function_loader,
+                    )
+                } else {
+                    vec![]
+                }
             } else {
                 // Could be a variable — for now, skip complex chains
                 vec![]
@@ -222,9 +237,10 @@ impl Backend {
 
             let mut results = Vec::new();
             for owner in &lhs_classes {
-                results.extend(Self::resolve_method_return_types(
+                results.extend(Self::resolve_method_return_types_with_args(
                     owner,
                     method_name,
+                    text_args,
                     all_classes,
                     class_loader,
                 ));
@@ -254,9 +270,10 @@ impl Backend {
             };
 
             if let Some(ref owner) = owner_class {
-                return Self::resolve_method_return_types(
+                return Self::resolve_method_return_types_with_args(
                     owner,
                     method_name,
+                    text_args,
                     all_classes,
                     class_loader,
                 );
@@ -273,9 +290,9 @@ impl Backend {
             // (e.g. `app(SessionManager::class)` → text_args = "SessionManager::class").
             if let Some(ref cond) = func_info.conditional_return {
                 let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args(cond, &func_info, text_args)
+                    resolve_conditional_with_text_args(cond, &func_info.parameters, text_args)
                 } else {
-                    resolve_conditional_without_args(cond, &func_info)
+                    resolve_conditional_without_args(cond, &func_info.parameters)
                 };
                 if let Some(ref ty) = resolved_type {
                     let classes = Self::type_hint_to_classes(ty, "", all_classes, class_loader);
@@ -303,8 +320,47 @@ impl Backend {
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> Vec<ClassInfo> {
-        // First check the class itself
-        if let Some(method) = class_info.methods.iter().find(|m| m.name == method_name) {
+        Self::resolve_method_return_types_with_args(
+            class_info,
+            method_name,
+            "",
+            all_classes,
+            class_loader,
+        )
+    }
+
+    /// Resolve a method call's return type, taking into account PHPStan
+    /// conditional return types when `text_args` is provided.
+    ///
+    /// This is the workhorse behind both `resolve_method_return_types`
+    /// (which passes `""`) and the inline call-chain path (which passes
+    /// the raw argument text from the source, e.g. `"CurrentCart::class"`).
+    fn resolve_method_return_types_with_args(
+        class_info: &ClassInfo,
+        method_name: &str,
+        text_args: &str,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Vec<ClassInfo> {
+        // Helper: try to resolve a method's conditional return type, falling
+        // back to the plain return type.
+        let resolve_method = |method: &MethodInfo| -> Vec<ClassInfo> {
+            // Try conditional return type first (PHPStan syntax)
+            if let Some(ref cond) = method.conditional_return {
+                let resolved_type = if !text_args.is_empty() {
+                    resolve_conditional_with_text_args(cond, &method.parameters, text_args)
+                } else {
+                    resolve_conditional_without_args(cond, &method.parameters)
+                };
+                if let Some(ref ty) = resolved_type {
+                    let classes =
+                        Self::type_hint_to_classes(ty, &class_info.name, all_classes, class_loader);
+                    if !classes.is_empty() {
+                        return classes;
+                    }
+                }
+            }
+            // Fall back to plain return type
             if let Some(ref ret) = method.return_type {
                 return Self::type_hint_to_classes(
                     ret,
@@ -313,15 +369,18 @@ impl Backend {
                     class_loader,
                 );
             }
-            return vec![];
+            vec![]
+        };
+
+        // First check the class itself
+        if let Some(method) = class_info.methods.iter().find(|m| m.name == method_name) {
+            return resolve_method(method);
         }
 
         // Walk up the inheritance chain
         let merged = Self::resolve_class_with_inheritance(class_info, class_loader);
-        if let Some(method) = merged.methods.iter().find(|m| m.name == method_name)
-            && let Some(ref ret) = method.return_type
-        {
-            return Self::type_hint_to_classes(ret, &class_info.name, all_classes, class_loader);
+        if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
+            return resolve_method(method);
         }
 
         vec![]
@@ -1001,7 +1060,7 @@ impl Backend {
                             if let Some(ref cond) = func_info.conditional_return {
                                 let resolved_type = resolve_conditional_with_args(
                                     cond,
-                                    &func_info,
+                                    &func_info.parameters,
                                     &func_call.argument_list,
                                 );
                                 if let Some(ref ty) = resolved_type {
@@ -1275,7 +1334,7 @@ fn split_call_subject(subject: &str) -> Option<(&str, &str)> {
 /// between the parentheses.
 fn resolve_conditional_with_text_args(
     conditional: &ConditionalReturnType,
-    func_info: &FunctionInfo,
+    params: &[ParameterInfo],
     text_args: &str,
 ) -> Option<String> {
     match conditional {
@@ -1293,11 +1352,7 @@ fn resolve_conditional_with_text_args(
         } => {
             // Find which parameter index corresponds to $param_name
             let target = format!("${}", param_name);
-            let param_idx = func_info
-                .parameters
-                .iter()
-                .position(|p| p.name == target)
-                .unwrap_or(0);
+            let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
 
             // Split the textual arguments by comma (at depth 0) and pick
             // the one at `param_idx`.
@@ -1313,20 +1368,20 @@ fn resolve_conditional_with_text_args(
                         return Some(class_name);
                     }
                     // Argument isn't a ::class literal → try else branch
-                    resolve_conditional_with_text_args(else_type, func_info, text_args)
+                    resolve_conditional_with_text_args(else_type, params, text_args)
                 }
                 ParamCondition::IsNull => {
                     if arg_text.is_none() || arg_text == Some("") || arg_text == Some("null") {
                         // No argument provided or explicitly null → null branch
-                        resolve_conditional_with_text_args(then_type, func_info, text_args)
+                        resolve_conditional_with_text_args(then_type, params, text_args)
                     } else {
                         // Argument was provided → not null
-                        resolve_conditional_with_text_args(else_type, func_info, text_args)
+                        resolve_conditional_with_text_args(else_type, params, text_args)
                     }
                 }
                 ParamCondition::IsType(_) => {
                     // Can't statically determine; fall through to else.
-                    resolve_conditional_with_text_args(else_type, func_info, text_args)
+                    resolve_conditional_with_text_args(else_type, params, text_args)
                 }
             }
         }
@@ -1383,7 +1438,7 @@ fn extract_class_name_from_text(text: &str) -> Option<String> {
 
 fn resolve_conditional_with_args<'b>(
     conditional: &ConditionalReturnType,
-    func_info: &FunctionInfo,
+    params: &[ParameterInfo],
     argument_list: &ArgumentList<'b>,
 ) -> Option<String> {
     match conditional {
@@ -1401,11 +1456,7 @@ fn resolve_conditional_with_args<'b>(
         } => {
             // Find which parameter index corresponds to $param_name
             let target = format!("${}", param_name);
-            let param_idx = func_info
-                .parameters
-                .iter()
-                .position(|p| p.name == target)
-                .unwrap_or(0);
+            let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
 
             // Get the actual argument expression (if provided)
             let arg_expr: Option<&Expression<'b>> = argument_list
@@ -1431,21 +1482,21 @@ fn resolve_conditional_with_args<'b>(
                         return Some(class_name);
                     }
                     // Argument isn't a ::class literal → try else branch
-                    resolve_conditional_with_args(else_type, func_info, argument_list)
+                    resolve_conditional_with_args(else_type, params, argument_list)
                 }
                 ParamCondition::IsNull => {
                     if arg_expr.is_none() {
                         // No argument provided → param uses default (null)
-                        resolve_conditional_with_args(then_type, func_info, argument_list)
+                        resolve_conditional_with_args(then_type, params, argument_list)
                     } else {
                         // Argument was provided → not null
-                        resolve_conditional_with_args(else_type, func_info, argument_list)
+                        resolve_conditional_with_args(else_type, params, argument_list)
                     }
                 }
                 ParamCondition::IsType(_) => {
                     // We can't statically determine the type of an
                     // arbitrary expression; fall through to else.
-                    resolve_conditional_with_args(else_type, func_info, argument_list)
+                    resolve_conditional_with_args(else_type, params, argument_list)
                 }
             }
         }
@@ -1457,7 +1508,7 @@ fn resolve_conditional_with_args<'b>(
 /// default" branch at each level.
 fn resolve_conditional_without_args(
     conditional: &ConditionalReturnType,
-    func_info: &FunctionInfo,
+    params: &[ParameterInfo],
 ) -> Option<String> {
     match conditional {
         ConditionalReturnType::Concrete(ty) => {
@@ -1475,16 +1526,16 @@ fn resolve_conditional_without_args(
             // Without arguments we check whether the parameter has a
             // null default — if so, the `is null` branch is taken.
             let target = format!("${}", param_name);
-            let param = func_info.parameters.iter().find(|p| p.name == target);
+            let param = params.iter().find(|p| p.name == target);
             let has_null_default = param.is_some_and(|p| !p.is_required);
 
             match condition {
                 ParamCondition::IsNull if has_null_default => {
-                    resolve_conditional_without_args(then_type, func_info)
+                    resolve_conditional_without_args(then_type, params)
                 }
                 _ => {
                     // Try else branch
-                    resolve_conditional_without_args(else_type, func_info)
+                    resolve_conditional_without_args(else_type, params)
                 }
             }
         }

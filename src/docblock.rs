@@ -245,6 +245,7 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             return_type,
             is_static,
             visibility: Visibility::Public,
+            conditional_return: None,
         });
     }
 

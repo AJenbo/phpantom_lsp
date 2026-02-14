@@ -1707,3 +1707,103 @@ async fn test_completion_inline_conditional_return_null_default() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// When a **method** has a PHPStan conditional return type (e.g.
+/// `Application::make`), chaining through it should resolve the type
+/// correctly.  For example:
+///
+/// ```php
+/// app()->make(CurrentCart::class)->save();
+/// ```
+///
+/// `app()` returns `Application`, `make(CurrentCart::class)` should
+/// resolve via the conditional `@return` to `CurrentCart`, and then
+/// `->save()` (or `->` completion) should offer `CurrentCart` members.
+#[tokio::test]
+async fn test_completion_method_conditional_return_class_string_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///method_conditional.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class CurrentCart {\n",
+        "    public function save(): void {}\n",
+        "    public function getTotal(): float {}\n",
+        "}\n",
+        "\n",
+        "class Application {\n",
+        "    /**\n",
+        "     * @template TClass of object\n",
+        "     * @param  string|class-string<TClass>  $abstract\n",
+        "     * @return ($abstract is class-string<TClass> ? TClass : mixed)\n",
+        "     */\n",
+        "    public function make($abstract, array $parameters = []) {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @return Application\n",
+        " */\n",
+        "function app() {}\n",
+        "\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        app()->make(CurrentCart::class)->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `app()->make(CurrentCart::class)->` on line 22
+    // 8 spaces + "app()->make(CurrentCart::class)->" = 8 + 33 = 41
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 22,
+                character: 41,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for app()->make(CurrentCart::class)->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from CurrentCart (resolved via method conditional return)
+            assert!(
+                labels.iter().any(|l| l.starts_with("save")),
+                "Should include save from CurrentCart (resolved via method class-string conditional), got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTotal")),
+                "Should include getTotal from CurrentCart, got: {:?}",
+                labels
+            );
+            // Should NOT include members from Application
+            assert!(
+                !labels.iter().any(|l| l.starts_with("make")),
+                "Should NOT include make from Application, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

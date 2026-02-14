@@ -44,6 +44,16 @@ pub struct MethodInfo {
     pub is_static: bool,
     /// Visibility of the method (public, protected, or private).
     pub visibility: Visibility,
+    /// Optional PHPStan conditional return type parsed from the docblock.
+    ///
+    /// When present, the resolver should use this instead of `return_type`
+    /// and resolve the concrete type based on call-site arguments.
+    ///
+    /// Example docblock:
+    /// ```text
+    /// @return ($abstract is class-string<TClass> ? TClass : mixed)
+    /// ```
+    pub conditional_return: Option<ConditionalReturnType>,
 }
 
 /// Stores extracted property information from a parsed PHP class.

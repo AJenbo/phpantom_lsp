@@ -716,18 +716,26 @@ impl Backend {
                     let visibility = Self::extract_visibility(method.modifiers.iter());
 
                     // Look up the PHPDoc `@return` tag (if any) and apply
-                    // type override logic.
-                    let return_type = if let Some(ctx) = doc_ctx {
-                        let doc_type =
-                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
-                                .and_then(docblock::extract_return_type);
+                    // type override logic.  Also extract PHPStan conditional
+                    // return types if present.
+                    let (return_type, conditional_return) = if let Some(ctx) = doc_ctx {
+                        let docblock_text =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method);
 
-                        docblock::resolve_effective_type(
+                        let doc_type = docblock_text.and_then(docblock::extract_return_type);
+
+                        let effective = docblock::resolve_effective_type(
                             native_return_type.as_deref(),
                             doc_type.as_deref(),
-                        )
+                        );
+
+                        let conditional =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
+                                .and_then(docblock::extract_conditional_return_type);
+
+                        (effective, conditional)
                     } else {
-                        native_return_type
+                        (native_return_type, None)
                     };
 
                     // Extract promoted properties from constructor parameters.
@@ -760,6 +768,7 @@ impl Backend {
                         return_type,
                         is_static,
                         visibility,
+                        conditional_return,
                     });
                 }
                 ClassLikeMember::Property(property) => {

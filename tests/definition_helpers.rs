@@ -1,6 +1,3 @@
-mod common;
-
-use common::create_test_backend;
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
