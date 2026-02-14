@@ -20,6 +20,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::composer;
 use crate::types::*;
+use crate::util::skip_balanced_parens_back;
 
 /// The kind of class member being resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,32 +91,128 @@ impl Backend {
             }
         }
 
-        // 5. Resolve file path via PSR-4.
+        // 5. Resolve file path via PSR-4 (only when workspace root is available).
         let workspace_root = self
             .workspace_root
             .lock()
             .ok()
-            .and_then(|guard| guard.clone())?;
+            .and_then(|guard| guard.clone());
 
-        let mappings = self.psr4_mappings.lock().ok()?;
-
-        for fqn in &candidates {
-            if let Some(file_path) = composer::resolve_class_path(&mappings, &workspace_root, fqn) {
-                // 6. Read the target file and find the definition line.
-                if let Ok(target_content) = std::fs::read_to_string(&file_path) {
-                    let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
-                    if let Some(target_position) =
-                        Self::find_definition_position(&target_content, short_name)
-                        && let Ok(target_uri) = Url::from_file_path(&file_path)
-                    {
-                        return Some(Location {
-                            uri: target_uri,
-                            range: Range {
-                                start: target_position,
-                                end: target_position,
-                            },
-                        });
+        if let Some(workspace_root) = workspace_root
+            && let Ok(mappings) = self.psr4_mappings.lock()
+        {
+            for fqn in &candidates {
+                if let Some(file_path) =
+                    composer::resolve_class_path(&mappings, &workspace_root, fqn)
+                {
+                    // 6. Read the target file and find the definition line.
+                    if let Ok(target_content) = std::fs::read_to_string(&file_path) {
+                        let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                        if let Some(target_position) =
+                            Self::find_definition_position(&target_content, short_name)
+                            && let Ok(target_uri) = Url::from_file_path(&file_path)
+                        {
+                            return Some(Location {
+                                uri: target_uri,
+                                range: Range {
+                                    start: target_position,
+                                    end: target_position,
+                                },
+                            });
+                        }
                     }
+                }
+            }
+        }
+
+        // 7. Try global function lookup as a last resort.
+        //    Build candidates: the word itself, the FQN-resolved version, and
+        //    (if inside a namespace) the namespace-qualified version.
+        let mut func_candidates = candidates.clone();
+        if !func_candidates.contains(&word) {
+            func_candidates.push(word.clone());
+        }
+
+        if let Some(location) = self.resolve_function_definition(&func_candidates) {
+            return Some(location);
+        }
+
+        None
+    }
+
+    // ─── Function Definition Resolution ─────────────────────────────────────
+
+    /// Try to resolve a standalone function name to its definition.
+    ///
+    /// Searches the `global_functions` map (populated from autoload files
+    /// and opened/changed files) for any of the given candidate names.
+    /// When found, reads the source file and locates the `function name(`
+    /// declaration line.
+    fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
+        let (file_uri, func_info) = {
+            let fmap = self.global_functions.lock().ok()?;
+            let mut found = None;
+            for candidate in candidates {
+                if let Some((uri, info)) = fmap.get(candidate) {
+                    found = Some((uri.clone(), info.clone()));
+                    break;
+                }
+            }
+            found
+        }?;
+
+        // Read the file content (try open files first, then disk).
+        let file_content = self
+            .open_files
+            .lock()
+            .ok()
+            .and_then(|files| files.get(&file_uri).cloned())
+            .or_else(|| {
+                let path = Url::parse(&file_uri).ok()?.to_file_path().ok()?;
+                std::fs::read_to_string(path).ok()
+            })?;
+
+        let position = Self::find_function_position(&file_content, &func_info.name)?;
+        let parsed_uri = Url::parse(&file_uri).ok()?;
+
+        Some(Location {
+            uri: parsed_uri,
+            range: Range {
+                start: position,
+                end: position,
+            },
+        })
+    }
+
+    /// Find the position of a standalone `function name(` declaration in
+    /// file content.
+    ///
+    /// This is distinct from `find_member_position` (which searches inside
+    /// a class body) — here we look for top-level or namespace-level
+    /// function declarations.
+    fn find_function_position(content: &str, function_name: &str) -> Option<Position> {
+        let pattern = format!("function {}", function_name);
+
+        let is_word_boundary = |c: u8| {
+            let ch = c as char;
+            !ch.is_alphanumeric() && ch != '_'
+        };
+
+        for (line_idx, line) in content.lines().enumerate() {
+            if let Some(col) = line.find(&pattern) {
+                // Verify word boundary before `function` keyword.
+                let before_ok = col == 0 || is_word_boundary(line.as_bytes()[col - 1]);
+
+                // Verify word boundary after the function name.
+                let after_pos = col + pattern.len();
+                let after_ok =
+                    after_pos >= line.len() || is_word_boundary(line.as_bytes()[after_pos]);
+
+                if before_ok && after_ok {
+                    return Some(Position {
+                        line: line_idx as u32,
+                        character: col as u32,
+                    });
                 }
             }
         }
@@ -187,6 +284,29 @@ impl Backend {
             self.find_or_load_class(resolved_name)
         };
 
+        // Build a function_loader closure for resolving standalone function
+        // return types (needed for call-expression subjects like `app()->`).
+        let function_loader = |name: &str| -> Option<FunctionInfo> {
+            let fmap = self.global_functions.lock().ok()?;
+            if let Some((_, info)) = fmap.get(name) {
+                return Some(info.clone());
+            }
+            // Try resolving via use map
+            if let Some(fqn) = file_use_map.get(name)
+                && let Some((_, info)) = fmap.get(fqn.as_str())
+            {
+                return Some(info.clone());
+            }
+            // Try namespace-qualified
+            if let Some(ref ns) = file_namespace {
+                let ns_qualified = format!("{}\\{}", ns, name);
+                if let Some((_, info)) = fmap.get(&ns_qualified) {
+                    return Some(info.clone());
+                }
+            }
+            None
+        };
+
         // 3. Resolve the subject to a concrete ClassInfo.
         let target_class = Self::resolve_target_class(
             &subject,
@@ -196,6 +316,7 @@ impl Backend {
             content,
             cursor_offset,
             &class_loader,
+            Some(&function_loader),
         )?;
 
         // 4. Find which class in the inheritance chain actually declares
@@ -304,8 +425,12 @@ impl Backend {
     /// Extract the subject expression before an arrow operator for definition
     /// resolution.
     ///
-    /// Handles `$this->`, `$var->`, `$this->prop->` (one level of chaining),
-    /// and `$this?->prop->`.
+    /// Handles:
+    ///   - `$this->`, `$var->` (simple variable)
+    ///   - `$this->prop->` (property chain)
+    ///   - `app()->` (function call)
+    ///   - `$this->getService()->` (method call chain)
+    ///   - `ClassName::make()->` (static method call)
     fn extract_arrow_subject_for_definition(chars: &[char], arrow_pos: usize) -> String {
         let end = arrow_pos;
 
@@ -313,6 +438,15 @@ impl Backend {
         let mut i = end;
         while i > 0 && chars[i - 1] == ' ' {
             i -= 1;
+        }
+
+        // ── Function / method call: detect `)` before the operator ──
+        // e.g. `app()->`, `$this->getService()->`, `Class::make()->`
+        if i > 0
+            && chars[i - 1] == ')'
+            && let Some(call_subject) = Self::extract_call_subject_for_definition(chars, i)
+        {
+            return call_subject;
         }
 
         // Read an identifier (could be a property name if chained).
@@ -342,6 +476,59 @@ impl Backend {
 
         // Simple variable like `$this` or `$var`.
         Self::extract_simple_var_before(chars, end)
+    }
+
+    /// Extract the full call-expression subject when `)` appears before an
+    /// operator (used for definition resolution).
+    ///
+    /// `paren_end` is the position one past the closing `)`.
+    ///
+    /// Returns subjects such as:
+    ///   - `"app()"` for a standalone function call
+    ///   - `"$this->getService()"` for an instance method call
+    ///   - `"ClassName::make()"` for a static method call
+    fn extract_call_subject_for_definition(chars: &[char], paren_end: usize) -> Option<String> {
+        let open = skip_balanced_parens_back(chars, paren_end)?;
+        if open == 0 {
+            return None;
+        }
+
+        // Read the function / method name before `(`
+        let mut i = open;
+        while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+            i -= 1;
+        }
+        if i == open {
+            return None;
+        }
+        let func_name: String = chars[i..open].iter().collect();
+
+        // Instance method call: `$this->method()` / `$var->method()`
+        if i >= 2 && chars[i - 2] == '-' && chars[i - 1] == '>' {
+            let inner_subject = Self::extract_simple_var_before(chars, i - 2);
+            if !inner_subject.is_empty() {
+                return Some(format!("{}->{}()", inner_subject, func_name));
+            }
+        }
+
+        // Null-safe method call: `$var?->method()`
+        if i >= 3 && chars[i - 3] == '?' && chars[i - 2] == '-' && chars[i - 1] == '>' {
+            let inner_subject = Self::extract_simple_var_before(chars, i - 3);
+            if !inner_subject.is_empty() {
+                return Some(format!("{}?->{}()", inner_subject, func_name));
+            }
+        }
+
+        // Static method call: `ClassName::method()` / `self::method()`
+        if i >= 2 && chars[i - 2] == ':' && chars[i - 1] == ':' {
+            let class_subject = Self::extract_subject_before(chars, i - 2);
+            if !class_subject.is_empty() {
+                return Some(format!("{}::{}()", class_subject, func_name));
+            }
+        }
+
+        // Standalone function call: `app()`
+        Some(format!("{}()", func_name))
     }
 
     /// Extract a `$variable` ending at position `end` (exclusive).

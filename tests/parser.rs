@@ -783,3 +783,309 @@ class User {
     assert_eq!(id.visibility, Visibility::Private);
     assert_eq!(id.type_hint.as_deref(), Some("int"));
 }
+
+// ─── Standalone Function Parsing Tests ──────────────────────────────────────
+
+#[tokio::test]
+async fn test_parse_functions_standalone() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "function hello(): void {}\n",
+        "function add(int $a, int $b): int { return $a + $b; }\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(functions.len(), 2, "Should extract 2 standalone functions");
+
+    let hello = functions.iter().find(|f| f.name == "hello").unwrap();
+    assert!(hello.parameters.is_empty());
+    assert_eq!(hello.return_type.as_deref(), Some("void"));
+    assert!(hello.namespace.is_none());
+
+    let add = functions.iter().find(|f| f.name == "add").unwrap();
+    assert_eq!(add.parameters.len(), 2);
+    assert_eq!(add.parameters[0].name, "$a");
+    assert_eq!(add.parameters[0].type_hint.as_deref(), Some("int"));
+    assert_eq!(add.parameters[1].name, "$b");
+    assert_eq!(add.return_type.as_deref(), Some("int"));
+    assert!(add.namespace.is_none());
+}
+
+#[tokio::test]
+async fn test_parse_functions_inside_namespace() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "namespace Amp;\n",
+        "\n",
+        "function delay(float $seconds): void {}\n",
+        "function async(callable $callback): void {}\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(functions.len(), 2, "Should extract 2 namespaced functions");
+
+    let delay = functions.iter().find(|f| f.name == "delay").unwrap();
+    assert_eq!(delay.namespace.as_deref(), Some("Amp"));
+    assert_eq!(delay.parameters.len(), 1);
+    assert_eq!(delay.parameters[0].name, "$seconds");
+    assert_eq!(delay.parameters[0].type_hint.as_deref(), Some("float"));
+    assert_eq!(delay.return_type.as_deref(), Some("void"));
+
+    let async_fn = functions.iter().find(|f| f.name == "async").unwrap();
+    assert_eq!(async_fn.namespace.as_deref(), Some("Amp"));
+}
+
+#[tokio::test]
+async fn test_parse_functions_ignores_class_methods() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "function standalone(): void {}\n",
+        "class Service {\n",
+        "    public function handle(): void {}\n",
+        "}\n",
+        "function another(): string { return ''; }\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(
+        functions.len(),
+        2,
+        "Should only extract standalone functions, not class methods"
+    );
+    assert!(functions.iter().any(|f| f.name == "standalone"));
+    assert!(functions.iter().any(|f| f.name == "another"));
+    assert!(
+        !functions.iter().any(|f| f.name == "handle"),
+        "Class methods should not appear"
+    );
+}
+
+#[tokio::test]
+async fn test_parse_functions_no_return_type() {
+    let backend = create_test_backend();
+    let php = "<?php\nfunction legacy($x, $y) { return $x + $y; }\n";
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(functions.len(), 1);
+
+    let f = &functions[0];
+    assert_eq!(f.name, "legacy");
+    assert!(f.return_type.is_none(), "No return type hint");
+    assert_eq!(f.parameters.len(), 2);
+    assert!(f.parameters[0].type_hint.is_none());
+}
+
+#[tokio::test]
+async fn test_parse_functions_nullable_and_union_types() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "function maybe(?string $val): ?int { return null; }\n",
+        "function either(string|int $val): string|false { return ''; }\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(functions.len(), 2);
+
+    let maybe = functions.iter().find(|f| f.name == "maybe").unwrap();
+    assert_eq!(maybe.parameters[0].type_hint.as_deref(), Some("?string"));
+    assert_eq!(maybe.return_type.as_deref(), Some("?int"));
+
+    let either = functions.iter().find(|f| f.name == "either").unwrap();
+    assert_eq!(
+        either.parameters[0].type_hint.as_deref(),
+        Some("string|int")
+    );
+    assert_eq!(either.return_type.as_deref(), Some("string|false"));
+}
+
+#[tokio::test]
+async fn test_parse_functions_variadic_and_reference() {
+    let backend = create_test_backend();
+    let php = "<?php\nfunction gather(string ...$items): array { return $items; }\nfunction swap(int &$a, int &$b): void {}\n";
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(functions.len(), 2);
+
+    let gather = functions.iter().find(|f| f.name == "gather").unwrap();
+    assert_eq!(gather.parameters.len(), 1);
+    assert!(gather.parameters[0].is_variadic);
+    assert!(!gather.parameters[0].is_reference);
+    assert!(!gather.parameters[0].is_required);
+
+    let swap = functions.iter().find(|f| f.name == "swap").unwrap();
+    assert_eq!(swap.parameters.len(), 2);
+    assert!(swap.parameters[0].is_reference);
+    assert!(!swap.parameters[0].is_variadic);
+}
+
+#[tokio::test]
+async fn test_parse_functions_brace_delimited_namespace() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "namespace Foo\\Bar {\n",
+        "    function helper(): void {}\n",
+        "}\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(functions.len(), 1);
+    assert_eq!(functions[0].name, "helper");
+    assert_eq!(functions[0].namespace.as_deref(), Some("Foo\\Bar"));
+}
+
+#[tokio::test]
+async fn test_parse_functions_empty_file() {
+    let backend = create_test_backend();
+    let php = "<?php\n// nothing here\n";
+
+    let functions = backend.parse_functions(php);
+    assert!(functions.is_empty(), "No functions in an empty file");
+}
+
+// ─── Functions inside if-guards ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_parse_functions_inside_function_exists_guard() {
+    let backend = create_test_backend();
+    // This is the exact pattern used by Laravel helpers.php and many other
+    // PHP libraries: functions wrapped in `if (! function_exists(...))`.
+    let php = concat!(
+        "<?php\n",
+        "\n",
+        "if (! function_exists('session')) {\n",
+        "    /**\n",
+        "     * Get / set the specified session value.\n",
+        "     */\n",
+        "    function session($key = null, $default = null)\n",
+        "    {\n",
+        "        if (is_null($key)) {\n",
+        "            return app('session');\n",
+        "        }\n",
+        "        return app('session')->get($key, $default);\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(
+        functions.len(),
+        1,
+        "Should find function inside if-guard block"
+    );
+    assert_eq!(functions[0].name, "session");
+    assert_eq!(functions[0].parameters.len(), 2);
+    assert!(
+        functions[0].return_type.is_none(),
+        "session() has no return type hint"
+    );
+}
+
+#[tokio::test]
+async fn test_parse_functions_multiple_function_exists_guards() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "\n",
+        "if (! function_exists('app')) {\n",
+        "    function app(?string $abstract = null, array $parameters = []): mixed\n",
+        "    {\n",
+        "        return Container::getInstance();\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "if (! function_exists('session')) {\n",
+        "    function session($key = null, $default = null)\n",
+        "    {\n",
+        "        return app('session');\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "if (! function_exists('config')) {\n",
+        "    function config($key = null, $default = null): mixed\n",
+        "    {\n",
+        "        return null;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(
+        functions.len(),
+        3,
+        "Should find all 3 functions inside separate if-guards"
+    );
+
+    let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+    assert!(names.contains(&"app"), "Should find app()");
+    assert!(names.contains(&"session"), "Should find session()");
+    assert!(names.contains(&"config"), "Should find config()");
+
+    let app = functions.iter().find(|f| f.name == "app").unwrap();
+    assert_eq!(app.return_type.as_deref(), Some("mixed"));
+
+    let config = functions.iter().find(|f| f.name == "config").unwrap();
+    assert_eq!(config.return_type.as_deref(), Some("mixed"));
+}
+
+#[tokio::test]
+async fn test_parse_functions_inside_namespace_with_function_exists_guard() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "namespace Illuminate\\Support;\n",
+        "\n",
+        "if (! function_exists('Illuminate\\Support\\enum_value')) {\n",
+        "    function enum_value($value): mixed\n",
+        "    {\n",
+        "        return $value;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(
+        functions.len(),
+        1,
+        "Should find function inside if-guard within namespace"
+    );
+    assert_eq!(functions[0].name, "enum_value");
+    assert_eq!(
+        functions[0].namespace.as_deref(),
+        Some("Illuminate\\Support"),
+        "Should preserve namespace context"
+    );
+    assert_eq!(functions[0].return_type.as_deref(), Some("mixed"));
+}
+
+#[tokio::test]
+async fn test_parse_functions_mixed_guarded_and_unguarded() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "\n",
+        "function always_defined(): void {}\n",
+        "\n",
+        "if (! function_exists('maybe_defined')) {\n",
+        "    function maybe_defined(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "function also_always(): int { return 0; }\n",
+    );
+
+    let functions = backend.parse_functions(php);
+    assert_eq!(
+        functions.len(),
+        3,
+        "Should find both guarded and unguarded functions"
+    );
+
+    let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+    assert!(names.contains(&"always_defined"));
+    assert!(names.contains(&"maybe_defined"));
+    assert!(names.contains(&"also_always"));
+}

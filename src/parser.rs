@@ -143,6 +143,20 @@ impl Backend {
         classes
     }
 
+    /// Parse PHP source text and extract standalone function definitions.
+    ///
+    /// Returns a list of `FunctionInfo` for every `function` declaration
+    /// found at the top level (or inside a namespace block).
+    pub fn parse_functions(&self, content: &str) -> Vec<FunctionInfo> {
+        let arena = Bump::new();
+        let file_id = mago_database::file::FileId::new("input.php");
+        let program = parse_file_content(&arena, file_id, content);
+
+        let mut functions = Vec::new();
+        Self::extract_functions_from_statements(program.statements.iter(), &mut functions, &None);
+        functions
+    }
+
     /// Parse PHP source text and extract `use` statement mappings.
     ///
     /// Returns a `HashMap` mapping short (imported) names to their
@@ -300,6 +314,130 @@ impl Backend {
     /// Recursively walk statements and extract class information.
     /// This handles classes at the top level as well as classes nested
     /// inside namespace declarations.
+    /// Extract standalone function definitions from a sequence of statements.
+    ///
+    /// Recurses into `Statement::Namespace` blocks, passing the namespace
+    /// name down so that each `FunctionInfo` records which namespace it
+    /// belongs to (if any).
+    pub(crate) fn extract_functions_from_statements<'a>(
+        statements: impl Iterator<Item = &'a Statement<'a>>,
+        functions: &mut Vec<FunctionInfo>,
+        current_namespace: &Option<String>,
+    ) {
+        for statement in statements {
+            match statement {
+                Statement::Function(func) => {
+                    let name = func.name.value.to_string();
+                    let parameters = Self::extract_parameters(&func.parameter_list);
+                    let return_type = func
+                        .return_type_hint
+                        .as_ref()
+                        .map(|rth| Self::extract_hint_string(&rth.hint));
+
+                    functions.push(FunctionInfo {
+                        name,
+                        parameters,
+                        return_type,
+                        namespace: current_namespace.clone(),
+                    });
+                }
+                Statement::Namespace(namespace) => {
+                    let ns_name = namespace
+                        .name
+                        .as_ref()
+                        .map(|ident| ident.value().to_string())
+                        .filter(|s| !s.is_empty());
+
+                    // Merge: if we already have a namespace and the inner
+                    // one is set, use the inner one; otherwise keep current.
+                    let effective_ns = ns_name.or_else(|| current_namespace.clone());
+
+                    Self::extract_functions_from_statements(
+                        namespace.statements().iter(),
+                        functions,
+                        &effective_ns,
+                    );
+                }
+                // Recurse into block statements `{ ... }` to find nested
+                // function declarations.
+                Statement::Block(block) => {
+                    Self::extract_functions_from_statements(
+                        block.statements.iter(),
+                        functions,
+                        current_namespace,
+                    );
+                }
+                // Recurse into `if` bodies — this is critical for the very
+                // common PHP pattern:
+                //   if (! function_exists('session')) {
+                //       function session(...) { ... }
+                //   }
+                Statement::If(if_stmt) => {
+                    Self::extract_functions_from_if_body(
+                        &if_stmt.body,
+                        functions,
+                        current_namespace,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Helper: recurse into an `if` statement body to extract function
+    /// declarations.  Handles both brace-delimited and colon-delimited
+    /// `if` bodies, including `elseif` and `else` branches.
+    fn extract_functions_from_if_body<'a>(
+        body: &'a IfBody<'a>,
+        functions: &mut Vec<FunctionInfo>,
+        current_namespace: &Option<String>,
+    ) {
+        match body {
+            IfBody::Statement(body) => {
+                Self::extract_functions_from_statements(
+                    std::iter::once(body.statement),
+                    functions,
+                    current_namespace,
+                );
+                for else_if in body.else_if_clauses.iter() {
+                    Self::extract_functions_from_statements(
+                        std::iter::once(else_if.statement),
+                        functions,
+                        current_namespace,
+                    );
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    Self::extract_functions_from_statements(
+                        std::iter::once(else_clause.statement),
+                        functions,
+                        current_namespace,
+                    );
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                Self::extract_functions_from_statements(
+                    body.statements.iter(),
+                    functions,
+                    current_namespace,
+                );
+                for else_if in body.else_if_clauses.iter() {
+                    Self::extract_functions_from_statements(
+                        else_if.statements.iter(),
+                        functions,
+                        current_namespace,
+                    );
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    Self::extract_functions_from_statements(
+                        else_clause.statements.iter(),
+                        functions,
+                        current_namespace,
+                    );
+                }
+            }
+        }
+    }
+
     pub(crate) fn extract_classes_from_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         classes: &mut Vec<ClassInfo>,
@@ -444,7 +582,7 @@ impl Backend {
 
     /// Update the ast_map, use_map, and namespace_map for a given file URI
     /// by parsing its content.
-    pub(crate) fn update_ast(&self, uri: &str, content: &str) {
+    pub fn update_ast(&self, uri: &str, content: &str) {
         let arena = Bump::new();
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
@@ -501,12 +639,56 @@ impl Backend {
             }
         }
 
+        // Extract standalone functions (including those inside if-guards
+        // like `if (! function_exists('...'))`) using the shared helper
+        // which recurses into if/block statements.
+        let mut functions = Vec::new();
+        Self::extract_functions_from_statements(
+            program.statements.iter(),
+            &mut functions,
+            &namespace,
+        );
+        if !functions.is_empty()
+            && let Ok(mut fmap) = self.global_functions.lock()
+        {
+            for func_info in functions {
+                let fqn = if let Some(ref ns) = func_info.namespace {
+                    format!("{}\\{}", ns, &func_info.name)
+                } else {
+                    func_info.name.clone()
+                };
+
+                // Insert both the FQN and the short name so that
+                // callers using bare `func()` can resolve.
+                fmap.insert(fqn.clone(), (uri.to_string(), func_info.clone()));
+                if func_info.namespace.is_some() {
+                    fmap.entry(func_info.name.clone())
+                        .or_insert_with(|| (uri.to_string(), func_info));
+                }
+            }
+        }
+
         // Post-process: resolve parent_class short names to fully-qualified
         // names using the file's use_map and namespace so that cross-file
         // inheritance resolution can find parent classes via PSR-4.
         Self::resolve_parent_class_names(&mut classes, &use_map, &namespace);
 
         let uri_string = uri.to_string();
+
+        // Populate the class_index with FQN → URI mappings for every class
+        // found in this file.  This enables reliable lookup of classes that
+        // don't follow PSR-4 conventions (e.g. classes defined in Composer
+        // autoload_files.php entries).
+        if let Ok(mut idx) = self.class_index.lock() {
+            for class in &classes {
+                let fqn = if let Some(ref ns) = namespace {
+                    format!("{}\\{}", ns, &class.name)
+                } else {
+                    class.name.clone()
+                };
+                idx.insert(fqn, uri_string.clone());
+            }
+        }
 
         if let Ok(mut map) = self.ast_map.lock() {
             map.insert(uri_string.clone(), classes);

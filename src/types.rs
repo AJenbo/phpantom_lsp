@@ -1,8 +1,9 @@
 //! Data types used throughout the PHPantomLSP server.
 //!
 //! This module contains all the "model" structs and enums that represent
-//! extracted PHP information (classes, methods, properties, constants)
-//! as well as completion-related types (AccessKind, CompletionTarget).
+//! extracted PHP information (classes, methods, properties, constants,
+//! standalone functions) as well as completion-related types
+//! (AccessKind, CompletionTarget).
 
 /// Visibility of a class member (method, property, or constant).
 ///
@@ -94,6 +95,23 @@ pub struct CompletionTarget {
     /// The textual subject before the operator, e.g. `"$this"`, `"self"`,
     /// `"$var"`, `"$this->prop"`, `"ClassName"`.
     pub subject: String,
+}
+
+/// Stores extracted information about a standalone PHP function.
+///
+/// This is used for global / namespaced functions defined outside of classes,
+/// typically found in files listed by Composer's `autoload_files.php`.
+#[derive(Debug, Clone)]
+pub struct FunctionInfo {
+    /// The function name (e.g. "array_map", "myHelper").
+    pub name: String,
+    /// The parameters of the function.
+    pub parameters: Vec<ParameterInfo>,
+    /// Optional return type hint string (e.g. "void", "string", "?int").
+    pub return_type: Option<String>,
+    /// The namespace this function is declared in, if any.
+    /// For example, `Amp\delay` would have namespace `Some("Amp")`.
+    pub namespace: Option<String>,
 }
 
 /// Stores extracted class information from a parsed PHP file.

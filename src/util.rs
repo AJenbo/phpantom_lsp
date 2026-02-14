@@ -1,12 +1,43 @@
 /// Utility functions for the PHPantomLSP server.
 ///
 /// This module contains helper methods for position/offset conversion,
-/// class lookup by offset, logging, and cross-file class resolution.
+/// class lookup by offset, logging, cross-file class resolution, and
+/// shared text-processing helpers used by multiple modules.
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
 use crate::types::ClassInfo;
+
+/// Skip backwards past a balanced parenthesised group `(…)` in a char slice.
+///
+/// `pos` must point one past the closing `)`.  Returns the index of the
+/// opening `(`, or `None` if parens are unbalanced.
+///
+/// This is a standalone function (not on `impl Backend`) so it can be
+/// shared by both the completion target extractor and the definition
+/// resolver without creating duplicate method definitions.
+pub(crate) fn skip_balanced_parens_back(chars: &[char], pos: usize) -> Option<usize> {
+    if pos == 0 || chars[pos - 1] != ')' {
+        return None;
+    }
+    let mut depth: u32 = 0;
+    let mut j = pos;
+    while j > 0 {
+        j -= 1;
+        match chars[j] {
+            ')' => depth += 1,
+            '(' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
 
 impl Backend {
     /// Convert an LSP Position (line, character) to a byte offset in content.
@@ -70,6 +101,20 @@ impl Backend {
         // The class name stored in ClassInfo is just the short name (e.g. "Customer"),
         // so we match against the last segment of the namespace-qualified name.
         let last_segment = name.rsplit('\\').next().unwrap_or(name);
+
+        // ── Phase 0: Try the class_index for a direct FQN → URI lookup ──
+        // This handles classes that don't follow PSR-4 conventions, such as
+        // classes defined in Composer autoload_files.php entries.  Using the
+        // FQN avoids false positives from short-name collisions.
+        if name.contains('\\')
+            && let Ok(idx) = self.class_index.lock()
+            && let Some(uri) = idx.get(name)
+            && let Ok(map) = self.ast_map.lock()
+            && let Some(classes) = map.get(uri)
+            && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
+        {
+            return Some(cls.clone());
+        }
 
         // ── Phase 1: Search all already-parsed files in the ast_map ──
         if let Ok(map) = self.ast_map.lock() {

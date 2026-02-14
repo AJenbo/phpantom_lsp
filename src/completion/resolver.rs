@@ -10,6 +10,9 @@
 ///   - Property chains: `$this->prop` → follow property type hints
 ///   - Variable assignments: `$var = new ClassName(…)` → resolve class
 ///   - Parameter type hints: `function f(Foo $x)` → resolve from hint
+///   - Function call return types: `app()` → look up return type in global_functions
+///   - Method call return types: `$this->getService()` → look up method return type
+///   - Static method call return types: `Class::make()` → look up method return type
 ///
 /// When a class cannot be found in the local `all_classes` slice, the
 /// `class_loader` callback is invoked. This allows the caller (typically
@@ -25,6 +28,10 @@ use crate::Backend;
 use crate::types::Visibility;
 use crate::types::*;
 
+/// Type alias for the optional function-loader closure passed through
+/// the resolution chain.  Reduces clippy `type_complexity` warnings.
+pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
+
 impl Backend {
     /// Determine which class (if any) the completion subject refers to.
     ///
@@ -35,6 +42,7 @@ impl Backend {
     /// classes on demand (e.g. via PSR-4).
     ///
     /// Returns an owned `ClassInfo` if the type could be resolved.
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_target_class(
         subject: &str,
         access_kind: AccessKind,
@@ -43,6 +51,7 @@ impl Backend {
         content: &str,
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
     ) -> Option<ClassInfo> {
         // ── Keywords that always mean "current class" ──
         if subject == "$this" || subject == "self" || subject == "static" {
@@ -75,6 +84,19 @@ impl Backend {
             return class_loader(subject);
         }
 
+        // ── Call expression: subject ends with "()" ──
+        // Handles function calls (`app()`), method calls (`$this->getService()`),
+        // and static method calls (`ClassName::make()`).
+        if let Some(call_body) = subject.strip_suffix("()") {
+            return Self::resolve_call_return_type(
+                call_body,
+                current_class,
+                all_classes,
+                class_loader,
+                function_loader,
+            );
+        }
+
         // ── Property-chain: $this->prop  or  $this?->prop ──
         if let Some(prop_name) = subject
             .strip_prefix("$this->")
@@ -99,11 +121,129 @@ impl Backend {
                     content,
                     cursor_offset,
                     class_loader,
+                    function_loader,
                 )
             {
                 return Some(resolved);
             }
             return None;
+        }
+
+        None
+    }
+
+    /// Resolve a call expression to the class of its return type.
+    ///
+    /// `call_body` is the subject without the trailing `()`, for example:
+    ///   - `"app"` for a standalone function call
+    ///   - `"$this->getService"` for an instance method call
+    ///   - `"ClassName::make"` for a static method call
+    ///
+    /// The return type string is extracted from the function / method
+    /// definition and then resolved to a `ClassInfo` via `class_loader`.
+    fn resolve_call_return_type(
+        call_body: &str,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
+    ) -> Option<ClassInfo> {
+        // ── Instance method call: $this->method / $var->method ──
+        if let Some(pos) = call_body.rfind("->") {
+            let lhs = &call_body[..pos];
+            let method_name = &call_body[pos + 2..];
+
+            // Resolve the left-hand side to a class (recursively handles
+            // $this, $var, property chains, nested calls, etc.)
+            let lhs_class = if lhs == "$this" || lhs == "self" || lhs == "static" {
+                current_class.cloned()
+            } else if let Some(prop) = lhs
+                .strip_prefix("$this->")
+                .or_else(|| lhs.strip_prefix("$this?->"))
+            {
+                current_class
+                    .and_then(|cc| Self::resolve_property_type(prop, cc, all_classes, class_loader))
+            } else {
+                // Could be a variable — for now, skip complex chains
+                None
+            };
+
+            if let Some(ref owner) = lhs_class {
+                return Self::resolve_method_return_type(
+                    owner,
+                    method_name,
+                    all_classes,
+                    class_loader,
+                );
+            }
+            return None;
+        }
+
+        // ── Static method call: ClassName::method / self::method ──
+        if let Some(pos) = call_body.rfind("::") {
+            let class_part = &call_body[..pos];
+            let method_name = &call_body[pos + 2..];
+
+            let owner_class = if class_part == "self" || class_part == "static" {
+                current_class.cloned()
+            } else if class_part == "parent" {
+                current_class
+                    .and_then(|cc| cc.parent_class.as_ref())
+                    .and_then(|p| class_loader(p))
+            } else {
+                // Bare class name
+                let lookup = class_part.rsplit('\\').next().unwrap_or(class_part);
+                all_classes
+                    .iter()
+                    .find(|c| c.name == lookup)
+                    .cloned()
+                    .or_else(|| class_loader(class_part))
+            };
+
+            if let Some(ref owner) = owner_class {
+                return Self::resolve_method_return_type(
+                    owner,
+                    method_name,
+                    all_classes,
+                    class_loader,
+                );
+            }
+            return None;
+        }
+
+        // ── Standalone function call: app / myHelper ──
+        if let Some(fl) = function_loader
+            && let Some(func_info) = fl(call_body)
+            && let Some(ref ret) = func_info.return_type
+        {
+            return Self::type_hint_to_class(ret, "", all_classes, class_loader);
+        }
+
+        None
+    }
+
+    /// Look up a method's return type in a class (including inherited methods)
+    /// and resolve it to a `ClassInfo`.
+    pub(crate) fn resolve_method_return_type(
+        class_info: &ClassInfo,
+        method_name: &str,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
+        // First check the class itself
+        if let Some(method) = class_info.methods.iter().find(|m| m.name == method_name) {
+            if let Some(ref ret) = method.return_type {
+                return Self::type_hint_to_class(ret, &class_info.name, all_classes, class_loader);
+            }
+            return None;
+        }
+
+        // Walk up the inheritance chain
+        let merged = Self::resolve_class_with_inheritance(class_info, class_loader);
+        if let Some(method) = merged.methods.iter().find(|m| m.name == method_name)
+            && let Some(ref ret) = method.return_type
+        {
+            return Self::type_hint_to_class(ret, &class_info.name, all_classes, class_loader);
         }
 
         None
@@ -159,7 +299,8 @@ impl Backend {
     ///
     /// Looks at:
     ///   1. Assignments: `$var = new ClassName(…)` / `new self` / `new static`
-    ///   2. Method parameter type hints
+    ///   2. Assignments from function calls: `$var = app()` → look up return type
+    ///   3. Method parameter type hints
     fn resolve_variable_type(
         var_name: &str,
         current_class: &ClassInfo,
@@ -167,6 +308,7 @@ impl Backend {
         content: &str,
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
     ) -> Option<ClassInfo> {
         let arena = Bump::new();
         let file_id = mago_database::file::FileId::new("input.php");
@@ -181,6 +323,7 @@ impl Backend {
             all_classes,
             cursor_offset,
             class_loader,
+            function_loader,
         )
     }
 
@@ -191,6 +334,7 @@ impl Backend {
         all_classes: &[ClassInfo],
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
     ) -> Option<ClassInfo> {
         for stmt in statements {
             match stmt {
@@ -207,6 +351,7 @@ impl Backend {
                         all_classes,
                         cursor_offset,
                         class_loader,
+                        function_loader,
                     ) {
                         return Some(cls);
                     }
@@ -224,6 +369,7 @@ impl Backend {
                         all_classes,
                         cursor_offset,
                         class_loader,
+                        function_loader,
                     ) {
                         return Some(cls);
                     }
@@ -236,6 +382,7 @@ impl Backend {
                         all_classes,
                         cursor_offset,
                         class_loader,
+                        function_loader,
                     ) {
                         return Some(cls);
                     }
@@ -257,6 +404,7 @@ impl Backend {
         all_classes: &[ClassInfo],
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
     ) -> Option<ClassInfo> {
         for member in members {
             if let ClassLikeMember::Method(method) = member {
@@ -287,6 +435,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                         )
                     {
                         return Some(cls);
@@ -306,6 +455,7 @@ impl Backend {
         all_classes: &[ClassInfo],
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
     ) -> Option<ClassInfo> {
         let mut result: Option<ClassInfo> = None;
         Self::walk_statements_for_assignments(
@@ -315,11 +465,13 @@ impl Backend {
             all_classes,
             cursor_offset,
             class_loader,
+            function_loader,
             &mut result,
         );
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn walk_statements_for_assignments<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
         var_name: &str,
@@ -327,6 +479,7 @@ impl Backend {
         all_classes: &[ClassInfo],
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
         result: &mut Option<ClassInfo>,
     ) {
         for stmt in statements {
@@ -343,6 +496,7 @@ impl Backend {
                         current_class_name,
                         all_classes,
                         class_loader,
+                        function_loader,
                         result,
                     );
                 }
@@ -355,6 +509,7 @@ impl Backend {
                         all_classes,
                         cursor_offset,
                         class_loader,
+                        function_loader,
                         result,
                     );
                 }
@@ -367,6 +522,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                         for else_if in body.else_if_clauses.iter() {
@@ -377,6 +533,7 @@ impl Backend {
                                 all_classes,
                                 cursor_offset,
                                 class_loader,
+                                function_loader,
                                 result,
                             );
                         }
@@ -388,6 +545,7 @@ impl Backend {
                                 all_classes,
                                 cursor_offset,
                                 class_loader,
+                                function_loader,
                                 result,
                             );
                         }
@@ -400,6 +558,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                         for else_if in body.else_if_clauses.iter() {
@@ -410,6 +569,7 @@ impl Backend {
                                 all_classes,
                                 cursor_offset,
                                 class_loader,
+                                function_loader,
                                 result,
                             );
                         }
@@ -421,6 +581,7 @@ impl Backend {
                                 all_classes,
                                 cursor_offset,
                                 class_loader,
+                                function_loader,
                                 result,
                             );
                         }
@@ -435,6 +596,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -446,6 +608,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -459,6 +622,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -470,6 +634,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -483,6 +648,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -494,6 +660,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -506,6 +673,7 @@ impl Backend {
                         all_classes,
                         cursor_offset,
                         class_loader,
+                        function_loader,
                         result,
                     );
                 }
@@ -517,6 +685,7 @@ impl Backend {
                         all_classes,
                         cursor_offset,
                         class_loader,
+                        function_loader,
                         result,
                     );
                     for catch in try_stmt.catch_clauses.iter() {
@@ -527,6 +696,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -538,6 +708,7 @@ impl Backend {
                             all_classes,
                             cursor_offset,
                             class_loader,
+                            function_loader,
                             result,
                         );
                     }
@@ -548,6 +719,7 @@ impl Backend {
     }
 
     /// Helper: treat a single statement as an iterator of one and recurse.
+    #[allow(clippy::too_many_arguments)]
     fn check_statement_for_assignments<'b>(
         stmt: &'b Statement<'b>,
         var_name: &str,
@@ -555,6 +727,7 @@ impl Backend {
         all_classes: &[ClassInfo],
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
         result: &mut Option<ClassInfo>,
     ) {
         Self::walk_statements_for_assignments(
@@ -564,18 +737,21 @@ impl Backend {
             all_classes,
             cursor_offset,
             class_loader,
+            function_loader,
             result,
         );
     }
 
     /// If `expr` is an assignment whose LHS matches `$var_name` and whose
-    /// RHS is a `new …` instantiation, resolve the class.
+    /// RHS is a `new …` instantiation or a function/method call with a
+    /// known return type, resolve the class.
     fn check_expression_for_assignment<'b>(
         expr: &'b Expression<'b>,
         var_name: &str,
         current_class_name: &str,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
         result: &mut Option<ClassInfo>,
     ) {
         if let Expression::Assignment(assignment) = expr {
@@ -607,6 +783,86 @@ impl Backend {
                     )
                 {
                     *result = Some(cls);
+                }
+                return;
+            }
+            // Check RHS is a function call: `$var = someFunction(…)`
+            // Look up the function's return type and resolve to a class.
+            if let Expression::Call(call) = assignment.rhs {
+                match call {
+                    Call::Function(func_call) => {
+                        // Extract the function name from the call target
+                        let func_name = match func_call.function {
+                            Expression::Identifier(ident) => Some(ident.value().to_string()),
+                            _ => None,
+                        };
+                        if let Some(name) = func_name
+                            && let Some(fl) = function_loader
+                            && let Some(func_info) = fl(&name)
+                            && let Some(ref ret) = func_info.return_type
+                            && let Some(cls) = Self::type_hint_to_class(
+                                ret,
+                                current_class_name,
+                                all_classes,
+                                class_loader,
+                            )
+                        {
+                            *result = Some(cls);
+                        }
+                    }
+                    Call::Method(method_call) => {
+                        // `$var = $obj->method()` — resolve the object, find the
+                        // method, and use its return type.
+                        // For now, handle the common case of `$this->method()`.
+                        if let Expression::Variable(Variable::Direct(dv)) = method_call.object
+                            && dv.name == "$this"
+                            && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
+                        {
+                            let method_name = ident.value.to_string();
+                            if let Some(owner) =
+                                all_classes.iter().find(|c| c.name == current_class_name)
+                                && let Some(cls) = Self::resolve_method_return_type(
+                                    owner,
+                                    &method_name,
+                                    all_classes,
+                                    class_loader,
+                                )
+                            {
+                                *result = Some(cls);
+                            }
+                        }
+                    }
+                    Call::StaticMethod(static_call) => {
+                        // `$var = ClassName::method()` — resolve the class, find the
+                        // method, and use its return type.
+                        let class_name = match static_call.class {
+                            Expression::Self_(_) => Some(current_class_name.to_string()),
+                            Expression::Static(_) => Some(current_class_name.to_string()),
+                            Expression::Identifier(ident) => Some(ident.value().to_string()),
+                            _ => None,
+                        };
+                        if let Some(cls_name) = class_name
+                            && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
+                        {
+                            let method_name = ident.value.to_string();
+                            let owner = all_classes
+                                .iter()
+                                .find(|c| c.name == cls_name)
+                                .cloned()
+                                .or_else(|| class_loader(&cls_name));
+                            if let Some(ref owner) = owner
+                                && let Some(cls) = Self::resolve_method_return_type(
+                                    owner,
+                                    &method_name,
+                                    all_classes,
+                                    class_loader,
+                                )
+                            {
+                                *result = Some(cls);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

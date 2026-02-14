@@ -67,15 +67,67 @@ impl LanguageServer for Backend {
             let mappings = composer::parse_composer_json(&root);
             let mapping_count = mappings.len();
 
+            // Determine the vendor directory (needed for autoload_files.php).
+            let vendor_dir = {
+                let composer_path = root.join("composer.json");
+                if let Ok(content) = std::fs::read_to_string(&composer_path) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        json.get("config")
+                            .and_then(|c| c.get("vendor-dir"))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.trim_end_matches('/').to_string())
+                            .unwrap_or_else(|| "vendor".to_string())
+                    } else {
+                        "vendor".to_string()
+                    }
+                } else {
+                    "vendor".to_string()
+                }
+            };
+
             if let Ok(mut m) = self.psr4_mappings.lock() {
                 *m = mappings;
+            }
+
+            // Parse autoload_files.php to discover global function definitions.
+            let autoload_files = composer::parse_autoload_files(&root, &vendor_dir);
+            let autoload_count = autoload_files.len();
+
+            for file_path in &autoload_files {
+                if let Ok(content) = std::fs::read_to_string(file_path) {
+                    let functions = self.parse_functions(&content);
+                    let uri = format!("file://{}", file_path.display());
+
+                    if let Ok(mut fmap) = self.global_functions.lock() {
+                        for func in functions {
+                            let fqn = if let Some(ref ns) = func.namespace {
+                                format!("{}\\{}", ns, &func.name)
+                            } else {
+                                func.name.clone()
+                            };
+
+                            // Insert both the FQN and the short name so that
+                            // callers using `use function Ns\func;` or bare
+                            // `func()` can both resolve.
+                            fmap.insert(fqn.clone(), (uri.clone(), func.clone()));
+                            if func.namespace.is_some() {
+                                fmap.entry(func.name.clone())
+                                    .or_insert_with(|| (uri.clone(), func.clone()));
+                            }
+                        }
+                    }
+
+                    // Also cache classes from these files in the ast_map so
+                    // that class definitions in autoload files are available.
+                    self.update_ast(&uri, &content);
+                }
             }
 
             self.log(
                 MessageType::INFO,
                 format!(
-                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s)",
-                    mapping_count
+                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s), {} autoload file(s)",
+                    mapping_count, autoload_count
                 ),
             )
             .await;
@@ -247,6 +299,32 @@ impl LanguageServer for Backend {
                     self.find_or_load_class(resolved_name)
                 };
 
+                // Build a function_loader closure that looks up standalone
+                // functions by name in the global_functions map and returns
+                // their FunctionInfo (needed for return-type resolution on
+                // call expressions like `app()->method()`).
+                let function_loader = |name: &str| -> Option<crate::FunctionInfo> {
+                    let fmap = self.global_functions.lock().ok()?;
+                    // Try the exact name first, then namespace-qualified variants.
+                    if let Some((_, info)) = fmap.get(name) {
+                        return Some(info.clone());
+                    }
+                    // Try resolving via use map (e.g. `use function Ns\func;`)
+                    if let Some(fqn) = file_use_map.get(name)
+                        && let Some((_, info)) = fmap.get(fqn.as_str())
+                    {
+                        return Some(info.clone());
+                    }
+                    // Try namespace-qualified
+                    if let Some(ref ns) = file_namespace {
+                        let ns_qualified = format!("{}\\{}", ns, name);
+                        if let Some((_, info)) = fmap.get(&ns_qualified) {
+                            return Some(info.clone());
+                        }
+                    }
+                    None
+                };
+
                 let resolved = Self::resolve_target_class(
                     &target.subject,
                     target.access_kind,
@@ -255,6 +333,7 @@ impl LanguageServer for Backend {
                     &content,
                     cursor_offset.unwrap_or(0),
                     &class_loader,
+                    Some(&function_loader),
                 );
 
                 if let Some(target_class) = resolved {
