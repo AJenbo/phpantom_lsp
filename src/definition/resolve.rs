@@ -56,6 +56,16 @@ impl Backend {
             return Some(location);
         }
 
+        // ── Handle `self`, `static`, `parent` keywords ──
+        // When the cursor is on one of these keywords (e.g. `new self()`,
+        // `new static()`, `new parent()`), resolve to the enclosing class
+        // definition (or the parent class for `parent`).
+        if (word == "self" || word == "static" || word == "parent")
+            && let Some(location) = self.resolve_self_static_parent(uri, content, position, &word)
+        {
+            return Some(location);
+        }
+
         // 2. Gather context from the current file (use map + namespace).
         let file_use_map = self
             .use_map
@@ -954,6 +964,125 @@ impl Backend {
     ///
     /// Returns the position of the keyword (`class`, `interface`, etc.) on
     /// the matching line.
+    /// Resolve `self`, `static`, or `parent` keywords to a class definition.
+    ///
+    /// - `self` / `static` → jump to the enclosing class declaration.
+    /// - `parent` → jump to the parent class declaration (from `extends`).
+    fn resolve_self_static_parent(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        keyword: &str,
+    ) -> Option<Location> {
+        let cursor_offset = Self::position_to_offset(content, position)?;
+
+        let classes = self
+            .ast_map
+            .lock()
+            .ok()
+            .and_then(|m| m.get(uri).cloned())
+            .unwrap_or_default();
+
+        let current_class = Self::find_class_at_offset(&classes, cursor_offset)?;
+
+        if keyword == "self" || keyword == "static" {
+            // Jump to the enclosing class definition in the current file.
+            let target_position = Self::find_definition_position(content, &current_class.name)?;
+            let parsed_uri = Url::parse(uri).ok()?;
+            return Some(Location {
+                uri: parsed_uri,
+                range: Range {
+                    start: target_position,
+                    end: target_position,
+                },
+            });
+        }
+
+        // keyword == "parent"
+        let parent_name = current_class.parent_class.as_ref()?;
+
+        // Try to find the parent class in the current file first.
+        if let Some(pos) = Self::find_definition_position(content, parent_name) {
+            let parsed_uri = Url::parse(uri).ok()?;
+            return Some(Location {
+                uri: parsed_uri,
+                range: Range {
+                    start: pos,
+                    end: pos,
+                },
+            });
+        }
+
+        // Resolve the parent class name to a FQN using use-map / namespace.
+        let file_use_map = self
+            .use_map
+            .lock()
+            .ok()
+            .and_then(|m| m.get(uri).cloned())
+            .unwrap_or_default();
+
+        let file_namespace = self
+            .namespace_map
+            .lock()
+            .ok()
+            .and_then(|m| m.get(uri).cloned())
+            .flatten();
+
+        let fqn = Self::resolve_to_fqn(parent_name, &file_use_map, &file_namespace);
+
+        // Try class_index / ast_map lookup via find_class_file_content.
+        let short_name = fqn.rsplit('\\').next().unwrap_or(&fqn);
+        if let Some((class_uri, class_content)) =
+            self.find_class_file_content(short_name, uri, content)
+            && let Some(pos) = Self::find_definition_position(&class_content, short_name)
+            && let Ok(parsed_uri) = Url::parse(&class_uri)
+        {
+            return Some(Location {
+                uri: parsed_uri,
+                range: Range {
+                    start: pos,
+                    end: pos,
+                },
+            });
+        }
+
+        // Try PSR-4 resolution as a last resort.
+        let workspace_root = self
+            .workspace_root
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
+
+        if let Some(workspace_root) = workspace_root
+            && let Ok(mappings) = self.psr4_mappings.lock()
+        {
+            let candidates = [fqn.as_str(), parent_name.as_str()];
+            for candidate in &candidates {
+                if let Some(file_path) =
+                    composer::resolve_class_path(&mappings, &workspace_root, candidate)
+                    && let Ok(target_content) = std::fs::read_to_string(&file_path)
+                {
+                    let name = candidate.rsplit('\\').next().unwrap_or(candidate);
+                    if let Some(target_position) =
+                        Self::find_definition_position(&target_content, name)
+                        && let Ok(target_uri) = Url::from_file_path(&file_path)
+                    {
+                        return Some(Location {
+                            uri: target_uri,
+                            range: Range {
+                                start: target_position,
+                                end: target_position,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn find_definition_position(content: &str, class_name: &str) -> Option<Position> {
         let keywords = ["class", "interface", "trait", "enum"];
 
