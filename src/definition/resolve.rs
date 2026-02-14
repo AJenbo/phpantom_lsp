@@ -319,8 +319,10 @@ impl Backend {
             None
         };
 
-        // 3. Resolve the subject to a concrete ClassInfo.
-        let target_class = Self::resolve_target_class(
+        // 3. Resolve the subject to all candidate classes.
+        //    When a variable is assigned different types in conditional
+        //    branches (e.g. if/else), multiple candidates are returned.
+        let candidates = Self::resolve_target_classes(
             &subject,
             access_kind,
             current_class.as_ref(),
@@ -329,21 +331,54 @@ impl Backend {
             cursor_offset,
             &class_loader,
             Some(&function_loader),
-        )?;
+        );
 
-        // 4. Find which class in the inheritance chain actually declares
-        //    the member.  This handles inherited members correctly.
-        let declaring_class = Self::find_declaring_class(&target_class, member_name, &class_loader)
-            .unwrap_or(target_class);
+        if candidates.is_empty() {
+            return None;
+        }
 
-        // 5. Determine the member kind.
+        // 4. Try each candidate class and pick the first one where the
+        //    member actually exists (directly or via inheritance).
+        for target_class in &candidates {
+            let declaring_class =
+                Self::find_declaring_class(target_class, member_name, &class_loader)
+                    .unwrap_or_else(|| target_class.clone());
+
+            // Check that the member is actually present on the declaring class.
+            let member_kind = match Self::classify_member(&declaring_class, member_name) {
+                Some(k) => k,
+                None => continue, // member not on this candidate, try next
+            };
+
+            // Locate the file that contains the declaring class.
+            if let Some((class_uri, class_content)) =
+                self.find_class_file_content(&declaring_class.name, uri, content)
+                && let Some(member_position) =
+                    Self::find_member_position(&class_content, member_name, member_kind)
+                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            {
+                return Some(Location {
+                    uri: parsed_uri,
+                    range: Range {
+                        start: member_position,
+                        end: member_position,
+                    },
+                });
+            }
+        }
+
+        // No candidate had the member — fall back to the first candidate
+        // and try the original (non-iterating) logic so we at least get
+        // partial results when possible.
+        let target_class = &candidates[0];
+        let declaring_class = Self::find_declaring_class(target_class, member_name, &class_loader)
+            .unwrap_or_else(|| target_class.clone());
+
         let member_kind = Self::classify_member(&declaring_class, member_name)?;
 
-        // 6. Locate the file that contains the declaring class.
         let (class_uri, class_content) =
             self.find_class_file_content(&declaring_class.name, uri, content)?;
 
-        // 7. Find the member's position inside that file.
         let member_position = Self::find_member_position(&class_content, member_name, member_kind)?;
 
         let parsed_uri = Url::parse(&class_uri).ok()?;

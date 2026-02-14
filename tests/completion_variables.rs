@@ -719,3 +719,508 @@ async fn test_completion_new_classname_arrow_cross_file() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Ambiguous Variable Completion Tests ────────────────────────────────────
+
+/// When a variable is conditionally reassigned (if-block), completion should
+/// offer the union of members from all candidate types.
+#[tokio::test]
+async fn test_completion_ambiguous_variable_if_block_union() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ambiguous.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SessionManager {\n",
+        "    public function callCustomCreator2(): void {}\n",
+        "    public function start(): void {}\n",
+        "}\n",
+        "\n",
+        "class Manager {\n",
+        "    public function doWork(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        $thing = new SessionManager();\n",
+        "        if ($thing->callCustomCreator2()) {\n",
+        "            $thing = new Manager();\n",
+        "        }\n",
+        "        $thing->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$thing->` on line 16
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 16,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for ambiguous $thing->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from SessionManager
+            assert!(
+                labels.iter().any(|l| l.starts_with("callCustomCreator2")),
+                "Should include callCustomCreator2 from SessionManager, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("start")),
+                "Should include start from SessionManager, got: {:?}",
+                labels
+            );
+            // Should also include members from Manager
+            assert!(
+                labels.iter().any(|l| l.starts_with("doWork")),
+                "Should include doWork from Manager, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Unconditional reassignment: only the final type's members should appear.
+#[tokio::test]
+async fn test_completion_unconditional_reassignment_only_final_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///unconditional.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function fooOnly(): void {}\n",
+        "}\n",
+        "\n",
+        "class Bar {\n",
+        "    public function barOnly(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        $x = new Foo();\n",
+        "        $x = new Bar();\n",
+        "        $x->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$x->` on line 13
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $x->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include Bar's method (the final unconditional assignment)
+            assert!(
+                labels.iter().any(|l| l.starts_with("barOnly")),
+                "Should include barOnly from Bar, got: {:?}",
+                labels
+            );
+            // Should NOT include Foo's method (unconditionally replaced)
+            assert!(
+                !labels.iter().any(|l| l.starts_with("fooOnly")),
+                "Should NOT include fooOnly from Foo after unconditional reassignment, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Ambiguous variable with if/else: completion shows union of all branches
+/// plus the original type.
+#[tokio::test]
+async fn test_completion_ambiguous_variable_if_else_union() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ifelse.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Writer {\n",
+        "    public function write(): void {}\n",
+        "}\n",
+        "\n",
+        "class Printer {\n",
+        "    public function print(): void {}\n",
+        "}\n",
+        "\n",
+        "class Sender {\n",
+        "    public function send(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        $out = new Writer();\n",
+        "        if (true) {\n",
+        "            $out = new Printer();\n",
+        "        } else {\n",
+        "            $out = new Sender();\n",
+        "        }\n",
+        "        $out->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$out->` on line 21
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 21,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for ambiguous $out->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from all three candidate types
+            assert!(
+                labels.iter().any(|l| l.starts_with("write")),
+                "Should include write from Writer, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("print")),
+                "Should include print from Printer, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("send")),
+                "Should include send from Sender, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Union Type Completion Tests ────────────────────────────────────────────
+
+/// When a method returns a union type (`B|C`), completion should offer
+/// the union of members from all parts of the type.
+#[tokio::test]
+async fn test_completion_union_return_type_shows_all_members() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///union_completion.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Dog {\n",
+        "    public function bark(): void {}\n",
+        "    public function fetch(): void {}\n",
+        "}\n",
+        "\n",
+        "class Cat {\n",
+        "    public function meow(): void {}\n",
+        "    public function purr(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function getAnimal(): Dog|Cat { return new Dog(); }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $pet = $this->getAnimal();\n",
+        "        $pet->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$pet->` on line 16
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 16,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for union return type Dog|Cat"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from Dog
+            assert!(
+                labels.iter().any(|l| l.starts_with("bark")),
+                "Should include bark from Dog, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("fetch")),
+                "Should include fetch from Dog, got: {:?}",
+                labels
+            );
+            // Should also include members from Cat
+            assert!(
+                labels.iter().any(|l| l.starts_with("meow")),
+                "Should include meow from Cat, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("purr")),
+                "Should include purr from Cat, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Union type on a parameter: completion shows members from all parts.
+#[tokio::test]
+async fn test_completion_union_parameter_type_shows_all_members() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///union_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Reader {\n",
+        "    public function read(): void {}\n",
+        "}\n",
+        "\n",
+        "class Stream {\n",
+        "    public function consume(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function process(Reader|Stream $input): void {\n",
+        "        $input->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$input->` on line 11
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for union param type Reader|Stream"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("read")),
+                "Should include read from Reader, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("consume")),
+                "Should include consume from Stream, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Union Return + Conditional Reassignment ────────────────────────────────
+
+/// When a variable is assigned from a function returning a union type (A|B)
+/// and then conditionally reassigned to a new type (C), the resulting type
+/// should be A|B|C — the union should grow, not be special-cased.
+#[tokio::test]
+async fn test_completion_union_return_plus_conditional_reassignment_grows_union() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///union_grow.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class A {\n",
+        "    public function onlyOnA(): void {}\n",
+        "}\n",
+        "\n",
+        "class B {\n",
+        "    public function onlyOnB(): void {}\n",
+        "}\n",
+        "\n",
+        "class C {\n",
+        "    public function onlyOnC(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    /** @return A|B */\n",
+        "    public function makeAOrB(): A|B { return new A(); }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $thing = $this->makeAOrB();\n",
+        "        if (true) {\n",
+        "            $thing = new C();\n",
+        "        }\n",
+        "        $thing->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$thing->` on line 22
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 22,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $thing-> after union return + conditional reassignment"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should include members from A (from makeAOrB union part)
+            assert!(
+                labels.iter().any(|l| l.starts_with("onlyOnA")),
+                "Should include onlyOnA from A (union return), got: {:?}",
+                labels
+            );
+            // Should include members from B (from makeAOrB union part)
+            assert!(
+                labels.iter().any(|l| l.starts_with("onlyOnB")),
+                "Should include onlyOnB from B (union return), got: {:?}",
+                labels
+            );
+            // Should include members from C (conditional reassignment)
+            assert!(
+                labels.iter().any(|l| l.starts_with("onlyOnC")),
+                "Should include onlyOnC from C (conditional reassignment), got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

@@ -2960,3 +2960,1237 @@ async fn test_goto_definition_new_namespaced_classname_arrow_method() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Ambiguous Variable Types ───────────────────────────────────────────────
+
+/// When a variable is reassigned inside an `if` block, the variable could be
+/// either type after the block.  Goto definition should still resolve the
+/// member if *any* candidate type declares it.
+///
+/// ```php
+/// $thing = new SessionManager();
+/// if ($thing->callCustomCreator2()) {
+///     $thing = new Manager();
+/// }
+/// $thing->callCustomCreator2(); // Manager doesn't have it, but SessionManager does
+/// ```
+#[tokio::test]
+async fn test_goto_definition_ambiguous_variable_if_block() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                             // 0
+        "class SessionManager {\n",                            // 1
+        "    public function callCustomCreator2(): void {}\n", // 2
+        "    public function start(): void {}\n",              // 3
+        "}\n",                                                 // 4
+        "\n",                                                  // 5
+        "class Manager {\n",                                   // 6
+        "    public function doWork(): void {}\n",             // 7
+        "}\n",                                                 // 8
+        "\n",                                                  // 9
+        "class App {\n",                                       // 10
+        "    public function run(): void {\n",                 // 11
+        "        $thing = new SessionManager();\n",            // 12
+        "        if ($thing->callCustomCreator2()) {\n",       // 13
+        "            $thing = new Manager();\n",               // 14
+        "        }\n",                                         // 15
+        "        $thing->callCustomCreator2();\n",             // 16
+        "    }\n",                                             // 17
+        "}\n",                                                 // 18
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "callCustomCreator2" on line 16: $thing->callCustomCreator2()
+    // After the if block, $thing could be SessionManager or Manager.
+    // Manager doesn't have callCustomCreator2, but SessionManager does.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 16,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $thing->callCustomCreator2() via SessionManager even though Manager was assigned in if-block"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "callCustomCreator2 is declared on line 2 in SessionManager"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When both candidate types share a method, the first candidate (original
+/// assignment) should win.
+#[tokio::test]
+async fn test_goto_definition_ambiguous_variable_both_have_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // 0
+        "class Alpha {\n",                        // 1
+        "    public function greet(): void {}\n", // 2
+        "}\n",                                    // 3
+        "\n",                                     // 4
+        "class Beta {\n",                         // 5
+        "    public function greet(): void {}\n", // 6
+        "}\n",                                    // 7
+        "\n",                                     // 8
+        "class App {\n",                          // 9
+        "    public function run(): void {\n",    // 10
+        "        $obj = new Alpha();\n",          // 11
+        "        if (true) {\n",                  // 12
+        "            $obj = new Beta();\n",       // 13
+        "        }\n",                            // 14
+        "        $obj->greet();\n",               // 15
+        "    }\n",                                // 16
+        "}\n",                                    // 17
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "greet" on line 15
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 15,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $obj->greet() when both Alpha and Beta have greet()"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            // First candidate (Alpha) wins since it was the original assignment
+            assert_eq!(
+                location.range.start.line, 2,
+                "greet() should resolve to Alpha (line 2) as the first candidate"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// An unconditional reassignment should replace previous candidates,
+/// so only the final type is used.
+#[tokio::test]
+async fn test_goto_definition_unconditional_reassignment_replaces_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                  // 0
+        "class Foo {\n",                            // 1
+        "    public function fooOnly(): void {}\n", // 2
+        "}\n",                                      // 3
+        "\n",                                       // 4
+        "class Bar {\n",                            // 5
+        "    public function barOnly(): void {}\n", // 6
+        "}\n",                                      // 7
+        "\n",                                       // 8
+        "class App {\n",                            // 9
+        "    public function run(): void {\n",      // 10
+        "        $x = new Foo();\n",                // 11
+        "        $x = new Bar();\n",                // 12
+        "        $x->barOnly();\n",                 // 13
+        "    }\n",                                  // 14
+        "}\n",                                      // 15
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "barOnly" on line 13 — unconditional reassignment means $x is Bar
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 13,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $x->barOnly() to Bar::barOnly"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "barOnly is declared on line 6 in Bar"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // fooOnly should NOT resolve since Foo was unconditionally replaced by Bar
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 13,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    // The result should resolve to Bar, not Foo — we already checked above
+    assert!(result2.is_some());
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_ne!(
+                location.range.start.line, 2,
+                "fooOnly on line 2 (Foo) should NOT be reachable after unconditional reassignment"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Ambiguous variable across try/catch: reassignment in try block should
+/// add a candidate, not replace the original.
+#[tokio::test]
+async fn test_goto_definition_ambiguous_variable_try_catch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                         // 0
+        "class Logger {\n",                                // 1
+        "    public function log(string $msg): void {}\n", // 2
+        "}\n",                                             // 3
+        "\n",                                              // 4
+        "class NullLogger {\n",                            // 5
+        "    public function silence(): void {}\n",        // 6
+        "}\n",                                             // 7
+        "\n",                                              // 8
+        "class App {\n",                                   // 9
+        "    public function run(): void {\n",             // 10
+        "        $logger = new Logger();\n",               // 11
+        "        try {\n",                                 // 12
+        "            $logger = new NullLogger();\n",       // 13
+        "        } catch (\\Exception $e) {\n",            // 14
+        "        }\n",                                     // 15
+        "        $logger->log('hello');\n",                // 16
+        "    }\n",                                         // 17
+        "}\n",                                             // 18
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "log" on line 16: $logger->log('hello')
+    // NullLogger doesn't have log(), but Logger does.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 16,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $logger->log() via Logger even though NullLogger was assigned in try block"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "log() is declared on line 2 in Logger"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Ambiguous variable with if/else: both branches reassign, original type
+/// should still be available as a candidate.
+#[tokio::test]
+async fn test_goto_definition_ambiguous_variable_if_else_branches() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // 0
+        "class Writer {\n",                       // 1
+        "    public function write(): void {}\n", // 2
+        "}\n",                                    // 3
+        "\n",                                     // 4
+        "class Printer {\n",                      // 5
+        "    public function print(): void {}\n", // 6
+        "}\n",                                    // 7
+        "\n",                                     // 8
+        "class Sender {\n",                       // 9
+        "    public function send(): void {}\n",  // 10
+        "}\n",                                    // 11
+        "\n",                                     // 12
+        "class App {\n",                          // 13
+        "    public function run(): void {\n",    // 14
+        "        $out = new Writer();\n",         // 15
+        "        if (true) {\n",                  // 16
+        "            $out = new Printer();\n",    // 17
+        "        } else {\n",                     // 18
+        "            $out = new Sender();\n",     // 19
+        "        }\n",                            // 20
+        "        $out->write();\n",               // 21
+        "    }\n",                                // 22
+        "}\n",                                    // 23
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "write" on line 21 — only Writer has write()
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 21,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $out->write() via Writer even with if/else reassignments"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "write() is declared on line 2 in Writer"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Ambiguous variable across a loop: reassignment inside a while loop should
+/// add a candidate.
+#[tokio::test]
+async fn test_goto_definition_ambiguous_variable_loop() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                   // 0
+        "class Handler {\n",                         // 1
+        "    public function handle(): void {}\n",   // 2
+        "}\n",                                       // 3
+        "\n",                                        // 4
+        "class Fallback {\n",                        // 5
+        "    public function fallback(): void {}\n", // 6
+        "}\n",                                       // 7
+        "\n",                                        // 8
+        "class App {\n",                             // 9
+        "    public function run(): void {\n",       // 10
+        "        $h = new Handler();\n",             // 11
+        "        while (true) {\n",                  // 12
+        "            $h = new Fallback();\n",        // 13
+        "        }\n",                               // 14
+        "        $h->handle();\n",                   // 15
+        "    }\n",                                   // 16
+        "}\n",                                       // 17
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "handle" on line 15 — Fallback doesn't have handle(), Handler does
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 15,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $h->handle() via Handler even though Fallback was assigned in while loop"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "handle() is declared on line 2 in Handler"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Cross-file ambiguous variable: the reassigned class comes from PSR-4.
+#[tokio::test]
+async fn test_goto_definition_ambiguous_variable_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        &[
+            (
+                "src/Cache.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class Cache {\n",
+                    "    public function get(string $key): mixed { return null; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/NullCache.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class NullCache {\n",
+                    "    public function clear(): void {}\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let uri = Url::parse("file:///test_main.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Cache;\n",
+        "use App\\NullCache;\n",
+        "\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $store = new Cache();\n",
+        "        if (getenv('DISABLE_CACHE')) {\n",
+        "            $store = new NullCache();\n",
+        "        }\n",
+        "        $store->get('key');\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "get" on line 10: $store->get('key')
+    // NullCache doesn't have get(), but Cache does (cross-file via PSR-4)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 10,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $store->get() via Cache (PSR-4) even with NullCache in if-block"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            // Cache::get is declared on line 3 (0-indexed) of Cache.php
+            assert_eq!(
+                location.range.start.line, 3,
+                "get() should be on line 3 of Cache.php"
+            );
+            let loc_path = location.uri.to_file_path().unwrap();
+            assert!(
+                loc_path.ends_with("src/Cache.php"),
+                "Should resolve to Cache.php, got: {:?}",
+                loc_path
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+// ─── Union Return Type Resolution ───────────────────────────────────────────
+
+/// When a function returns a union type (`B|C`), goto definition should
+/// resolve the member if any part of the union declares it.
+///
+/// ```php
+/// function a(): B|C { ... }
+/// $a = a();
+/// $a->onlyOnB(); // B has it, C doesn't — should still resolve
+/// ```
+#[tokio::test]
+async fn test_goto_definition_union_return_type_function() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                // 0
+        "class B {\n",                                            // 1
+        "    public function onlyOnB(): void {}\n",               // 2
+        "}\n",                                                    // 3
+        "\n",                                                     // 4
+        "class C {\n",                                            // 5
+        "    public function onlyOnC(): void {}\n",               // 6
+        "}\n",                                                    // 7
+        "\n",                                                     // 8
+        "class App {\n",                                          // 9
+        "    public function getBC(): B|C { return new B(); }\n", // 10
+        "\n",                                                     // 11
+        "    public function run(): void {\n",                    // 12
+        "        $a = $this->getBC();\n",                         // 13
+        "        $a->onlyOnB();\n",                               // 14
+        "        $a->onlyOnC();\n",                               // 15
+        "    }\n",                                                // 16
+        "}\n",                                                    // 17
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "onlyOnB" on line 14 — B has it, C doesn't
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 14,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $a->onlyOnB() via union return type B|C"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "onlyOnB is declared on line 2 in class B"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Click on "onlyOnC" on line 15 — C has it, B doesn't
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 15,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Should resolve $a->onlyOnC() via union return type B|C"
+    );
+
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "onlyOnC is declared on line 6 in class C"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Union return type via a standalone function assigned to a variable:
+/// `$x = someFunc();` where `someFunc(): A|B`.
+#[tokio::test]
+async fn test_goto_definition_union_return_type_standalone_function() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                               // 0
+        "class Dog {\n",                         // 1
+        "    public function bark(): void {}\n", // 2
+        "}\n",                                   // 3
+        "\n",                                    // 4
+        "class Cat {\n",                         // 5
+        "    public function meow(): void {}\n", // 6
+        "}\n",                                   // 7
+        "\n",                                    // 8
+        "function getAnimal(): Dog|Cat {\n",     // 9
+        "    return new Dog();\n",               // 10
+        "}\n",                                   // 11
+        "\n",                                    // 12
+        "class App {\n",                         // 13
+        "    public function run(): void {\n",   // 14
+        "        $pet = getAnimal();\n",         // 15
+        "        $pet->bark();\n",               // 16
+        "        $pet->meow();\n",               // 17
+        "    }\n",                               // 18
+        "}\n",                                   // 19
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Register the standalone function in global_functions so the resolver
+    // can look up its return type.
+    {
+        let mut fmap = backend.global_functions.lock().unwrap();
+        fmap.insert(
+            "getAnimal".to_string(),
+            (
+                uri.to_string(),
+                phpantom_lsp::FunctionInfo {
+                    name: "getAnimal".to_string(),
+                    parameters: vec![],
+                    return_type: Some("Dog|Cat".to_string()),
+                    namespace: None,
+                },
+            ),
+        );
+    }
+
+    // Click on "bark" on line 16 — Dog has it
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 16,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $pet->bark() via Dog|Cat union return type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "bark is declared on line 2 in Dog"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Click on "meow" on line 17 — Cat has it
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 17,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Should resolve $pet->meow() via Dog|Cat union return type"
+    );
+
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "meow is declared on line 6 in Cat"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Nullable union type (`?Foo` is equivalent to `Foo|null`): should still
+/// resolve the class part.
+#[tokio::test]
+async fn test_goto_definition_nullable_union_return_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                        // 0
+        "class Formatter {\n",                                            // 1
+        "    public function format(string $s): string { return $s; }\n", // 2
+        "}\n",                                                            // 3
+        "\n",                                                             // 4
+        "class App {\n",                                                  // 5
+        "    public function getFormatter(): ?Formatter {\n",             // 6
+        "        return new Formatter();\n",                              // 7
+        "    }\n",                                                        // 8
+        "\n",                                                             // 9
+        "    public function run(): void {\n",                            // 10
+        "        $f = $this->getFormatter();\n",                          // 11
+        "        $f->format('hello');\n",                                 // 12
+        "    }\n",                                                        // 13
+        "}\n",                                                            // 14
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "format" on line 12
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $f->format() via ?Formatter nullable return type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "format is declared on line 2 in Formatter"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Union type on a property: `public A|B $prop;`
+#[tokio::test]
+async fn test_goto_definition_union_property_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // 0
+        "class Engine {\n",                       // 1
+        "    public function start(): void {}\n", // 2
+        "}\n",                                    // 3
+        "\n",                                     // 4
+        "class Motor {\n",                        // 5
+        "    public function rev(): void {}\n",   // 6
+        "}\n",                                    // 7
+        "\n",                                     // 8
+        "class Car {\n",                          // 9
+        "    public Engine|Motor $powerUnit;\n",  // 10
+        "\n",                                     // 11
+        "    public function run(): void {\n",    // 12
+        "        $this->powerUnit->start();\n",   // 13
+        "        $this->powerUnit->rev();\n",     // 14
+        "    }\n",                                // 15
+        "}\n",                                    // 16
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "start" on line 13 — Engine has it
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 13,
+                character: 30,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->powerUnit->start() via Engine|Motor union property type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "start is declared on line 2 in Engine"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Click on "rev" on line 14 — Motor has it
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 14,
+                character: 27,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Should resolve $this->powerUnit->rev() via Engine|Motor union property type"
+    );
+
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "rev is declared on line 6 in Motor"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Union type in a parameter type hint: `function run(A|B $x) { $x->method(); }`
+#[tokio::test]
+async fn test_goto_definition_union_parameter_type_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                     // 0
+        "class Reader {\n",                                            // 1
+        "    public function read(): void {}\n",                       // 2
+        "}\n",                                                         // 3
+        "\n",                                                          // 4
+        "class Stream {\n",                                            // 5
+        "    public function consume(): void {}\n",                    // 6
+        "}\n",                                                         // 7
+        "\n",                                                          // 8
+        "class App {\n",                                               // 9
+        "    public function process(Reader|Stream $input): void {\n", // 10
+        "        $input->read();\n",                                   // 11
+        "        $input->consume();\n",                                // 12
+        "    }\n",                                                     // 13
+        "}\n",                                                         // 14
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "read" on line 11 — Reader has it
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $input->read() via Reader|Stream union param type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "read is declared on line 2 in Reader"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Click on "consume" on line 12 — Stream has it
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Should resolve $input->consume() via Reader|Stream union param type"
+    );
+
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "consume is declared on line 6 in Stream"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Union return type with scalar parts: `string|Foo` — the scalar `string`
+/// should be ignored and `Foo` should resolve.
+#[tokio::test]
+async fn test_goto_definition_union_with_scalar_parts() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                // 0
+        "class Result {\n",                                       // 1
+        "    public function unwrap(): mixed { return null; }\n", // 2
+        "}\n",                                                    // 3
+        "\n",                                                     // 4
+        "class App {\n",                                          // 5
+        "    public function fetch(): string|Result {\n",         // 6
+        "        return new Result();\n",                         // 7
+        "    }\n",                                                // 8
+        "\n",                                                     // 9
+        "    public function run(): void {\n",                    // 10
+        "        $r = $this->fetch();\n",                         // 11
+        "        $r->unwrap();\n",                                // 12
+        "    }\n",                                                // 13
+        "}\n",                                                    // 14
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "unwrap" on line 12 — `string` part is ignored, Result has it
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $r->unwrap() via string|Result, ignoring scalar part"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "unwrap is declared on line 2 in Result"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Cross-file union return type: parts of the union come from PSR-4.
+#[tokio::test]
+async fn test_goto_definition_union_return_type_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#,
+        &[
+            (
+                "src/Encoder.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class Encoder {\n",
+                    "    public function encode(string $data): string { return $data; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Decoder.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class Decoder {\n",
+                    "    public function decode(string $data): string { return $data; }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let uri = Url::parse("file:///test_main.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Encoder;\n",
+        "use App\\Decoder;\n",
+        "\n",
+        "class Codec {\n",
+        "    public function getCodec(): Encoder|Decoder {\n",
+        "        return new Encoder();\n",
+        "    }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $c = $this->getCodec();\n",
+        "        $c->encode('data');\n",
+        "        $c->decode('data');\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "encode" on line 11 — Encoder has it (cross-file)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $c->encode() via Encoder|Decoder union return type (cross-file)"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 3,
+                "encode is on line 3 of Encoder.php"
+            );
+            let loc_path = location.uri.to_file_path().unwrap();
+            assert!(
+                loc_path.ends_with("src/Encoder.php"),
+                "Should resolve to Encoder.php, got: {:?}",
+                loc_path
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Click on "decode" on line 12 — Decoder has it (cross-file)
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Should resolve $c->decode() via Encoder|Decoder union return type (cross-file)"
+    );
+
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 3,
+                "decode is on line 3 of Decoder.php"
+            );
+            let loc_path = location.uri.to_file_path().unwrap();
+            assert!(
+                loc_path.ends_with("src/Decoder.php"),
+                "Should resolve to Decoder.php, got: {:?}",
+                loc_path
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

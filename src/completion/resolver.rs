@@ -13,6 +13,12 @@
 ///   - Function call return types: `app()` → look up return type in global_functions
 ///   - Method call return types: `$this->getService()` → look up method return type
 ///   - Static method call return types: `Class::make()` → look up method return type
+///   - **Ambiguous variables**: when a variable is assigned different types
+///     in conditional branches (if/else, try/catch, loops), all possible
+///     types are collected so that member resolution can try each one.
+///   - **Union types**: `A|B` in return types, property types, and parameter
+///     type hints are split into individual candidates so each one can be
+///     tried when resolving members.
 ///
 /// When a class cannot be found in the local `all_classes` slice, the
 /// `class_loader` callback is invoked. This allows the caller (typically
@@ -45,7 +51,7 @@ impl Backend {
     #[allow(clippy::too_many_arguments)]
     pub fn resolve_target_class(
         subject: &str,
-        _access_kind: AccessKind,
+        access_kind: AccessKind,
         current_class: Option<&ClassInfo>,
         all_classes: &[ClassInfo],
         content: &str,
@@ -53,9 +59,39 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
     ) -> Option<ClassInfo> {
+        Self::resolve_target_classes(
+            subject,
+            access_kind,
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader,
+            function_loader,
+        )
+        .into_iter()
+        .next()
+    }
+
+    /// Like `resolve_target_class`, but returns **all** candidate types.
+    ///
+    /// When a variable is assigned different types in conditional branches
+    /// (e.g. an `if` block reassigns `$thing`), this returns every possible
+    /// type so the caller can try each one when looking up members.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_target_classes(
+        subject: &str,
+        _access_kind: AccessKind,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        content: &str,
+        cursor_offset: u32,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
+    ) -> Vec<ClassInfo> {
         // ── Keywords that always mean "current class" ──
         if subject == "$this" || subject == "self" || subject == "static" {
-            return current_class.cloned();
+            return current_class.cloned().into_iter().collect();
         }
 
         // ── `parent::` — resolve to the current class's parent ──
@@ -66,12 +102,12 @@ impl Backend {
                 // Try local lookup first
                 let lookup = parent_name.rsplit('\\').next().unwrap_or(parent_name);
                 if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
-                    return Some(cls.clone());
+                    return vec![cls.clone()];
                 }
                 // Fall back to cross-file / PSR-4
-                return class_loader(parent_name);
+                return class_loader(parent_name).into_iter().collect();
             }
-            return None;
+            return vec![];
         }
 
         // ── Bare class name (for `::` or `->` from `new ClassName()`) ──
@@ -82,17 +118,17 @@ impl Backend {
         {
             let lookup = subject.rsplit('\\').next().unwrap_or(subject);
             if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
-                return Some(cls.clone());
+                return vec![cls.clone()];
             }
             // Try cross-file / PSR-4 with the full subject
-            return class_loader(subject);
+            return class_loader(subject).into_iter().collect();
         }
 
         // ── Call expression: subject ends with "()" ──
         // Handles function calls (`app()`), method calls (`$this->getService()`),
         // and static method calls (`ClassName::make()`).
         if let Some(call_body) = subject.strip_suffix("()") {
-            return Self::resolve_call_return_type(
+            return Self::resolve_call_return_types(
                 call_body,
                 current_class,
                 all_classes,
@@ -106,19 +142,20 @@ impl Backend {
             .strip_prefix("$this->")
             .or_else(|| subject.strip_prefix("$this?->"))
         {
-            if let Some(cc) = current_class
-                && let Some(resolved) =
-                    Self::resolve_property_type(prop_name, cc, all_classes, class_loader)
-            {
-                return Some(resolved);
+            if let Some(cc) = current_class {
+                let resolved =
+                    Self::resolve_property_types(prop_name, cc, all_classes, class_loader);
+                if !resolved.is_empty() {
+                    return resolved;
+                }
             }
-            return None;
+            return vec![];
         }
 
         // ── Variable like `$var` — resolve via assignments / parameter hints ──
         if subject.starts_with('$') {
-            if let Some(cc) = current_class
-                && let Some(resolved) = Self::resolve_variable_type(
+            if let Some(cc) = current_class {
+                return Self::resolve_variable_types(
                     subject,
                     cc,
                     all_classes,
@@ -126,14 +163,12 @@ impl Backend {
                     cursor_offset,
                     class_loader,
                     function_loader,
-                )
-            {
-                return Some(resolved);
+                );
             }
-            return None;
+            return vec![];
         }
 
-        None
+        vec![]
     }
 
     /// Resolve a call expression to the class of its return type.
@@ -145,13 +180,16 @@ impl Backend {
     ///
     /// The return type string is extracted from the function / method
     /// definition and then resolved to a `ClassInfo` via `class_loader`.
-    fn resolve_call_return_type(
+    ///
+    /// Returns all candidate classes when the return type is a union
+    /// (e.g. `A|B`).
+    fn resolve_call_return_types(
         call_body: &str,
         current_class: Option<&ClassInfo>,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-    ) -> Option<ClassInfo> {
+    ) -> Vec<ClassInfo> {
         // ── Instance method call: $this->method / $var->method ──
         if let Some(pos) = call_body.rfind("->") {
             let lhs = &call_body[..pos];
@@ -159,28 +197,31 @@ impl Backend {
 
             // Resolve the left-hand side to a class (recursively handles
             // $this, $var, property chains, nested calls, etc.)
-            let lhs_class = if lhs == "$this" || lhs == "self" || lhs == "static" {
-                current_class.cloned()
+            let lhs_classes: Vec<ClassInfo> = if lhs == "$this" || lhs == "self" || lhs == "static"
+            {
+                current_class.cloned().into_iter().collect()
             } else if let Some(prop) = lhs
                 .strip_prefix("$this->")
                 .or_else(|| lhs.strip_prefix("$this?->"))
             {
                 current_class
-                    .and_then(|cc| Self::resolve_property_type(prop, cc, all_classes, class_loader))
+                    .map(|cc| Self::resolve_property_types(prop, cc, all_classes, class_loader))
+                    .unwrap_or_default()
             } else {
                 // Could be a variable — for now, skip complex chains
-                None
+                vec![]
             };
 
-            if let Some(ref owner) = lhs_class {
-                return Self::resolve_method_return_type(
+            let mut results = Vec::new();
+            for owner in &lhs_classes {
+                results.extend(Self::resolve_method_return_types(
                     owner,
                     method_name,
                     all_classes,
                     class_loader,
-                );
+                ));
             }
-            return None;
+            return results;
         }
 
         // ── Static method call: ClassName::method / self::method ──
@@ -205,14 +246,14 @@ impl Backend {
             };
 
             if let Some(ref owner) = owner_class {
-                return Self::resolve_method_return_type(
+                return Self::resolve_method_return_types(
                     owner,
                     method_name,
                     all_classes,
                     class_loader,
                 );
             }
-            return None;
+            return vec![];
         }
 
         // ── Standalone function call: app / myHelper ──
@@ -220,26 +261,34 @@ impl Backend {
             && let Some(func_info) = fl(call_body)
             && let Some(ref ret) = func_info.return_type
         {
-            return Self::type_hint_to_class(ret, "", all_classes, class_loader);
+            return Self::type_hint_to_classes(ret, "", all_classes, class_loader);
         }
 
-        None
+        vec![]
     }
 
     /// Look up a method's return type in a class (including inherited methods)
-    /// and resolve it to a `ClassInfo`.
-    pub(crate) fn resolve_method_return_type(
+    /// and resolve all candidate classes.
+    ///
+    /// When the return type is a union (e.g. `A|B`), every resolvable part
+    /// is returned as a separate candidate.
+    pub(crate) fn resolve_method_return_types(
         class_info: &ClassInfo,
         method_name: &str,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> Option<ClassInfo> {
+    ) -> Vec<ClassInfo> {
         // First check the class itself
         if let Some(method) = class_info.methods.iter().find(|m| m.name == method_name) {
             if let Some(ref ret) = method.return_type {
-                return Self::type_hint_to_class(ret, &class_info.name, all_classes, class_loader);
+                return Self::type_hint_to_classes(
+                    ret,
+                    &class_info.name,
+                    all_classes,
+                    class_loader,
+                );
             }
-            return None;
+            return vec![];
         }
 
         // Walk up the inheritance chain
@@ -247,37 +296,71 @@ impl Backend {
         if let Some(method) = merged.methods.iter().find(|m| m.name == method_name)
             && let Some(ref ret) = method.return_type
         {
-            return Self::type_hint_to_class(ret, &class_info.name, all_classes, class_loader);
+            return Self::type_hint_to_classes(ret, &class_info.name, all_classes, class_loader);
         }
 
-        None
+        vec![]
     }
 
-    /// Look up a property's type hint in `class_info` and find the
-    /// corresponding class in `all_classes` (or via `class_loader`).
-    pub(crate) fn resolve_property_type(
+    /// Look up a property's type hint and resolve all candidate classes.
+    ///
+    /// When the type hint is a union (e.g. `A|B`), every resolvable part
+    /// is returned.
+    pub(crate) fn resolve_property_types(
         prop_name: &str,
         class_info: &ClassInfo,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> Option<ClassInfo> {
-        let prop = class_info.properties.iter().find(|p| p.name == prop_name)?;
-        let type_hint = prop.type_hint.as_deref()?;
-        Self::type_hint_to_class(type_hint, &class_info.name, all_classes, class_loader)
+    ) -> Vec<ClassInfo> {
+        let prop = match class_info.properties.iter().find(|p| p.name == prop_name) {
+            Some(p) => p,
+            None => return vec![],
+        };
+        let type_hint = match prop.type_hint.as_deref() {
+            Some(h) => h,
+            None => return vec![],
+        };
+        Self::type_hint_to_classes(type_hint, &class_info.name, all_classes, class_loader)
     }
 
-    /// Map a type-hint string to a `ClassInfo`, treating `self` / `static`
-    /// as the owning class.  Strips a leading `?` for nullable types.
+    /// Map a type-hint string to all matching `ClassInfo` values.
     ///
-    /// First searches `all_classes` (the current file), then falls back to
-    /// the `class_loader` callback for cross-file resolution.
-    pub(crate) fn type_hint_to_class(
+    /// Handles:
+    ///   - Nullable types: `?Foo` → strips `?`, resolves `Foo`
+    ///   - Union types: `A|B|C` → resolves each part independently
+    ///   - `self` / `static` → owning class
+    ///   - Scalar/built-in types (`int`, `string`, `bool`, `float`, `array`,
+    ///     `void`, `null`, `mixed`, `never`, `object`, `callable`, `iterable`,
+    ///     `false`, `true`) → skipped (not class types)
+    ///
+    /// Each resolvable class-like part is returned as a separate entry.
+    pub(crate) fn type_hint_to_classes(
         type_hint: &str,
         owning_class_name: &str,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> Option<ClassInfo> {
+    ) -> Vec<ClassInfo> {
         let hint = type_hint.strip_prefix('?').unwrap_or(type_hint);
+
+        // ── Union type: split on `|` and resolve each part ──
+        if hint.contains('|') {
+            let mut results = Vec::new();
+            for part in hint.split('|') {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                // Recursively resolve each part (handles self/static, scalars, etc.)
+                let resolved =
+                    Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
+                for cls in resolved {
+                    if !results.iter().any(|c: &ClassInfo| c.name == cls.name) {
+                        results.push(cls);
+                    }
+                }
+            }
+            return results;
+        }
 
         // self / static always refer to the owning class
         if hint == "self" || hint == "static" {
@@ -285,17 +368,19 @@ impl Backend {
                 .iter()
                 .find(|c| c.name == owning_class_name)
                 .cloned()
-                .or_else(|| class_loader(owning_class_name));
+                .or_else(|| class_loader(owning_class_name))
+                .into_iter()
+                .collect();
         }
 
         // Try local (current-file) lookup by last segment
         let lookup = hint.rsplit('\\').next().unwrap_or(hint);
         if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
-            return Some(cls.clone());
+            return vec![cls.clone()];
         }
 
         // Fallback: cross-file / PSR-4 with the full hint string
-        class_loader(hint)
+        class_loader(hint).into_iter().collect()
     }
 
     /// Resolve the type of `$variable` by re-parsing the file and walking
@@ -305,7 +390,10 @@ impl Backend {
     ///   1. Assignments: `$var = new ClassName(…)` / `new self` / `new static`
     ///   2. Assignments from function calls: `$var = app()` → look up return type
     ///   3. Method parameter type hints
-    fn resolve_variable_type(
+    ///
+    /// Returns all possible types when the variable is assigned different
+    /// types in conditional branches.
+    fn resolve_variable_types(
         var_name: &str,
         current_class: &ClassInfo,
         all_classes: &[ClassInfo],
@@ -313,7 +401,7 @@ impl Backend {
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-    ) -> Option<ClassInfo> {
+    ) -> Vec<ClassInfo> {
         let arena = Bump::new();
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);
@@ -339,7 +427,7 @@ impl Backend {
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-    ) -> Option<ClassInfo> {
+    ) -> Vec<ClassInfo> {
         for stmt in statements {
             match stmt {
                 Statement::Class(class) => {
@@ -348,7 +436,7 @@ impl Backend {
                     if cursor_offset < start || cursor_offset > end {
                         continue;
                     }
-                    if let Some(cls) = Self::resolve_variable_in_members(
+                    let results = Self::resolve_variable_in_members(
                         class.members.iter(),
                         var_name,
                         current_class,
@@ -356,8 +444,9 @@ impl Backend {
                         cursor_offset,
                         class_loader,
                         function_loader,
-                    ) {
-                        return Some(cls);
+                    );
+                    if !results.is_empty() {
+                        return results;
                     }
                 }
                 Statement::Interface(iface) => {
@@ -366,7 +455,7 @@ impl Backend {
                     if cursor_offset < start || cursor_offset > end {
                         continue;
                     }
-                    if let Some(cls) = Self::resolve_variable_in_members(
+                    let results = Self::resolve_variable_in_members(
                         iface.members.iter(),
                         var_name,
                         current_class,
@@ -374,12 +463,13 @@ impl Backend {
                         cursor_offset,
                         class_loader,
                         function_loader,
-                    ) {
-                        return Some(cls);
+                    );
+                    if !results.is_empty() {
+                        return results;
                     }
                 }
                 Statement::Namespace(ns) => {
-                    if let Some(cls) = Self::resolve_variable_in_statements(
+                    let results = Self::resolve_variable_in_statements(
                         ns.statements().iter(),
                         var_name,
                         current_class,
@@ -387,20 +477,24 @@ impl Backend {
                         cursor_offset,
                         class_loader,
                         function_loader,
-                    ) {
-                        return Some(cls);
+                    );
+                    if !results.is_empty() {
+                        return results;
                     }
                 }
                 _ => {}
             }
         }
-        None
+        vec![]
     }
 
     /// Resolve a variable's type by scanning class-like members for parameter
     /// type hints and assignment expressions.
     ///
     /// Shared between `Statement::Class` and `Statement::Interface`.
+    ///
+    /// Returns all possible types when the variable is assigned different
+    /// types in conditional branches.
     fn resolve_variable_in_members<'b>(
         members: impl Iterator<Item = &'b ClassLikeMember<'b>>,
         var_name: &str,
@@ -409,7 +503,7 @@ impl Backend {
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-    ) -> Option<ClassInfo> {
+    ) -> Vec<ClassInfo> {
         for member in members {
             if let ClassLikeMember::Method(method) = member {
                 // Check parameter type hints first
@@ -419,20 +513,22 @@ impl Backend {
                         && let Some(hint) = &param.hint
                     {
                         let type_str = Self::extract_hint_string(hint);
-                        return Self::type_hint_to_class(
+                        let resolved = Self::type_hint_to_classes(
                             &type_str,
                             &current_class.name,
                             all_classes,
                             class_loader,
                         );
+                        if !resolved.is_empty() {
+                            return resolved;
+                        }
                     }
                 }
                 if let MethodBody::Concrete(block) = &method.body {
                     let blk_start = block.left_brace.start.offset;
                     let blk_end = block.right_brace.end.offset;
-                    if cursor_offset >= blk_start
-                        && cursor_offset <= blk_end
-                        && let Some(cls) = Self::find_assignment_type_in_block(
+                    if cursor_offset >= blk_start && cursor_offset <= blk_end {
+                        let results = Self::find_assignment_types_in_block(
                             block,
                             var_name,
                             &current_class.name,
@@ -440,19 +536,24 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                        )
-                    {
-                        return Some(cls);
+                        );
+                        if !results.is_empty() {
+                            return results;
+                        }
                     }
                 }
             }
         }
-        None
+        vec![]
     }
 
-    /// Walk a block's statements looking for the *last* assignment to
-    /// `$var_name` that occurs *before* the cursor.
-    fn find_assignment_type_in_block<'b>(
+    /// Walk a block's statements looking for assignments to `$var_name`
+    /// that occur *before* the cursor.
+    ///
+    /// Returns all possible types: unconditional assignments replace
+    /// previous candidates, while conditional assignments (inside
+    /// if/else/try/catch/loops) add to the list.
+    fn find_assignment_types_in_block<'b>(
         block: &'b Block<'b>,
         var_name: &str,
         current_class_name: &str,
@@ -460,8 +561,8 @@ impl Backend {
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-    ) -> Option<ClassInfo> {
-        let mut result: Option<ClassInfo> = None;
+    ) -> Vec<ClassInfo> {
+        let mut results: Vec<ClassInfo> = Vec::new();
         Self::walk_statements_for_assignments(
             block.statements.iter(),
             var_name,
@@ -470,11 +571,20 @@ impl Backend {
             cursor_offset,
             class_loader,
             function_loader,
-            &mut result,
+            &mut results,
+            false,
         );
-        result
+        results
     }
 
+    /// Walk statements collecting variable assignment types.
+    ///
+    /// The `conditional` flag indicates whether we are inside a conditional
+    /// block (if/else, try/catch, loop).  When `conditional` is `false`,
+    /// a new assignment **replaces** all previous candidates (the variable
+    /// is being unconditionally reassigned).  When `conditional` is `true`,
+    /// a new assignment **adds** to the list (the variable *might* be this
+    /// type).
     #[allow(clippy::too_many_arguments)]
     fn walk_statements_for_assignments<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
@@ -484,7 +594,8 @@ impl Backend {
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-        result: &mut Option<ClassInfo>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
     ) {
         for stmt in statements {
             // Only consider statements whose start is before the cursor
@@ -501,10 +612,12 @@ impl Backend {
                         all_classes,
                         class_loader,
                         function_loader,
-                        result,
+                        results,
+                        conditional,
                     );
                 }
-                // Recurse into blocks, if/else, loops, try, etc.
+                // Recurse into blocks — these are just `{ … }` groupings,
+                // not conditional, so preserve the current `conditional` flag.
                 Statement::Block(block) => {
                     Self::walk_statements_for_assignments(
                         block.statements.iter(),
@@ -514,9 +627,11 @@ impl Backend {
                         cursor_offset,
                         class_loader,
                         function_loader,
-                        result,
+                        results,
+                        conditional,
                     );
                 }
+                // ── Conditional blocks: recurse with conditional = true ──
                 Statement::If(if_stmt) => match &if_stmt.body {
                     IfBody::Statement(body) => {
                         Self::check_statement_for_assignments(
@@ -527,7 +642,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                         for else_if in body.else_if_clauses.iter() {
                             Self::check_statement_for_assignments(
@@ -538,7 +654,8 @@ impl Backend {
                                 cursor_offset,
                                 class_loader,
                                 function_loader,
-                                result,
+                                results,
+                                true,
                             );
                         }
                         if let Some(else_clause) = &body.else_clause {
@@ -550,7 +667,8 @@ impl Backend {
                                 cursor_offset,
                                 class_loader,
                                 function_loader,
-                                result,
+                                results,
+                                true,
                             );
                         }
                     }
@@ -563,7 +681,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                         for else_if in body.else_if_clauses.iter() {
                             Self::walk_statements_for_assignments(
@@ -574,7 +693,8 @@ impl Backend {
                                 cursor_offset,
                                 class_loader,
                                 function_loader,
-                                result,
+                                results,
+                                true,
                             );
                         }
                         if let Some(else_clause) = &body.else_clause {
@@ -586,7 +706,8 @@ impl Backend {
                                 cursor_offset,
                                 class_loader,
                                 function_loader,
-                                result,
+                                results,
+                                true,
                             );
                         }
                     }
@@ -601,7 +722,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                     ForeachBody::ColonDelimited(body) => {
@@ -613,7 +735,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                 },
@@ -627,7 +750,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                     WhileBody::ColonDelimited(body) => {
@@ -639,7 +763,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                 },
@@ -653,7 +778,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                     ForBody::ColonDelimited(body) => {
@@ -665,7 +791,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                 },
@@ -678,7 +805,8 @@ impl Backend {
                         cursor_offset,
                         class_loader,
                         function_loader,
-                        result,
+                        results,
+                        true,
                     );
                 }
                 Statement::Try(try_stmt) => {
@@ -690,7 +818,8 @@ impl Backend {
                         cursor_offset,
                         class_loader,
                         function_loader,
-                        result,
+                        results,
+                        true,
                     );
                     for catch in try_stmt.catch_clauses.iter() {
                         Self::walk_statements_for_assignments(
@@ -701,7 +830,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                     if let Some(finally) = &try_stmt.finally_clause {
@@ -713,7 +843,8 @@ impl Backend {
                             cursor_offset,
                             class_loader,
                             function_loader,
-                            result,
+                            results,
+                            true,
                         );
                     }
                 }
@@ -732,7 +863,8 @@ impl Backend {
         cursor_offset: u32,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-        result: &mut Option<ClassInfo>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
     ) {
         Self::walk_statements_for_assignments(
             std::iter::once(stmt),
@@ -742,13 +874,21 @@ impl Backend {
             cursor_offset,
             class_loader,
             function_loader,
-            result,
+            results,
+            conditional,
         );
     }
 
     /// If `expr` is an assignment whose LHS matches `$var_name` and whose
     /// RHS is a `new …` instantiation or a function/method call with a
-    /// known return type, resolve the class.
+    /// known return type, resolve the class and add it to `results`.
+    ///
+    /// When `conditional` is `false` (unconditional assignment), previous
+    /// candidates are cleared before adding the new type.  When `true`,
+    /// the new type is appended (the variable *might* be this type).
+    ///
+    /// Duplicate class names are suppressed automatically.
+    #[allow(clippy::too_many_arguments)]
     fn check_expression_for_assignment<'b>(
         expr: &'b Expression<'b>,
         var_name: &str,
@@ -756,8 +896,36 @@ impl Backend {
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
-        result: &mut Option<ClassInfo>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
     ) {
+        /// Push one or more resolved classes into `results`.
+        ///
+        /// * `conditional == false` → unconditional assignment: **clear**
+        ///   previous candidates first, then add all new ones (handles
+        ///   union return types like `A|B` from a single assignment).
+        /// * `conditional == true` → conditional branch: **append**
+        ///   without clearing (the variable *might* be these types).
+        ///
+        /// Duplicates (same class name) are always suppressed.
+        fn push_results(
+            results: &mut Vec<ClassInfo>,
+            new_classes: Vec<ClassInfo>,
+            conditional: bool,
+        ) {
+            if new_classes.is_empty() {
+                return;
+            }
+            if !conditional {
+                results.clear();
+            }
+            for cls in new_classes {
+                if !results.iter().any(|c| c.name == cls.name) {
+                    results.push(cls);
+                }
+            }
+        }
+
         if let Expression::Assignment(assignment) = expr {
             if !assignment.operator.is_assign() {
                 return;
@@ -778,15 +946,14 @@ impl Backend {
                     Expression::Identifier(ident) => Some(ident.value()),
                     _ => None,
                 };
-                if let Some(name) = class_name
-                    && let Some(cls) = Self::type_hint_to_class(
+                if let Some(name) = class_name {
+                    let resolved = Self::type_hint_to_classes(
                         name,
                         current_class_name,
                         all_classes,
                         class_loader,
-                    )
-                {
-                    *result = Some(cls);
+                    );
+                    push_results(results, resolved, conditional);
                 }
                 return;
             }
@@ -804,14 +971,14 @@ impl Backend {
                             && let Some(fl) = function_loader
                             && let Some(func_info) = fl(&name)
                             && let Some(ref ret) = func_info.return_type
-                            && let Some(cls) = Self::type_hint_to_class(
+                        {
+                            let resolved = Self::type_hint_to_classes(
                                 ret,
                                 current_class_name,
                                 all_classes,
                                 class_loader,
-                            )
-                        {
-                            *result = Some(cls);
+                            );
+                            push_results(results, resolved, conditional);
                         }
                     }
                     Call::Method(method_call) => {
@@ -825,14 +992,14 @@ impl Backend {
                             let method_name = ident.value.to_string();
                             if let Some(owner) =
                                 all_classes.iter().find(|c| c.name == current_class_name)
-                                && let Some(cls) = Self::resolve_method_return_type(
+                            {
+                                let resolved = Self::resolve_method_return_types(
                                     owner,
                                     &method_name,
                                     all_classes,
                                     class_loader,
-                                )
-                            {
-                                *result = Some(cls);
+                                );
+                                push_results(results, resolved, conditional);
                             }
                         }
                     }
@@ -854,15 +1021,14 @@ impl Backend {
                                 .find(|c| c.name == cls_name)
                                 .cloned()
                                 .or_else(|| class_loader(&cls_name));
-                            if let Some(ref owner) = owner
-                                && let Some(cls) = Self::resolve_method_return_type(
+                            if let Some(ref owner) = owner {
+                                let resolved = Self::resolve_method_return_types(
                                     owner,
                                     &method_name,
                                     all_classes,
                                     class_loader,
-                                )
-                            {
-                                *result = Some(cls);
+                                );
+                                push_results(results, resolved, conditional);
                             }
                         }
                     }

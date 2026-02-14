@@ -325,7 +325,7 @@ impl LanguageServer for Backend {
                     None
                 };
 
-                let resolved = Self::resolve_target_class(
+                let candidates = Self::resolve_target_classes(
                     &target.subject,
                     target.access_kind,
                     current_class,
@@ -336,8 +336,7 @@ impl LanguageServer for Backend {
                     Some(&function_loader),
                 );
 
-                if let Some(target_class) = resolved {
-                    let merged = Self::resolve_class_with_inheritance(&target_class, &class_loader);
+                if !candidates.is_empty() {
                     // `parent::` is syntactically `::` but semantically
                     // different: it shows both static and instance members
                     // while excluding private ones.
@@ -346,9 +345,26 @@ impl LanguageServer for Backend {
                     } else {
                         target.access_kind
                     };
-                    let items = Self::build_completion_items(&merged, effective_access);
-                    if !items.is_empty() {
-                        return Ok(Some(CompletionResponse::Array(items)));
+
+                    // Merge completion items from all candidate classes,
+                    // deduplicating by label so ambiguous variables show
+                    // the union of all possible members.
+                    let mut all_items: Vec<CompletionItem> = Vec::new();
+                    for target_class in &candidates {
+                        let merged =
+                            Self::resolve_class_with_inheritance(target_class, &class_loader);
+                        let items = Self::build_completion_items(&merged, effective_access);
+                        for item in items {
+                            if !all_items
+                                .iter()
+                                .any(|existing| existing.label == item.label)
+                            {
+                                all_items.push(item);
+                            }
+                        }
+                    }
+                    if !all_items.is_empty() {
+                        return Ok(Some(CompletionResponse::Array(all_items)));
                     }
                 }
             }
