@@ -1003,6 +1003,34 @@ impl Backend {
             }
         }
 
+        // Fallback: for properties, check if this is a magic property
+        // declared via a `@property` tag in the class docblock.
+        // Lines look like: ` * @property Type $propertyName`
+        if kind == MemberKind::Property {
+            let var_pattern = format!("${}", member_name);
+            for (line_idx, line) in content.lines().enumerate() {
+                if let Some(col) = line.find(&var_pattern) {
+                    let after_pos = col + var_pattern.len();
+                    let after_ok =
+                        after_pos >= line.len() || is_word_boundary(line.as_bytes()[after_pos]);
+                    if !after_ok {
+                        continue;
+                    }
+
+                    let trimmed = line.trim().trim_start_matches('*').trim();
+                    if trimmed.starts_with("@property-read")
+                        || trimmed.starts_with("@property-write")
+                        || trimmed.starts_with("@property")
+                    {
+                        return Some(Position {
+                            line: line_idx as u32,
+                            character: col as u32,
+                        });
+                    }
+                }
+            }
+        }
+
         None
     }
 

@@ -517,8 +517,31 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let (methods, properties, constants, used_traits) =
+                    let (methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(class.members.iter(), doc_ctx);
+
+                    // Extract @property tags from the class-level docblock.
+                    // These declare magic properties accessible via __get/__set.
+                    if let Some(ctx) = doc_ctx
+                        && let Some(doc_text) =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, class)
+                        {
+                            for (name, type_str) in docblock::extract_property_tags(doc_text) {
+                                // Only add if not already declared as a real property.
+                                if !properties.iter().any(|p| p.name == name) {
+                                    properties.push(PropertyInfo {
+                                        name,
+                                        type_hint: if type_str.is_empty() {
+                                            None
+                                        } else {
+                                            Some(type_str)
+                                        },
+                                        is_static: false,
+                                        visibility: Visibility::Public,
+                                    });
+                                }
+                            }
+                        }
 
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
@@ -544,8 +567,29 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let (methods, properties, constants, used_traits) =
+                    let (methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(iface.members.iter(), doc_ctx);
+
+                    // Extract @property tags from the interface-level docblock.
+                    if let Some(ctx) = doc_ctx
+                        && let Some(doc_text) =
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, iface)
+                        {
+                            for (name, type_str) in docblock::extract_property_tags(doc_text) {
+                                if !properties.iter().any(|p| p.name == name) {
+                                    properties.push(PropertyInfo {
+                                        name,
+                                        type_hint: if type_str.is_empty() {
+                                            None
+                                        } else {
+                                            Some(type_str)
+                                        },
+                                        is_static: false,
+                                        visibility: Visibility::Public,
+                                    });
+                                }
+                            }
+                        }
 
                     let start_offset = iface.left_brace.start.offset;
                     let end_offset = iface.right_brace.end.offset;
@@ -564,8 +608,31 @@ impl Backend {
                 Statement::Trait(trait_def) => {
                     let trait_name = trait_def.name.value.to_string();
 
-                    let (methods, properties, constants, used_traits) =
+                    let (methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
+
+                    // Extract @property tags from the trait-level docblock.
+                    if let Some(ctx) = doc_ctx
+                        && let Some(doc_text) = docblock::get_docblock_text_for_node(
+                            ctx.trivias,
+                            ctx.content,
+                            trait_def,
+                        ) {
+                            for (name, type_str) in docblock::extract_property_tags(doc_text) {
+                                if !properties.iter().any(|p| p.name == name) {
+                                    properties.push(PropertyInfo {
+                                        name,
+                                        type_hint: if type_str.is_empty() {
+                                            None
+                                        } else {
+                                            Some(type_str)
+                                        },
+                                        is_static: false,
+                                        visibility: Visibility::Public,
+                                    });
+                                }
+                            }
+                        }
 
                     let start_offset = trait_def.left_brace.start.offset;
                     let end_offset = trait_def.right_brace.end.offset;

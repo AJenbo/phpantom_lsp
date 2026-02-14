@@ -1332,3 +1332,362 @@ async fn test_docblock_return_generic_type_stripped() {
         "@return Collection<int, Model> should resolve to Collection"
     );
 }
+
+// ─── @property Docblock Tags ────────────────────────────────────────────────
+
+/// Test: `parse_php` extracts `@property` tags from a class-level docblock
+/// as public, non-static `PropertyInfo` entries.
+#[tokio::test]
+async fn test_parse_php_class_property_tags() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property null|int                    $latest_subscription_agreement_id\n",
+        " * @property UserMobileVerificationState $mobile_verification_state\n",
+        " */\n",
+        "class Customer {\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].properties.len(), 2);
+
+    let id_prop = classes[0]
+        .properties
+        .iter()
+        .find(|p| p.name == "latest_subscription_agreement_id")
+        .expect("Should have latest_subscription_agreement_id property");
+    assert_eq!(
+        id_prop.type_hint.as_deref(),
+        Some("int"),
+        "null|int should resolve to int via clean_type"
+    );
+    assert!(!id_prop.is_static, "@property should not be static");
+
+    let state_prop = classes[0]
+        .properties
+        .iter()
+        .find(|p| p.name == "mobile_verification_state")
+        .expect("Should have mobile_verification_state property");
+    assert_eq!(
+        state_prop.type_hint.as_deref(),
+        Some("UserMobileVerificationState")
+    );
+}
+
+/// Test: `@property` with a class type enables chained completion.
+/// `$customer->mobile_verification_state->` should offer members of
+/// `UserMobileVerificationState`.
+#[tokio::test]
+async fn test_completion_via_property_tag() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "class UserMobileVerificationState {\n",                     // 1
+        "    public function isVerified(): bool { return true; }\n", // 2
+        "    public function getCode(): string { return ''; }\n",    // 3
+        "}\n",                                                       // 4
+        "\n",                                                        // 5
+        "/**\n",                                                     // 6
+        " * @property UserMobileVerificationState $mobile_state\n",  // 7
+        " */\n",                                                     // 8
+        "class Customer {\n",                                        // 9
+        "    public function test(): void {\n",                      // 10
+        "        $this->mobile_state->\n",                           // 11
+        "    }\n",                                                   // 12
+        "}\n",                                                       // 13
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap().unwrap();
+    let names = completion_names(result);
+    assert!(
+        names.iter().any(|n| n == "isVerified"),
+        "Should offer 'isVerified' from UserMobileVerificationState via @property tag. Got: {:?}",
+        names
+    );
+    assert!(
+        names.iter().any(|n| n == "getCode"),
+        "Should offer 'getCode' from UserMobileVerificationState via @property tag. Got: {:?}",
+        names
+    );
+}
+
+/// Test: A real declared property takes precedence over a `@property` tag
+/// with the same name.
+#[tokio::test]
+async fn test_real_property_overrides_property_tag() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property string $name\n",
+        " */\n",
+        "class Customer {\n",
+        "    protected int $name;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    // Should have exactly one property, not two.
+    let name_props: Vec<_> = classes[0]
+        .properties
+        .iter()
+        .filter(|p| p.name == "name")
+        .collect();
+    assert_eq!(
+        name_props.len(),
+        1,
+        "Real property should shadow the @property tag"
+    );
+    assert_eq!(
+        name_props[0].type_hint.as_deref(),
+        Some("int"),
+        "Real declared type should win over @property type"
+    );
+}
+
+/// Test: `@property-read` tags are also extracted.
+#[tokio::test]
+async fn test_parse_php_property_read_tag() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @property-read Session $session\n",
+        " */\n",
+        "class Controller {\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let prop = classes[0]
+        .properties
+        .iter()
+        .find(|p| p.name == "session")
+        .expect("Should have session property from @property-read");
+    assert_eq!(prop.type_hint.as_deref(), Some("Session"));
+}
+
+/// Test: Goto definition on a magic property jumps to the `@property` line
+/// in the class docblock.
+#[tokio::test]
+async fn test_goto_definition_property_tag_jumps_to_docblock_line() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "class VerificationState {\n",                               // 1
+        "    public function isVerified(): bool { return true; }\n", // 2
+        "}\n",                                                       // 3
+        "\n",                                                        // 4
+        "/**\n",                                                     // 5
+        " * @property null|int             $agreement_id\n",         // 6
+        " * @property VerificationState    $verification_state\n",   // 7
+        " */\n",                                                     // 8
+        "class Customer {\n",                                        // 9
+        "    public function test(): void {\n",                      // 10
+        "        $this->agreement_id;\n",                            // 11
+        "    }\n",                                                   // 12
+        "}\n",                                                       // 13
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // line 11: "        $this->agreement_id;"
+    //           0       8      14    20
+    // Click on "agreement_id" (character 15)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->agreement_id to @property line"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "@property $agreement_id is declared on line 6"
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+}
+
+/// Test: Goto definition on a method chained through a `@property` tag resolves
+/// to the method declaration in the target class.
+#[tokio::test]
+async fn test_goto_definition_chained_via_property_tag() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "class VerificationState {\n",                               // 1
+        "    public function isVerified(): bool { return true; }\n", // 2
+        "}\n",                                                       // 3
+        "\n",                                                        // 4
+        "/**\n",                                                     // 5
+        " * @property VerificationState $verification_state\n",      // 6
+        " */\n",                                                     // 7
+        "class Customer {\n",                                        // 8
+        "    public function test(): void {\n",                      // 9
+        "        $this->verification_state->isVerified();\n",        // 10
+        "    }\n",                                                   // 11
+        "}\n",                                                       // 12
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // line 10: "        $this->verification_state->isVerified();"
+    //           0       8      14                 34  38
+    // Click on "isVerified" (character 35)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 10,
+                character: 35,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->verification_state->isVerified() via @property tag"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "isVerified() is declared on line 2 of VerificationState"
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+}
+
+/// Test: Goto definition on a `@property-read` property jumps to the docblock line.
+#[tokio::test]
+async fn test_goto_definition_property_read_tag() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                              // 0
+        "/**\n",                                // 1
+        " * @property-read string $name\n",     // 2
+        " */\n",                                // 3
+        "class Model {\n",                      // 4
+        "    public function test(): void {\n", // 5
+        "        $this->name;\n",               // 6
+        "    }\n",                              // 7
+        "}\n",                                  // 8
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // line 6: "        $this->name;"
+    // Click on "name" (character 15)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 6,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->name to @property-read line"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "@property-read $name is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+}

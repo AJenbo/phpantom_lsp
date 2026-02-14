@@ -51,6 +51,92 @@ pub fn extract_var_type(docblock: &str) -> Option<String> {
     extract_tag_type(docblock, "@var")
 }
 
+/// Extract all `@property` tags from a class-level docblock.
+///
+/// PHPDoc `@property` tags declare magic properties that are accessible via
+/// `__get` / `__set`.  The format is:
+///
+///   - `@property Type $name`
+///   - `@property null|Type $name`
+///   - `@property ?Type $name`
+///   - `@property-read Type $name`
+///   - `@property-write Type $name`
+///
+/// Returns a list of `(property_name, cleaned_type)` pairs.  The property
+/// name is returned **without** the `$` prefix.
+pub fn extract_property_tags(docblock: &str) -> Vec<(String, String)> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        // Match @property, @property-read, and @property-write
+        let rest = if let Some(r) = trimmed.strip_prefix("@property-read") {
+            r
+        } else if let Some(r) = trimmed.strip_prefix("@property-write") {
+            r
+        } else if let Some(r) = trimmed.strip_prefix("@property") {
+            r
+        } else {
+            continue;
+        };
+
+        // The tag must be followed by whitespace.
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+
+        // The type may be a compound like `null|int`, `?Foo`, or a generic
+        // like `Collection<int, Model>` that spans multiple whitespace-
+        // delimited tokens.  We take the first token as the type (for
+        // `clean_type` purposes) and then scan forward until we find a
+        // token starting with `$`.
+        //
+        // Format: @property Type $name  (or)  @property $name
+        let mut parts = rest.split_whitespace();
+        let first = match parts.next() {
+            Some(t) => t,
+            None => continue,
+        };
+
+        let (type_str, prop_name) = if first.starts_with('$') {
+            // No explicit type: `@property $name`
+            (None, first)
+        } else {
+            // Type is the first token; scan forward to find the `$name`.
+            let mut found_name = None;
+            for token in parts {
+                if token.starts_with('$') {
+                    found_name = Some(token);
+                    break;
+                }
+            }
+            match found_name {
+                Some(name) => (Some(first), name),
+                None => continue,
+            }
+        };
+
+        let name = prop_name.strip_prefix('$').unwrap_or(prop_name);
+        if name.is_empty() {
+            continue;
+        }
+
+        let cleaned = type_str.map(clean_type);
+        results.push((name.to_string(), cleaned.unwrap_or_default()));
+    }
+
+    results
+}
+
 /// Decide whether a docblock type should override a native type hint.
 ///
 /// Returns `true` when:
@@ -457,6 +543,100 @@ fn is_scalar(type_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── @property tag extraction ───────────────────────────────────────
+
+    #[test]
+    fn property_tag_simple() {
+        let doc = "/** @property Session $session */";
+        let props = extract_property_tags(doc);
+        assert_eq!(props, vec![("session".to_string(), "Session".to_string())]);
+    }
+
+    #[test]
+    fn property_tag_nullable() {
+        let doc = "/** @property ?int $count */";
+        let props = extract_property_tags(doc);
+        assert_eq!(props, vec![("count".to_string(), "?int".to_string())]);
+    }
+
+    #[test]
+    fn property_tag_union_with_null() {
+        let doc = "/** @property null|int $latest_id */";
+        let props = extract_property_tags(doc);
+        assert_eq!(props, vec![("latest_id".to_string(), "int".to_string())]);
+    }
+
+    #[test]
+    fn property_tag_fqn() {
+        let doc = "/** @property \\App\\Models\\User $user */";
+        let props = extract_property_tags(doc);
+        assert_eq!(
+            props,
+            vec![("user".to_string(), "App\\Models\\User".to_string())]
+        );
+    }
+
+    #[test]
+    fn property_tag_multiple() {
+        let doc = concat!(
+            "/**\n",
+            " * @property null|int                    $latest_subscription_agreement_id\n",
+            " * @property UserMobileVerificationState $mobile_verification_state\n",
+            " */",
+        );
+        let props = extract_property_tags(doc);
+        assert_eq!(props.len(), 2);
+        assert_eq!(
+            props[0],
+            (
+                "latest_subscription_agreement_id".to_string(),
+                "int".to_string()
+            )
+        );
+        assert_eq!(
+            props[1],
+            (
+                "mobile_verification_state".to_string(),
+                "UserMobileVerificationState".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn property_tag_read_write_variants() {
+        let doc = concat!(
+            "/**\n",
+            " * @property-read string $name\n",
+            " * @property-write int $age\n",
+            " */",
+        );
+        let props = extract_property_tags(doc);
+        assert_eq!(props.len(), 2);
+        assert_eq!(props[0], ("name".to_string(), "string".to_string()));
+        assert_eq!(props[1], ("age".to_string(), "int".to_string()));
+    }
+
+    #[test]
+    fn property_tag_no_type() {
+        let doc = "/** @property $thing */";
+        let props = extract_property_tags(doc);
+        assert_eq!(props, vec![("thing".to_string(), "".to_string())]);
+    }
+
+    #[test]
+    fn property_tag_generic_stripped() {
+        let doc = "/** @property Collection<int, Model> $items */";
+        let props = extract_property_tags(doc);
+        assert_eq!(props, vec![("items".to_string(), "Collection".to_string())]);
+    }
+
+    #[test]
+    fn property_tag_none_when_missing() {
+        let doc = "/** @return Foo */";
+        let props = extract_property_tags(doc);
+        assert!(props.is_empty());
+    }
 
     // ── extract_return_type (skips conditionals) ────────────────────────
 
