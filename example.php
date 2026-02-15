@@ -96,17 +96,28 @@ enum Mode
 
 // ─── Base / Parent Class ────────────────────────────────────────────────────
 
+class Builder
+{
+    /**
+     * @return $this
+     */
+    public function query(): self
+    {
+        return $this;
+    }
+}
+
 /**
  * @property string $magicName
  * @method static static create(array $attributes)
- * @mixin HasTimestamps
+ * @mixin Builder
  */
 abstract class Model
 {
     protected int $id;
 
     /** @var string */
-    protected string $table = '';
+    protected $table = '';
 
     public const string CONNECTION = 'default';
     protected const int PER_PAGE = 15;
