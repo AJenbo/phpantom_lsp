@@ -110,7 +110,7 @@ To configure PHPantom LSP as the default PHP language server in Zed, add the fol
 {
   "languages": {
     "PHP": {
-      "language_servers": ["PHPantom LSP", "!intelephense", "!phpactor", "..."]
+      "language_servers": ["phpantom_lsp", "!intelephense", "!phpactor", "!phptools", "..."]
     }
   }
 }
