@@ -93,6 +93,29 @@ PHPantomLSP communicates over stdin/stdout. Point your editor's LSP client at th
 
 - **Path:** `target/release/phpantom_lsp` (after `cargo build --release`)
 
+### Zed
+
+Install it as a dev extension from the `zed-extension/` directory in this repo:
+
+1. Open Zed
+2. Open the Extensions panel
+3. Click **Install Dev Extension**
+4. Select the `zed-extension/` directory
+
+The extension automatically downloads the correct pre-built binary from GitHub releases for your platform. If you'd prefer to use a locally built binary, ensure `phpantom_lsp` is on your `PATH` and the extension will use it instead.
+
+To configure PHPantom LSP as the default PHP language server in Zed, add the following to your Zed settings (`settings.json`):
+
+```json
+{
+  "languages": {
+    "PHP": {
+      "language_servers": ["PHPantom LSP", "!intelephense", "!phpactor", "..."]
+    }
+  }
+}
+```
+
 ## Contributing
 
 See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
