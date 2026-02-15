@@ -1432,6 +1432,70 @@ impl Backend {
                 Self::merge_traits_into(merged, &trait_info.used_traits, class_loader, depth + 1);
             }
 
+            // Walk the `parent_class` (extends) chain so that interface
+            // inheritance is resolved.  For example, `BackedEnum extends
+            // UnitEnum` — loading `BackedEnum` alone would miss `UnitEnum`'s
+            // members (`cases()`, `$name`) unless we follow the chain here.
+            // The same depth counter is shared to prevent infinite loops.
+            let mut current = trait_info.clone();
+            let mut parent_depth = depth;
+            while let Some(ref parent_name) = current.parent_class {
+                parent_depth += 1;
+                if parent_depth > MAX_TRAIT_DEPTH {
+                    break;
+                }
+                let parent = if let Some(p) = class_loader(parent_name) {
+                    p
+                } else {
+                    break;
+                };
+
+                // Also follow the parent's own used_traits.
+                if !parent.used_traits.is_empty() {
+                    Self::merge_traits_into(
+                        merged,
+                        &parent.used_traits,
+                        class_loader,
+                        parent_depth + 1,
+                    );
+                }
+
+                // Merge parent methods (skip private, skip duplicates)
+                for method in &parent.methods {
+                    if method.visibility == Visibility::Private {
+                        continue;
+                    }
+                    if merged.methods.iter().any(|m| m.name == method.name) {
+                        continue;
+                    }
+                    merged.methods.push(method.clone());
+                }
+
+                // Merge parent properties
+                for property in &parent.properties {
+                    if property.visibility == Visibility::Private {
+                        continue;
+                    }
+                    if merged.properties.iter().any(|p| p.name == property.name) {
+                        continue;
+                    }
+                    merged.properties.push(property.clone());
+                }
+
+                // Merge parent constants
+                for constant in &parent.constants {
+                    if constant.visibility == Visibility::Private {
+                        continue;
+                    }
+                    if merged.constants.iter().any(|c| c.name == constant.name) {
+                        continue;
+                    }
+                    merged.constants.push(constant.clone());
+                }
+
+                current = parent;
+            }
+
             // Merge trait methods — skip if already present
             for method in &trait_info.methods {
                 if merged.methods.iter().any(|m| m.name == method.name) {

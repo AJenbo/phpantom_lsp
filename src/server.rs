@@ -304,25 +304,26 @@ impl LanguageServer for Backend {
                 // their FunctionInfo (needed for return-type resolution on
                 // call expressions like `app()->method()`).
                 let function_loader = |name: &str| -> Option<crate::FunctionInfo> {
-                    let fmap = self.global_functions.lock().ok()?;
-                    // Try the exact name first, then namespace-qualified variants.
-                    if let Some((_, info)) = fmap.get(name) {
-                        return Some(info.clone());
+                    // Build candidate names to try: exact name, use-map
+                    // resolved name, and namespace-qualified name.
+                    let mut candidates: Vec<&str> = vec![name];
+
+                    let use_resolved: Option<String> = file_use_map.get(name).cloned();
+                    if let Some(ref fqn) = use_resolved {
+                        candidates.push(fqn.as_str());
                     }
-                    // Try resolving via use map (e.g. `use function Ns\func;`)
-                    if let Some(fqn) = file_use_map.get(name)
-                        && let Some((_, info)) = fmap.get(fqn.as_str())
-                    {
-                        return Some(info.clone());
+
+                    let ns_qualified: Option<String> = file_namespace
+                        .as_ref()
+                        .map(|ns| format!("{}\\{}", ns, name));
+                    if let Some(ref nq) = ns_qualified {
+                        candidates.push(nq.as_str());
                     }
-                    // Try namespace-qualified
-                    if let Some(ref ns) = file_namespace {
-                        let ns_qualified = format!("{}\\{}", ns, name);
-                        if let Some((_, info)) = fmap.get(&ns_qualified) {
-                            return Some(info.clone());
-                        }
-                    }
-                    None
+
+                    // Unified lookup: checks global_functions first, then
+                    // falls back to embedded PHP stubs (parsed lazily and
+                    // cached for future lookups).
+                    self.find_or_load_function(&candidates)
                 };
 
                 let candidates = Self::resolve_target_classes(

@@ -169,22 +169,63 @@ impl Backend {
 
     /// Try to resolve a standalone function name to its definition.
     ///
-    /// Searches the `global_functions` map (populated from autoload files
-    /// and opened/changed files) for any of the given candidate names.
+    /// Searches the `global_functions` map (populated from autoload files,
+    /// opened/changed files, and cached stub functions) for any of the
+    /// given candidate names.  If not found there, falls back to the
+    /// embedded PHP stubs via `find_or_load_function` — which parses the
+    /// stub lazily and caches it in `global_functions` for future lookups.
+    ///
     /// When found, reads the source file and locates the `function name(`
-    /// declaration line.
+    /// declaration line.  Stub functions (with `phpantom-stub-fn://` URIs)
+    /// are not navigable so they are skipped for go-to-definition but
+    /// still loaded into the cache for return-type resolution.
     fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
-        let (file_uri, func_info) = {
+        // ── Phase 1: Check global_functions (user code + cached stubs) ──
+        let found = {
             let fmap = self.global_functions.lock().ok()?;
-            let mut found = None;
+            let mut result = None;
             for candidate in candidates {
-                if let Some((uri, info)) = fmap.get(candidate) {
-                    found = Some((uri.clone(), info.clone()));
+                if let Some((uri, info)) = fmap.get(candidate.as_str()) {
+                    result = Some((uri.clone(), info.clone()));
                     break;
                 }
             }
-            found
-        }?;
+            result
+        };
+
+        // ── Phase 2: Try embedded PHP stubs as fallback ──
+        let (file_uri, func_info) = if let Some(pair) = found {
+            pair
+        } else {
+            // Build &str candidates for find_or_load_function.
+            let str_candidates: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
+            let loaded = self.find_or_load_function(&str_candidates)?;
+
+            // After find_or_load_function, the function is cached in
+            // global_functions.  Look it up to get the URI.
+            let fmap = self.global_functions.lock().ok()?;
+            let mut result = None;
+            for candidate in candidates {
+                if let Some((uri, info)) = fmap.get(candidate.as_str()) {
+                    result = Some((uri.clone(), info.clone()));
+                    break;
+                }
+            }
+            result.unwrap_or_else(|| {
+                // Fallback: use a synthetic URI with the loaded info.
+                (
+                    format!("phpantom-stub-fn://{}", loaded.name),
+                    loaded,
+                )
+            })
+        };
+
+        // Stub functions don't have real file locations — skip
+        // go-to-definition for them (they're still useful for return-type
+        // resolution via the function_loader).
+        if file_uri.starts_with("phpantom-stub-fn://") {
+            return None;
+        }
 
         // Read the file content (try open files first, then disk).
         let file_content = self
@@ -312,24 +353,26 @@ impl Backend {
         // Build a function_loader closure for resolving standalone function
         // return types (needed for call-expression subjects like `app()->`).
         let function_loader = |name: &str| -> Option<FunctionInfo> {
-            let fmap = self.global_functions.lock().ok()?;
-            if let Some((_, info)) = fmap.get(name) {
-                return Some(info.clone());
+            // Build candidate names to try: exact name, use-map
+            // resolved name, and namespace-qualified name.
+            let mut candidates: Vec<&str> = vec![name];
+
+            let use_resolved: Option<String> = file_use_map.get(name).cloned();
+            if let Some(ref fqn) = use_resolved {
+                candidates.push(fqn.as_str());
             }
-            // Try resolving via use map
-            if let Some(fqn) = file_use_map.get(name)
-                && let Some((_, info)) = fmap.get(fqn.as_str())
-            {
-                return Some(info.clone());
+
+            let ns_qualified: Option<String> = file_namespace
+                .as_ref()
+                .map(|ns| format!("{}\\{}", ns, name));
+            if let Some(ref nq) = ns_qualified {
+                candidates.push(nq.as_str());
             }
-            // Try namespace-qualified
-            if let Some(ref ns) = file_namespace {
-                let ns_qualified = format!("{}\\{}", ns, name);
-                if let Some((_, info)) = fmap.get(&ns_qualified) {
-                    return Some(info.clone());
-                }
-            }
-            None
+
+            // Unified lookup: checks global_functions first, then
+            // falls back to embedded PHP stubs (parsed lazily and
+            // cached for future lookups).
+            self.find_or_load_function(&candidates)
         };
 
         // 3. Resolve the subject to all candidate classes.
@@ -878,6 +921,36 @@ impl Backend {
                 depth + 1,
             ) {
                 return Some(found);
+            }
+            // Walk the parent_class (extends) chain so that interface
+            // inheritance is resolved.  For example, BackedEnum extends
+            // UnitEnum — looking up `cases` on BackedEnum should find
+            // the declaring UnitEnum interface.
+            let mut current = trait_info;
+            let mut parent_depth = depth;
+            while let Some(ref parent_name) = current.parent_class {
+                parent_depth += 1;
+                if parent_depth > MAX_TRAIT_DEPTH {
+                    break;
+                }
+                let parent = if let Some(p) = class_loader(parent_name) {
+                    p
+                } else {
+                    break;
+                };
+                if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some()
+                {
+                    return Some(parent);
+                }
+                if let Some(found) = Self::find_declaring_in_traits(
+                    &parent.used_traits,
+                    member_name,
+                    class_loader,
+                    parent_depth + 1,
+                ) {
+                    return Some(found);
+                }
+                current = parent;
             }
         }
 

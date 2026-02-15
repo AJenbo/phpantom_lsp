@@ -2,3 +2,4 @@
 /.codelite
 *.phprj
 *.workspace
+/stubs/

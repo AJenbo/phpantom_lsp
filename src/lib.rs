@@ -24,6 +24,7 @@ mod definition;
 pub mod docblock;
 mod parser;
 mod server;
+pub mod stubs;
 pub mod types;
 mod util;
 
@@ -84,6 +85,27 @@ pub struct Backend {
     /// Populated during `update_ast` (using the file's namespace + class
     /// short name) and during server initialization for autoload files.
     pub class_index: Arc<Mutex<HashMap<String, String>>>,
+    /// Embedded PHP stubs for built-in classes/interfaces (e.g. `UnitEnum`,
+    /// `BackedEnum`, `Iterator`, `Countable`, …).
+    /// Maps class short name → raw PHP source code.
+    ///
+    /// Built once during construction via [`stubs::build_stub_class_index`].
+    /// Consulted by `find_or_load_class` as a final fallback after the
+    /// `ast_map` and PSR-4 resolution.  Stub files are parsed lazily on
+    /// first access and cached in `ast_map` under `phpantom-stub://` URIs.
+    pub(crate) stub_index: HashMap<&'static str, &'static str>,
+    /// Embedded PHP stubs for built-in functions (e.g. `array_map`,
+    /// `str_contains`, …).  Maps function name → raw PHP source code.
+    ///
+    /// Built once during construction via [`stubs::build_stub_function_index`].
+    /// Can be consulted to resolve return types of built-in function calls.
+    pub(crate) stub_function_index: HashMap<&'static str, &'static str>,
+    /// Embedded PHP stubs for built-in constants (e.g. `PHP_EOL`,
+    /// `SORT_ASC`, …).  Maps constant name → raw PHP source code.
+    ///
+    /// Built once during construction via [`stubs::build_stub_constant_index`].
+    /// Can be consulted when resolving standalone constant references.
+    pub stub_constant_index: HashMap<&'static str, &'static str>,
 }
 
 impl Backend {
@@ -101,6 +123,9 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            stub_index: stubs::build_stub_class_index(),
+            stub_function_index: stubs::build_stub_function_index(),
+            stub_constant_index: stubs::build_stub_constant_index(),
         }
     }
 
@@ -118,6 +143,9 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            stub_index: stubs::build_stub_class_index(),
+            stub_function_index: stubs::build_stub_function_index(),
+            stub_constant_index: stubs::build_stub_constant_index(),
         }
     }
 
@@ -139,6 +167,9 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            stub_index: stubs::build_stub_class_index(),
+            stub_function_index: stubs::build_stub_function_index(),
+            stub_constant_index: stubs::build_stub_constant_index(),
         }
     }
 }

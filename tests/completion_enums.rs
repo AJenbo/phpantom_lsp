@@ -1565,3 +1565,686 @@ async fn test_parser_enum_with_trait_also_has_implicit_interface() {
         enum_info.used_traits
     );
 }
+
+// ─── Embedded stub tests (no manual stub loading) ───────────────────────────
+
+/// With embedded stubs, a unit enum should automatically get `cases()` and
+/// `$name` without any manually opened stub files.
+#[tokio::test]
+async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///embedded_unit.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Direction\n",
+        "{\n",
+        "    case Up;\n",
+        "    case Down;\n",
+        "    case Left;\n",
+        "    case Right;\n",
+        "}\n",
+        "\n",
+        "class Nav {\n",
+        "    public function test(): void {\n",
+        "        Direction::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 20,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"cases"),
+                "Unit enum should auto-inherit 'cases()' from embedded UnitEnum stub, got: {:?}",
+                method_names
+            );
+            assert!(
+                constant_names.contains(&"Up"),
+                "Should include enum case 'Up', got: {:?}",
+                constant_names
+            );
+            assert!(
+                constant_names.contains(&"Right"),
+                "Should include enum case 'Right', got: {:?}",
+                constant_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// With embedded stubs, a backed enum should automatically get `from()`,
+/// `tryFrom()`, `cases()`, `$name`, and `$value` without any manually
+/// opened stub files — including members inherited through
+/// BackedEnum extends UnitEnum.
+#[tokio::test]
+async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///embedded_backed.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum HttpStatus: int\n",
+        "{\n",
+        "    case Ok = 200;\n",
+        "    case NotFound = 404;\n",
+        "    case ServerError = 500;\n",
+        "}\n",
+        "\n",
+        "class Router {\n",
+        "    public function test(): void {\n",
+        "        HttpStatus::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 20,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // BackedEnum's own methods
+            assert!(
+                method_names.contains(&"from"),
+                "Backed enum should auto-inherit 'from()' from embedded BackedEnum stub, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"tryFrom"),
+                "Backed enum should auto-inherit 'tryFrom()' from embedded BackedEnum stub, got: {:?}",
+                method_names
+            );
+
+            // UnitEnum's method inherited through BackedEnum extends UnitEnum
+            assert!(
+                method_names.contains(&"cases"),
+                "Backed enum should auto-inherit 'cases()' from UnitEnum via extends chain, got: {:?}",
+                method_names
+            );
+
+            // Enum cases
+            assert!(
+                constant_names.contains(&"Ok"),
+                "Should include enum case 'Ok', got: {:?}",
+                constant_names
+            );
+            assert!(
+                constant_names.contains(&"NotFound"),
+                "Should include enum case 'NotFound', got: {:?}",
+                constant_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// With embedded stubs, $this-> inside a backed enum should show `$name`
+/// (from UnitEnum) and `$value` (from BackedEnum) plus instance methods.
+#[tokio::test]
+async fn test_completion_backed_enum_arrow_gets_properties_from_embedded_stubs() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///embedded_arrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Color: string\n",
+        "{\n",
+        "    case Red = 'red';\n",
+        "    case Blue = 'blue';\n",
+        "\n",
+        "    public function label(): string\n",
+        "    {\n",
+        "        return $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let property_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // $name from UnitEnum (via BackedEnum extends UnitEnum)
+            assert!(
+                property_names.contains(&"name"),
+                "Should auto-inherit 'name' property from UnitEnum stub, got: {:?}",
+                property_names
+            );
+
+            // $value from BackedEnum
+            assert!(
+                property_names.contains(&"value"),
+                "Should auto-inherit 'value' property from BackedEnum stub, got: {:?}",
+                property_names
+            );
+
+            // Own instance method
+            assert!(
+                method_names.contains(&"label"),
+                "Should include own instance method 'label', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Embedded stubs are cached after first access — verify that a second
+/// enum in the same session also gets the methods without re-parsing.
+#[tokio::test]
+async fn test_completion_embedded_stub_caching_across_files() {
+    let backend = create_test_backend();
+
+    // First file: a unit enum
+    let uri1 = Url::parse("file:///cache_test_1.php").unwrap();
+    let text1 = concat!(
+        "<?php\n",
+        "enum Suit\n",
+        "{\n",
+        "    case Hearts;\n",
+        "    case Spades;\n",
+        "}\n",
+        "\n",
+        "class Game1 {\n",
+        "    public function test(): void {\n",
+        "        Suit::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri1.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text1.to_string(),
+            },
+        })
+        .await;
+
+    // Trigger completion on the first file to cause stub parsing + caching
+    let result1 = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri1 },
+                position: Position {
+                    line: 9,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    // Verify first file works
+    if let Some(CompletionResponse::Array(items)) = &result1 {
+        let method_names: Vec<&str> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .map(|i| i.filter_text.as_deref().unwrap())
+            .collect();
+        assert!(
+            method_names.contains(&"cases"),
+            "First enum should get 'cases()' from stub, got: {:?}",
+            method_names
+        );
+    } else {
+        panic!("Expected CompletionResponse::Array for first file");
+    }
+
+    // Second file: another unit enum — stubs should already be cached
+    let uri2 = Url::parse("file:///cache_test_2.php").unwrap();
+    let text2 = concat!(
+        "<?php\n",
+        "enum Season\n",
+        "{\n",
+        "    case Spring;\n",
+        "    case Summer;\n",
+        "}\n",
+        "\n",
+        "class Game2 {\n",
+        "    public function test(): void {\n",
+        "        Season::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri2.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text2.to_string(),
+            },
+        })
+        .await;
+
+    let result2 = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri2 },
+                position: Position {
+                    line: 9,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    // Verify second file also works (from cached stubs)
+    if let Some(CompletionResponse::Array(items)) = &result2 {
+        let method_names: Vec<&str> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .map(|i| i.filter_text.as_deref().unwrap())
+            .collect();
+        assert!(
+            method_names.contains(&"cases"),
+            "Second enum should also get 'cases()' from cached stub, got: {:?}",
+            method_names
+        );
+    } else {
+        panic!("Expected CompletionResponse::Array for second file");
+    }
+}
+
+/// A backed enum should inherit members from both BackedEnum AND UnitEnum
+/// (because BackedEnum extends UnitEnum).  This validates that the
+/// `merge_traits_into` parent_class chain walk works for interface
+/// inheritance.
+#[tokio::test]
+async fn test_completion_backed_enum_inherits_unit_enum_members_through_extends() {
+    let backend = create_test_backend();
+
+    // Open a UnitEnum stub with `cases()` and `$name`.
+    let unit_stub_uri = Url::parse("file:///stubs/UnitEnum.php").unwrap();
+    let unit_stub = concat!(
+        "<?php\n",
+        "interface UnitEnum\n",
+        "{\n",
+        "    public readonly string $name;\n",
+        "    public static function cases(): array;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: unit_stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: unit_stub.to_string(),
+            },
+        })
+        .await;
+
+    // Open a BackedEnum stub that extends UnitEnum.
+    let backed_stub_uri = Url::parse("file:///stubs/BackedEnum.php").unwrap();
+    let backed_stub = concat!(
+        "<?php\n",
+        "interface BackedEnum extends UnitEnum\n",
+        "{\n",
+        "    public readonly int|string $value;\n",
+        "    public static function from(int|string $value): static;\n",
+        "    public static function tryFrom(int|string $value): ?static;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: backed_stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: backed_stub.to_string(),
+            },
+        })
+        .await;
+
+    // Open a file with a backed enum and a class that accesses it.
+    let uri = Url::parse("file:///enum_backed_extends.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Priority: int\n",
+        "{\n",
+        "    case Low = 0;\n",
+        "    case Medium = 1;\n",
+        "    case High = 2;\n",
+        "}\n",
+        "\n",
+        "class TaskService {\n",
+        "    public function test(): void {\n",
+        "        Priority::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // BackedEnum's own methods
+            assert!(
+                method_names.contains(&"from"),
+                "Should inherit 'from()' from BackedEnum, got methods: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"tryFrom"),
+                "Should inherit 'tryFrom()' from BackedEnum, got methods: {:?}",
+                method_names
+            );
+
+            // UnitEnum's methods inherited through BackedEnum extends UnitEnum
+            assert!(
+                method_names.contains(&"cases"),
+                "Should inherit 'cases()' from UnitEnum via BackedEnum extends, got methods: {:?}",
+                method_names
+            );
+
+            // Enum cases should still be present
+            assert!(
+                constant_names.contains(&"Low"),
+                "Should include enum case 'Low', got: {:?}",
+                constant_names
+            );
+            assert!(
+                constant_names.contains(&"High"),
+                "Should include enum case 'High', got: {:?}",
+                constant_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Same as above but tests arrow access ($instance->) to verify instance
+/// members like `$name` and `$value` are inherited through the interface
+/// extends chain.
+#[tokio::test]
+async fn test_completion_backed_enum_inherits_properties_through_extends() {
+    let backend = create_test_backend();
+
+    // Open stubs
+    let unit_stub_uri = Url::parse("file:///stubs2/UnitEnum.php").unwrap();
+    let unit_stub = concat!(
+        "<?php\n",
+        "interface UnitEnum\n",
+        "{\n",
+        "    public readonly string $name;\n",
+        "    public static function cases(): array;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: unit_stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: unit_stub.to_string(),
+            },
+        })
+        .await;
+
+    let backed_stub_uri = Url::parse("file:///stubs2/BackedEnum.php").unwrap();
+    let backed_stub = concat!(
+        "<?php\n",
+        "interface BackedEnum extends UnitEnum\n",
+        "{\n",
+        "    public readonly int|string $value;\n",
+        "    public static function from(int|string $value): static;\n",
+        "    public static function tryFrom(int|string $value): ?static;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: backed_stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: backed_stub.to_string(),
+            },
+        })
+        .await;
+
+    // A backed enum with a method that uses $this->
+    let uri = Url::parse("file:///enum_arrow_extends.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Status: int\n",
+        "{\n",
+        "    case Active = 1;\n",
+        "    case Inactive = 0;\n",
+        "\n",
+        "    public function describe(): string\n",
+        "    {\n",
+        "        return $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let property_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // BackedEnum's own property
+            assert!(
+                property_names.contains(&"value"),
+                "Should inherit 'value' property from BackedEnum, got properties: {:?}",
+                property_names
+            );
+
+            // UnitEnum's property inherited through BackedEnum extends UnitEnum
+            assert!(
+                property_names.contains(&"name"),
+                "Should inherit 'name' property from UnitEnum via BackedEnum extends, got properties: {:?}",
+                property_names
+            );
+
+            // The enum's own instance method should be present
+            assert!(
+                method_names.contains(&"describe"),
+                "Should include own instance method 'describe', got methods: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

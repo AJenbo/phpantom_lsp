@@ -52,12 +52,24 @@ PHPantom uses a shared analysis engine built on [Mago](https://github.com/cartha
 
 ## Building
 
+PHPantomLSP embeds [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) at compile time to provide type information for PHP's built-in classes and functions. The stubs are managed as a Composer dependency with `stubs/` as the vendor directory.
+
 ```bash
+# Install the PHP stubs (requires Composer)
+composer install
+
+# Build
 cargo build
 
 # or for a release build
 cargo build --release
 ```
+
+> **Note:** The build will succeed without `composer install`, but the resulting binary won't know about built-in PHP symbols like `Iterator`, `Countable`, `UnitEnum`, etc. Always run `composer install` first for a fully functional build.
+
+After updating stubs (`composer update`), just rebuild — the `build.rs` script watches `composer.lock` and re-embeds everything automatically.
+
+For more details on how symbol resolution and stub loading work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Testing
 
