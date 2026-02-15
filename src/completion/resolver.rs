@@ -1482,12 +1482,26 @@ impl Backend {
 fn split_call_subject(subject: &str) -> Option<(&str, &str)> {
     // Subject must end with ')'.
     let inner = subject.strip_suffix(')')?;
-    // Find the matching '(' — for simple subjects (no nested parens in
-    // the call body) this is the first '(' that belongs to the call.
-    // The call body part (before the open-paren) never contains '('
-    // (it's things like `app`, `$this->method`, `ClassName::make`),
-    // so a simple `rfind` is correct.
-    let open = inner.rfind('(')?;
+    // Find the matching '(' for the stripped ')' by scanning backwards
+    // and tracking balanced parentheses.  This correctly handles nested
+    // calls inside the argument list (e.g. `Environment::get(self::country())`).
+    let bytes = inner.as_bytes();
+    let mut depth: u32 = 0;
+    let mut open = None;
+    for i in (0..bytes.len()).rev() {
+        match bytes[i] {
+            b')' => depth += 1,
+            b'(' => {
+                if depth == 0 {
+                    open = Some(i);
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    let open = open?;
     let call_body = &inner[..open];
     let args_text = inner[open + 1..].trim();
     if call_body.is_empty() {

@@ -1363,3 +1363,71 @@ async fn test_goto_definition_method_tag_name_matches_type_keyword() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+#[tokio::test]
+async fn test_goto_definition_method_on_static_call_with_nested_call_arg() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test_nested_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                                     // 0
+        "class Country {}\n",                                                          // 1
+        "\n",                                                                          // 2
+        "class SettingsProvider {\n",                                                  // 3
+        "    public function get(string $key): string { return ''; }\n",               // 4
+        "}\n",                                                                         // 5
+        "\n",                                                                          // 6
+        "class Environment {\n",                                                       // 7
+        "    public static function get(Country $env): self { return new self(); }\n", // 8
+        "    public function settings(): SettingsProvider { return new SettingsProvider(); }\n", // 9
+        "}\n",                                                                       // 10
+        "\n",                                                                        // 11
+        "class CurrentEnvironment {\n",                                              // 12
+        "    public static function country(): Country { return new Country(); }\n", // 13
+        "    public static function settings(): SettingsProvider {\n",               // 14
+        "        return Environment::get(self::country())->settings();\n",           // 15
+        "    }\n",                                                                   // 16
+        "}\n",                                                                       // 17
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "settings" in `Environment::get(self::country())->settings()` on line 15
+    // "settings" starts at character 50
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 15,
+                character: 52,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve ->settings() after Environment::get(self::country()) to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 9,
+                "Environment::settings() is declared on line 9"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
