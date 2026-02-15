@@ -1,6 +1,7 @@
 mod common;
 
 use common::{create_psr4_workspace, create_test_backend};
+
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -1224,4 +1225,343 @@ async fn test_completion_self_inside_enum() {
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
+}
+
+// ─── Implicit UnitEnum / BackedEnum interface inheritance ───────────────────
+
+/// When a UnitEnum stub is available, a unit enum should inherit its methods
+/// (e.g. `cases()`) via the implicit interface added to `used_traits`.
+#[tokio::test]
+async fn test_completion_unit_enum_inherits_cases_from_stub() {
+    let backend = create_test_backend();
+
+    // Open the UnitEnum stub so it lands in the ast_map.
+    let stub_uri = Url::parse("file:///stubs/UnitEnum.php").unwrap();
+    let unit_enum_stub = concat!(
+        "<?php\n",
+        "interface UnitEnum\n",
+        "{\n",
+        "    public static function cases(): array;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: unit_enum_stub.to_string(),
+            },
+        })
+        .await;
+
+    // Open a file containing a unit enum and a class that uses it.
+    let uri = Url::parse("file:///enum_stub_unit.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Color\n",
+        "{\n",
+        "    case Red;\n",
+        "    case Green;\n",
+        "    case Blue;\n",
+        "}\n",
+        "\n",
+        "class Palette {\n",
+        "    public function test(): void {\n",
+        "        Color::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"cases"),
+                "Unit enum should inherit 'cases()' from UnitEnum stub, got methods: {:?}",
+                method_names
+            );
+            assert!(
+                constant_names.contains(&"Red"),
+                "Should still include enum case 'Red', got: {:?}",
+                constant_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When a BackedEnum stub is available, a backed enum should inherit its
+/// methods (e.g. `from()`, `tryFrom()`, `cases()`) via the implicit
+/// interface added to `used_traits`.
+#[tokio::test]
+async fn test_completion_backed_enum_inherits_from_and_tryfrom_from_stub() {
+    let backend = create_test_backend();
+
+    // Open the BackedEnum stub so it lands in the ast_map.
+    let stub_uri = Url::parse("file:///stubs/BackedEnum.php").unwrap();
+    let backed_enum_stub = concat!(
+        "<?php\n",
+        "interface BackedEnum\n",
+        "{\n",
+        "    public static function from(int|string $value): static;\n",
+        "    public static function tryFrom(int|string $value): ?static;\n",
+        "    public static function cases(): array;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: backed_enum_stub.to_string(),
+            },
+        })
+        .await;
+
+    // Open a file containing a backed enum and a class that uses it.
+    let uri = Url::parse("file:///enum_stub_backed.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Priority: int\n",
+        "{\n",
+        "    case Low = 0;\n",
+        "    case Medium = 1;\n",
+        "    case High = 2;\n",
+        "}\n",
+        "\n",
+        "class TaskService {\n",
+        "    public function test(): void {\n",
+        "        Priority::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"from"),
+                "Backed enum should inherit 'from()' from BackedEnum stub, got methods: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"tryFrom"),
+                "Backed enum should inherit 'tryFrom()' from BackedEnum stub, got methods: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"cases"),
+                "Backed enum should inherit 'cases()' from BackedEnum stub, got methods: {:?}",
+                method_names
+            );
+            assert!(
+                constant_names.contains(&"Low"),
+                "Should still include enum case 'Low', got: {:?}",
+                constant_names
+            );
+            assert!(
+                constant_names.contains(&"High"),
+                "Should still include enum case 'High', got: {:?}",
+                constant_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Parser-level check: a unit enum should have `\UnitEnum` in used_traits,
+/// and a backed enum should have `\BackedEnum`.
+#[tokio::test]
+async fn test_parser_enum_implicit_interface_in_used_traits() {
+    let backend = create_test_backend();
+
+    // Unit enum
+    let unit_php = concat!(
+        "<?php\n",
+        "enum Direction\n",
+        "{\n",
+        "    case Up;\n",
+        "    case Down;\n",
+        "}\n",
+    );
+    let unit_classes = backend.parse_php(unit_php);
+    assert_eq!(unit_classes.len(), 1);
+    assert!(
+        unit_classes[0]
+            .used_traits
+            .iter()
+            .any(|t| t == "\\UnitEnum"),
+        "Unit enum should have \\UnitEnum in used_traits, got: {:?}",
+        unit_classes[0].used_traits
+    );
+    assert!(
+        !unit_classes[0]
+            .used_traits
+            .iter()
+            .any(|t| t == "\\BackedEnum"),
+        "Unit enum should NOT have \\BackedEnum, got: {:?}",
+        unit_classes[0].used_traits
+    );
+
+    // Backed enum (int)
+    let backed_php = concat!(
+        "<?php\n",
+        "enum Status: int\n",
+        "{\n",
+        "    case Active = 1;\n",
+        "    case Inactive = 0;\n",
+        "}\n",
+    );
+    let backed_classes = backend.parse_php(backed_php);
+    assert_eq!(backed_classes.len(), 1);
+    assert!(
+        backed_classes[0]
+            .used_traits
+            .iter()
+            .any(|t| t == "\\BackedEnum"),
+        "Backed enum should have \\BackedEnum in used_traits, got: {:?}",
+        backed_classes[0].used_traits
+    );
+    assert!(
+        !backed_classes[0]
+            .used_traits
+            .iter()
+            .any(|t| t == "\\UnitEnum"),
+        "Backed enum should NOT have \\UnitEnum, got: {:?}",
+        backed_classes[0].used_traits
+    );
+
+    // Backed enum (string)
+    let string_php = concat!(
+        "<?php\n",
+        "enum Suit: string\n",
+        "{\n",
+        "    case Hearts = 'H';\n",
+        "}\n",
+    );
+    let string_classes = backend.parse_php(string_php);
+    assert_eq!(string_classes.len(), 1);
+    assert!(
+        string_classes[0]
+            .used_traits
+            .iter()
+            .any(|t| t == "\\BackedEnum"),
+        "String-backed enum should have \\BackedEnum, got: {:?}",
+        string_classes[0].used_traits
+    );
+}
+
+/// An enum that also uses an explicit trait should have both the trait
+/// and the implicit interface in `used_traits`.
+#[tokio::test]
+async fn test_parser_enum_with_trait_also_has_implicit_interface() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "trait HasLabel {\n",
+        "    public function label(): string { return 'label'; }\n",
+        "}\n",
+        "\n",
+        "enum Status: int\n",
+        "{\n",
+        "    use HasLabel;\n",
+        "\n",
+        "    case Active = 1;\n",
+        "    case Inactive = 0;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    let enum_info = classes.iter().find(|c| c.name == "Status").unwrap();
+
+    assert!(
+        enum_info.used_traits.iter().any(|t| t == "HasLabel"),
+        "Should include the explicit trait, got: {:?}",
+        enum_info.used_traits
+    );
+    assert!(
+        enum_info.used_traits.iter().any(|t| t == "\\BackedEnum"),
+        "Should include implicit \\BackedEnum, got: {:?}",
+        enum_info.used_traits
+    );
 }

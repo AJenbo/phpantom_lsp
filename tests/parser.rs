@@ -1240,3 +1240,172 @@ async fn test_parse_php_extracts_enum_inside_namespace() {
     assert_eq!(classes[0].name, "Direction");
     assert_eq!(classes[0].constants.len(), 4);
 }
+
+// ─── Implicit UnitEnum / BackedEnum interface tests ─────────────────────────
+
+/// A unit enum (no backing type) should have `UnitEnum` in its `used_traits`.
+#[tokio::test]
+async fn test_parse_php_unit_enum_has_implicit_unit_enum_interface() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum Color\n",
+        "{\n",
+        "    case Red;\n",
+        "    case Green;\n",
+        "    case Blue;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Color");
+    // parse_php returns raw names before resolution; the leading backslash
+    // marks the name as fully-qualified so resolve_name won't prepend a
+    // namespace later.
+    assert!(
+        classes[0].used_traits.iter().any(|t| t == "\\UnitEnum"),
+        "Unit enum should implicitly implement \\UnitEnum, got used_traits: {:?}",
+        classes[0].used_traits
+    );
+    assert!(
+        !classes[0].used_traits.iter().any(|t| t == "\\BackedEnum"),
+        "Unit enum should NOT implement \\BackedEnum, got used_traits: {:?}",
+        classes[0].used_traits
+    );
+}
+
+/// A backed enum (`: int`) should have `BackedEnum` in its `used_traits`.
+#[tokio::test]
+async fn test_parse_php_backed_int_enum_has_implicit_backed_enum_interface() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum Priority: int\n",
+        "{\n",
+        "    case Low = 0;\n",
+        "    case High = 1;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Priority");
+    assert!(
+        classes[0].used_traits.iter().any(|t| t == "\\BackedEnum"),
+        "Backed int enum should implicitly implement \\BackedEnum, got used_traits: {:?}",
+        classes[0].used_traits
+    );
+    assert!(
+        !classes[0].used_traits.iter().any(|t| t == "\\UnitEnum"),
+        "Backed enum should NOT implement \\UnitEnum, got used_traits: {:?}",
+        classes[0].used_traits
+    );
+}
+
+/// A backed enum (`: string`) should have `BackedEnum` in its `used_traits`.
+#[tokio::test]
+async fn test_parse_php_backed_string_enum_has_implicit_backed_enum_interface() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "enum Suit: string\n",
+        "{\n",
+        "    case Hearts = 'H';\n",
+        "    case Spades = 'S';\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Suit");
+    assert!(
+        classes[0].used_traits.iter().any(|t| t == "\\BackedEnum"),
+        "Backed string enum should implicitly implement \\BackedEnum, got used_traits: {:?}",
+        classes[0].used_traits
+    );
+}
+
+/// An enum inside a namespace should still have UnitEnum/BackedEnum resolved
+/// to the root namespace (not prefixed with the current namespace).
+#[tokio::test]
+async fn test_parse_php_namespaced_enum_implicit_interface_is_not_namespace_prefixed() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "namespace App\\Enums;\n",
+        "\n",
+        "enum Mode\n",
+        "{\n",
+        "    case Automatic;\n",
+        "    case Manual;\n",
+        "}\n",
+    );
+
+    let mut classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+    assert_eq!(classes[0].name, "Mode");
+    // parse_php returns the raw `\UnitEnum` (leading backslash marks it as
+    // fully-qualified).  After resolve_parent_class_names the backslash is
+    // stripped to `UnitEnum`, which is the root-namespace FQN.
+    assert!(
+        classes[0].used_traits.iter().any(|t| t == "\\UnitEnum"),
+        "Namespaced unit enum should have \\UnitEnum before resolution, got: {:?}",
+        classes[0].used_traits
+    );
+
+    // Simulate the resolution step that update_ast performs.
+    let use_map = std::collections::HashMap::new();
+    let namespace = Some("App\\Enums".to_string());
+    phpantom_lsp::Backend::resolve_parent_class_names(&mut classes, &use_map, &namespace);
+
+    // After resolution the leading backslash is stripped and the name stays
+    // in the root namespace — NOT prefixed with `App\Enums\`.
+    assert!(
+        classes[0].used_traits.iter().any(|t| t == "UnitEnum"),
+        "After resolution, should be UnitEnum (root namespace), got: {:?}",
+        classes[0].used_traits
+    );
+    assert!(
+        !classes[0]
+            .used_traits
+            .iter()
+            .any(|t| t == "App\\Enums\\UnitEnum"),
+        "Should NOT be namespace-prefixed as App\\Enums\\UnitEnum, got: {:?}",
+        classes[0].used_traits
+    );
+}
+
+/// An enum that explicitly uses a trait should have both the trait and the
+/// implicit interface in `used_traits`.
+#[tokio::test]
+async fn test_parse_php_enum_with_trait_also_has_implicit_interface() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "trait HasDescription {\n",
+        "    public function describe(): string { return 'desc'; }\n",
+        "}\n",
+        "\n",
+        "enum Status: int\n",
+        "{\n",
+        "    use HasDescription;\n",
+        "\n",
+        "    case Active = 1;\n",
+        "    case Inactive = 0;\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    let enum_info = classes.iter().find(|c| c.name == "Status").unwrap();
+    assert!(
+        enum_info.used_traits.iter().any(|t| t == "HasDescription"),
+        "Should include the explicit trait, got: {:?}",
+        enum_info.used_traits
+    );
+    assert!(
+        enum_info.used_traits.iter().any(|t| t == "\\BackedEnum"),
+        "Should include implicit \\BackedEnum, got: {:?}",
+        enum_info.used_traits
+    );
+}

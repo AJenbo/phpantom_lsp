@@ -88,6 +88,12 @@ enum Priority: int
     case High = 3;
 }
 
+enum Mode
+{
+    case Automatic;
+    case Manual;
+}
+
 // ─── Base / Parent Class ────────────────────────────────────────────────────
 
 /**

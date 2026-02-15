@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use bumpalo::Bump;
+
 use mago_syntax::ast::*;
 use mago_syntax::parser::parse_file_content;
 
@@ -683,8 +684,21 @@ impl Backend {
                 Statement::Enum(enum_def) => {
                     let enum_name = enum_def.name.value.to_string();
 
-                    let (mut methods, mut properties, constants, used_traits) =
+                    let (mut methods, mut properties, constants, mut used_traits) =
                         Self::extract_class_like_members(enum_def.members.iter(), doc_ctx);
+
+                    // Enums implicitly implement UnitEnum or BackedEnum.
+                    // We add the interface as a fully-qualified name (leading
+                    // backslash) so that `resolve_name` does not prepend the
+                    // current namespace.  The class_loader / merge_traits_into
+                    // path will pick up the interface from the SPL stubs and
+                    // merge its methods (cases, from, tryFrom, …) automatically.
+                    let implicit_interface = if enum_def.backing_type_hint.is_some() {
+                        "\\BackedEnum"
+                    } else {
+                        "\\UnitEnum"
+                    };
+                    used_traits.push(implicit_interface.to_string());
 
                     // Extract @property, @method, and @mixin tags from the enum-level docblock.
                     let mut mixins = Vec::new();
@@ -1034,7 +1048,7 @@ impl Backend {
     ///      otherwise prepend current namespace
     ///   3. Unqualified (`Bar`) → check use_map; otherwise prepend namespace
     ///   4. No namespace and not in use_map → keep as-is
-    pub(crate) fn resolve_parent_class_names(
+    pub fn resolve_parent_class_names(
         classes: &mut [ClassInfo],
         use_map: &HashMap<String, String>,
         namespace: &Option<String>,
