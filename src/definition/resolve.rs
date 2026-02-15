@@ -1133,7 +1133,15 @@ impl Backend {
             // The method name is followed by `(` in a @method tag.
             let method_pattern = member_name;
             for (line_idx, line) in content.lines().enumerate() {
-                if let Some(col) = line.find(method_pattern) {
+                // Search for ALL occurrences of the pattern within the line,
+                // not just the first one.  This is important when the method
+                // name collides with a type keyword (e.g. `string`) that also
+                // appears as the return type on the same line.
+                let mut search_start = 0;
+                while let Some(offset) = line[search_start..].find(method_pattern) {
+                    let col = search_start + offset;
+                    search_start = col + method_pattern.len();
+
                     // Verify the character after the name is `(` (method call syntax).
                     let after_pos = col + method_pattern.len();
                     if after_pos >= line.len() {

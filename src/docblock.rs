@@ -1043,6 +1043,22 @@ mod tests {
         assert!(!methods[0].parameters[0].is_required);
     }
 
+    #[test]
+    fn method_tag_name_matches_type_keyword() {
+        let doc = "/** @method static string string(string $key, \\Closure|string|null $default = null) */";
+        let methods = extract_method_tags(doc);
+        assert_eq!(methods.len(), 1);
+        assert_eq!(methods[0].name, "string");
+        assert_eq!(methods[0].return_type.as_deref(), Some("string"));
+        assert!(methods[0].is_static);
+        assert_eq!(methods[0].parameters.len(), 2);
+        assert_eq!(methods[0].parameters[0].name, "$key");
+        assert_eq!(
+            methods[0].parameters[0].type_hint.as_deref(),
+            Some("string")
+        );
+    }
+
     // ─── @property tag extraction ───────────────────────────────────────
 
     #[test]

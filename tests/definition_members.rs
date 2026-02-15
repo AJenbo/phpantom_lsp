@@ -1304,3 +1304,62 @@ async fn test_goto_definition_this_property_vs_method_disambiguation() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ── @method tag: method name matches a type keyword ─────────────────────────
+
+#[tokio::test]
+async fn test_goto_definition_method_tag_name_matches_type_keyword() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///method_string.php").unwrap();
+    let text = concat!(
+        "<?php\n", // 0
+        "/**\n",   // 1
+        " * @method static string string(string $key, \\Closure|string|null $default = null)\n", // 2
+        " */\n",                      // 3
+        "class Config {\n",           // 4
+        "}\n",                        // 5
+        "\n",                         // 6
+        "Config::string('hello');\n", // 7
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "string" in `Config::string('hello')` on line 7, character 8
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 7,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve Config::string() to the @method tag declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "@method string string(...) is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
