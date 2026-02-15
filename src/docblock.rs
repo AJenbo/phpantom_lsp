@@ -101,6 +101,86 @@ pub fn extract_var_type(docblock: &str) -> Option<String> {
     extract_tag_type(docblock, "@var")
 }
 
+/// Extract the type and optional variable name from a `@var` PHPDoc tag.
+///
+/// Handles both inline annotation formats:
+///   - `/** @var TheType */`         → `Some(("TheType", None))`
+///   - `/** @var TheType $var */`    → `Some(("TheType", Some("$var")))`
+///
+/// The variable name (if present) is returned **with** the `$` prefix so
+/// callers can compare directly against AST variable names.
+pub fn extract_var_type_with_name(docblock: &str) -> Option<(String, Option<String>)> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = trimmed.strip_prefix("@var") {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the type token, respecting `<…>` nesting so that
+            // generics like `Collection<int, User>` are treated as one unit.
+            let (type_str, remainder) = split_type_token(rest);
+            let cleaned_type = clean_type(type_str);
+            if cleaned_type.is_empty() {
+                return None;
+            }
+
+            // Check for an optional `$variable` name after the type.
+            let var_name = remainder
+                .split_whitespace()
+                .next()
+                .filter(|t| t.starts_with('$'))
+                .map(|t| t.to_string());
+
+            return Some((cleaned_type, var_name));
+        }
+    }
+    None
+}
+
+/// Search backward in `content` from `stmt_start` for an inline `/** @var … */`
+/// docblock comment and extract the type (and optional variable name).
+///
+/// Only considers a docblock that is separated from the statement by
+/// whitespace alone — no intervening code.
+///
+/// Returns `(cleaned_type, optional_var_name)` or `None`.
+pub fn find_inline_var_docblock(
+    content: &str,
+    stmt_start: usize,
+) -> Option<(String, Option<String>)> {
+    let before = content.get(..stmt_start)?;
+
+    // Walk backward past whitespace / newlines.
+    let trimmed = before.trim_end();
+    if !trimmed.ends_with("*/") {
+        return None;
+    }
+
+    // Find the matching `/**`.
+    let block_end = trimmed.len();
+    let open_pos = trimmed.rfind("/**")?;
+
+    // Ensure nothing but whitespace between the start of the line and `/**`.
+    let line_start = trimmed[..open_pos].rfind('\n').map_or(0, |p| p + 1);
+    let prefix = &trimmed[line_start..open_pos];
+    if !prefix.chars().all(|c| c.is_ascii_whitespace()) {
+        return None;
+    }
+
+    let docblock = &trimmed[open_pos..block_end];
+    extract_var_type_with_name(docblock)
+}
+
 /// Extract all `@property` tags from a class-level docblock.
 ///
 /// PHPDoc `@property` tags declare magic properties that are accessible via
@@ -749,6 +829,32 @@ fn parse_condition(s: &str) -> ParamCondition {
     }
 }
 
+/// Split off the first type token from `s`, respecting `<…>` nesting.
+///
+/// Returns `(type_token, remainder)` where `type_token` is the full type
+/// (e.g. `Collection<int, User>`) and `remainder` is whatever follows.
+fn split_type_token(s: &str) -> (&str, &str) {
+    let mut angle_depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => angle_depth += 1,
+            '>' => {
+                angle_depth -= 1;
+                // If we just closed the outermost `<`, the type ends here.
+                if angle_depth == 0 {
+                    let end = i + c.len_utf8();
+                    return (&s[..end], &s[end..]);
+                }
+            }
+            c if c.is_whitespace() && angle_depth == 0 => {
+                return (&s[..i], &s[i..]);
+            }
+            _ => {}
+        }
+    }
+    (s, "")
+}
+
 /// Clean a raw type string from a docblock:
 ///   - Strip leading `\` (PHP fully-qualified prefix)
 ///   - Handle `TypeName|null` → `?TypeName` normalisation is intentionally
@@ -1124,6 +1230,117 @@ mod tests {
     fn var_type_none_when_missing() {
         let doc = "/** just a comment */";
         assert_eq!(extract_var_type(doc), None);
+    }
+
+    // ── extract_var_type_with_name ──────────────────────────────────────
+
+    #[test]
+    fn var_type_with_name_simple() {
+        let doc = "/** @var Session */";
+        assert_eq!(
+            extract_var_type_with_name(doc),
+            Some(("Session".into(), None))
+        );
+    }
+
+    #[test]
+    fn var_type_with_name_has_var() {
+        let doc = "/** @var Session $sess */";
+        assert_eq!(
+            extract_var_type_with_name(doc),
+            Some(("Session".into(), Some("$sess".into())))
+        );
+    }
+
+    #[test]
+    fn var_type_with_name_fqn() {
+        let doc = "/** @var \\App\\Models\\User $user */";
+        assert_eq!(
+            extract_var_type_with_name(doc),
+            Some(("App\\Models\\User".into(), Some("$user".into())))
+        );
+    }
+
+    #[test]
+    fn var_type_with_name_no_var_tag() {
+        let doc = "/** just a comment */";
+        assert_eq!(extract_var_type_with_name(doc), None);
+    }
+
+    #[test]
+    fn var_type_with_name_description_not_var() {
+        // Second token is not a $variable — should be ignored.
+        let doc = "/** @var Session some description */";
+        assert_eq!(
+            extract_var_type_with_name(doc),
+            Some(("Session".into(), None))
+        );
+    }
+
+    #[test]
+    fn var_type_with_name_generic_stripped() {
+        let doc = "/** @var Collection<int, User> $items */";
+        assert_eq!(
+            extract_var_type_with_name(doc),
+            Some(("Collection".into(), Some("$items".into())))
+        );
+    }
+
+    // ── find_inline_var_docblock ────────────────────────────────────────
+
+    #[test]
+    fn inline_var_docblock_simple() {
+        let content = "<?php\n/** @var Session */\n$var = mystery();\n";
+        let stmt_start = content.find("$var").unwrap();
+        assert_eq!(
+            find_inline_var_docblock(content, stmt_start),
+            Some(("Session".into(), None))
+        );
+    }
+
+    #[test]
+    fn inline_var_docblock_with_var_name() {
+        let content = "<?php\n/** @var Session $var */\n$var = mystery();\n";
+        let stmt_start = content.find("$var =").unwrap();
+        assert_eq!(
+            find_inline_var_docblock(content, stmt_start),
+            Some(("Session".into(), Some("$var".into())))
+        );
+    }
+
+    #[test]
+    fn inline_var_docblock_fqn() {
+        let content = "<?php\n/** @var \\App\\Models\\User */\n$u = get();\n";
+        let stmt_start = content.find("$u").unwrap();
+        assert_eq!(
+            find_inline_var_docblock(content, stmt_start),
+            Some(("App\\Models\\User".into(), None))
+        );
+    }
+
+    #[test]
+    fn inline_var_docblock_no_docblock() {
+        let content = "<?php\n$var = mystery();\n";
+        let stmt_start = content.find("$var").unwrap();
+        assert_eq!(find_inline_var_docblock(content, stmt_start), None);
+    }
+
+    #[test]
+    fn inline_var_docblock_regular_comment_ignored() {
+        // A `/* ... */` comment (not `/** */`) should not match.
+        let content = "<?php\n/* @var Session */\n$var = mystery();\n";
+        let stmt_start = content.find("$var").unwrap();
+        assert_eq!(find_inline_var_docblock(content, stmt_start), None);
+    }
+
+    #[test]
+    fn inline_var_docblock_with_indentation() {
+        let content = "<?php\nclass A {\n    public function f() {\n        /** @var Session */\n        $var = mystery();\n    }\n}\n";
+        let stmt_start = content.find("$var").unwrap();
+        assert_eq!(
+            find_inline_var_docblock(content, stmt_start),
+            Some(("Session".into(), None))
+        );
     }
 
     // ── should_override_type ────────────────────────────────────────────

@@ -34,6 +34,7 @@ use mago_syntax::ast::*;
 use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
+use crate::docblock;
 use crate::types::Visibility;
 use crate::types::*;
 
@@ -665,12 +666,24 @@ impl Backend {
 
             match stmt {
                 Statement::Expression(expr_stmt) => {
-                    Self::check_expression_for_assignment(
+                    // Try inline `/** @var Type */` override first.
+                    // If the docblock resolves successfully (and passes
+                    // the same override check we apply to @return), use
+                    // it and skip normal resolution for this statement.
+                    if !Self::try_inline_var_override(
                         expr_stmt.expression,
+                        stmt.span().start.offset as usize,
                         ctx,
                         results,
                         conditional,
-                    );
+                    ) {
+                        Self::check_expression_for_assignment(
+                            expr_stmt.expression,
+                            ctx,
+                            results,
+                            conditional,
+                        );
+                    }
                 }
                 // Recurse into blocks — these are just `{ … }` groupings,
                 // not conditional, so preserve the current `conditional` flag.
@@ -807,6 +820,181 @@ impl Backend {
         conditional: bool,
     ) {
         Self::walk_statements_for_assignments(std::iter::once(stmt), ctx, results, conditional);
+    }
+
+    /// Try to resolve a variable's type from an inline `/** @var … */`
+    /// docblock that immediately precedes the assignment statement.
+    ///
+    /// Supports both formats:
+    ///   - `/** @var TheType */`
+    ///   - `/** @var TheType $var */`
+    ///
+    /// When a variable name is present in the annotation, it must match
+    /// the variable being resolved.
+    ///
+    /// The same override check used for `@return` is applied: the docblock
+    /// type only wins when `resolve_effective_type(native, docblock)` picks
+    /// the docblock.  If the native (RHS) type is a concrete scalar and the
+    /// docblock type is a class name, the override is rejected and the
+    /// method returns `false` so the caller falls through to normal
+    /// resolution.
+    ///
+    /// Returns `true` when the override was applied (results updated) and
+    /// `false` when there is no applicable `@var` annotation.
+    fn try_inline_var_override<'b>(
+        expr: &'b Expression<'b>,
+        stmt_start: usize,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
+    ) -> bool {
+        // Must be an assignment to our target variable.
+        let assignment = match expr {
+            Expression::Assignment(a) if a.operator.is_assign() => a,
+            _ => return false,
+        };
+        let lhs_name = match assignment.lhs {
+            Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+            _ => return false,
+        };
+        if lhs_name != ctx.var_name {
+            return false;
+        }
+
+        // Look for a `/** @var … */` docblock right before this statement.
+        let (var_type, var_name) = match docblock::find_inline_var_docblock(ctx.content, stmt_start)
+        {
+            Some(pair) => pair,
+            None => return false,
+        };
+
+        // If the annotation includes a variable name, it must match.
+        if let Some(ref vn) = var_name
+            && vn != ctx.var_name
+        {
+            return false;
+        }
+
+        // Determine the "native" return-type string from the RHS so we can
+        // apply the same override check used for `@return` annotations.
+        let native_type = Self::extract_native_type_from_rhs(assignment.rhs, ctx);
+        let effective = docblock::resolve_effective_type(native_type.as_deref(), Some(&var_type));
+
+        let eff_type = match effective {
+            Some(t) => t,
+            None => return false,
+        };
+
+        let resolved = Self::type_hint_to_classes(
+            &eff_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+
+        if resolved.is_empty() {
+            return false;
+        }
+
+        // Apply the resolved type(s) with the same conditional semantics
+        // used by `check_expression_for_assignment`.
+        if !conditional {
+            results.clear();
+        }
+        for cls in resolved {
+            if !results.iter().any(|c| c.name == cls.name) {
+                results.push(cls);
+            }
+        }
+        true
+    }
+
+    /// Extract the "native" return-type string from the RHS of an assignment
+    /// expression, without resolving it to `ClassInfo`.
+    ///
+    /// This is used by [`try_inline_var_override`] to feed
+    /// [`docblock::resolve_effective_type`] with the same kind of type
+    /// string that `@return` override checking uses.
+    ///
+    /// Returns `None` when the native type cannot be determined (the
+    /// caller should treat this as "unknown", which lets the docblock type
+    /// win unconditionally).
+    fn extract_native_type_from_rhs<'b>(
+        rhs: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Option<String> {
+        match rhs {
+            // `new ClassName(…)` → the class name.
+            Expression::Instantiation(inst) => match inst.class {
+                Expression::Identifier(ident) => Some(ident.value().to_string()),
+                Expression::Self_(_) => Some(ctx.current_class.name.clone()),
+                Expression::Static(_) => Some(ctx.current_class.name.clone()),
+                _ => None,
+            },
+            // Function / method calls → look up the return type.
+            Expression::Call(call) => match call {
+                Call::Function(func_call) => {
+                    let func_name = match func_call.function {
+                        Expression::Identifier(ident) => Some(ident.value().to_string()),
+                        _ => None,
+                    };
+                    func_name.and_then(|name| {
+                        ctx.function_loader
+                            .and_then(|fl| fl(&name))
+                            .and_then(|fi| fi.return_type)
+                    })
+                }
+                Call::Method(method_call) => {
+                    if let Expression::Variable(Variable::Direct(dv)) = method_call.object
+                        && dv.name == "$this"
+                        && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
+                    {
+                        let method_name = ident.value.to_string();
+                        ctx.all_classes
+                            .iter()
+                            .find(|c| c.name == ctx.current_class.name)
+                            .and_then(|cls| {
+                                cls.methods
+                                    .iter()
+                                    .find(|m| m.name == method_name)
+                                    .and_then(|m| m.return_type.clone())
+                            })
+                    } else {
+                        None
+                    }
+                }
+                Call::StaticMethod(static_call) => {
+                    let class_name = match static_call.class {
+                        Expression::Self_(_) | Expression::Static(_) => {
+                            Some(ctx.current_class.name.clone())
+                        }
+                        Expression::Identifier(ident) => Some(ident.value().to_string()),
+                        _ => None,
+                    };
+                    if let Some(cls_name) = class_name
+                        && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
+                    {
+                        let method_name = ident.value.to_string();
+                        let owner = ctx
+                            .all_classes
+                            .iter()
+                            .find(|c| c.name == cls_name)
+                            .cloned()
+                            .or_else(|| (ctx.class_loader)(&cls_name));
+                        owner.and_then(|o| {
+                            o.methods
+                                .iter()
+                                .find(|m| m.name == method_name)
+                                .and_then(|m| m.return_type.clone())
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// If `expr` is an assignment whose LHS matches `$var_name` and whose

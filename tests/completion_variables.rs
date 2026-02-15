@@ -1807,3 +1807,425 @@ async fn test_completion_method_conditional_return_class_string_chain() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ── Inline @var docblock override tests ─────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_inline_var_docblock_simple() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inlinevar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Session {\n",
+        "    public function getId(): string {}\n",
+        "    public function flash(): void {}\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function handle() {\n",
+        "        /** @var Session */\n",
+        "        $sess = mystery();\n",
+        "        $sess->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for @var Session"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getId"),
+                "Should include getId from Session, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"flash"),
+                "Should include flash from Session, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_inline_var_docblock_with_variable_name() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inlinevar_named.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(): void {}\n",
+        "    public function error(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run() {\n",
+        "        /** @var Logger $log */\n",
+        "        $log = getLogger();\n",
+        "        $log->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for @var Logger $log"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"info"),
+                "Should include info from Logger, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"error"),
+                "Should include error from Logger, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_inline_var_docblock_wrong_variable_name_ignored() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inlinevar_wrong.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run() {\n",
+        "        /** @var Logger $other */\n",
+        "        $log = something();\n",
+        "        $log->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            // The @var annotation names $other, not $log — so it should NOT
+            // apply and $log should fall back to the default placeholder.
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                !method_names.contains(&"info"),
+                "Should NOT include Logger::info when @var names a different variable, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_inline_var_docblock_override_blocked_by_scalar() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inlinevar_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Session {\n",
+        "    public function getId(): string {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function getName(): string {}\n",
+        "    public function run() {\n",
+        "        /** @var Session */\n",
+        "        $s = $this->getName();\n",
+        "        $s->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            // getName() returns `string` — the @var Session override should
+            // be blocked because string is a scalar.
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                !method_names.contains(&"getId"),
+                "Should NOT include Session::getId when native type is scalar string, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_inline_var_docblock_override_allowed_for_object() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inlinevar_obj.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class BaseService {\n",
+        "    public function base(): void {}\n",
+        "}\n",
+        "class Session extends BaseService {\n",
+        "    public function getId(): string {}\n",
+        "    public function flash(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function getService(): BaseService {}\n",
+        "    public function run() {\n",
+        "        /** @var Session */\n",
+        "        $s = $this->getService();\n",
+        "        $s->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results when @var overrides a class type"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getId"),
+                "Should include getId from Session (override allowed), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"flash"),
+                "Should include flash from Session (override allowed), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_inline_var_docblock_unconditional_reassignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inlinevar_reassign.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class First {\n",
+        "    public function one(): void {}\n",
+        "}\n",
+        "class Second {\n",
+        "    public function two(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run() {\n",
+        "        $x = new First();\n",
+        "        /** @var Second */\n",
+        "        $x = transform();\n",
+        "        $x->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for reassigned @var"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"two"),
+                "Should include two from Second (latest assignment), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"one"),
+                "Should NOT include one from First (overwritten), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

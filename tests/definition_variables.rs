@@ -558,3 +558,306 @@ async fn test_goto_definition_ambiguous_variable_cross_file() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ── Inline @var docblock override tests ─────────────────────────────────────
+
+/// When a variable is assigned from an unknown function but has an inline
+/// `/** @var Type */` annotation, goto definition should resolve the member
+/// via the annotated type.
+#[tokio::test]
+async fn test_goto_definition_inline_var_docblock_simple() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///varoverride.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                  // 0
+        "class Session {\n",                        // 1
+        "    public function getId(): string {}\n", // 2
+        "    public function flash(): void {}\n",   // 3
+        "}\n",                                      // 4
+        "class Controller {\n",                     // 5
+        "    public function handle() {\n",         // 6
+        "        /** @var Session */\n",            // 7
+        "        $sess = mystery();\n",             // 8
+        "        $sess->getId();\n",                // 9
+        "    }\n",                                  // 10
+        "}\n",                                      // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getId" on line 9: $sess->getId()
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $sess->getId() via @var Session annotation"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "getId is declared on line 2 in Session"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the `@var` annotation includes a variable name (`@var Type $var`),
+/// goto definition should still resolve correctly.
+#[tokio::test]
+async fn test_goto_definition_inline_var_docblock_with_variable_name() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///varoverride_named.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // 0
+        "class Logger {\n",                       // 1
+        "    public function info(): void {}\n",  // 2
+        "    public function error(): void {}\n", // 3
+        "}\n",                                    // 4
+        "class App {\n",                          // 5
+        "    public function run() {\n",          // 6
+        "        /** @var Logger $log */\n",      // 7
+        "        $log = getLogger();\n",          // 8
+        "        $log->error();\n",               // 9
+        "    }\n",                                // 10
+        "}\n",                                    // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "error" on line 9: $log->error()
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $log->error() via @var Logger $log annotation"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 3,
+                "error() is declared on line 3 in Logger"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the `@var` annotation names a *different* variable, the override
+/// should NOT apply and goto definition should fail (no type info).
+#[tokio::test]
+async fn test_goto_definition_inline_var_docblock_wrong_variable_name() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///varoverride_wrong.php").unwrap();
+    let text = concat!(
+        "<?php\n",                               // 0
+        "class Logger {\n",                      // 1
+        "    public function info(): void {}\n", // 2
+        "}\n",                                   // 3
+        "class App {\n",                         // 4
+        "    public function run() {\n",         // 5
+        "        /** @var Logger $other */\n",   // 6
+        "        $log = something();\n",         // 7
+        "        $log->info();\n",               // 8
+        "    }\n",                               // 9
+        "}\n",                                   // 10
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "info" on line 8: $log->info()
+    // The @var names $other, not $log, so no type resolution should occur.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 8,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should NOT resolve $log->info() when @var names $other"
+    );
+}
+
+/// When the native return type is a scalar (string), the `@var` override
+/// should be blocked (same check as @return) and definition should fall
+/// through to normal resolution (which won't find a class for `string`).
+#[tokio::test]
+async fn test_goto_definition_inline_var_docblock_blocked_by_scalar() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///varoverride_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                    // 0
+        "class Session {\n",                          // 1
+        "    public function getId(): string {}\n",   // 2
+        "}\n",                                        // 3
+        "class App {\n",                              // 4
+        "    public function getName(): string {}\n", // 5
+        "    public function run() {\n",              // 6
+        "        /** @var Session */\n",              // 7
+        "        $s = $this->getName();\n",           // 8
+        "        $s->getId();\n",                     // 9
+        "    }\n",                                    // 10
+        "}\n",                                        // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getId" on line 9: $s->getId()
+    // getName() returns `string` — override should be blocked.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 9,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should NOT resolve $s->getId() when native type is scalar string"
+    );
+}
+
+/// When the native return type is a class (non-scalar), the `@var` override
+/// should be allowed and goto definition should resolve to the overridden type.
+#[tokio::test]
+async fn test_goto_definition_inline_var_docblock_override_allowed_for_object() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///varoverride_obj.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                            // 0
+        "class BaseService {\n",                              // 1
+        "    public function base(): void {}\n",              // 2
+        "}\n",                                                // 3
+        "class Session extends BaseService {\n",              // 4
+        "    public function getId(): string {}\n",           // 5
+        "    public function flash(): void {}\n",             // 6
+        "}\n",                                                // 7
+        "class App {\n",                                      // 8
+        "    public function getService(): BaseService {}\n", // 9
+        "    public function run() {\n",                      // 10
+        "        /** @var Session */\n",                      // 11
+        "        $s = $this->getService();\n",                // 12
+        "        $s->flash();\n",                             // 13
+        "    }\n",                                            // 14
+        "}\n",                                                // 15
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "flash" on line 13: $s->flash()
+    // getService() returns BaseService but @var says Session — override allowed.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 13,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $s->flash() via @var Session override"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 6,
+                "flash() is declared on line 6 in Session"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
