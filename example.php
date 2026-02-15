@@ -9,16 +9,10 @@
 
 namespace Demo;
 
-use Demo\Contracts\Renderable;
-use Demo\Concerns\HasTimestamps;
-use Demo\Enums\Status;
+use Exception;
+use Stringable;
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
-
-interface Stringable
-{
-    public function toString(): string;
-}
 
 /**
  * @method string render()
@@ -49,7 +43,7 @@ trait HasTimestamps
 
     public function touch(): void
     {
-        $this->updatedAt = date("Y-m-d H:i:s");
+        $this->updatedAt = date('Y-m-d H:i:s');
     }
 }
 
@@ -60,7 +54,7 @@ trait HasSlug
 {
     public function generateSlug(string $value): string
     {
-        return strtolower(str_replace(" ", "-", $value));
+        return strtolower(str_replace(' ', '-', $value));
     }
 }
 
@@ -68,16 +62,16 @@ trait HasSlug
 
 enum Status: string
 {
-    case Active = "active";
-    case Inactive = "inactive";
-    case Pending = "pending";
+    case Active = 'active';
+    case Inactive = 'inactive';
+    case Pending = 'pending';
 
     public function label(): string
     {
         return match ($this) {
-            self::Active => "Active",
-            self::Inactive => "Inactive",
-            self::Pending => "Pending",
+            self::Active => 'Active',
+            self::Inactive => 'Inactive',
+            self::Pending => 'Pending',
         };
     }
 
@@ -106,15 +100,15 @@ abstract class Model
     protected int $id;
 
     /** @var string */
-    protected string $table = "";
+    protected string $table = '';
 
-    public const string CONNECTION = "default";
+    public const string CONNECTION = 'default';
     protected const int PER_PAGE = 15;
-    private const string INTERNAL_KEY = "__model__";
+    private const string INTERNAL_KEY = '__model__';
 
     public function __construct(
-        protected string $name = "",
-        public readonly string $uuid = "",
+        protected string $name = '',
+        public readonly string $uuid = '',
     ) {
         $this->id = rand(1, 99999);
     }
@@ -146,9 +140,9 @@ abstract class Model
     /**
      * @return static
      */
-    public static function make(string $name = ""): static
+    public static function make(string $name = ''): static
     {
-        return new static($name);
+        return new static($name, '');
     }
 
     abstract public function toArray(): array;
@@ -177,16 +171,16 @@ class User extends Model implements Renderable
     protected Status $status;
     private array $roles = [];
 
-    public static string $defaultRole = "user";
+    public static string $defaultRole = 'user';
     public static int $count = 0;
 
-    public const string TYPE_ADMIN = "admin";
-    public const string TYPE_USER = "user";
+    public const string TYPE_ADMIN = 'admin';
+    public const string TYPE_USER = 'user';
 
     public function __construct(
         string $name,
         string $email,
-        private readonly string $password = "",
+        private readonly string $password = '',
         public int $age = 0,
     ) {
         parent::__construct($name);
@@ -232,10 +226,10 @@ class User extends Model implements Renderable
     public function toArray(): array
     {
         return [
-            "id" => $this->getId(),
-            "name" => $this->getName(),
-            "email" => $this->email,
-            "status" => $this->status->value,
+            'id' => $this->getId(),
+            'name' => $this->getName(),
+            'email' => $this->email,
+            'status' => $this->status->value,
         ];
     }
 
@@ -246,7 +240,7 @@ class User extends Model implements Renderable
 
     public function format(string $template): string
     {
-        return str_replace("{name}", $this->getName(), $template);
+        return str_replace('{name}', $this->getName(), $template);
     }
 
     public static function findByEmail(string $email): ?self
@@ -269,8 +263,8 @@ class User extends Model implements Renderable
 
 class UserProfile
 {
-    public string $bio = "";
-    public string $avatarUrl = "";
+    public string $bio = '';
+    public string $avatarUrl = '';
 
     public function __construct(private User $user) {}
 
@@ -287,7 +281,7 @@ class UserProfile
 
     public function getDisplayName(): string
     {
-        return $this->user->getName() . " (" . $this->user->getEmail() . ")";
+        return $this->user->getName() . ' (' . $this->user->getEmail() . ')';
     }
 }
 
@@ -307,7 +301,7 @@ class AdminUser extends User
     public function toArray(): array
     {
         $base = parent::toArray();
-        $base["permissions"] = $this->permissions;
+        $base['permissions'] = $this->permissions;
         return $base;
     }
 
@@ -361,7 +355,12 @@ class Container
         if ($abstract === null) {
             return $this;
         }
-        return $this->bindings[$abstract] ?? null;
+        return $this->bindings[$abstract] ?? new Exception();
+    }
+
+    public function bind(string $abstract, object $obj): void
+    {
+        $this->bindings[$abstract] = $obj;
     }
 }
 
@@ -393,23 +392,28 @@ function createUser(string $name, string $email): User
 
 function findOrFail(int $id): User|AdminUser
 {
-    return new User("test", "test@example.com");
+    return new User('test', 'test@example.com');
+}
+
+function getUnknownValue()
+{
+    return new AdminUser('', '');
 }
 
 // ─── Usage Examples ─────────────────────────────────────────────────────────
 
 // Instance member completion via ->
-$user = new User("Alice", "alice@example.com");
+$user = new User('Alice', 'alice@example.com');
 $user->getEmail(); // Completion: methods on User
 $user->email; // Completion: properties on User
 $user->getCreatedAt(); // Completion: methods from HasTimestamps trait
-$user->generateSlug("Test"); // Completion: methods from HasSlug trait
+$user->generateSlug('Test'); // Completion: methods from HasSlug trait
 
 // Static member completion via ::
 User::$defaultRole; // Completion: static properties
 User::TYPE_ADMIN; // Completion: class constants
-User::findByEmail("a@b.c"); // Completion: static methods
-User::make("Bob"); // Completion: inherited static methods from Model
+User::findByEmail('a@b.c'); // Completion: static methods
+User::make('Bob'); // Completion: inherited static methods from Model
 
 // Enum case completion via ::
 Status::Active; // Completion: enum cases
@@ -425,7 +429,7 @@ Status::Active->label(); // Completion: methods on enum
 //   static::find(1)         — resolves to the calling class
 
 // Method call chaining
-$user->setName("Bob")->setStatus(Status::Active)->getEmail();
+$user->setName('Bob')->setStatus(Status::Active)->getEmail();
 
 // Property chain resolution: $this->prop->method()
 $profile = $user->getProfile();
@@ -435,11 +439,11 @@ $profile->getUser()->getEmail(); // Chain through UserProfile->User
 $user->getProfile()->getDisplayName();
 
 // Static method return type -> chaining
-$made = User::make("Charlie");
+$made = User::make('Charlie');
 $made->getEmail(); // Resolves static return type
 
 // Function return type resolution
-$u = createUser("Dana", "dana@example.com");
+$u = createUser('Dana', 'dana@example.com');
 $u->getName(); // Resolves createUser() return type -> User
 
 // Constructor promoted properties (readonly)
@@ -447,18 +451,18 @@ $user->age; // public promoted property
 $user->uuid; // readonly promoted property from Model
 
 // new expression -> chaining (PHP 8.4+ / parenthesized)
-new User("Eve", "eve@example.com")->getEmail();
+new User('Eve', 'eve@example.com')->getEmail();
 
 // Variable type inference from assignments
-$admin = new AdminUser("Frank", "frank@example.com");
-$admin->grantPermission("delete");
+$admin = new AdminUser('Frank', 'frank@example.com');
+$admin->grantPermission('delete');
 $admin->getCreatedAt(); // Inherited via trait from User
 
 // Union types — ambiguous variable across conditional branches
 if (rand(0, 1)) {
-    $ambiguous = new User("X", "x@example.com");
+    $ambiguous = new User('X', 'x@example.com');
 } else {
-    $ambiguous = new AdminUser("Y", "y@example.com");
+    $ambiguous = new AdminUser('Y', 'y@example.com');
 }
 $ambiguous->getName(); // Both User and AdminUser have getName()
 
@@ -491,8 +495,8 @@ $typed->getEmail(); // Type comes from @var docblock
 
 // Inline @var docblock for variable type hints
 /** @var AdminUser $inlineTyped */
-$inlineTyped = someFactory();
-$inlineTyped->grantPermission("write");
+$inlineTyped = getUnknownValue(AdminUser::class);
+$inlineTyped->grantPermission('write');
 
 // Null-safe operator chaining
 $maybeUser = User::find(1);
@@ -509,12 +513,13 @@ $maybeUser?->getProfile()?->getDisplayName();
 // - Relative in same namespace: User (resolved from current namespace Demo)
 
 // Response with union type properties
-$response = new Response(200, ["data" => "ok"]);
+$response = new Response(200, ['data' => 'ok']);
 $response->getStatusCode(); // Returns string|int
 $response->getBody(); // Returns string|array|null
 
 // Container with conditional return type
 $container = new Container();
+$container->bind(User::class, new User('', ''));
 $resolvedUser = $container->make(User::class);
 $resolvedUser->getEmail(); // Conditional return resolves User from class-string
 
