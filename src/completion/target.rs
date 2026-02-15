@@ -74,13 +74,26 @@ impl Backend {
     ///   - `(new ClassName())->` (parenthesized instantiation)
     fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String {
         // Position just before the `->`
-        let end = arrow_pos;
+        let mut end = arrow_pos;
 
         // Skip whitespace
         let mut i = end;
         while i > 0 && chars[i - 1] == ' ' {
             i -= 1;
         }
+
+        // Skip the `?` of the nullsafe `?->` operator so that the rest
+        // of the extraction logic sees the expression before the `?`
+        // (e.g. the `)` of a call expression like `tryFrom($int)?->`,
+        // or a simple variable like `$var?->`).
+        if i > 0 && chars[i - 1] == '?' {
+            i -= 1;
+        }
+
+        // Update `end` so the fallback `extract_simple_variable` at the
+        // bottom of this function also starts from the correct position
+        // (past any `?` and whitespace).
+        end = i;
 
         // ── Function / method call or `new` expression: detect `)` ──
         // e.g. `app()->`, `$this->getService()->`, `Class::make()->`,

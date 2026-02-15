@@ -5,6 +5,285 @@ use common::{create_psr4_workspace, create_test_backend};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
+// ─── Nullsafe operator ?-> completion ───────────────────────────────────────
+
+/// Test: `Priority::tryFrom($int)?->` should suggest `name` and `value`
+/// just like `Priority::tryFrom($int)->` does.
+#[tokio::test]
+async fn test_completion_nullsafe_arrow_on_tryfrom() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///nullsafe_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Priority: int\n",
+        "{\n",
+        "    case Low = 1;\n",
+        "    case Medium = 2;\n",
+        "    case High = 3;\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function test(int $val): void {\n",
+        "        Priority::tryFrom($val)?->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 38,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results for ?->");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // BackedEnum instances have `name` and `value` properties.
+            assert!(
+                labels.iter().any(|l| l.contains("name")),
+                "?-> after tryFrom() should include 'name', got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.contains("value")),
+                "?-> after tryFrom() should include 'value', got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: Verify that `->` (without `?`) on tryFrom still works (regression guard).
+#[tokio::test]
+async fn test_completion_regular_arrow_on_tryfrom() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///regular_arrow_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Priority: int\n",
+        "{\n",
+        "    case Low = 1;\n",
+        "    case Medium = 2;\n",
+        "    case High = 3;\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function test(int $val): void {\n",
+        "        Priority::tryFrom($val)->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 37,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results for ->");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.contains("name")),
+                "-> after tryFrom() should include 'name', got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.contains("value")),
+                "-> after tryFrom() should include 'value', got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: `$var?->` on a regular class should also work with the nullsafe operator.
+#[tokio::test]
+async fn test_completion_nullsafe_arrow_on_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///nullsafe_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public string $label;\n",
+        "    public function render(): void {}\n",
+        "}\n",
+        "\n",
+        "class Page {\n",
+        "    public function test(?Widget $w): void {\n",
+        "        $w?->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 13,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should return results for $w?->"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.contains("render")),
+                "$w?-> should include 'render', got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.contains("label")),
+                "$w?-> should include 'label', got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: `$this->getWidget()?->` should complete on the return type of getWidget().
+#[tokio::test]
+async fn test_completion_nullsafe_arrow_on_method_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///nullsafe_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public string $label;\n",
+        "    public function render(): void {}\n",
+        "}\n",
+        "\n",
+        "class Page {\n",
+        "    public function getWidget(): ?Widget { return null; }\n",
+        "    public function test(): void {\n",
+        "        $this->getWidget()?->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 33,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should return results for getWidget()?->"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.contains("render")),
+                "getWidget()?-> should include 'render', got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.contains("label")),
+                "getWidget()?-> should include 'label', got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ─── Basic enum case completion via :: ──────────────────────────────────────
 
 /// Test: Completing on `EnumName::` should show enum cases as constants.
