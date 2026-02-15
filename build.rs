@@ -110,7 +110,11 @@ fn main() {
     // 2. Class name → file index mapping.
     let class_entries: Vec<(&str, usize)> = class_map
         .iter()
-        .filter_map(|(name, path)| file_index.get(path.as_str()).map(|&idx| (name.as_str(), idx)))
+        .filter_map(|(name, path)| {
+            file_index
+                .get(path.as_str())
+                .map(|&idx| (name.as_str(), idx))
+        })
         .collect();
 
     out.push_str("/// Maps PHP class/interface/trait short names to an index into\n");
@@ -127,7 +131,11 @@ fn main() {
     // 3. Function name → file index mapping.
     let function_entries: Vec<(&str, usize)> = function_map
         .iter()
-        .filter_map(|(name, path)| file_index.get(path.as_str()).map(|&idx| (name.as_str(), idx)))
+        .filter_map(|(name, path)| {
+            file_index
+                .get(path.as_str())
+                .map(|&idx| (name.as_str(), idx))
+        })
         .collect();
 
     out.push_str("/// Maps PHP function names (including namespaced ones) to an index\n");
@@ -144,7 +152,11 @@ fn main() {
     // 4. Constant name → file index mapping.
     let constant_entries: Vec<(&str, usize)> = constant_map
         .iter()
-        .filter_map(|(name, path)| file_index.get(path.as_str()).map(|&idx| (name.as_str(), idx)))
+        .filter_map(|(name, path)| {
+            file_index
+                .get(path.as_str())
+                .map(|&idx| (name.as_str(), idx))
+        })
         .collect();
 
     out.push_str("/// Maps PHP constant names (including namespaced ones) to an index\n");

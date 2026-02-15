@@ -5,7 +5,13 @@ use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// Helper: open a file and request completion at the given line/character.
-async fn complete_at(backend: &phpantom_lsp::Backend, uri: &Url, text: &str, line: u32, character: u32) -> Vec<CompletionItem> {
+async fn complete_at(
+    backend: &phpantom_lsp::Backend,
+    uri: &Url,
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Vec<CompletionItem> {
     let open_params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
@@ -130,10 +136,7 @@ async fn test_stub_function_nonexistent_returns_none() {
     let backend = create_test_backend();
 
     let result = backend.find_or_load_function(&["this_function_does_not_exist_xyz"]);
-    assert!(
-        result.is_none(),
-        "Non-existent function should return None"
-    );
+    assert!(result.is_none(), "Non-existent function should return None");
 }
 
 /// Verify that when multiple candidates are provided, the first match wins.
@@ -142,10 +145,7 @@ async fn test_stub_function_multiple_candidates() {
     let backend = create_test_backend();
 
     // Try a non-existent name first, then a real one.
-    let result = backend.find_or_load_function(&[
-        "nonexistent_func_xyz",
-        "array_pop",
-    ]);
+    let result = backend.find_or_load_function(&["nonexistent_func_xyz", "array_pop"]);
     assert!(result.is_some());
     assert_eq!(result.unwrap().name, "array_pop");
 }
@@ -276,7 +276,9 @@ async fn test_completion_stub_function_in_expression_subject() {
     // SimpleXMLElement should have `xpath` or `children` method.
     // Completion labels include the full signature (e.g. "xpath($expression): array|false|null").
     let has_sxml_method = items.iter().any(|item| {
-        item.label.starts_with("xpath(") || item.label.starts_with("children(") || item.label.starts_with("attributes(")
+        item.label.starts_with("xpath(")
+            || item.label.starts_with("children(")
+            || item.label.starts_with("attributes(")
     });
     assert!(
         has_sxml_method,
@@ -373,10 +375,7 @@ async fn test_stub_constant_index_built() {
     // The stub_constant_index should be populated from the embedded stubs.
     // PHP_EOL is a very common constant that should be present.
     let has_php_eol = backend.stub_constant_index.contains_key("PHP_EOL");
-    assert!(
-        has_php_eol,
-        "stub_constant_index should contain PHP_EOL"
-    );
+    assert!(has_php_eol, "stub_constant_index should contain PHP_EOL");
 }
 
 /// Verify that common constants are present in the constant index.
@@ -385,7 +384,14 @@ async fn test_stub_constant_index_common_constants() {
     let backend = create_test_backend();
 
     // Note: TRUE, FALSE, NULL are language constructs, not in the stubs map.
-    let expected = ["PHP_INT_MAX", "PHP_INT_MIN", "SORT_ASC", "SORT_DESC", "PHP_EOL", "PHP_MAJOR_VERSION"];
+    let expected = [
+        "PHP_INT_MAX",
+        "PHP_INT_MIN",
+        "SORT_ASC",
+        "SORT_DESC",
+        "PHP_EOL",
+        "PHP_MAJOR_VERSION",
+    ];
     for name in &expected {
         assert!(
             backend.stub_constant_index.contains_key(name),

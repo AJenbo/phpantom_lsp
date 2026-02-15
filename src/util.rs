@@ -215,41 +215,31 @@ impl Backend {
             .lock()
             .ok()
             .and_then(|guard| guard.clone())
+            && let Ok(mappings) = self.psr4_mappings.lock()
+            && let Some(file_path) = composer::resolve_class_path(&mappings, &workspace_root, name)
+            && let Ok(content) = std::fs::read_to_string(&file_path)
         {
-            if let Some(mappings) = self.psr4_mappings.lock().ok() {
-                if let Some(file_path) =
-                    composer::resolve_class_path(&mappings, &workspace_root, name)
-                {
-                    if let Ok(content) = std::fs::read_to_string(&file_path) {
-                        let mut classes = self.parse_php(&content);
+            let mut classes = self.parse_php(&content);
 
-                        let file_use_map = self.parse_use_statements(&content);
-                        let file_namespace = self.parse_namespace(&content);
-                        Self::resolve_parent_class_names(
-                            &mut classes,
-                            &file_use_map,
-                            &file_namespace,
-                        );
+            let file_use_map = self.parse_use_statements(&content);
+            let file_namespace = self.parse_namespace(&content);
+            Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
 
-                        let result =
-                            classes.iter().find(|c| c.name == last_segment).cloned();
+            let result = classes.iter().find(|c| c.name == last_segment).cloned();
 
-                        let uri = format!("file://{}", file_path.display());
-                        if let Ok(mut map) = self.ast_map.lock() {
-                            map.insert(uri.clone(), classes);
-                        }
-                        if let Ok(mut map) = self.use_map.lock() {
-                            map.insert(uri.clone(), file_use_map);
-                        }
-                        if let Ok(mut map) = self.namespace_map.lock() {
-                            map.insert(uri, file_namespace);
-                        }
+            let uri = format!("file://{}", file_path.display());
+            if let Ok(mut map) = self.ast_map.lock() {
+                map.insert(uri.clone(), classes);
+            }
+            if let Ok(mut map) = self.use_map.lock() {
+                map.insert(uri.clone(), file_use_map);
+            }
+            if let Ok(mut map) = self.namespace_map.lock() {
+                map.insert(uri, file_namespace);
+            }
 
-                        if result.is_some() {
-                            return result;
-                        }
-                    }
-                }
+            if result.is_some() {
+                return result;
             }
         }
 
@@ -331,9 +321,7 @@ impl Backend {
                         };
 
                         // Check if this is the function we're looking for.
-                        if result.is_none()
-                            && (fqn == lookup || func.name == lookup)
-                        {
+                        if result.is_none() && (fqn == lookup || func.name == lookup) {
                             result = Some(func.clone());
                         }
 
@@ -355,11 +343,7 @@ impl Backend {
                 if !classes.is_empty() {
                     let empty_use_map = std::collections::HashMap::new();
                     let stub_namespace = self.parse_namespace(stub_content);
-                    Self::resolve_parent_class_names(
-                        &mut classes,
-                        &empty_use_map,
-                        &stub_namespace,
-                    );
+                    Self::resolve_parent_class_names(&mut classes, &empty_use_map, &stub_namespace);
                     let class_uri = format!("phpantom-stub-fn://{}", lookup);
                     if let Ok(mut map) = self.ast_map.lock() {
                         map.insert(class_uri, classes);

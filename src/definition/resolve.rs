@@ -213,10 +213,7 @@ impl Backend {
             }
             result.unwrap_or_else(|| {
                 // Fallback: use a synthetic URI with the loaded info.
-                (
-                    format!("phpantom-stub-fn://{}", loaded.name),
-                    loaded,
-                )
+                (format!("phpantom-stub-fn://{}", loaded.name), loaded)
             })
         };
 
