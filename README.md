@@ -6,53 +6,59 @@ A fast, lightweight PHP language server that stays out of your way. Using only a
 
 ## Features
 
-### Document Synchronization
-
-- Full text document sync (open, change, close)
-
-### PHP Analysis & Type Resolution
-
-PHPantom uses a shared analysis engine built on [Mago](https://github.com/carthage-software/mago)'s PHP parser for parsing and type resolution, powering both completion and go-to-definition.
-
-- Extracts classes, interfaces, traits, enums, and standalone functions
-- Parses methods, properties, constants, and constructor-promoted properties with visibility, static modifiers, and type hints
-- Parses `use` statements and namespace declarations
-- PHPDoc annotations including:
-  - `@return`, `@var`, `@property`, `@method`, `@mixin`
-  - PHPStan-style conditional return types
-- Resolves `$this`, `self`, `static`, and `parent` keywords
-- Infers variable types from assignments and parameter type hints
-- Supports property chains and method call chaining (e.g., `$this->getService()->doSomething()`)
-- Resolves function and static method return types (e.g., `app()->`, `Class::make()->`)
-- Inheritance-aware resolution including traits cases
-- Handles union types (`A|B`) and ambiguous variables across conditional branches
-
 ### Completion
 
-- Instance member completion via `->` (methods and properties)
-- Static member completion via `::` (static methods, static properties, constants, and enum cases)
-- `parent::` completion (static and non-static members, excluding private)
-- Magic method filtering (`__construct`, `__destruct`, etc. are excluded from results)
-- Full method signature display in completion labels (parameters, types, return type)
+- **Instance members** via `->` — methods, properties, constructor-promoted properties
+- **Static members** via `::` — static methods, static properties, constants, enum cases
+- **`parent::`** — inherited and overridden members (excludes private)
+- **Traits and interfaces** — trait members appear on the using class; interface contracts are resolved
+- **`@mixin` classes** — members from `@mixin` annotations are included, even when the mixin is declared on a parent class (the Laravel `Model`/`Builder` pattern works out of the box)
+- **Magic members** — `@property`, `@property-read`, `@method` from PHPDoc
+- **Method chaining** — return types are followed through arbitrarily long chains
+- **Null-safe chaining** — `?->` is handled identically to `->`
+- **Full signatures** in completion labels (parameters, types, return type)
+- Magic methods (`__construct`, `__destruct`, etc.) are filtered out of results
 
 <img width="683" height="339" alt="image" src="https://github.com/user-attachments/assets/65e8220d-5d94-466f-aea7-2f239a8d4b19" />
 
 ### Go to Definition
 
-- Jump to class, interface, trait, enum, and standalone function definitions
-- Jump to method, property, and constant definitions on a class
-- Same-file and cross-file definition lookup
-- Fully-qualified, partially-qualified, and unqualified name resolution via `use` statements and the current namespace
+- **Classes, interfaces, traits, enums** — same-file and cross-file
+- **Methods, properties, constants** — resolves through inheritance, traits, and mixins
+- **Standalone functions** — including PHP built-ins via embedded stubs
+- **Variables** — jumps to the most recent assignment or declaration (assignment, parameter, `foreach`, `catch`, `static`/`global`)
+- **Namespace resolution** — fully-qualified, partially-qualified, and aliased names via `use ... as ...`
 
-### Composer Integration
+### Type Resolution
 
-- Parses `composer.json` for PSR-4 class mapping
-- Parses vendor autoload file and PSR-4 loading
-- Caches parsed files in memory to avoid redundant loading
+PHPantom infers variable types from assignments, parameter hints, return types, and PHPDoc annotations, then uses them to power both completion and go-to-definition.
+
+- **Union types** (`A|B`) and **intersection types** (`A&B`), including PHP 8.2 DNF types like `(A&B)|C`
+- **Conditional return types** — PHPStan-style `@return ($param is class-string<T> ? T : mixed)`, used by patterns like `app(User::class)->getEmail()`
+- **`@var` overrides** — inline `/** @var Type $var */` docblocks refine variable types
+- **Ambiguous variables** — when a variable is assigned different types in conditional branches, all candidates are offered
+
+### Type Narrowing
+
+Completion results adapt to runtime type checks. PHPantomLSP narrows union types in both the positive and inverse branches of `if`/`else`, `while`, and `match(true)`:
+
+- `instanceof` and negated `!instanceof`
+- `is_a($var, ClassName::class)`
+- `get_class($var) === ClassName::class` and `$var::class === ClassName::class` (including `!==` and reversed operand order)
+- `assert($var instanceof ClassName)`
+- **Custom assertion functions** via `@phpstan-assert` / `@psalm-assert` annotations:
+  - `@phpstan-assert Type $param` — unconditional narrowing after the call
+  - `@phpstan-assert-if-true Type $param` — narrows in the then-branch
+  - `@phpstan-assert-if-false Type $param` — narrows in the else-branch
+
+### Composer & Project Awareness
+
+- Parses `composer.json` for PSR-4 and file autoload mappings
+- Resolves cross-file class lookups on demand
 
 ## Building
 
-PHPantomLSP embeds [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) at compile time to provide type information for PHP's built-in classes and functions. The stubs are managed as a Composer dependency with `stubs/` as the vendor directory.
+The PHP stubs are managed as a Composer dependency in `stubs/`. Install them before building:
 
 ```bash
 # Install the PHP stubs (requires Composer)

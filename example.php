@@ -1,16 +1,17 @@
 <?php
 
 /**
- * PHPantomLSP — Comprehensive Feature Demo
+ * PHPantomLSP — Feature Showcase
  *
- * This file showcases most of the features supported by PHPantomLSP.
- * Use it to test completion, go-to-definition, type resolution, and more.
+ * A single-file demo of every completion and go-to-definition feature.
+ * Open this in your editor to try each one interactively.
  */
 
 namespace Demo;
 
 use Exception;
 use Stringable;
+use Demo\UserProfile as Profile;
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -23,12 +24,16 @@ interface Renderable extends Stringable
     public function format(string $template): string;
 }
 
+interface Loggable
+{
+    public function log(string $message): void;
+}
+
 // ─── Traits ─────────────────────────────────────────────────────────────────
 
 trait HasTimestamps
 {
     protected ?string $createdAt = null;
-    protected ?string $updatedAt = null;
 
     public function getCreatedAt(): ?string
     {
@@ -40,16 +45,8 @@ trait HasTimestamps
         $this->createdAt = $date;
         return $this;
     }
-
-    public function touch(): void
-    {
-        $this->updatedAt = date('Y-m-d H:i:s');
-    }
 }
 
-/**
- * @property string $slug
- */
 trait HasSlug
 {
     public function generateSlug(string $value): string
@@ -94,18 +91,23 @@ enum Mode
     case Manual;
 }
 
-// ─── Base / Parent Class ────────────────────────────────────────────────────
+// ─── Builder (@mixin target) ────────────────────────────────────────────────
 
 class Builder
 {
-    /**
-     * @return static
-     */
+    /** @return static */
     public static function query(): self
     {
         return new static();
     }
+
+    public function where(string $col, mixed $val): self
+    {
+        return $this;
+    }
 }
+
+// ─── Abstract Base Class ────────────────────────────────────────────────────
 
 /**
  * @property string $magicName
@@ -116,12 +118,8 @@ abstract class Model
 {
     protected int $id;
 
-    /** @var string */
-    protected $table = '';
-
     public const string CONNECTION = 'default';
     protected const int PER_PAGE = 15;
-    private const string INTERNAL_KEY = '__model__';
 
     public function __construct(
         protected string $name = '',
@@ -140,9 +138,7 @@ abstract class Model
         return $this->name;
     }
 
-    /**
-     * @return static
-     */
+    /** @return static */
     public function setName(string $name): static
     {
         $this->name = $name;
@@ -154,9 +150,7 @@ abstract class Model
         return null;
     }
 
-    /**
-     * @return static
-     */
+    /** @return static */
     public static function make(string $name = ''): static
     {
         return new static($name, '');
@@ -170,26 +164,23 @@ abstract class Model
     }
 }
 
-// ─── Concrete Class with Inheritance, Traits, Interfaces ────────────────────
+// ─── Concrete Class ─────────────────────────────────────────────────────────
 
 /**
- * Represents a user in the system.
- *
  * @property string $displayName
  * @property-read bool $isAdmin
  * @method bool hasPermission(string $permission)
  */
-class User extends Model implements Renderable // Press go-to on `Model` or `Renderable` to jump to there definitions
+class User extends Model implements Renderable
 {
-    use HasTimestamps; // Press go-to on `HasTimestamps` to jump to the trait definition
+    use HasTimestamps;
     use HasSlug;
 
     public string $email;
-    protected Status $status; // Press go-to on `Status` to jump to the enum definition
+    protected Status $status;
     private array $roles = [];
 
     public static string $defaultRole = 'user';
-    public static int $count = 0;
 
     public const string TYPE_ADMIN = 'admin';
     public const string TYPE_USER = 'user';
@@ -203,7 +194,6 @@ class User extends Model implements Renderable // Press go-to on `Model` or `Ren
         parent::__construct($name);
         $this->email = $email;
         $this->status = Status::Active;
-        self::$count++;
     }
 
     public function getEmail(): string
@@ -222,9 +212,6 @@ class User extends Model implements Renderable // Press go-to on `Model` or `Ren
         return $this;
     }
 
-    /**
-     * @param string ...$roles
-     */
     public function addRoles(string ...$roles): void
     {
         $this->roles = array_merge($this->roles, $roles);
@@ -250,11 +237,6 @@ class User extends Model implements Renderable // Press go-to on `Model` or `Ren
         ];
     }
 
-    public function toString(): string
-    {
-        return $this->getName();
-    }
-
     public function format(string $template): string
     {
         return str_replace('{name}', $this->getName(), $template);
@@ -270,18 +252,14 @@ class User extends Model implements Renderable // Press go-to on `Model` or `Ren
         return password_hash($raw, PASSWORD_BCRYPT);
     }
 
-    private function secretInternalMethod(): void
-    {
-        // Not visible via parent:: or from outside
-    }
+    private function secretInternalMethod(): void {}
 }
 
-// ─── Another Class for Chaining / Cross-Class Resolution ────────────────────
+// ─── Related Classes ────────────────────────────────────────────────────────
 
 class UserProfile
 {
     public string $bio = '';
-    public string $avatarUrl = '';
 
     public function __construct(private User $user) {}
 
@@ -302,8 +280,6 @@ class UserProfile
     }
 }
 
-// ─── Child Class (parent:: resolution) ──────────────────────────────────────
-
 final class AdminUser extends User
 {
     /** @var string[] */
@@ -311,13 +287,13 @@ final class AdminUser extends User
 
     public function __construct(string $name, string $email)
     {
-        parent::__construct($name, $email);
-        // parent:: shows inherited non-private methods and constants
+        parent::__construct($name, $email); // parent:: shows inherited methods
     }
 
     public function toArray(): array
     {
-        $base = parent::toArray();
+        $base = parent::toArray();          // parent:: resolves overridden method
+        $base['connection'] = parent::CONNECTION; // parent:: resolves inherited constant
         $base['permissions'] = $this->permissions;
         return $base;
     }
@@ -327,8 +303,6 @@ final class AdminUser extends User
         $this->permissions[] = $permission;
     }
 }
-
-// ─── Class with Union Types and Nullable ────────────────────────────────────
 
 class Response
 {
@@ -353,7 +327,7 @@ class Response
     }
 }
 
-// ─── Container with PHPStan Conditional Return Types ────────────────────────
+// ─── Container (conditional return types) ───────────────────────────────────
 
 class Container
 {
@@ -361,12 +335,9 @@ class Container
     private array $bindings = [];
 
     /**
-     * Resolve an item from the container.
-     *
      * @template TClass
      * @param string|null $abstract
      * @return ($abstract is class-string<TClass> ? TClass : mixed)
-     * @throws Exception
      */
     public function make(?string $abstract = null): mixed
     {
@@ -383,7 +354,7 @@ class Container
 
     public function getStatus(): int
     {
-        return 404;
+        return 200;
     }
 }
 
@@ -400,12 +371,7 @@ function app(?string $abstract = null): mixed
     if ($container === null) {
         $container = new Container();
     }
-
-    if ($abstract !== null) {
-        return $container->make($abstract);
-    }
-
-    return $container;
+    return $abstract !== null ? $container->make($abstract) : $container;
 }
 
 function createUser(string $name, string $email): User
@@ -418,284 +384,266 @@ function findOrFail(int $id): User|AdminUser
     return new User('test', 'test@example.com');
 }
 
-function getUnknownValue()
+function getUnknownValue(): mixed
 {
     return new AdminUser('', '');
 }
 
-// ─── Custom Assert Functions (@phpstan-assert) ──────────────────────────────
+// ─── Custom Assert Functions ────────────────────────────────────────────────
 
-/**
- * @phpstan-assert User $value
- */
-function assertUser($value): void
+/** @phpstan-assert User $value */
+function assertUser(mixed $value): void
 {
     if (!$value instanceof User) {
         throw new \InvalidArgumentException('Expected User');
     }
 }
 
-/**
- * @phpstan-assert-if-true AdminUser $value
- */
-function isAdmin($value): bool
+/** @phpstan-assert-if-true AdminUser $value */
+function isAdmin(mixed $value): bool
 {
     return $value instanceof AdminUser;
 }
 
-/**
- * @phpstan-assert-if-false AdminUser $value
- */
-function isRegularUser($value): bool
+/** @phpstan-assert-if-false AdminUser $value */
+function isRegularUser(mixed $value): bool
 {
     return !$value instanceof AdminUser;
 }
 
-// ─── Usage Examples ─────────────────────────────────────────────────────────
 
-// Instance member completion via ->
+// ═══════════════════════════════════════════════════════════════════════════
+//  Usage Examples — try completion (→) and go-to-definition (⌘-click) here
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+// ── Instance Completion (→) ─────────────────────────────────────────────────
+
 $user = new User('Alice', 'alice@example.com');
-$user->getEmail(); // Completion: methods on User
-$user->email; // Completion: properties on User
-$user->getCreatedAt(); // Completion: methods from HasTimestamps trait
-$user->generateSlug('Test'); // Completion: methods from HasSlug trait
-
-// Static member completion via ::
-User::$defaultRole; // Completion: static properties
-// Press go-to on `TYPE_ADMIN` to jump to its constant definition
-User::TYPE_ADMIN; // Completion: class constants
-User::findByEmail('a@b.c'); // Completion: static methods
-User::make('Bob'); // Completion: inherited static methods from Model
-
-// Enum case completion via ::
-Status::Active; // Completion: enum cases
-Status::Active->label(); // Completion: methods on enum
+$user->getEmail();           // own method
+$user->email;                // own property
+$user->age;                  // constructor-promoted property
+$user->uuid;                 // readonly promoted property from Model
+$user->getCreatedAt();       // from HasTimestamps trait
+$user->generateSlug('Hi');   // from HasSlug trait
+$user->getName();            // inherited from Model
+$user->displayName;          // @property magic member
+$user->hasPermission('x');   // @method magic member
 
 
-// self / static / $this resolution
-// Inside User class:
-//   $this->getName()        — resolves User->getName()
-//   self::TYPE_ADMIN        — resolves User::TYPE_ADMIN
-//   static::find(1)         — resolves to the calling class
+// ── Static Completion (::) ──────────────────────────────────────────────────
 
-// Method call chaining
+User::$defaultRole;          // static property
+User::TYPE_ADMIN;            // class constant
+User::findByEmail('a@b.c'); // static method
+User::make('Bob');           // inherited static from Model
+User::query();               // from @mixin Builder on Model (inherited)
+
+
+// ── Enum Completion ─────────────────────────────────────────────────────────
+
+Status::Active;              // enum case
+Status::Active->label();     // method on backed enum
+Priority::High;              // int-backed enum case
+Mode::Manual;                // unit enum case
+
+
+// ── Method Chaining ─────────────────────────────────────────────────────────
+
 $user->setName('Bob')->setStatus(Status::Active)->getEmail();
 
-// Property chain resolution: $this->prop->method()
-$profile = $user->getProfile();
-$profile->getUser()->getEmail(); // Chain through UserProfile->User
 
-// Chaining directly
+// ── Property Chain Resolution ───────────────────────────────────────────────
+
 $user->getProfile()->getDisplayName();
+$profile = $user->getProfile();
+$profile->getUser()->getEmail();
 
-// Static method return type -> chaining
+
+// ── Null-Safe Chaining ──────────────────────────────────────────────────────
+
+$maybe = User::find(1);
+$maybe?->getProfile()?->getDisplayName();
+
+
+// ── Static Return Type Resolution ───────────────────────────────────────────
+
 $made = User::make('Charlie');
-$made->getEmail(); // Resolves static return type
+$made->getEmail();
 
-// Function return type resolution
-$u = createUser('Dana', 'dana@example.com'); // Press go-to on `createUser` to jump to the function definition
-$u->getName(); // Resolves createUser() return type -> User
 
-// Constructor promoted properties (readonly)
-$user->age; // public promoted property
-$user->uuid; // readonly promoted property from Model
+// ── Function Return Type Resolution ─────────────────────────────────────────
 
-// new expression -> chaining (PHP 8.4+ / parenthesized)
-new User('Eve', 'eve@example.com')->getEmail();
+$u = createUser('Dana', 'dana@example.com');
+$u->getName();               // resolves via createUser() return type
 
-// Variable type inference from assignments
-$admin = new AdminUser('Frank', 'frank@example.com');
-$admin->grantPermission('delete');
-$admin->getCreatedAt(); // Inherited via trait from User
 
-// Union types — ambiguous variable across conditional branches
+// ── Conditional Return Types ────────────────────────────────────────────────
+
+$container = new Container();
+$resolved = $container->make(User::class);
+$resolved->getEmail();       // conditional return resolves to User
+
+$appContainer = app();               // no arg → returns Container
+$appContainer->getStatus();
+$appUser = app(User::class);         // class-string arg → returns User
+$appUser->getEmail();
+
+
+// ── Union Return Types ──────────────────────────────────────────────────────
+
+$found = findOrFail(1);     // User|AdminUser
+$found->getName();           // available on both types
+
+
+// ── Intersection Types ──────────────────────────────────────────────────────
+
+function handleIntersection(User&Loggable $entity): void
+{
+    $entity->getEmail();     // from User
+    $entity->log('saved');   // from Loggable
+}
+
+
+// ── use ... as ... (Class Alias) ────────────────────────────────────────────
+
+$p = new Profile(new User('Eve', 'eve@example.com'));
+$p->getDisplayName();        // Profile resolves to Demo\UserProfile via alias
+
+
+
+// ── Variable Go-To-Definition ───────────────────────────────────────────────
+
+$typed = getUnknownValue();
+return $typed;               // go-to-def on $typed jumps to its assignment above
+
+
+// ── @var Docblock Type Override ─────────────────────────────────────────────
+
+/** @var User $hinted */
+$hinted = getUnknownValue();
+$hinted->getEmail();         // type comes from @var docblock
+
+/** @var AdminUser $inlineHinted */
+$inlineHinted = getUnknownValue();
+$inlineHinted->grantPermission('write');
+
+
+// ── Ambiguous Variables (Conditional Branches) ──────────────────────────────
+
 if (rand(0, 1)) {
     $ambiguous = new Container();
 } else {
     $ambiguous = new AdminUser('Y', 'y@example.com');
 }
-$ambiguous->getStatus(); // Both Container and AdminUser have getStatus()
-if ($ambiguous instanceof AdminUser) {
-    $ambiguous->grantPermission('review');
+$ambiguous->getStatus();     // available on both Container and AdminUser
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Type Narrowing — completion adapts to runtime type checks
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+// ── instanceof ──────────────────────────────────────────────────────────────
+
+$a = findOrFail(1);          // User|AdminUser
+if ($a instanceof AdminUser) {
+    $a->grantPermission('x');    // narrowed to AdminUser
 } else {
-    $ambiguous->bind($ambiguous::class, $ambiguous);
+    $a->getEmail();              // narrowed to User
 }
 
-// Union return type resolution
-$found = findOrFail(1);
-$found->getName(); // User|AdminUser — union completion
-if ($found instanceof User) {
-    $found->addRoles('triage'); // AdminUser extends User
+// negated instanceof
+$b = findOrFail(1);
+if (!$b instanceof AdminUser) {
+    $b->getEmail();              // narrowed to User
 }
 
-// Narrow using assert()
-$asserted = getUnknownValue(1);
-assert($asserted instanceof User);
-$asserted->addRoles();
 
-// ─── Type Narrowing ────────────────────────────────────────────────────────
-//
-// PHPantomLSP narrows union types based on runtime checks so that
-// completion only shows the relevant members.
+// ── is_a() ──────────────────────────────────────────────────────────────────
 
-// while-loop instanceof narrowing
-// Inside the loop body, $found is narrowed to User because the condition
-// guarantees it on every iteration.
-$found2 = getUnknownValue(1);
-while ($found2 instanceof User) {
-    $found2->getEmail(); // ✅ User members only
-    break;
+$c = getUnknownValue();
+if (is_a($c, AdminUser::class)) {
+    $c->grantPermission('edit'); // narrowed to AdminUser
 }
 
-// is_a() — treated the same as instanceof
-$pet = getUnknownValue(1);
-if (is_a($pet, AdminUser::class)) {
-    $pet->grantPermission('edit'); // ✅ narrowed to AdminUser
+
+// ── get_class() / ::class Identity ──────────────────────────────────────────
+
+$d = findOrFail(1);
+if (get_class($d) === User::class) {
+    $d->getEmail();              // narrowed to exactly User
 }
 
-// Negated is_a() — excludes the checked class
-$pet2 = findOrFail(1); // User|AdminUser
-if (!is_a($pet2, AdminUser::class)) {
-    $pet2->getEmail(); // ✅ narrowed to User (AdminUser excluded)
+$e = findOrFail(1);
+if ($e::class === AdminUser::class) {
+    $e->grantPermission('x');    // narrowed to AdminUser
 }
 
-// assert() with is_a() — unconditional narrowing
-$pet3 = getUnknownValue(1);
-assert(is_a($pet3, AdminUser::class));
-$pet3->grantPermission('delete'); // ✅ narrowed to AdminUser
 
-// get_class() === ClassName::class — exact class identity
-$entity = findOrFail(1); // User|AdminUser
-if (get_class($entity) === User::class) {
-    $entity->getEmail(); // ✅ narrowed to exactly User
-}
+// ── assert() ────────────────────────────────────────────────────────────────
 
-// $var::class === ClassName::class — modern exact class identity (PHP 8.0+)
-$entity2 = findOrFail(1); // User|AdminUser
-if ($entity2::class === AdminUser::class) {
-    $entity2->grantPermission('manage'); // ✅ narrowed to AdminUser
-}
+$f = getUnknownValue();
+assert($f instanceof User);
+$f->getEmail();                  // narrowed unconditionally
 
-// Negated class identity — excludes the matched class
-$entity3 = findOrFail(1); // User|AdminUser
-if (get_class($entity3) !== User::class) {
-    $entity3->grantPermission('review'); // ✅ narrowed to AdminUser (User excluded)
-}
 
-// Reversed operand order also works
-$entity4 = findOrFail(1); // User|AdminUser
-if (User::class === $entity4::class) {
-    $entity4->getEmail(); // ✅ narrowed to User
-}
+// ── match(true) ─────────────────────────────────────────────────────────────
 
-// match(true) with instanceof — narrowing inside match arm bodies
-$value = getUnknownValue(1);
+$g = getUnknownValue();
 $result = match (true) {
-    $value instanceof AdminUser => $value->grantPermission('approve'), // ✅ narrowed to AdminUser
-    default => null,
+    $g instanceof AdminUser => $g->grantPermission('approve'),
+    is_a($g, User::class)  => $g->getEmail(),
+    default                 => null,
 };
 
-// match(true) with is_a() — also works
-$value2 = getUnknownValue(1);
-$result2 = match (true) {
-    is_a($value2, AdminUser::class) => $value2->grantPermission('deploy'), // ✅ narrowed to AdminUser
-    default => null,
-};
 
-// Else-branch narrowing — the inverse type is used
-$check = findOrFail(1); // User|AdminUser
-if ($check instanceof AdminUser) {
-    $check->grantPermission('sudo'); // ✅ narrowed to AdminUser
-} else {
-    $check->getEmail(); // ✅ narrowed to User (AdminUser excluded)
-}
+// ── while Loop Narrowing ────────────────────────────────────────────────────
 
-// ─── Custom Assert Narrowing (@phpstan-assert) ─────────────────────────────
-//
-// Functions annotated with @phpstan-assert / @psalm-assert act as custom
-// type guards — PHPantomLSP reads the annotation and narrows accordingly.
-
-// @phpstan-assert — unconditional narrowing after the call
-$unknown = getUnknownValue(1);
-assertUser($unknown);
-$unknown->getEmail(); // ✅ narrowed to User (assertUser guarantees it)
-
-// @phpstan-assert-if-true — narrows inside the if-body when function returns true
-$maybe = findOrFail(1); // User|AdminUser
-if (isAdmin($maybe)) {
-    $maybe->grantPermission('sudo'); // ✅ narrowed to AdminUser
-} else {
-    $maybe->getEmail(); // ✅ narrowed to User (AdminUser excluded)
-}
-
-// @phpstan-assert-if-false — narrows in the else-body when function returns false
-// and excludes in the then-body (function returned true → AdminUser is excluded)
-$maybe2 = findOrFail(1); // User|AdminUser
-if (isRegularUser($maybe2)) {
-    $maybe2->getEmail(); // ✅ narrowed to User (AdminUser excluded)
-} else {
-    $maybe2->grantPermission('deploy'); // ✅ narrowed to AdminUser
-}
-
-// Negated condition flips which branch gets the narrowing
-$maybe3 = findOrFail(1); // User|AdminUser
-if (!isAdmin($maybe3)) {
-    $maybe3->getEmail(); // ✅ narrowed to User (function returned false → AdminUser excluded)
-} else {
-    $maybe3->grantPermission('edit'); // ✅ narrowed to AdminUser (function returned true)
-}
-
-// @phpstan-assert-if-true in a while-loop condition
-$cursor = getUnknownValue(1);
-while (isAdmin($cursor)) {
-    $cursor->grantPermission('loop'); // ✅ narrowed to AdminUser inside loop
+$h = getUnknownValue();
+while ($h instanceof User) {
+    $h->getEmail();              // narrowed inside loop body
     break;
 }
 
-// @mixin resolution
-// Model has @mixin Builder — mixin members appear in completion
-$query = User::query(); // Press go-to on `query()` to jump to its class definition
 
-// @var type override
-/** @var User $typed */
-$typed = getUnknownValue();
-// Press go-to on `getEmail()` to jump to its method definition
-$email = $typed->getEmail(); // Type comes from @var docblock
-echo $email; // Press go-to on `$email` to jump to its assignment
+// ═══════════════════════════════════════════════════════════════════════════
+//  Custom Assert Narrowing (@phpstan-assert / @psalm-assert)
+// ═══════════════════════════════════════════════════════════════════════════
 
-// Inline @var docblock for variable type hints
-/** @var AdminUser $inlineTyped */
-$inlineTyped = getUnknownValue(AdminUser::class);
-$inlineTyped->grantPermission('write');
 
-// Null-safe operator chaining
-$maybeUser = User::find(1); // Press go-to on `User` to jump to its class definition
-$maybeUser?->getProfile()?->getDisplayName();
+// ── Unconditional (@phpstan-assert) ─────────────────────────────────────────
 
-// PHPDoc @property and @method (magic members)
-echo $maybeUser->displayName; // from @property tag on User
-$maybeUser->hasPermission('edit'); // from @method tag on User
+$i = getUnknownValue();
+assertUser($i);
+$i->getEmail();                  // narrowed to User after assertion
 
-// Visibility filtering:
-// - $obj-> shows only accessible dynamic members
-// - MyClass:: shows only accessible static members
 
-// Namespace and use statement resolution:
-// - Fully qualified: \Demo\User
-// - Imported via use: User (resolved from `use Demo\User`)
-// - Relative in same namespace: User (resolved from current namespace Demo)
+// ── Conditional True (@phpstan-assert-if-true) ──────────────────────────────
 
-// Response with union type properties
-$response = new Response(200, ['data' => 'ok']);
-$response->getStatusCode(); // Returns string|int
-$response->getBody(); // Returns string|array|null
+$j = findOrFail(1);
+if (isAdmin($j)) {
+    $j->grantPermission('sudo'); // then-branch: AdminUser
+} else {
+    $j->getEmail();              // else-branch: User
+}
 
-// Container with conditional return type
-$container = new Container();
-$container->bind(User::class, new User('', ''));
-$resolvedUser = $container->make(User::class);
-$resolvedUser->getEmail(); // Conditional return resolves User from class-string
 
-// Standalone function with conditional return
-$appContainer = app(); // Returns Container (no argument = else branch)
-$appUser = app(User::class); // Returns User (class-string argument = then branch)
+// ── Conditional False (@phpstan-assert-if-false) ────────────────────────────
+
+$k = findOrFail(1);
+if (isRegularUser($k)) {
+    $k->getEmail();              // then-branch: User (AdminUser excluded)
+} else {
+    $k->grantPermission('x');    // else-branch: AdminUser
+}
+
+
+// ── Negated Condition ───────────────────────────────────────────────────────
+
+$l = findOrFail(1);
+if (!isAdmin($l)) {
+    $l->getEmail();              // negated → User
+} else {
+    $l->grantPermission('y');    // negated else → AdminUser
+}
