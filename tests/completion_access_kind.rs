@@ -196,7 +196,7 @@ async fn test_completion_arrow_shows_only_non_static() {
 }
 
 #[tokio::test]
-async fn test_completion_double_colon_shows_only_static_and_constants() {
+async fn test_completion_self_double_colon_shows_all_members() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///dcolon.php").unwrap();
@@ -262,33 +262,35 @@ async fn test_completion_double_colon_shows_only_static_and_constants() {
             // Should include static method `create`
             assert!(
                 method_names.contains(&"create"),
-                "DoubleColon should include static method 'create'"
+                "self:: should include static method 'create'"
             );
-            // Should NOT include non-static methods `run` and `helper`
+            // self:: shows both static and non-static methods (PHP allows
+            // calling instance methods via `self::` from within the class).
             assert!(
-                !method_names.contains(&"run"),
-                "DoubleColon should exclude non-static method 'run'"
+                method_names.contains(&"run"),
+                "self:: should include non-static method 'run'"
             );
             assert!(
-                !method_names.contains(&"helper"),
-                "DoubleColon should exclude non-static method 'helper'"
+                method_names.contains(&"helper"),
+                "self:: should include non-static method 'helper'"
             );
 
             // Should include static property `$instance` (with $ prefix for :: access)
             assert!(
                 property_names.contains(&"$instance"),
-                "DoubleColon should include static property '$instance'"
+                "self:: should include static property '$instance'"
             );
-            // Should NOT include non-static property `count` (or `$count`)
+            // Non-static properties are still excluded — `self::$count`
+            // is not valid PHP for instance properties.
             assert!(
                 !property_names.contains(&"count") && !property_names.contains(&"$count"),
-                "DoubleColon should exclude non-static property 'count'"
+                "self:: should exclude non-static property 'count'"
             );
 
             // Should include constant `MAX`
             assert!(
                 constant_names.contains(&"MAX"),
-                "DoubleColon should include constant 'MAX'"
+                "self:: should include constant 'MAX'"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),
@@ -899,4 +901,175 @@ async fn test_double_colon_shows_class_keyword() {
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
+}
+
+// ─── self:: and static:: show the same symbols as parent:: ──────────────────
+
+/// `self::` and `static::` should show both static **and** non-static methods,
+/// just like `parent::` does, because PHP allows calling instance methods via
+/// `self::method()` and `static::method()` from within the class hierarchy.
+#[tokio::test]
+async fn test_self_and_static_show_non_static_methods_like_parent() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///self_static_parity.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Animal {\n",
+        "    public function breathe(): void {}\n",
+        "    public static function kingdom(): string { return 'Animalia'; }\n",
+        "    public const LEGS = 4;\n",
+        "    public static string $species = '';\n",
+        "    public int $age = 0;\n",
+        "}\n",
+        "class Dog extends Animal {\n",
+        "    public function bark(): void {}\n",
+        "    function testSelf() {\n",
+        "        self::\n",
+        "    }\n",
+        "    function testStatic() {\n",
+        "        static::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // ── self:: (line 11, character 14) ──
+    let self_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let self_result = backend.completion(self_params).await.unwrap();
+    assert!(self_result.is_some(), "self:: should return completions");
+
+    let self_items = match self_result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        _ => panic!("Expected CompletionResponse::Array"),
+    };
+
+    let self_method_names: Vec<&str> = self_items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .map(|i| i.filter_text.as_deref().unwrap())
+        .collect();
+    let self_property_names: Vec<&str> = self_items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+        .map(|i| i.label.as_str())
+        .collect();
+    let self_constant_names: Vec<&str> = self_items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    // self:: should show both static and non-static methods
+    assert!(
+        self_method_names.contains(&"breathe"),
+        "self:: should include inherited non-static 'breathe', got: {:?}",
+        self_method_names
+    );
+    assert!(
+        self_method_names.contains(&"kingdom"),
+        "self:: should include inherited static 'kingdom', got: {:?}",
+        self_method_names
+    );
+    assert!(
+        self_method_names.contains(&"bark"),
+        "self:: should include own non-static 'bark', got: {:?}",
+        self_method_names
+    );
+    // Static properties shown, instance properties excluded
+    assert!(
+        self_property_names.contains(&"$species"),
+        "self:: should include static property '$species', got: {:?}",
+        self_property_names
+    );
+    assert!(
+        !self_property_names.contains(&"age") && !self_property_names.contains(&"$age"),
+        "self:: should exclude non-static property 'age', got: {:?}",
+        self_property_names
+    );
+    // Constants shown
+    assert!(
+        self_constant_names.contains(&"LEGS"),
+        "self:: should include constant 'LEGS', got: {:?}",
+        self_constant_names
+    );
+
+    // ── static:: (line 14, character 16) ──
+    let static_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 14,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let static_result = backend.completion(static_params).await.unwrap();
+    assert!(
+        static_result.is_some(),
+        "static:: should return completions"
+    );
+
+    let static_items = match static_result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        _ => panic!("Expected CompletionResponse::Array"),
+    };
+
+    let static_method_names: Vec<&str> = static_items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .map(|i| i.filter_text.as_deref().unwrap())
+        .collect();
+    let static_constant_names: Vec<&str> = static_items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    // static:: should also show both static and non-static methods
+    assert!(
+        static_method_names.contains(&"breathe"),
+        "static:: should include inherited non-static 'breathe', got: {:?}",
+        static_method_names
+    );
+    assert!(
+        static_method_names.contains(&"kingdom"),
+        "static:: should include inherited static 'kingdom', got: {:?}",
+        static_method_names
+    );
+    assert!(
+        static_method_names.contains(&"bark"),
+        "static:: should include own non-static 'bark', got: {:?}",
+        static_method_names
+    );
+    assert!(
+        static_constant_names.contains(&"LEGS"),
+        "static:: should include constant 'LEGS', got: {:?}",
+        static_constant_names
+    );
 }

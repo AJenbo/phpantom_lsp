@@ -376,14 +376,19 @@ impl LanguageServer for Backend {
                 };
 
                 if !candidates.is_empty() {
-                    // `parent::` is syntactically `::` but semantically
-                    // different: it shows both static and instance members
-                    // while excluding private ones.
-                    let effective_access = if target.subject == "parent" {
-                        AccessKind::ParentDoubleColon
-                    } else {
-                        target.access_kind
-                    };
+                    // `parent::`, `self::`, and `static::` are syntactically
+                    // `::` but semantically different from external static
+                    // access: they show both static and instance members
+                    // (PHP allows `self::nonStaticMethod()` etc. from an
+                    // instance context).  `parent::` additionally excludes
+                    // private members, which is handled by visibility
+                    // filtering below.
+                    let effective_access =
+                        if matches!(target.subject.as_str(), "parent" | "self" | "static") {
+                            AccessKind::ParentDoubleColon
+                        } else {
+                            target.access_kind
+                        };
 
                     // Merge completion items from all candidate classes,
                     // deduplicating by label so ambiguous variables show

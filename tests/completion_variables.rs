@@ -499,8 +499,8 @@ async fn test_completion_static_double_colon() {
                 "Should include static 'create'"
             );
             assert!(
-                !method_names.contains(&"run"),
-                "Should exclude non-static 'run'"
+                method_names.contains(&"run"),
+                "static:: should include non-static 'run'"
             );
             assert!(
                 constant_names.contains(&"MAX"),

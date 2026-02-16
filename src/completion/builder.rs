@@ -98,9 +98,9 @@ impl Backend {
     /// `is_self_or_ancestor` should be `true` when the cursor is inside the
     /// target class itself or inside a class that (transitively) extends the
     /// target.  When `true`, `__construct` is offered for `::` access
-    /// (e.g. `self::__construct()`, `parent::__construct()`,
-    /// `ClassName::__construct()` from within a subclass).  When `false`,
-    /// magic methods are suppressed entirely.
+    /// (e.g. `self::__construct()`, `static::__construct()`,
+    /// `parent::__construct()`, `ClassName::__construct()` from within a
+    /// subclass).  When `false`, magic methods are suppressed entirely.
     pub(crate) fn build_completion_items(
         target_class: &ClassInfo,
         access_kind: AccessKind,
@@ -115,9 +115,9 @@ impl Backend {
 
         // Methods — filtered by static / instance, excluding magic methods
         for method in &target_class.methods {
-            // `__construct` is meaningful to call explicitly via `::` or
-            // `parent::` when inside the same class or a subclass
-            // (e.g. `parent::__construct(...)`, `self::__construct()`).
+            // `__construct` is meaningful to call explicitly via `::` when
+            // inside the same class or a subclass (e.g.
+            // `parent::__construct(...)`, `self::__construct()`).
             // Outside of that relationship, magic methods are suppressed.
             let is_constructor = method.name.eq_ignore_ascii_case("__construct");
             if Self::is_magic_method(&method.name) {
@@ -145,12 +145,14 @@ impl Backend {
 
             let include = match access_kind {
                 AccessKind::Arrow => !method.is_static,
-                // `::` normally shows only static methods, but `__construct`
-                // is an exception — it's an instance method that is routinely
-                // called via `parent::__construct(...)`, `self::__construct()`,
-                // `static::__construct()`, or even `ClassName::__construct()`.
+                // External `ClassName::` shows only static methods, but
+                // `__construct` is an exception — it's an instance method
+                // that is routinely called via `ClassName::__construct()`
+                // from within a subclass.
                 AccessKind::DoubleColon => method.is_static || is_constructor,
-                // parent:: shows both static and non-static methods
+                // `self::`, `static::`, and `parent::` show both static and
+                // non-static methods (PHP allows calling instance methods
+                // via `::` from within the class hierarchy).
                 AccessKind::ParentDoubleColon => true,
                 AccessKind::Other => true,
             };
@@ -187,9 +189,9 @@ impl Backend {
                 continue;
             }
 
-            // Static properties accessed via `::` or `parent::` need the `$`
-            // prefix (e.g. `self::$path`), while instance properties via `->`
-            // use the bare name (e.g. `$this->path`).
+            // Static properties accessed via `::` need the `$` prefix
+            // (e.g. `self::$path`, `ClassName::$path`), while instance
+            // properties via `->` use the bare name (e.g. `$this->path`).
             let display_name = if access_kind == AccessKind::DoubleColon
                 || access_kind == AccessKind::ParentDoubleColon
             {

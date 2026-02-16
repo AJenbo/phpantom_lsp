@@ -88,11 +88,15 @@ pub enum AccessKind {
     Arrow,
     /// Completion triggered after `::` (static access).
     DoubleColon,
-    /// Completion triggered after `parent::`.
+    /// Completion triggered after `parent::`, `self::`, or `static::`.
     ///
-    /// This is an oddball: it shows both static **and** instance methods
-    /// (since PHP allows `parent::nonStaticMethod()` from a child class),
-    /// plus constants and static properties — but excludes private members.
+    /// All three keywords use `::` syntax but differ from external static
+    /// access (`ClassName::`): they show both static **and** instance
+    /// methods (PHP allows `self::nonStaticMethod()`,
+    /// `static::nonStaticMethod()`, and `parent::nonStaticMethod()` from
+    /// an instance context), plus constants and static properties.
+    /// Visibility filtering (e.g. excluding private members for `parent::`)
+    /// is handled separately via `current_class_name`.
     ParentDoubleColon,
     /// No specific access operator detected (e.g. inside class body).
     Other,
