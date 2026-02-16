@@ -91,8 +91,20 @@ impl Backend {
 
         // Methods — filtered by static / instance, excluding magic methods
         for method in &target_class.methods {
+            // `__construct` is meaningful to call explicitly via `::` or
+            // `parent::` (e.g. `parent::__construct(...)` in a child class),
+            // so we only suppress it for `->` access.  All other magic
+            // methods are always suppressed.
+            let is_constructor = method.name.eq_ignore_ascii_case("__construct");
             if Self::is_magic_method(&method.name) {
-                continue;
+                let allow = is_constructor
+                    && matches!(
+                        access_kind,
+                        AccessKind::DoubleColon | AccessKind::ParentDoubleColon
+                    );
+                if !allow {
+                    continue;
+                }
             }
 
             // parent:: excludes private members
@@ -104,7 +116,11 @@ impl Backend {
 
             let include = match access_kind {
                 AccessKind::Arrow => !method.is_static,
-                AccessKind::DoubleColon => method.is_static,
+                // `::` normally shows only static methods, but `__construct`
+                // is an exception — it's an instance method that is routinely
+                // called via `parent::__construct(...)`, `self::__construct()`,
+                // `static::__construct()`, or even `ClassName::__construct()`.
+                AccessKind::DoubleColon => method.is_static || is_constructor,
                 // parent:: shows both static and non-static methods
                 AccessKind::ParentDoubleColon => true,
                 AccessKind::Other => true,

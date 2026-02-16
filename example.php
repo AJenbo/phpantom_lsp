@@ -304,7 +304,7 @@ class UserProfile
 
 // ─── Child Class (parent:: resolution) ──────────────────────────────────────
 
-class AdminUser extends User
+final class AdminUser extends User
 {
     /** @var string[] */
     private array $permissions = [];
@@ -366,6 +366,7 @@ class Container
      * @template TClass
      * @param string|null $abstract
      * @return ($abstract is class-string<TClass> ? TClass : mixed)
+     * @throws Exception
      */
     public function make(?string $abstract = null): mixed
     {

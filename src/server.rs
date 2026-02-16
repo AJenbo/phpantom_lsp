@@ -326,16 +326,26 @@ impl LanguageServer for Backend {
                     self.find_or_load_function(&candidates)
                 };
 
-                let candidates = Self::resolve_target_classes(
-                    &target.subject,
-                    target.access_kind,
-                    current_class,
-                    &classes,
-                    &content,
-                    cursor_offset.unwrap_or(0),
-                    &class_loader,
-                    Some(&function_loader),
-                );
+                // `static::` in a final class is equivalent to `self::` but
+                // suggests the class can be subclassed — which it can't.
+                // Suppress suggestions to nudge the developer toward `self::`.
+                let suppress =
+                    target.subject == "static" && current_class.is_some_and(|cc| cc.is_final);
+
+                let candidates = if suppress {
+                    vec![]
+                } else {
+                    Self::resolve_target_classes(
+                        &target.subject,
+                        target.access_kind,
+                        current_class,
+                        &classes,
+                        &content,
+                        cursor_offset.unwrap_or(0),
+                        &class_loader,
+                        Some(&function_loader),
+                    )
+                };
 
                 if !candidates.is_empty() {
                     // `parent::` is syntactically `::` but semantically

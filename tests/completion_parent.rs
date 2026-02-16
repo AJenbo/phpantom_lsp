@@ -516,7 +516,7 @@ async fn test_completion_parent_double_colon_no_parent_falls_back() {
 }
 
 #[tokio::test]
-async fn test_completion_parent_double_colon_magic_methods_excluded() {
+async fn test_completion_parent_double_colon_construct_included_other_magic_excluded() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///parent_magic.php").unwrap();
@@ -569,16 +569,604 @@ async fn test_completion_parent_double_colon_magic_methods_excluded() {
                 .collect();
 
             assert!(
-                !method_names.contains(&"__construct"),
-                "Magic methods should be filtered from parent::"
+                method_names.contains(&"__construct"),
+                "__construct should be available via parent:: (commonly used to call parent constructor), got: {:?}",
+                method_names
             );
             assert!(
                 !method_names.contains(&"__toString"),
-                "Magic methods should be filtered from parent::"
+                "Other magic methods like __toString should still be filtered from parent::"
             );
             assert!(
                 method_names.contains(&"realMethod"),
                 "Non-magic method should appear via parent::"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `static::` inside a `final` class should produce no suggestions,
+/// nudging the developer to use `self::` instead.
+#[tokio::test]
+async fn test_completion_static_double_colon_suppressed_on_final_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///static_final.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "final class Singleton {\n",
+        "    private static ?self $instance = null;\n",
+        "    public static function getInstance(): static {\n",
+        "        static::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    // Should fall back to the default PHPantomLSP item since the class is final
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            assert_eq!(
+                items.len(),
+                1,
+                "static:: in a final class should fall back to default, got: {:?}",
+                items.iter().map(|i| &i.label).collect::<Vec<_>>()
+            );
+            assert_eq!(items[0].label, "PHPantomLSP");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `static::` inside a non-final class should work as normal.
+#[tokio::test]
+async fn test_completion_static_double_colon_works_on_non_final_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///static_non_final.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public static function create(): static {\n",
+        "        static::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 3,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"create"),
+                "static:: on a non-final class should show methods, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `static::` inside an enum should be suppressed (enums are implicitly final).
+#[tokio::test]
+async fn test_completion_static_double_colon_suppressed_on_enum() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///static_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "enum Color {\n",
+        "    case Red;\n",
+        "    case Blue;\n",
+        "    public function label(): string {\n",
+        "        static::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            assert_eq!(
+                items.len(),
+                1,
+                "static:: in an enum should fall back to default (enums are final), got: {:?}",
+                items.iter().map(|i| &i.label).collect::<Vec<_>>()
+            );
+            assert_eq!(items[0].label, "PHPantomLSP");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `self::` should still work on final classes (only `static::` is suppressed).
+#[tokio::test]
+async fn test_completion_self_double_colon_works_on_final_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///self_final.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "final class Config {\n",
+        "    public const VERSION = '1.0';\n",
+        "    public static function getVersion(): string {\n",
+        "        self::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let has_version = items.iter().any(|i| {
+                i.kind == Some(CompletionItemKind::CONSTANT)
+                    && i.filter_text.as_deref() == Some("VERSION")
+            });
+            let has_get_version = items.iter().any(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    && i.filter_text.as_deref() == Some("getVersion")
+            });
+            assert!(
+                has_version,
+                "self:: on a final class should still show constants, got: {:?}",
+                items.iter().map(|i| &i.label).collect::<Vec<_>>()
+            );
+            assert!(
+                has_get_version,
+                "self:: on a final class should still show static methods, got: {:?}",
+                items.iter().map(|i| &i.label).collect::<Vec<_>>()
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `self::` should include `__construct` but exclude other magic methods.
+#[tokio::test]
+async fn test_completion_self_double_colon_includes_construct() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///self_construct.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class MyService {\n",
+        "    public function __construct(private string $name) {}\n",
+        "    public function __toString(): string { return ''; }\n",
+        "    public static function create(): static {\n",
+        "        self::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"__construct"),
+                "self:: should include __construct, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"__toString"),
+                "self:: should still exclude other magic methods like __toString"
+            );
+            assert!(
+                method_names.contains(&"create"),
+                "self:: should include static methods"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `static::` should include `__construct` but exclude other magic methods.
+#[tokio::test]
+async fn test_completion_static_double_colon_includes_construct() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///static_construct.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function __construct(private string $name) {}\n",
+        "    public function __clone(): void {}\n",
+        "    public static function make(): static {\n",
+        "        static::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"__construct"),
+                "static:: should include __construct, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"__clone"),
+                "static:: should still exclude other magic methods like __clone"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Using the class name instead of `self::` (sloppy code) should also
+/// show `__construct` in completion.
+#[tokio::test]
+async fn test_completion_classname_double_colon_includes_construct() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///classname_construct.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public function __construct(private string $label) {}\n",
+        "    public function __debugInfo(): array { return []; }\n",
+        "    public static function create(): static {\n",
+        "        Widget::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"__construct"),
+                "ClassName:: (sloppy self) should include __construct, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"__debugInfo"),
+                "ClassName:: should still exclude other magic methods like __debugInfo"
+            );
+            assert!(
+                method_names.contains(&"create"),
+                "ClassName:: should include static methods"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Using another class name via `::` from outside should also show
+/// `__construct` — PHP allows this for calling parent constructors
+/// by explicit class name, e.g. `BaseClass::__construct(...)`.
+#[tokio::test]
+async fn test_completion_other_classname_double_colon_includes_construct() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///other_class_construct.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function __construct(private string $name) {}\n",
+        "    public function __sleep(): array { return []; }\n",
+        "    public static function create(): static { return new static(''); }\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public function __construct(string $name, private int $age) {\n",
+        "        Base::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"__construct"),
+                "Base:: from child class should include __construct, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"__sleep"),
+                "Base:: should still exclude other magic methods like __sleep"
+            );
+            assert!(
+                method_names.contains(&"create"),
+                "Base:: should include static methods"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `__construct` should NOT appear via `->` (arrow) access — only via `::`.
+#[tokio::test]
+async fn test_completion_arrow_access_still_excludes_construct() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///arrow_no_construct.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Thing {\n",
+        "    public function __construct() {}\n",
+        "    public function doWork(): void {}\n",
+        "}\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        $t = new Thing();\n",
+        "        $t->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                !method_names.contains(&"__construct"),
+                "__construct should NOT appear via -> access, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"doWork"),
+                "Regular methods should still appear via -> access"
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

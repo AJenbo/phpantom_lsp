@@ -210,4 +210,9 @@ pub struct ClassInfo {
     /// classes via magic methods (`__call`, `__get`, `__set`, etc.).
     /// Resolved to fully-qualified names during post-processing.
     pub mixins: Vec<String>,
+    /// Whether the class is declared `final`.
+    ///
+    /// Final classes cannot be extended, so `static::` is equivalent to
+    /// `self::` and need not be offered as a separate completion subject.
+    pub is_final: bool,
 }

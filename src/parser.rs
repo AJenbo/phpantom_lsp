@@ -557,6 +557,8 @@ impl Backend {
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
 
+                    let is_final = class.modifiers.contains_final();
+
                     classes.push(ClassInfo {
                         name: class_name,
                         methods,
@@ -567,6 +569,7 @@ impl Backend {
                         parent_class,
                         used_traits,
                         mixins,
+                        is_final,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -625,6 +628,7 @@ impl Backend {
                         parent_class,
                         used_traits,
                         mixins,
+                        is_final: false,
                     });
                 }
                 Statement::Trait(trait_def) => {
@@ -679,6 +683,7 @@ impl Backend {
                         parent_class: None,
                         used_traits,
                         mixins,
+                        is_final: false,
                     });
                 }
                 Statement::Enum(enum_def) => {
@@ -736,6 +741,7 @@ impl Backend {
                     let start_offset = enum_def.left_brace.start.offset;
                     let end_offset = enum_def.right_brace.end.offset;
 
+                    // Enums are implicitly final — they cannot be extended.
                     classes.push(ClassInfo {
                         name: enum_name,
                         methods,
@@ -746,6 +752,7 @@ impl Backend {
                         parent_class,
                         used_traits,
                         mixins,
+                        is_final: true,
                     });
                 }
                 Statement::Namespace(namespace) => {
