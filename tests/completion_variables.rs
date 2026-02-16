@@ -2240,28 +2240,28 @@ async fn test_completion_instanceof_narrows_to_single_class() {
 
     let uri = Url::parse("file:///instanceof_basic.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class Animal {\n",                                 // 1
-        "    public function breathe(): void {}\n",         // 2
-        "}\n",                                              // 3
-        "class Dog extends Animal {\n",                     // 4
-        "    public function bark(): void {}\n",            // 5
-        "}\n",                                              // 6
-        "class Cat extends Animal {\n",                     // 7
-        "    public function purr(): void {}\n",            // 8
-        "}\n",                                              // 9
-        "class Svc {\n",                                    // 10
-        "    public function test(): void {\n",             // 11
-        "        if (rand(0,1)) {\n",                       // 12
-        "            $pet = new Dog();\n",                  // 13
-        "        } else {\n",                               // 14
-        "            $pet = new Cat();\n",                  // 15
-        "        }\n",                                      // 16
-        "        if ($pet instanceof Dog) {\n",             // 17
-        "            $pet->\n",                             // 18
-        "        }\n",                                      // 19
-        "    }\n",                                          // 20
-        "}\n",                                              // 21
+        "<?php\n",                                  // 0
+        "class Animal {\n",                         // 1
+        "    public function breathe(): void {}\n", // 2
+        "}\n",                                      // 3
+        "class Dog extends Animal {\n",             // 4
+        "    public function bark(): void {}\n",    // 5
+        "}\n",                                      // 6
+        "class Cat extends Animal {\n",             // 7
+        "    public function purr(): void {}\n",    // 8
+        "}\n",                                      // 9
+        "class Svc {\n",                            // 10
+        "    public function test(): void {\n",     // 11
+        "        if (rand(0,1)) {\n",               // 12
+        "            $pet = new Dog();\n",          // 13
+        "        } else {\n",                       // 14
+        "            $pet = new Cat();\n",          // 15
+        "        }\n",                              // 16
+        "        if ($pet instanceof Dog) {\n",     // 17
+        "            $pet->\n",                     // 18
+        "        }\n",                              // 19
+        "    }\n",                                  // 20
+        "}\n",                                      // 21
     );
 
     backend
@@ -2327,26 +2327,26 @@ async fn test_completion_instanceof_no_narrowing_outside_block() {
 
     let uri = Url::parse("file:///instanceof_outside.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class Alpha {\n",                                  // 1
-        "    public function alphaMethod(): void {}\n",     // 2
-        "}\n",                                              // 3
-        "class Beta {\n",                                   // 4
-        "    public function betaMethod(): void {}\n",      // 5
-        "}\n",                                              // 6
-        "class Svc {\n",                                    // 7
-        "    public function test(): void {\n",             // 8
-        "        if (rand(0,1)) {\n",                       // 9
-        "            $obj = new Alpha();\n",                // 10
-        "        } else {\n",                               // 11
-        "            $obj = new Beta();\n",                 // 12
-        "        }\n",                                      // 13
-        "        if ($obj instanceof Alpha) {\n",           // 14
-        "            // narrowed here\n",                   // 15
-        "        }\n",                                      // 16
-        "        $obj->\n",                                 // 17
-        "    }\n",                                          // 18
-        "}\n",                                              // 19
+        "<?php\n",                                      // 0
+        "class Alpha {\n",                              // 1
+        "    public function alphaMethod(): void {}\n", // 2
+        "}\n",                                          // 3
+        "class Beta {\n",                               // 4
+        "    public function betaMethod(): void {}\n",  // 5
+        "}\n",                                          // 6
+        "class Svc {\n",                                // 7
+        "    public function test(): void {\n",         // 8
+        "        if (rand(0,1)) {\n",                   // 9
+        "            $obj = new Alpha();\n",            // 10
+        "        } else {\n",                           // 11
+        "            $obj = new Beta();\n",             // 12
+        "        }\n",                                  // 13
+        "        if ($obj instanceof Alpha) {\n",       // 14
+        "            // narrowed here\n",               // 15
+        "        }\n",                                  // 16
+        "        $obj->\n",                             // 17
+        "    }\n",                                      // 18
+        "}\n",                                          // 19
     );
 
     backend
@@ -2408,32 +2408,32 @@ async fn test_completion_instanceof_elseif_narrows() {
 
     let uri = Url::parse("file:///instanceof_elseif.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class Foo {\n",                                    // 1
-        "    public function fooMethod(): void {}\n",       // 2
-        "}\n",                                              // 3
-        "class Bar {\n",                                    // 4
-        "    public function barMethod(): void {}\n",       // 5
-        "}\n",                                              // 6
-        "class Baz {\n",                                    // 7
-        "    public function bazMethod(): void {}\n",       // 8
-        "}\n",                                              // 9
-        "class Svc {\n",                                    // 10
-        "    public function test(): void {\n",             // 11
-        "        if (rand(0,1)) {\n",                       // 12
-        "            $x = new Foo();\n",                    // 13
-        "        } elseif (rand(0,1)) {\n",                 // 14
-        "            $x = new Bar();\n",                    // 15
-        "        } else {\n",                               // 16
-        "            $x = new Baz();\n",                    // 17
-        "        }\n",                                      // 18
-        "        if ($x instanceof Foo) {\n",               // 19
-        "            // cursor NOT here\n",                 // 20
-        "        } elseif ($x instanceof Bar) {\n",         // 21
-        "            $x->\n",                               // 22
-        "        }\n",                                      // 23
-        "    }\n",                                          // 24
-        "}\n",                                              // 25
+        "<?php\n",                                    // 0
+        "class Foo {\n",                              // 1
+        "    public function fooMethod(): void {}\n", // 2
+        "}\n",                                        // 3
+        "class Bar {\n",                              // 4
+        "    public function barMethod(): void {}\n", // 5
+        "}\n",                                        // 6
+        "class Baz {\n",                              // 7
+        "    public function bazMethod(): void {}\n", // 8
+        "}\n",                                        // 9
+        "class Svc {\n",                              // 10
+        "    public function test(): void {\n",       // 11
+        "        if (rand(0,1)) {\n",                 // 12
+        "            $x = new Foo();\n",              // 13
+        "        } elseif (rand(0,1)) {\n",           // 14
+        "            $x = new Bar();\n",              // 15
+        "        } else {\n",                         // 16
+        "            $x = new Baz();\n",              // 17
+        "        }\n",                                // 18
+        "        if ($x instanceof Foo) {\n",         // 19
+        "            // cursor NOT here\n",           // 20
+        "        } elseif ($x instanceof Bar) {\n",   // 21
+        "            $x->\n",                         // 22
+        "        }\n",                                // 23
+        "    }\n",                                    // 24
+        "}\n",                                        // 25
     );
 
     backend
@@ -2499,26 +2499,26 @@ async fn test_completion_instanceof_different_variable_no_effect() {
 
     let uri = Url::parse("file:///instanceof_other_var.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class TypeA {\n",                                  // 1
-        "    public function aMethod(): void {}\n",         // 2
-        "}\n",                                              // 3
-        "class TypeB {\n",                                  // 4
-        "    public function bMethod(): void {}\n",         // 5
-        "}\n",                                              // 6
-        "class Svc {\n",                                    // 7
-        "    public function test(): void {\n",             // 8
-        "        if (rand(0,1)) {\n",                       // 9
-        "            $obj = new TypeA();\n",                // 10
-        "        } else {\n",                               // 11
-        "            $obj = new TypeB();\n",                // 12
-        "        }\n",                                      // 13
-        "        $other = new TypeA();\n",                  // 14
-        "        if ($other instanceof TypeA) {\n",         // 15
-        "            $obj->\n",                             // 16
-        "        }\n",                                      // 17
-        "    }\n",                                          // 18
-        "}\n",                                              // 19
+        "<?php\n",                                  // 0
+        "class TypeA {\n",                          // 1
+        "    public function aMethod(): void {}\n", // 2
+        "}\n",                                      // 3
+        "class TypeB {\n",                          // 4
+        "    public function bMethod(): void {}\n", // 5
+        "}\n",                                      // 6
+        "class Svc {\n",                            // 7
+        "    public function test(): void {\n",     // 8
+        "        if (rand(0,1)) {\n",               // 9
+        "            $obj = new TypeA();\n",        // 10
+        "        } else {\n",                       // 11
+        "            $obj = new TypeB();\n",        // 12
+        "        }\n",                              // 13
+        "        $other = new TypeA();\n",          // 14
+        "        if ($other instanceof TypeA) {\n", // 15
+        "            $obj->\n",                     // 16
+        "        }\n",                              // 17
+        "    }\n",                                  // 18
+        "}\n",                                      // 19
     );
 
     backend
@@ -2589,12 +2589,12 @@ async fn test_completion_instanceof_top_level() {
         "}\n",                                              // 6
         "\n",                                               // 7
         "if (rand(0, 1)) {\n",                              // 8
-        "    $ambiguous = new Container();\n",               // 9
+        "    $ambiguous = new Container();\n",              // 9
         "} else {\n",                                       // 10
-        "    $ambiguous = new AdminUser();\n",               // 11
+        "    $ambiguous = new AdminUser();\n",              // 11
         "}\n",                                              // 12
         "if ($ambiguous instanceof AdminUser) {\n",         // 13
-        "    $ambiguous->\n",                                // 14
+        "    $ambiguous->\n",                               // 14
         "}\n",                                              // 15
     );
 
@@ -2750,25 +2750,25 @@ async fn test_completion_instanceof_parenthesised_condition() {
 
     let uri = Url::parse("file:///instanceof_parens.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class One {\n",                                    // 1
-        "    public function oneMethod(): void {}\n",       // 2
-        "}\n",                                              // 3
-        "class Two {\n",                                    // 4
-        "    public function twoMethod(): void {}\n",       // 5
-        "}\n",                                              // 6
-        "class Svc {\n",                                    // 7
-        "    public function test(): void {\n",             // 8
-        "        if (rand(0,1)) {\n",                       // 9
-        "            $val = new One();\n",                  // 10
-        "        } else {\n",                               // 11
-        "            $val = new Two();\n",                  // 12
-        "        }\n",                                      // 13
-        "        if (($val instanceof Two)) {\n",           // 14
-        "            $val->\n",                             // 15
-        "        }\n",                                      // 16
-        "    }\n",                                          // 17
-        "}\n",                                              // 18
+        "<?php\n",                                    // 0
+        "class One {\n",                              // 1
+        "    public function oneMethod(): void {}\n", // 2
+        "}\n",                                        // 3
+        "class Two {\n",                              // 4
+        "    public function twoMethod(): void {}\n", // 5
+        "}\n",                                        // 6
+        "class Svc {\n",                              // 7
+        "    public function test(): void {\n",       // 8
+        "        if (rand(0,1)) {\n",                 // 9
+        "            $val = new One();\n",            // 10
+        "        } else {\n",                         // 11
+        "            $val = new Two();\n",            // 12
+        "        }\n",                                // 13
+        "        if (($val instanceof Two)) {\n",     // 14
+        "            $val->\n",                       // 15
+        "        }\n",                                // 16
+        "    }\n",                                    // 17
+        "}\n",                                        // 18
     );
 
     backend
@@ -3141,27 +3141,27 @@ async fn test_completion_assert_instanceof_narrows_type() {
 
     let uri = Url::parse("file:///assert_instanceof_basic.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Animal {\n",                                     // 1
-        "    public function breathe(): void {}\n",             // 2
-        "}\n",                                                  // 3
-        "class Dog extends Animal {\n",                         // 4
-        "    public function bark(): void {}\n",                // 5
-        "}\n",                                                  // 6
-        "class Cat extends Animal {\n",                         // 7
-        "    public function purr(): void {}\n",                // 8
-        "}\n",                                                  // 9
-        "class Svc {\n",                                        // 10
-        "    public function test(): void {\n",                 // 11
-        "        if (rand(0,1)) {\n",                           // 12
-        "            $pet = new Dog();\n",                      // 13
-        "        } else {\n",                                   // 14
-        "            $pet = new Cat();\n",                      // 15
-        "        }\n",                                          // 16
-        "        assert($pet instanceof Dog);\n",               // 17
-        "        $pet->\n",                                     // 18
-        "    }\n",                                              // 19
-        "}\n",                                                  // 20
+        "<?php\n",                                  // 0
+        "class Animal {\n",                         // 1
+        "    public function breathe(): void {}\n", // 2
+        "}\n",                                      // 3
+        "class Dog extends Animal {\n",             // 4
+        "    public function bark(): void {}\n",    // 5
+        "}\n",                                      // 6
+        "class Cat extends Animal {\n",             // 7
+        "    public function purr(): void {}\n",    // 8
+        "}\n",                                      // 9
+        "class Svc {\n",                            // 10
+        "    public function test(): void {\n",     // 11
+        "        if (rand(0,1)) {\n",               // 12
+        "            $pet = new Dog();\n",          // 13
+        "        } else {\n",                       // 14
+        "            $pet = new Cat();\n",          // 15
+        "        }\n",                              // 16
+        "        assert($pet instanceof Dog);\n",   // 17
+        "        $pet->\n",                         // 18
+        "    }\n",                                  // 19
+        "}\n",                                      // 20
     );
 
     backend
@@ -3227,20 +3227,20 @@ async fn test_completion_assert_instanceof_top_level() {
 
     let uri = Url::parse("file:///assert_instanceof_toplevel.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Alpha {\n",                                      // 1
-        "    public function alphaMethod(): void {}\n",         // 2
-        "}\n",                                                  // 3
-        "class Beta {\n",                                       // 4
-        "    public function betaMethod(): void {}\n",          // 5
-        "}\n",                                                  // 6
-        "if (rand(0,1)) {\n",                                   // 7
-        "    $obj = new Alpha();\n",                             // 8
-        "} else {\n",                                            // 9
-        "    $obj = new Beta();\n",                              // 10
-        "}\n",                                                   // 11
-        "assert($obj instanceof Alpha);\n",                     // 12
-        "$obj->\n",                                              // 13
+        "<?php\n",                                      // 0
+        "class Alpha {\n",                              // 1
+        "    public function alphaMethod(): void {}\n", // 2
+        "}\n",                                          // 3
+        "class Beta {\n",                               // 4
+        "    public function betaMethod(): void {}\n",  // 5
+        "}\n",                                          // 6
+        "if (rand(0,1)) {\n",                           // 7
+        "    $obj = new Alpha();\n",                    // 8
+        "} else {\n",                                   // 9
+        "    $obj = new Beta();\n",                     // 10
+        "}\n",                                          // 11
+        "assert($obj instanceof Alpha);\n",             // 12
+        "$obj->\n",                                     // 13
     );
 
     backend
@@ -3301,19 +3301,19 @@ async fn test_completion_assert_instanceof_narrows_parameter() {
 
     let uri = Url::parse("file:///assert_instanceof_param.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Base {\n",                                       // 1
-        "    public function baseMethod(): void {}\n",          // 2
-        "}\n",                                                  // 3
-        "class Child extends Base {\n",                         // 4
-        "    public function childMethod(): void {}\n",         // 5
-        "}\n",                                                  // 6
-        "class Handler {\n",                                    // 7
-        "    public function handle(Base $item): void {\n",     // 8
-        "        assert($item instanceof Child);\n",            // 9
-        "        $item->\n",                                    // 10
-        "    }\n",                                              // 11
-        "}\n",                                                  // 12
+        "<?php\n",                                          // 0
+        "class Base {\n",                                   // 1
+        "    public function baseMethod(): void {}\n",      // 2
+        "}\n",                                              // 3
+        "class Child extends Base {\n",                     // 4
+        "    public function childMethod(): void {}\n",     // 5
+        "}\n",                                              // 6
+        "class Handler {\n",                                // 7
+        "    public function handle(Base $item): void {\n", // 8
+        "        assert($item instanceof Child);\n",        // 9
+        "        $item->\n",                                // 10
+        "    }\n",                                          // 11
+        "}\n",                                              // 12
     );
 
     backend
@@ -3374,21 +3374,21 @@ async fn test_completion_assert_instanceof_different_variable_no_effect() {
 
     let uri = Url::parse("file:///assert_instanceof_diffvar.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Foo {\n",                                        // 1
-        "    public function fooMethod(): void {}\n",           // 2
-        "}\n",                                                  // 3
-        "class Bar {\n",                                        // 4
-        "    public function barMethod(): void {}\n",           // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        $a = new Foo();\n",                            // 9
-        "        $b = new Bar();\n",                            // 10
-        "        assert($b instanceof Foo);\n",                 // 11
-        "        $a->\n",                                       // 12
-        "    }\n",                                              // 13
-        "}\n",                                                  // 14
+        "<?php\n",                                    // 0
+        "class Foo {\n",                              // 1
+        "    public function fooMethod(): void {}\n", // 2
+        "}\n",                                        // 3
+        "class Bar {\n",                              // 4
+        "    public function barMethod(): void {}\n", // 5
+        "}\n",                                        // 6
+        "class Svc {\n",                              // 7
+        "    public function run(): void {\n",        // 8
+        "        $a = new Foo();\n",                  // 9
+        "        $b = new Bar();\n",                  // 10
+        "        assert($b instanceof Foo);\n",       // 11
+        "        $a->\n",                             // 12
+        "    }\n",                                    // 13
+        "}\n",                                        // 14
     );
 
     backend
@@ -3531,24 +3531,24 @@ async fn test_completion_assert_instanceof_parenthesised() {
 
     let uri = Url::parse("file:///assert_instanceof_parens.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class X {\n",                                          // 1
-        "    public function xMethod(): void {}\n",             // 2
-        "}\n",                                                  // 3
-        "class Y {\n",                                          // 4
-        "    public function yMethod(): void {}\n",             // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $v = new X();\n",                          // 10
-        "        } else {\n",                                   // 11
-        "            $v = new Y();\n",                          // 12
-        "        }\n",                                          // 13
-        "        assert(($v instanceof X));\n",                 // 14
-        "        $v->\n",                                       // 15
-        "    }\n",                                              // 16
-        "}\n",                                                  // 17
+        "<?php\n",                                  // 0
+        "class X {\n",                              // 1
+        "    public function xMethod(): void {}\n", // 2
+        "}\n",                                      // 3
+        "class Y {\n",                              // 4
+        "    public function yMethod(): void {}\n", // 5
+        "}\n",                                      // 6
+        "class Svc {\n",                            // 7
+        "    public function run(): void {\n",      // 8
+        "        if (rand(0,1)) {\n",               // 9
+        "            $v = new X();\n",              // 10
+        "        } else {\n",                       // 11
+        "            $v = new Y();\n",              // 12
+        "        }\n",                              // 13
+        "        assert(($v instanceof X));\n",     // 14
+        "        $v->\n",                           // 15
+        "    }\n",                                  // 16
+        "}\n",                                      // 17
     );
 
     backend
@@ -3613,24 +3613,24 @@ async fn test_completion_assert_negated_instanceof_excludes_class() {
 
     let uri = Url::parse("file:///assert_neg_instanceof.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Alpha {\n",                                      // 1
-        "    public function alphaMethod(): void {}\n",         // 2
-        "}\n",                                                  // 3
-        "class Beta {\n",                                       // 4
-        "    public function betaMethod(): void {}\n",          // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $obj = new Alpha();\n",                    // 10
-        "        } else {\n",                                   // 11
-        "            $obj = new Beta();\n",                     // 12
-        "        }\n",                                          // 13
-        "        assert(!$obj instanceof Alpha);\n",            // 14
-        "        $obj->\n",                                     // 15
-        "    }\n",                                              // 16
-        "}\n",                                                  // 17
+        "<?php\n",                                      // 0
+        "class Alpha {\n",                              // 1
+        "    public function alphaMethod(): void {}\n", // 2
+        "}\n",                                          // 3
+        "class Beta {\n",                               // 4
+        "    public function betaMethod(): void {}\n",  // 5
+        "}\n",                                          // 6
+        "class Svc {\n",                                // 7
+        "    public function run(): void {\n",          // 8
+        "        if (rand(0,1)) {\n",                   // 9
+        "            $obj = new Alpha();\n",            // 10
+        "        } else {\n",                           // 11
+        "            $obj = new Beta();\n",             // 12
+        "        }\n",                                  // 13
+        "        assert(!$obj instanceof Alpha);\n",    // 14
+        "        $obj->\n",                             // 15
+        "    }\n",                                      // 16
+        "}\n",                                          // 17
     );
 
     backend
@@ -3692,24 +3692,24 @@ async fn test_completion_assert_negated_instanceof_parenthesised_excludes_class(
 
     let uri = Url::parse("file:///assert_neg_instanceof_parens.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Foo {\n",                                        // 1
-        "    public function fooMethod(): void {}\n",           // 2
-        "}\n",                                                  // 3
-        "class Bar {\n",                                        // 4
-        "    public function barMethod(): void {}\n",           // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $x = new Foo();\n",                        // 10
-        "        } else {\n",                                   // 11
-        "            $x = new Bar();\n",                        // 12
-        "        }\n",                                          // 13
-        "        assert(!($x instanceof Foo));\n",              // 14
-        "        $x->\n",                                       // 15
-        "    }\n",                                              // 16
-        "}\n",                                                  // 17
+        "<?php\n",                                    // 0
+        "class Foo {\n",                              // 1
+        "    public function fooMethod(): void {}\n", // 2
+        "}\n",                                        // 3
+        "class Bar {\n",                              // 4
+        "    public function barMethod(): void {}\n", // 5
+        "}\n",                                        // 6
+        "class Svc {\n",                              // 7
+        "    public function run(): void {\n",        // 8
+        "        if (rand(0,1)) {\n",                 // 9
+        "            $x = new Foo();\n",              // 10
+        "        } else {\n",                         // 11
+        "            $x = new Bar();\n",              // 12
+        "        }\n",                                // 13
+        "        assert(!($x instanceof Foo));\n",    // 14
+        "        $x->\n",                             // 15
+        "    }\n",                                    // 16
+        "}\n",                                        // 17
     );
 
     backend
@@ -3771,25 +3771,25 @@ async fn test_completion_if_negated_instanceof_excludes_class() {
 
     let uri = Url::parse("file:///if_neg_instanceof.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Cat {\n",                                        // 1
-        "    public function purr(): void {}\n",                // 2
-        "}\n",                                                  // 3
-        "class Dog {\n",                                        // 4
-        "    public function bark(): void {}\n",                // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $pet = new Cat();\n",                      // 10
-        "        } else {\n",                                   // 11
-        "            $pet = new Dog();\n",                      // 12
-        "        }\n",                                          // 13
-        "        if (!($pet instanceof Cat)) {\n",              // 14
-        "            $pet->\n",                                 // 15
-        "        }\n",                                          // 16
-        "    }\n",                                              // 17
-        "}\n",                                                  // 18
+        "<?php\n",                                 // 0
+        "class Cat {\n",                           // 1
+        "    public function purr(): void {}\n",   // 2
+        "}\n",                                     // 3
+        "class Dog {\n",                           // 4
+        "    public function bark(): void {}\n",   // 5
+        "}\n",                                     // 6
+        "class Svc {\n",                           // 7
+        "    public function run(): void {\n",     // 8
+        "        if (rand(0,1)) {\n",              // 9
+        "            $pet = new Cat();\n",         // 10
+        "        } else {\n",                      // 11
+        "            $pet = new Dog();\n",         // 12
+        "        }\n",                             // 13
+        "        if (!($pet instanceof Cat)) {\n", // 14
+        "            $pet->\n",                    // 15
+        "        }\n",                             // 16
+        "    }\n",                                 // 17
+        "}\n",                                     // 18
     );
 
     backend
@@ -3851,25 +3851,25 @@ async fn test_completion_if_negated_instanceof_no_inner_parens() {
 
     let uri = Url::parse("file:///if_neg_instanceof_no_parens.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class A1 {\n",                                         // 1
-        "    public function a1Method(): void {}\n",            // 2
-        "}\n",                                                  // 3
-        "class B1 {\n",                                         // 4
-        "    public function b1Method(): void {}\n",            // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $v = new A1();\n",                         // 10
-        "        } else {\n",                                   // 11
-        "            $v = new B1();\n",                         // 12
-        "        }\n",                                          // 13
-        "        if (!$v instanceof A1) {\n",                   // 14
-        "            $v->\n",                                   // 15
-        "        }\n",                                          // 16
-        "    }\n",                                              // 17
-        "}\n",                                                  // 18
+        "<?php\n",                                   // 0
+        "class A1 {\n",                              // 1
+        "    public function a1Method(): void {}\n", // 2
+        "}\n",                                       // 3
+        "class B1 {\n",                              // 4
+        "    public function b1Method(): void {}\n", // 5
+        "}\n",                                       // 6
+        "class Svc {\n",                             // 7
+        "    public function run(): void {\n",       // 8
+        "        if (rand(0,1)) {\n",                // 9
+        "            $v = new A1();\n",              // 10
+        "        } else {\n",                        // 11
+        "            $v = new B1();\n",              // 12
+        "        }\n",                               // 13
+        "        if (!$v instanceof A1) {\n",        // 14
+        "            $v->\n",                        // 15
+        "        }\n",                               // 16
+        "    }\n",                                   // 17
+        "}\n",                                       // 18
     );
 
     backend
@@ -3931,27 +3931,27 @@ async fn test_completion_if_instanceof_else_excludes_class() {
 
     let uri = Url::parse("file:///if_instanceof_else.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Red {\n",                                        // 1
-        "    public function redMethod(): void {}\n",           // 2
-        "}\n",                                                  // 3
-        "class Blue {\n",                                       // 4
-        "    public function blueMethod(): void {}\n",          // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $c = new Red();\n",                        // 10
-        "        } else {\n",                                   // 11
-        "            $c = new Blue();\n",                       // 12
-        "        }\n",                                          // 13
-        "        if ($c instanceof Red) {\n",                   // 14
-        "            // narrowed to Red here\n",                // 15
-        "        } else {\n",                                   // 16
-        "            $c->\n",                                   // 17
-        "        }\n",                                          // 18
-        "    }\n",                                              // 19
-        "}\n",                                                  // 20
+        "<?php\n",                                     // 0
+        "class Red {\n",                               // 1
+        "    public function redMethod(): void {}\n",  // 2
+        "}\n",                                         // 3
+        "class Blue {\n",                              // 4
+        "    public function blueMethod(): void {}\n", // 5
+        "}\n",                                         // 6
+        "class Svc {\n",                               // 7
+        "    public function run(): void {\n",         // 8
+        "        if (rand(0,1)) {\n",                  // 9
+        "            $c = new Red();\n",               // 10
+        "        } else {\n",                          // 11
+        "            $c = new Blue();\n",              // 12
+        "        }\n",                                 // 13
+        "        if ($c instanceof Red) {\n",          // 14
+        "            // narrowed to Red here\n",       // 15
+        "        } else {\n",                          // 16
+        "            $c->\n",                          // 17
+        "        }\n",                                 // 18
+        "    }\n",                                     // 19
+        "}\n",                                         // 20
     );
 
     backend
@@ -4013,27 +4013,27 @@ async fn test_completion_if_instanceof_then_still_narrows() {
 
     let uri = Url::parse("file:///if_instanceof_then_check.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Red {\n",                                        // 1
-        "    public function redMethod(): void {}\n",           // 2
-        "}\n",                                                  // 3
-        "class Blue {\n",                                       // 4
-        "    public function blueMethod(): void {}\n",          // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(): void {\n",                  // 8
-        "        if (rand(0,1)) {\n",                           // 9
-        "            $c = new Red();\n",                        // 10
-        "        } else {\n",                                   // 11
-        "            $c = new Blue();\n",                       // 12
-        "        }\n",                                          // 13
-        "        if ($c instanceof Red) {\n",                   // 14
-        "            $c->\n",                                   // 15
-        "        } else {\n",                                   // 16
-        "            // excluded here\n",                       // 17
-        "        }\n",                                          // 18
-        "    }\n",                                              // 19
-        "}\n",                                                  // 20
+        "<?php\n",                                     // 0
+        "class Red {\n",                               // 1
+        "    public function redMethod(): void {}\n",  // 2
+        "}\n",                                         // 3
+        "class Blue {\n",                              // 4
+        "    public function blueMethod(): void {}\n", // 5
+        "}\n",                                         // 6
+        "class Svc {\n",                               // 7
+        "    public function run(): void {\n",         // 8
+        "        if (rand(0,1)) {\n",                  // 9
+        "            $c = new Red();\n",               // 10
+        "        } else {\n",                          // 11
+        "            $c = new Blue();\n",              // 12
+        "        }\n",                                 // 13
+        "        if ($c instanceof Red) {\n",          // 14
+        "            $c->\n",                          // 15
+        "        } else {\n",                          // 16
+        "            // excluded here\n",              // 17
+        "        }\n",                                 // 18
+        "    }\n",                                     // 19
+        "}\n",                                         // 20
     );
 
     backend
@@ -4095,22 +4095,22 @@ async fn test_completion_if_instanceof_else_excludes_with_parameter() {
 
     let uri = Url::parse("file:///if_instanceof_else_param.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Sun {\n",                                        // 1
-        "    public function shine(): void {}\n",               // 2
-        "}\n",                                                  // 3
-        "class Moon {\n",                                       // 4
-        "    public function glow(): void {}\n",                // 5
-        "}\n",                                                  // 6
-        "class Svc {\n",                                        // 7
-        "    public function run(Sun|Moon $s): void {\n",       // 8
-        "        if ($s instanceof Sun) {\n",                   // 9
-        "            // narrowed to Sun\n",                     // 10
-        "        } else {\n",                                   // 11
-        "            $s->\n",                                   // 12
-        "        }\n",                                          // 13
-        "    }\n",                                              // 14
-        "}\n",                                                  // 15
+        "<?php\n",                                        // 0
+        "class Sun {\n",                                  // 1
+        "    public function shine(): void {}\n",         // 2
+        "}\n",                                            // 3
+        "class Moon {\n",                                 // 4
+        "    public function glow(): void {}\n",          // 5
+        "}\n",                                            // 6
+        "class Svc {\n",                                  // 7
+        "    public function run(Sun|Moon $s): void {\n", // 8
+        "        if ($s instanceof Sun) {\n",             // 9
+        "            // narrowed to Sun\n",               // 10
+        "        } else {\n",                             // 11
+        "            $s->\n",                             // 12
+        "        }\n",                                    // 13
+        "    }\n",                                        // 14
+        "}\n",                                            // 15
     );
 
     backend
@@ -4172,23 +4172,23 @@ async fn test_completion_if_instanceof_else_top_level() {
 
     let uri = Url::parse("file:///if_instanceof_else_toplevel.php").unwrap();
     let text = concat!(
-        "<?php\n",                                              // 0
-        "class Up {\n",                                         // 1
-        "    public function rise(): void {}\n",                // 2
-        "}\n",                                                  // 3
-        "class Down {\n",                                       // 4
-        "    public function fall(): void {}\n",                // 5
-        "}\n",                                                  // 6
-        "if (rand(0,1)) {\n",                                   // 7
-        "    $dir = new Up();\n",                                // 8
-        "} else {\n",                                            // 9
-        "    $dir = new Down();\n",                              // 10
-        "}\n",                                                   // 11
-        "if ($dir instanceof Up) {\n",                           // 12
-        "    // narrowed to Up\n",                               // 13
-        "} else {\n",                                            // 14
-        "    $dir->\n",                                          // 15
-        "}\n",                                                   // 16
+        "<?php\n",                               // 0
+        "class Up {\n",                          // 1
+        "    public function rise(): void {}\n", // 2
+        "}\n",                                   // 3
+        "class Down {\n",                        // 4
+        "    public function fall(): void {}\n", // 5
+        "}\n",                                   // 6
+        "if (rand(0,1)) {\n",                    // 7
+        "    $dir = new Up();\n",                // 8
+        "} else {\n",                            // 9
+        "    $dir = new Down();\n",              // 10
+        "}\n",                                   // 11
+        "if ($dir instanceof Up) {\n",           // 12
+        "    // narrowed to Up\n",               // 13
+        "} else {\n",                            // 14
+        "    $dir->\n",                          // 15
+        "}\n",                                   // 16
     );
 
     backend
@@ -4235,6 +4235,1214 @@ async fn test_completion_if_instanceof_else_top_level() {
             assert!(
                 !method_names.contains(&"rise"),
                 "Should NOT include Up's 'rise' in else branch, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── while-loop instanceof narrowing ────────────────────────────────────────
+
+/// When the cursor is inside `while ($var instanceof Foo) { … }`, only
+/// members of `Foo` should be suggested.
+#[tokio::test]
+async fn test_completion_while_instanceof_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///while_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                             // 0
+        "class Node {\n",                                      // 1
+        "    public function next(): ?Node {}\n",              // 2
+        "    public function getValue(): string {}\n",         // 3
+        "}\n",                                                 // 4
+        "class Leaf {\n",                                      // 5
+        "    public function leafOnly(): void {}\n",           // 6
+        "}\n",                                                 // 7
+        "class Svc {\n",                                       // 8
+        "    public function walk(Node|Leaf $item): void {\n", // 9
+        "        while ($item instanceof Node) {\n",           // 10
+        "            $item->\n",                               // 11
+        "        }\n",                                         // 12
+        "    }\n",                                             // 13
+        "}\n",                                                 // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 19,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"next"),
+                "Should include Node's 'next' inside while body, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getValue"),
+                "Should include Node's 'getValue' inside while body, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"leafOnly"),
+                "Should NOT include Leaf's 'leafOnly' inside while body, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Negated instanceof in a while condition should exclude the class.
+#[tokio::test]
+async fn test_completion_while_negated_instanceof_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///while_neg_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                           // 0
+        "class Alpha {\n",                                   // 1
+        "    public function alphaMethod(): void {}\n",      // 2
+        "}\n",                                               // 3
+        "class Beta {\n",                                    // 4
+        "    public function betaMethod(): void {}\n",       // 5
+        "}\n",                                               // 6
+        "class Svc {\n",                                     // 7
+        "    public function test(Alpha|Beta $x): void {\n", // 8
+        "        while (!($x instanceof Alpha)) {\n",        // 9
+        "            $x->\n",                                // 10
+        "        }\n",                                       // 11
+        "    }\n",                                           // 12
+        "}\n",                                               // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"betaMethod"),
+                "Should include Beta's 'betaMethod' when Alpha is excluded, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"alphaMethod"),
+                "Should NOT include Alpha's 'alphaMethod' when Alpha is excluded, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── is_a() narrowing ──────────────────────────────────────────────────────
+
+/// `if (is_a($var, Foo::class))` should narrow like instanceof.
+#[tokio::test]
+async fn test_completion_is_a_narrows_like_instanceof() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///is_a_narrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Dog {\n",                                    // 1
+        "    public function bark(): void {}\n",            // 2
+        "}\n",                                              // 3
+        "class Cat {\n",                                    // 4
+        "    public function purr(): void {}\n",            // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(Dog|Cat $pet): void {\n", // 8
+        "        if (is_a($pet, Dog::class)) {\n",          // 9
+        "            $pet->\n",                             // 10
+        "        }\n",                                      // 11
+        "    }\n",                                          // 12
+        "}\n",                                              // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' inside is_a block, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' inside is_a block, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if (!is_a($var, Foo::class))` should exclude Foo (negated is_a).
+#[tokio::test]
+async fn test_completion_negated_is_a_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///is_a_neg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Dog {\n",                                    // 1
+        "    public function bark(): void {}\n",            // 2
+        "}\n",                                              // 3
+        "class Cat {\n",                                    // 4
+        "    public function purr(): void {}\n",            // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(Dog|Cat $pet): void {\n", // 8
+        "        if (!is_a($pet, Dog::class)) {\n",         // 9
+        "            $pet->\n",                             // 10
+        "        }\n",                                      // 11
+        "    }\n",                                          // 12
+        "}\n",                                              // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"purr"),
+                "Should include Cat's 'purr' when Dog is excluded, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"bark"),
+                "Should NOT include Dog's 'bark' when Dog is excluded, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `is_a()` else branch should invert narrowing (exclude the matched class).
+#[tokio::test]
+async fn test_completion_is_a_else_branch_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///is_a_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Dog {\n",                                    // 1
+        "    public function bark(): void {}\n",            // 2
+        "}\n",                                              // 3
+        "class Cat {\n",                                    // 4
+        "    public function purr(): void {}\n",            // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(Dog|Cat $pet): void {\n", // 8
+        "        if (is_a($pet, Dog::class)) {\n",          // 9
+        "            // dog branch\n",                      // 10
+        "        } else {\n",                               // 11
+        "            $pet->\n",                             // 12
+        "        }\n",                                      // 13
+        "    }\n",                                          // 14
+        "}\n",                                              // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"purr"),
+                "Should include Cat's 'purr' in else branch (Dog excluded), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"bark"),
+                "Should NOT include Dog's 'bark' in else branch, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── get_class() / $var::class narrowing ────────────────────────────────────
+
+/// `if (get_class($var) === Foo::class)` should narrow to exactly Foo.
+#[tokio::test]
+async fn test_completion_get_class_identical_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///get_class_narrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser extends User {\n",                      // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if (get_class($u) === User::class) {\n",        // 9
+        "            $u->\n",                                    // 10
+        "        }\n",                                           // 11
+        "    }\n",                                               // 12
+        "}\n",                                                   // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' when get_class matches User, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' when get_class matches User, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if ($var::class === Foo::class)` should narrow to exactly Foo.
+#[tokio::test]
+async fn test_completion_var_class_constant_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_class_narrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser extends User {\n",                      // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if ($u::class === User::class) {\n",            // 9
+        "            $u->\n",                                    // 10
+        "        }\n",                                           // 11
+        "    }\n",                                               // 12
+        "}\n",                                                   // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' when $u::class === User::class, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' when $u::class === User::class, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if (get_class($var) !== Foo::class)` should exclude Foo (negated identity).
+#[tokio::test]
+async fn test_completion_get_class_not_identical_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///get_class_neg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if (get_class($u) !== User::class) {\n",        // 9
+        "            $u->\n",                                    // 10
+        "        }\n",                                           // 11
+        "    }\n",                                               // 12
+        "}\n",                                                   // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' when User is excluded, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' when User is excluded, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `get_class($var) === Foo::class` else branch should exclude Foo.
+#[tokio::test]
+async fn test_completion_get_class_else_branch_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///get_class_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if (get_class($u) === User::class) {\n",        // 9
+        "            // user branch\n",                          // 10
+        "        } else {\n",                                    // 11
+        "            $u->\n",                                    // 12
+        "        }\n",                                           // 13
+        "    }\n",                                               // 14
+        "}\n",                                                   // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' in else branch, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' in else branch (get_class matched), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Reversed order: `Foo::class === get_class($var)` should also narrow.
+#[tokio::test]
+async fn test_completion_get_class_reversed_order_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///get_class_reversed.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if (User::class === get_class($u)) {\n",        // 9
+        "            $u->\n",                                    // 10
+        "        }\n",                                           // 11
+        "    }\n",                                               // 12
+        "}\n",                                                   // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' with reversed order, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' with reversed order, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── match(true) instanceof narrowing ───────────────────────────────────────
+
+/// Inside a `match (true) { $var instanceof Foo => … }` arm body,
+/// the variable should be narrowed to Foo.
+#[tokio::test]
+async fn test_completion_match_true_instanceof_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_true_narrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $v): void {\n", // 8
+        "        $result = match (true) {\n",                    // 9
+        "            $v instanceof AdminUser => $v->\n",         // 10
+        "            default => null,\n",                        // 11
+        "        };\n",                                          // 12
+        "    }\n",                                               // 13
+        "}\n",                                                   // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 49,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' in match arm, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' in match arm, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `match (true)` with is_a() in arm condition should also narrow.
+#[tokio::test]
+async fn test_completion_match_true_is_a_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_true_is_a.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Dog {\n",                                    // 1
+        "    public function bark(): void {}\n",            // 2
+        "}\n",                                              // 3
+        "class Cat {\n",                                    // 4
+        "    public function purr(): void {}\n",            // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(Dog|Cat $pet): void {\n", // 8
+        "        $result = match (true) {\n",               // 9
+        "            is_a($pet, Cat::class) => $pet->\n",   // 10
+        "            default => null,\n",                   // 11
+        "        };\n",                                     // 12
+        "    }\n",                                          // 13
+        "}\n",                                              // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 50,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"purr"),
+                "Should include Cat's 'purr' in match arm with is_a, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"bark"),
+                "Should NOT include Dog's 'bark' in match arm with is_a, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert(is_a($var, Foo::class))` should narrow unconditionally.
+#[tokio::test]
+async fn test_completion_assert_is_a_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_is_a.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Dog {\n",                                    // 1
+        "    public function bark(): void {}\n",            // 2
+        "}\n",                                              // 3
+        "class Cat {\n",                                    // 4
+        "    public function purr(): void {}\n",            // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(Dog|Cat $pet): void {\n", // 8
+        "        assert(is_a($pet, Dog::class));\n",        // 9
+        "        $pet->\n",                                 // 10
+        "    }\n",                                          // 11
+        "}\n",                                              // 12
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' after assert(is_a()), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' after assert(is_a()), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `while` narrowing with `is_a()` should also work.
+#[tokio::test]
+async fn test_completion_while_is_a_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///while_is_a.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                             // 0
+        "class Node {\n",                                      // 1
+        "    public function next(): ?Node {}\n",              // 2
+        "    public function getValue(): string {}\n",         // 3
+        "}\n",                                                 // 4
+        "class Leaf {\n",                                      // 5
+        "    public function leafOnly(): void {}\n",           // 6
+        "}\n",                                                 // 7
+        "class Svc {\n",                                       // 8
+        "    public function walk(Node|Leaf $item): void {\n", // 9
+        "        while (is_a($item, Node::class)) {\n",        // 10
+        "            $item->\n",                               // 11
+        "        }\n",                                         // 12
+        "    }\n",                                             // 13
+        "}\n",                                                 // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 19,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"next"),
+                "Should include Node's 'next' inside while body with is_a, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"leafOnly"),
+                "Should NOT include Leaf's 'leafOnly' inside while body with is_a, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `$var::class === Foo::class` else branch should exclude Foo.
+#[tokio::test]
+async fn test_completion_var_class_constant_else_branch_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_class_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if ($u::class === User::class) {\n",            // 9
+        "            // user branch\n",                          // 10
+        "        } else {\n",                                    // 11
+        "            $u->\n",                                    // 12
+        "        }\n",                                           // 13
+        "    }\n",                                               // 14
+        "}\n",                                                   // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' in else branch, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' in else branch ($u::class matched), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `get_class()` narrowing with `==` (loose equality) should also work.
+#[tokio::test]
+async fn test_completion_get_class_loose_equality_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///get_class_eq.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "class Svc {\n",                                         // 7
+        "    public function test(User|AdminUser $u): void {\n", // 8
+        "        if (get_class($u) == User::class) {\n",         // 9
+        "            $u->\n",                                    // 10
+        "        }\n",                                           // 11
+        "    }\n",                                               // 12
+        "}\n",                                                   // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' with loose == comparison, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' with loose == comparison, got: {:?}",
                 method_names
             );
         }

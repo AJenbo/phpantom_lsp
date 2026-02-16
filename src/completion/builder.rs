@@ -97,8 +97,7 @@ impl Backend {
         current_class_name: Option<&str>,
     ) -> Vec<CompletionItem> {
         // Determine whether we are inside the same class as the target.
-        let same_class = current_class_name
-            .is_some_and(|name| name == target_class.name);
+        let same_class = current_class_name.is_some_and(|name| name == target_class.name);
         // Inside *some* class (possibly a subclass) — show protected.
         let in_class = current_class_name.is_some();
         let mut items: Vec<CompletionItem> = Vec::new();

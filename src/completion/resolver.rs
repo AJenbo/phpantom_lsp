@@ -763,11 +763,10 @@ impl Backend {
                     // When `assert($var instanceof Foo)` appears before
                     // the cursor, narrow the variable to `Foo` for the
                     // remainder of the current scope.
-                    Self::try_apply_assert_instanceof_narrowing(
-                        expr_stmt.expression,
-                        ctx,
-                        results,
-                    );
+                    Self::try_apply_assert_instanceof_narrowing(expr_stmt.expression, ctx, results);
+
+                    // ── match(true) { $var instanceof Foo => … } narrowing ──
+                    Self::try_apply_match_true_narrowing(expr_stmt.expression, ctx, results);
                 }
                 // Recurse into blocks — these are just `{ … }` groupings,
                 // not conditional, so preserve the current `conditional` flag.
@@ -833,7 +832,13 @@ impl Backend {
                         // Determine the then-body span: from the colon to
                         // the first elseif / else / endif keyword.
                         let then_end = if !body.else_if_clauses.is_empty() {
-                            body.else_if_clauses.first().unwrap().elseif.span().start.offset
+                            body.else_if_clauses
+                                .first()
+                                .unwrap()
+                                .elseif
+                                .span()
+                                .start
+                                .offset
                         } else if let Some(ref ec) = body.else_clause {
                             ec.r#else.span().start.offset
                         } else {
@@ -861,7 +866,11 @@ impl Backend {
                                 else_if.colon.file_id,
                                 else_if.colon.start,
                                 mago_span::Position::new(
-                                    else_if.statements.span(else_if.colon.file_id, else_if.colon.end).end.offset,
+                                    else_if
+                                        .statements
+                                        .span(else_if.colon.file_id, else_if.colon.end)
+                                        .end
+                                        .offset,
                                 ),
                             );
                             Self::try_apply_instanceof_narrowing(
@@ -885,10 +894,7 @@ impl Backend {
                                 mago_span::Position::new(
                                     else_clause
                                         .statements
-                                        .span(
-                                            else_clause.colon.file_id,
-                                            else_clause.colon.end,
-                                        )
+                                        .span(else_clause.colon.file_id, else_clause.colon.end)
                                         .end
                                         .offset,
                                 ),
@@ -923,9 +929,27 @@ impl Backend {
                 },
                 Statement::While(while_stmt) => match &while_stmt.body {
                     WhileBody::Statement(inner) => {
+                        // ── instanceof narrowing for while-body ──
+                        Self::try_apply_instanceof_narrowing(
+                            while_stmt.condition,
+                            inner.span(),
+                            ctx,
+                            results,
+                        );
                         Self::check_statement_for_assignments(inner, ctx, results, true);
                     }
                     WhileBody::ColonDelimited(body) => {
+                        let body_span = mago_span::Span::new(
+                            body.colon.file_id,
+                            body.colon.start,
+                            mago_span::Position::new(body.end_while.span().start.offset),
+                        );
+                        Self::try_apply_instanceof_narrowing(
+                            while_stmt.condition,
+                            body_span,
+                            ctx,
+                            results,
+                        );
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
                             ctx,
@@ -992,9 +1016,7 @@ impl Backend {
         ctx: &VarResolutionCtx<'_>,
         results: &mut Vec<ClassInfo>,
     ) {
-        if ctx.cursor_offset < body_span.start.offset
-            || ctx.cursor_offset > body_span.end.offset
-        {
+        if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
             return;
         }
         if let Some((cls_name, negated)) =
@@ -1020,9 +1042,7 @@ impl Backend {
         ctx: &VarResolutionCtx<'_>,
         results: &mut Vec<ClassInfo>,
     ) {
-        if ctx.cursor_offset < body_span.start.offset
-            || ctx.cursor_offset > body_span.end.offset
-        {
+        if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
             return;
         }
         if let Some((cls_name, negated)) =
@@ -1082,10 +1102,7 @@ impl Backend {
     ///
     /// Handles parenthesised expressions recursively so that
     /// `($var instanceof Foo)` also works.
-    fn try_extract_instanceof<'b>(
-        expr: &'b Expression<'b>,
-        var_name: &str,
-    ) -> Option<String> {
+    fn try_extract_instanceof<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<String> {
         match expr {
             Expression::Parenthesized(inner) => {
                 Self::try_extract_instanceof(inner.expression, var_name)
@@ -1116,6 +1133,11 @@ impl Backend {
     /// `!$var instanceof ClassName` (PHP precedence: `instanceof` binds
     /// tighter than `!`, so both forms are equivalent).
     ///
+    /// Also handles:
+    ///   - `is_a($var, ClassName::class)` — treated as equivalent to instanceof
+    ///   - `get_class($var) === ClassName::class` or `==` — exact class match
+    ///   - `$var::class === ClassName::class` or `==` — exact class match
+    ///
     /// Handles arbitrary parenthesisation.
     fn try_extract_instanceof_with_negation<'b>(
         expr: &'b Expression<'b>,
@@ -1129,12 +1151,162 @@ impl Backend {
                 // `!expr` — the inner expr should be a (possibly parenthesised) instanceof
                 Self::try_extract_instanceof(prefix.operand, var_name)
                     .map(|cls| (cls, true))
+                    .or_else(|| {
+                        // Also support `!is_a($var, ClassName::class)`
+                        Self::try_extract_is_a(prefix.operand, var_name).map(|cls| (cls, true))
+                    })
             }
             _ => {
                 Self::try_extract_instanceof(expr, var_name)
                     .map(|cls| (cls, false))
+                    .or_else(|| {
+                        // `is_a($var, ClassName::class)` — equivalent to instanceof
+                        Self::try_extract_is_a(expr, var_name).map(|cls| (cls, false))
+                    })
+                    .or_else(|| {
+                        // `get_class($var) === ClassName::class` or
+                        // `$var::class === ClassName::class` — exact class match
+                        Self::try_extract_class_identity_check(expr, var_name)
+                    })
             }
         }
+    }
+
+    /// Detect `is_a($var, ClassName::class)` — semantically equivalent to
+    /// `$var instanceof ClassName`.
+    ///
+    /// Returns the class name if the pattern matches.
+    fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<String> {
+        let expr = match expr {
+            Expression::Parenthesized(inner) => inner.expression,
+            other => other,
+        };
+        if let Expression::Call(Call::Function(func_call)) = expr {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value(),
+                _ => return None,
+            };
+            if func_name != "is_a" {
+                return None;
+            }
+            let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
+            if args.len() < 2 {
+                return None;
+            }
+            // First argument must be our variable
+            let first_expr = match &args[0] {
+                Argument::Positional(pos) => pos.value,
+                Argument::Named(named) => named.value,
+            };
+            let first_var = match first_expr {
+                Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+                _ => return None,
+            };
+            if first_var != var_name {
+                return None;
+            }
+            // Second argument should be ClassName::class
+            let second_expr = match &args[1] {
+                Argument::Positional(pos) => pos.value,
+                Argument::Named(named) => named.value,
+            };
+            extract_class_string_from_expr(second_expr)
+        } else {
+            None
+        }
+    }
+
+    /// Detect `get_class($var) === ClassName::class` (or `==`) and
+    /// `$var::class === ClassName::class` (or `==`).
+    ///
+    /// Returns `Some((class_name, negated))` where `negated` is `true`
+    /// for `!==` and `!=` operators.
+    fn try_extract_class_identity_check<'b>(
+        expr: &'b Expression<'b>,
+        var_name: &str,
+    ) -> Option<(String, bool)> {
+        let expr = match expr {
+            Expression::Parenthesized(inner) => inner.expression,
+            other => other,
+        };
+        if let Expression::Binary(bin) = expr {
+            let negated = match &bin.operator {
+                BinaryOperator::Identical(_) | BinaryOperator::Equal(_) => false,
+                BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_) => true,
+                _ => return None,
+            };
+            // Try both orders: class-check == ClassName::class and
+            // ClassName::class == class-check
+            if let Some(cls) = Self::match_class_identity_pair(bin.lhs, bin.rhs, var_name) {
+                return Some((cls, negated));
+            }
+            if let Some(cls) = Self::match_class_identity_pair(bin.rhs, bin.lhs, var_name) {
+                return Some((cls, negated));
+            }
+        }
+        None
+    }
+
+    /// Helper for `try_extract_class_identity_check`.
+    ///
+    /// Checks if `lhs` is a class-identity expression for `var_name`
+    /// (`get_class($var)` or `$var::class`) and `rhs` is a
+    /// `ClassName::class` constant.
+    fn match_class_identity_pair<'b>(
+        lhs: &'b Expression<'b>,
+        rhs: &'b Expression<'b>,
+        var_name: &str,
+    ) -> Option<String> {
+        let is_class_of_var =
+            Self::is_get_class_of_var(lhs, var_name) || Self::is_var_class_constant(lhs, var_name);
+        if !is_class_of_var {
+            return None;
+        }
+        extract_class_string_from_expr(rhs)
+    }
+
+    /// Check if `expr` is `get_class($var)` where the variable matches.
+    fn is_get_class_of_var(expr: &Expression<'_>, var_name: &str) -> bool {
+        let expr = match expr {
+            Expression::Parenthesized(inner) => inner.expression,
+            other => other,
+        };
+        if let Expression::Call(Call::Function(func_call)) = expr {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value(),
+                _ => return false,
+            };
+            if func_name != "get_class" {
+                return false;
+            }
+            if let Some(first_arg) = func_call.argument_list.arguments.iter().next() {
+                let arg_expr = match first_arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
+                    return dv.name == var_name;
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if `expr` is `$var::class` where the variable matches.
+    fn is_var_class_constant(expr: &Expression<'_>, var_name: &str) -> bool {
+        if let Expression::Access(Access::ClassConstant(cca)) = expr {
+            // The class part must be our variable
+            if let Expression::Variable(Variable::Direct(dv)) = cca.class {
+                if dv.name != var_name {
+                    return false;
+                }
+                // The constant selector must be `class`
+                if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
+                    return ident.value == "class";
+                }
+            }
+        }
+        false
     }
 
     /// If `expr` is `assert($var instanceof ClassName)` (or the negated
@@ -1150,9 +1322,7 @@ impl Backend {
         ctx: &VarResolutionCtx<'_>,
         results: &mut Vec<ClassInfo>,
     ) {
-        if let Some((cls_name, negated)) =
-            Self::try_extract_assert_instanceof(expr, ctx.var_name)
-        {
+        if let Some((cls_name, negated)) = Self::try_extract_assert_instanceof(expr, ctx.var_name) {
             if negated {
                 Self::apply_instanceof_exclusion(&cls_name, ctx, results);
             } else {
@@ -1184,7 +1354,7 @@ impl Backend {
                 return None;
             }
             // The first argument should be the instanceof expression
-            // (possibly negated)
+            // (possibly negated), or is_a / class-identity check
             if let Some(first_arg) = func_call.argument_list.arguments.iter().next() {
                 let arg_expr = match first_arg {
                     Argument::Positional(pos) => pos.value,
@@ -1194,6 +1364,67 @@ impl Backend {
             }
         }
         None
+    }
+
+    /// Check if the cursor is inside a `match (true)` arm whose
+    /// condition is `$var instanceof ClassName` and, if so, narrow
+    /// the results for the arm body.
+    ///
+    /// Supports patterns like:
+    /// ```php
+    /// match (true) {
+    ///     $value instanceof AdminUser => $value->doAdmin(),
+    ///     //                             ^cursor here
+    /// };
+    /// ```
+    fn try_apply_match_true_narrowing(
+        expr: &Expression<'_>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        // Unwrap parenthesised wrapper
+        let expr = match expr {
+            Expression::Parenthesized(inner) => inner.expression,
+            other => other,
+        };
+        let match_expr = match expr {
+            Expression::Match(m) => m,
+            // Also handle `$var = match(true) { … }`
+            Expression::Assignment(a) => {
+                if let Expression::Match(m) = a.rhs {
+                    m
+                } else {
+                    return;
+                }
+            }
+            _ => return,
+        };
+        // The subject must be `true` for instanceof conditions to make sense
+        if !match_expr.expression.is_true() {
+            return;
+        }
+        for arm in match_expr.arms.iter() {
+            if let MatchArm::Expression(expr_arm) = arm {
+                let body_span = expr_arm.expression.span();
+                if ctx.cursor_offset < body_span.start.offset
+                    || ctx.cursor_offset > body_span.end.offset
+                {
+                    continue;
+                }
+                // Check each condition in this arm (comma-separated)
+                for condition in expr_arm.conditions.iter() {
+                    if let Some((cls_name, negated)) =
+                        Self::try_extract_instanceof_with_negation(condition, ctx.var_name)
+                    {
+                        if negated {
+                            Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+                        } else {
+                            Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Helper: treat a single statement as an iterator of one and recurse.

@@ -506,6 +506,83 @@ $asserted = getUnknownValue(1);
 assert($asserted instanceof User);
 $asserted->addRoles();
 
+// ─── Type Narrowing ────────────────────────────────────────────────────────
+//
+// PHPantomLSP narrows union types based on runtime checks so that
+// completion only shows the relevant members.
+
+// while-loop instanceof narrowing
+// Inside the loop body, $found is narrowed to User because the condition
+// guarantees it on every iteration.
+$found2 = findOrFail(1); // User|AdminUser
+while ($found2 instanceof User) {
+    $found2->getEmail(); // ✅ User members only
+    break;
+}
+
+// is_a() — treated the same as instanceof
+$pet = findOrFail(1); // User|AdminUser
+if (is_a($pet, AdminUser::class)) {
+    $pet->grantPermission('edit'); // ✅ narrowed to AdminUser
+}
+
+// Negated is_a() — excludes the checked class
+$pet2 = findOrFail(1); // User|AdminUser
+if (!is_a($pet2, AdminUser::class)) {
+    $pet2->getEmail(); // ✅ narrowed to User (AdminUser excluded)
+}
+
+// assert() with is_a() — unconditional narrowing
+$pet3 = findOrFail(1); // User|AdminUser
+assert(is_a($pet3, AdminUser::class));
+$pet3->grantPermission('delete'); // ✅ narrowed to AdminUser
+
+// get_class() === ClassName::class — exact class identity
+$entity = findOrFail(1); // User|AdminUser
+if (get_class($entity) === User::class) {
+    $entity->getEmail(); // ✅ narrowed to exactly User
+}
+
+// $var::class === ClassName::class — modern exact class identity (PHP 8.0+)
+$entity2 = findOrFail(1); // User|AdminUser
+if ($entity2::class === AdminUser::class) {
+    $entity2->grantPermission('manage'); // ✅ narrowed to AdminUser
+}
+
+// Negated class identity — excludes the matched class
+$entity3 = findOrFail(1); // User|AdminUser
+if (get_class($entity3) !== User::class) {
+    $entity3->grantPermission('review'); // ✅ narrowed to AdminUser (User excluded)
+}
+
+// Reversed operand order also works
+$entity4 = findOrFail(1); // User|AdminUser
+if (User::class === $entity4::class) {
+    $entity4->getEmail(); // ✅ narrowed to User
+}
+
+// match(true) with instanceof — narrowing inside match arm bodies
+$value = findOrFail(1); // User|AdminUser
+$result = match (true) {
+    $value instanceof AdminUser => $value->grantPermission('approve'), // ✅ narrowed to AdminUser
+    default => null,
+};
+
+// match(true) with is_a() — also works
+$value2 = findOrFail(1); // User|AdminUser
+$result2 = match (true) {
+    is_a($value2, AdminUser::class) => $value2->grantPermission('deploy'), // ✅ narrowed to AdminUser
+    default => null,
+};
+
+// Else-branch narrowing — the inverse type is used
+$check = findOrFail(1); // User|AdminUser
+if ($check instanceof AdminUser) {
+    $check->grantPermission('sudo'); // ✅ narrowed to AdminUser
+} else {
+    $check->getEmail(); // ✅ narrowed to User (AdminUser excluded)
+}
+
 // Go-to-definition targets:
 // - Hover over `User` to jump to its class definition
 // - Hover over `getEmail` to jump to its method definition
