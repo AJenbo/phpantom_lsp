@@ -456,10 +456,14 @@ impl LanguageServer for Backend {
             // user is typing a class name and offer completions from all
             // known sources (use-imports, same namespace, stubs, classmap,
             // class_index).
-            if Self::extract_partial_class_name(&content, position).is_some() {
-                let class_items = self.build_class_name_completions(&file_use_map, &file_namespace);
+            if let Some(partial) = Self::extract_partial_class_name(&content, position) {
+                let (class_items, is_incomplete) =
+                    self.build_class_name_completions(&file_use_map, &file_namespace, &partial);
                 if !class_items.is_empty() {
-                    return Ok(Some(CompletionResponse::Array(class_items)));
+                    return Ok(Some(CompletionResponse::List(CompletionList {
+                        is_incomplete,
+                        items: class_items,
+                    })));
                 }
             }
         }

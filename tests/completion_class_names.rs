@@ -175,27 +175,33 @@ async fn test_class_name_completion_includes_stubs() {
     let backend = create_test_backend_with_stubs();
 
     let uri = Url::parse("file:///test.php").unwrap();
-    let text = concat!("<?php\n", "new Date\n",);
 
-    let items = complete_at(&backend, &uri, text, 1, 8).await;
-    let classes = class_items(&items);
+    // Check UnitEnum is found when typing "Unit"
+    let text_unit = concat!("<?php\n", "new Unit\n",);
+    let items_unit = complete_at(&backend, &uri, text_unit, 1, 8).await;
+    let classes_unit = class_items(&items_unit);
+    let labels_unit: Vec<&str> = classes_unit.iter().map(|i| i.label.as_str()).collect();
 
     assert!(
-        !classes.is_empty(),
+        !classes_unit.is_empty(),
         "Should return class name completions when typing a class name"
     );
-
-    // The stub backend has UnitEnum and BackedEnum
-    let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
     assert!(
-        class_labels.contains(&"UnitEnum"),
+        labels_unit.contains(&"UnitEnum"),
         "Should include stub class 'UnitEnum', got: {:?}",
-        class_labels
+        labels_unit
     );
+
+    // Check BackedEnum is found when typing "Backed"
+    let text_backed = concat!("<?php\n", "new Backed\n",);
+    let items_backed = complete_at(&backend, &uri, text_backed, 1, 10).await;
+    let classes_backed = class_items(&items_backed);
+    let labels_backed: Vec<&str> = classes_backed.iter().map(|i| i.label.as_str()).collect();
+
     assert!(
-        class_labels.contains(&"BackedEnum"),
+        labels_backed.contains(&"BackedEnum"),
         "Should include stub class 'BackedEnum', got: {:?}",
-        class_labels
+        labels_backed
     );
 }
 
@@ -424,8 +430,9 @@ async fn test_class_name_completion_from_classmap() {
     }
 
     let uri = Url::parse("file:///app.php").unwrap();
-    let text = concat!("<?php\n", "new Coll\n",);
 
+    // Check Collection matches prefix "Coll"
+    let text = concat!("<?php\n", "new Coll\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
     let classes = class_items(&items);
     let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
@@ -435,15 +442,27 @@ async fn test_class_name_completion_from_classmap() {
         "Should include classmap class 'Collection', got: {:?}",
         class_labels
     );
+
+    // Check Model matches prefix "Mo"
+    let text_mo = concat!("<?php\n", "new Mo\n",);
+    let items_mo = complete_at(&backend, &uri, text_mo, 1, 6).await;
+    let classes_mo = class_items(&items_mo);
+    let labels_mo: Vec<&str> = classes_mo.iter().map(|i| i.label.as_str()).collect();
     assert!(
-        class_labels.contains(&"Model"),
+        labels_mo.contains(&"Model"),
         "Should include classmap class 'Model', got: {:?}",
-        class_labels
+        labels_mo
     );
+
+    // Check Carbon matches prefix "Car"
+    let text_car = concat!("<?php\n", "new Car\n",);
+    let items_car = complete_at(&backend, &uri, text_car, 1, 7).await;
+    let classes_car = class_items(&items_car);
+    let labels_car: Vec<&str> = classes_car.iter().map(|i| i.label.as_str()).collect();
     assert!(
-        class_labels.contains(&"Carbon"),
+        labels_car.contains(&"Carbon"),
         "Should include classmap class 'Carbon', got: {:?}",
-        class_labels
+        labels_car
     );
 
     // Check that detail shows the FQN
@@ -480,8 +499,9 @@ async fn test_class_name_completion_from_class_index() {
     }
 
     let uri = Url::parse("file:///test.php").unwrap();
-    let text = concat!("<?php\n", "new Us\n",);
 
+    // Check User matches prefix "Us"
+    let text = concat!("<?php\n", "new Us\n",);
     let items = complete_at(&backend, &uri, text, 1, 6).await;
     let classes = class_items(&items);
     let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
@@ -491,10 +511,17 @@ async fn test_class_name_completion_from_class_index() {
         "Should include class_index class 'User', got: {:?}",
         class_labels
     );
+
+    // Check Order matches prefix "Or"
+    let text_or = concat!("<?php\n", "new Or\n",);
+    let items_or = complete_at(&backend, &uri, text_or, 1, 6).await;
+    let classes_or = class_items(&items_or);
+    let labels_or: Vec<&str> = classes_or.iter().map(|i| i.label.as_str()).collect();
+
     assert!(
-        class_labels.contains(&"Order"),
+        labels_or.contains(&"Order"),
         "Should include class_index class 'Order', got: {:?}",
-        class_labels
+        labels_or
     );
 }
 
@@ -724,33 +751,43 @@ async fn test_class_name_completion_combines_all_sources() {
         );
     }
 
-    // Open a file with a use statement
+    // Open a file with a use statement — use a prefix that matches
+    // classes from all three sources.  All test class names end with
+    // "Class", so the prefix "Cl" only matches "ClassmapClass".
+    // Instead we use separate checks per source.
     let uri = Url::parse("file:///test.php").unwrap();
-    let text = concat!("<?php\n", "use App\\IndexedClass;\n", "new Cl\n",);
 
-    let items = complete_at(&backend, &uri, text, 2, 6).await;
-    let classes = class_items(&items);
-    let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
-
-    // Should include from stubs
+    // Check stubs: "Stub" matches "StubClass"
+    let text_stub = concat!("<?php\n", "use App\\IndexedClass;\n", "new Stub\n",);
+    let items_stub = complete_at(&backend, &uri, text_stub, 2, 8).await;
+    let classes_stub = class_items(&items_stub);
+    let labels_stub: Vec<&str> = classes_stub.iter().map(|i| i.label.as_str()).collect();
     assert!(
-        class_labels.contains(&"StubClass"),
+        labels_stub.contains(&"StubClass"),
         "Should include stub class, got: {:?}",
-        class_labels
+        labels_stub
     );
 
-    // Should include from classmap
+    // Check classmap: "Classmap" matches "ClassmapClass"
+    let text_cm = concat!("<?php\n", "use App\\IndexedClass;\n", "new Classmap\n",);
+    let items_cm = complete_at(&backend, &uri, text_cm, 2, 12).await;
+    let classes_cm = class_items(&items_cm);
+    let labels_cm: Vec<&str> = classes_cm.iter().map(|i| i.label.as_str()).collect();
     assert!(
-        class_labels.contains(&"ClassmapClass"),
+        labels_cm.contains(&"ClassmapClass"),
         "Should include classmap class, got: {:?}",
-        class_labels
+        labels_cm
     );
 
-    // Should include from use-import (which is also in class_index)
+    // Check use-import / class_index: "Indexed" matches "IndexedClass"
+    let text_idx = concat!("<?php\n", "use App\\IndexedClass;\n", "new Indexed\n",);
+    let items_idx = complete_at(&backend, &uri, text_idx, 2, 11).await;
+    let classes_idx = class_items(&items_idx);
+    let labels_idx: Vec<&str> = classes_idx.iter().map(|i| i.label.as_str()).collect();
     assert!(
-        class_labels.contains(&"IndexedClass"),
+        labels_idx.contains(&"IndexedClass"),
         "Should include use-imported / class_index class, got: {:?}",
-        class_labels
+        labels_idx
     );
 }
 

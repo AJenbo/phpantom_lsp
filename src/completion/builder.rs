@@ -334,22 +334,34 @@ impl Backend {
     /// Sources (in priority order):
     ///   1. Classes imported via `use` statements in the current file
     ///   2. Classes in the same namespace (from the ast_map)
-    ///   3. Built-in PHP classes from embedded stubs
+    ///   3. Classes from the class_index (discovered during parsing)
     ///   4. Classes from the Composer classmap (`autoload_classmap.php`)
-    ///   5. Classes from the class_index (discovered during parsing)
+    ///   5. Built-in PHP classes from embedded stubs
     ///
     /// Each item uses the short class name as `label` and the
     /// fully-qualified name as `detail`.  Items are deduplicated by FQN.
+    ///
+    /// Returns `(items, is_incomplete)`.  When the total number of
+    /// matching classes exceeds [`MAX_CLASS_COMPLETIONS`], the result is
+    /// truncated and `is_incomplete` is `true`, signalling the client to
+    /// re-request as the user types more characters.
+    const MAX_CLASS_COMPLETIONS: usize = 100;
+
     pub(crate) fn build_class_name_completions(
         &self,
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
-    ) -> Vec<CompletionItem> {
+        prefix: &str,
+    ) -> (Vec<CompletionItem>, bool) {
+        let prefix_lower = prefix.to_lowercase();
         let mut seen_fqns: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
         // ── 1. Use-imported classes (highest priority) ──────────────
         for (short_name, fqn) in file_use_map {
+            if !short_name.to_lowercase().contains(&prefix_lower) {
+                continue;
+            }
             if !seen_fqns.insert(fqn.clone()) {
                 continue;
             }
@@ -385,6 +397,9 @@ impl Backend {
                 for uri in &same_ns_uris {
                     if let Some(classes) = amap.get(uri) {
                         for cls in classes {
+                            if !cls.name.to_lowercase().contains(&prefix_lower) {
+                                continue;
+                            }
                             let fqn = format!("{}\\{}", ns, cls.name);
                             if !seen_fqns.insert(fqn.clone()) {
                                 continue;
@@ -404,61 +419,80 @@ impl Backend {
             }
         }
 
-        // ── 3. Built-in PHP classes from stubs ──────────────────────
+        // ── 3. class_index (discovered / interacted-with classes) ───
+        if let Ok(idx) = self.class_index.lock() {
+            for fqn in idx.keys() {
+                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                if !short_name.to_lowercase().contains(&prefix_lower) {
+                    continue;
+                }
+                if !seen_fqns.insert(fqn.clone()) {
+                    continue;
+                }
+                items.push(CompletionItem {
+                    label: short_name.to_string(),
+                    kind: Some(CompletionItemKind::CLASS),
+                    detail: Some(fqn.clone()),
+                    insert_text: Some(short_name.to_string()),
+                    filter_text: Some(short_name.to_string()),
+                    sort_text: Some(format!("2_{}", short_name.to_lowercase())),
+                    ..CompletionItem::default()
+                });
+            }
+        }
+
+        // ── 4. Composer classmap (all autoloaded classes) ───────────
+        if let Ok(cmap) = self.classmap.lock() {
+            for fqn in cmap.keys() {
+                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                if !short_name.to_lowercase().contains(&prefix_lower) {
+                    continue;
+                }
+                if !seen_fqns.insert(fqn.clone()) {
+                    continue;
+                }
+                items.push(CompletionItem {
+                    label: short_name.to_string(),
+                    kind: Some(CompletionItemKind::CLASS),
+                    detail: Some(fqn.clone()),
+                    insert_text: Some(short_name.to_string()),
+                    filter_text: Some(short_name.to_string()),
+                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
+                    ..CompletionItem::default()
+                });
+            }
+        }
+
+        // ── 5. Built-in PHP classes from stubs (lowest priority) ────
         for &name in self.stub_index.keys() {
+            let short_name = name.rsplit('\\').next().unwrap_or(name);
+            if !short_name.to_lowercase().contains(&prefix_lower) {
+                continue;
+            }
             if !seen_fqns.insert(name.to_string()) {
                 continue;
             }
-            let short_name = name.rsplit('\\').next().unwrap_or(name);
             items.push(CompletionItem {
                 label: short_name.to_string(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(name.to_string()),
                 insert_text: Some(short_name.to_string()),
                 filter_text: Some(short_name.to_string()),
-                sort_text: Some(format!("2_{}", short_name.to_lowercase())),
+                sort_text: Some(format!("4_{}", short_name.to_lowercase())),
                 ..CompletionItem::default()
             });
         }
 
-        // ── 4. Composer classmap ────────────────────────────────────
-        if let Ok(cmap) = self.classmap.lock() {
-            for fqn in cmap.keys() {
-                if !seen_fqns.insert(fqn.clone()) {
-                    continue;
-                }
-                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
-                items.push(CompletionItem {
-                    label: short_name.to_string(),
-                    kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(fqn.clone()),
-                    insert_text: Some(short_name.to_string()),
-                    filter_text: Some(short_name.to_string()),
-                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
-                    ..CompletionItem::default()
-                });
-            }
+        // Cap the result set so the client isn't overwhelmed.
+        // Sort by sort_text first so that higher-priority items
+        // (use-imports, same-namespace, user project classes) survive
+        // the truncation ahead of lower-priority SPL stubs.
+        let is_incomplete = items.len() > Self::MAX_CLASS_COMPLETIONS;
+        if is_incomplete {
+            items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
+            items.truncate(Self::MAX_CLASS_COMPLETIONS);
         }
 
-        // ── 5. class_index (discovered classes) ─────────────────────
-        if let Ok(idx) = self.class_index.lock() {
-            for fqn in idx.keys() {
-                if !seen_fqns.insert(fqn.clone()) {
-                    continue;
-                }
-                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
-                items.push(CompletionItem {
-                    label: short_name.to_string(),
-                    kind: Some(CompletionItemKind::CLASS),
-                    detail: Some(fqn.clone()),
-                    insert_text: Some(short_name.to_string()),
-                    filter_text: Some(short_name.to_string()),
-                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
-                    ..CompletionItem::default()
-                });
-            }
-        }
-
-        items
+        (items, is_incomplete)
     }
 }
