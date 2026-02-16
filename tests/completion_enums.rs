@@ -2527,3 +2527,241 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Enum case arrow completion (e.g. Status::Active->label()) ──────────────
+
+/// Test: `Status::Active->` in top-level code should suggest instance methods
+/// defined on the enum.
+#[tokio::test]
+async fn test_completion_enum_case_arrow_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///enum_case_arrow.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // 0
+        "enum Status: string\n",                  // 1
+        "{\n",                                    // 2
+        "    case Active = 'active';\n",          // 3
+        "    case Inactive = 'inactive';\n",      // 4
+        "\n",                                     // 5
+        "    public function label(): string\n",  // 6
+        "    {\n",                                // 7
+        "        return 'Label';\n",              // 8
+        "    }\n",                                // 9
+        "\n",                                     // 10
+        "    public function isActive(): bool\n", // 11
+        "    {\n",                                // 12
+        "        return true;\n",                 // 13
+        "    }\n",                                // 14
+        "}\n",                                    // 15
+        "\n",                                     // 16
+        "Status::Active->\n",                     // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 17,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should return results for Status::Active->"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"label"),
+                "Should include instance method 'label' via Status::Active->, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"isActive"),
+                "Should include instance method 'isActive' via Status::Active->, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: `Status::Active->` inside a method body should also suggest
+/// instance methods on the enum.
+#[tokio::test]
+async fn test_completion_enum_case_arrow_inside_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///enum_case_arrow_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                  // 0
+        "enum Priority: int\n",                     // 1
+        "{\n",                                      // 2
+        "    case Low = 1;\n",                      // 3
+        "    case High = 2;\n",                     // 4
+        "\n",                                       // 5
+        "    public function describe(): string\n", // 6
+        "    {\n",                                  // 7
+        "        return 'priority';\n",             // 8
+        "    }\n",                                  // 9
+        "}\n",                                      // 10
+        "\n",                                       // 11
+        "class Ticket {\n",                         // 12
+        "    public function test(): void\n",       // 13
+        "    {\n",                                  // 14
+        "        Priority::High->\n",               // 15
+        "    }\n",                                  // 16
+        "}\n",                                      // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should return results for Priority::High-> inside a method"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"describe"),
+                "Should include instance method 'describe' via Priority::High->, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: `$var = Status::Active; $var->` in top-level code should suggest
+/// instance methods on the enum (variable assigned from enum case).
+#[tokio::test]
+async fn test_completion_variable_assigned_enum_case_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///enum_var_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                            // 0
+        "enum Status: string\n",                              // 1
+        "{\n",                                                // 2
+        "    case Active = 'active';\n",                      // 3
+        "    case Inactive = 'inactive';\n",                  // 4
+        "\n",                                                 // 5
+        "    public function label(): string\n",              // 6
+        "    {\n",                                            // 7
+        "        return 'Label';\n",                          // 8
+        "    }\n",                                            // 9
+        "}\n",                                                // 10
+        "\n",                                                 // 11
+        "class Svc {\n",                                      // 12
+        "    public function run(): string { return ''; }\n", // 13
+        "}\n",                                                // 14
+        "\n",                                                 // 15
+        "$svc = new Svc();\n",                                // 16
+        "$svc->\n",                                           // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 6,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should return results for top-level $svc = new Svc()"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"run"),
+                "Should include 'run' for top-level $svc-> , got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

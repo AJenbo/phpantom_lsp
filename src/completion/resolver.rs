@@ -57,6 +57,20 @@ struct VarResolutionCtx<'a> {
     function_loader: FunctionLoaderFn<'a>,
 }
 
+/// Bundles the common parameters threaded through call-expression
+/// return-type resolution.
+///
+/// This keeps the argument count of [`resolve_call_return_types`] under
+/// clippy's `too_many_arguments` threshold.
+struct CallResolutionCtx<'a> {
+    current_class: Option<&'a ClassInfo>,
+    all_classes: &'a [ClassInfo],
+    content: &'a str,
+    cursor_offset: u32,
+    class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    function_loader: FunctionLoaderFn<'a>,
+}
+
 impl Backend {
     /// Determine which class (if any) the completion subject refers to.
     ///
@@ -129,6 +143,21 @@ impl Backend {
             return vec![];
         }
 
+        // ── Enum case / static member access: `ClassName::CaseName` ──
+        // When an enum case or static member is used with `->`, resolve to
+        // the class/enum itself (e.g. `Status::Active->label()` → `Status`).
+        if !subject.starts_with('$')
+            && subject.contains("::")
+            && !subject.ends_with(')')
+            && let Some((class_part, _case_part)) = subject.split_once("::")
+        {
+            let lookup = class_part.rsplit('\\').next().unwrap_or(class_part);
+            if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
+                return vec![cls.clone()];
+            }
+            return class_loader(class_part).into_iter().collect();
+        }
+
         // ── Bare class name (for `::` or `->` from `new ClassName()`) ──
         if !subject.starts_with('$')
             && !subject.contains("->")
@@ -150,14 +179,15 @@ impl Backend {
         if subject.ends_with(')')
             && let Some((call_body, args_text)) = split_call_subject(subject)
         {
-            return Self::resolve_call_return_types(
-                call_body,
-                args_text,
+            let ctx = CallResolutionCtx {
                 current_class,
                 all_classes,
+                content,
+                cursor_offset,
                 class_loader,
                 function_loader,
-            );
+            };
+            return Self::resolve_call_return_types(call_body, args_text, &ctx);
         }
 
         // ── Property-chain: $this->prop  or  $this?->prop ──
@@ -177,18 +207,38 @@ impl Backend {
 
         // ── Variable like `$var` — resolve via assignments / parameter hints ──
         if subject.starts_with('$') {
-            if let Some(cc) = current_class {
-                return Self::resolve_variable_types(
-                    subject,
-                    cc,
-                    all_classes,
-                    content,
-                    cursor_offset,
-                    class_loader,
-                    function_loader,
-                );
-            }
-            return vec![];
+            // When the cursor is inside a class, use the enclosing class
+            // for `self`/`static` resolution in type hints.  When in
+            // top-level code (`current_class` is `None`), use a dummy
+            // empty class so that assignment scanning still works.
+            let dummy_class;
+            let effective_class = match current_class {
+                Some(cc) => cc,
+                None => {
+                    dummy_class = ClassInfo {
+                        name: String::new(),
+                        methods: vec![],
+                        properties: vec![],
+                        constants: vec![],
+                        start_offset: 0,
+                        end_offset: 0,
+                        parent_class: None,
+                        used_traits: vec![],
+                        mixins: vec![],
+                        is_final: false,
+                    };
+                    &dummy_class
+                }
+            };
+            return Self::resolve_variable_types(
+                subject,
+                effective_class,
+                all_classes,
+                content,
+                cursor_offset,
+                class_loader,
+                function_loader,
+            );
         }
 
         vec![]
@@ -209,11 +259,12 @@ impl Backend {
     fn resolve_call_return_types(
         call_body: &str,
         text_args: &str,
-        current_class: Option<&ClassInfo>,
-        all_classes: &[ClassInfo],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &CallResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
+        let current_class = ctx.current_class;
+        let all_classes = ctx.all_classes;
+        let class_loader = ctx.class_loader;
+        let function_loader = ctx.function_loader;
         // ── Instance method call: $this->method / $var->method ──
         if let Some(pos) = call_body.rfind("->") {
             let lhs = &call_body[..pos];
@@ -235,14 +286,7 @@ impl Backend {
                 // `$this->getFactory()->create(…)`).
                 // Recursively resolve it.
                 if let Some((inner_body, inner_args)) = split_call_subject(lhs) {
-                    Self::resolve_call_return_types(
-                        inner_body,
-                        inner_args,
-                        current_class,
-                        all_classes,
-                        class_loader,
-                        function_loader,
-                    )
+                    Self::resolve_call_return_types(inner_body, inner_args, ctx)
                 } else {
                     vec![]
                 }
@@ -253,8 +297,23 @@ impl Backend {
                 current_class
                     .map(|cc| Self::resolve_property_types(prop, cc, all_classes, class_loader))
                     .unwrap_or_default()
+            } else if lhs.starts_with('$') {
+                // Bare variable like `$profile` — resolve its type via
+                // assignment scanning so that chains like
+                // `$profile->getUser()->getEmail()` work in both
+                // class-method and top-level contexts.
+                Self::resolve_target_classes(
+                    lhs,
+                    AccessKind::Arrow,
+                    ctx.current_class,
+                    ctx.all_classes,
+                    ctx.content,
+                    ctx.cursor_offset,
+                    ctx.class_loader,
+                    ctx.function_loader,
+                )
             } else {
-                // Could be a variable — for now, skip complex chains
+                // Unknown LHS form — skip
                 vec![]
             };
 
@@ -536,7 +595,11 @@ impl Backend {
         statements: impl Iterator<Item = &'b Statement<'b>>,
         ctx: &VarResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
-        for stmt in statements {
+        // Collect so we can iterate twice: once to check class bodies,
+        // once (if needed) to walk top-level statements.
+        let stmts: Vec<&Statement> = statements.collect();
+
+        for &stmt in &stmts {
             match stmt {
                 Statement::Class(class) => {
                     let start = class.left_brace.start.offset;
@@ -580,7 +643,13 @@ impl Backend {
                 _ => {}
             }
         }
-        vec![]
+
+        // The cursor is not inside any class/interface/enum body — it must
+        // be in top-level code.  Walk all top-level statements to find
+        // variable assignments (e.g. `$user = new User(…);`).
+        let mut results: Vec<ClassInfo> = Vec::new();
+        Self::walk_statements_for_assignments(stmts.into_iter(), ctx, &mut results, false);
+        results
     }
 
     /// Resolve a variable's type by scanning class-like members for parameter
@@ -1163,13 +1232,16 @@ impl Backend {
                                 {
                                     let current_class =
                                         all_classes.iter().find(|c| c.name == current_class_name);
-                                    let resolved = Self::resolve_call_return_types(
-                                        call_body,
-                                        args_text,
+                                    let call_ctx = CallResolutionCtx {
                                         current_class,
                                         all_classes,
+                                        content,
+                                        cursor_offset: ctx.cursor_offset,
                                         class_loader,
                                         function_loader,
+                                    };
+                                    let resolved = Self::resolve_call_return_types(
+                                        call_body, args_text, &call_ctx,
                                     );
                                     push_results(results, resolved, conditional);
                                 }

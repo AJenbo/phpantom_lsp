@@ -133,6 +133,16 @@ impl Backend {
             }
         }
 
+        // Check if preceded by `::` (enum case or static member access,
+        // e.g. `Status::Active->`)
+        if i >= 2 && chars[i - 2] == ':' && chars[i - 1] == ':' {
+            let class_subject = Self::extract_double_colon_subject_raw(chars, i - 2);
+            if !class_subject.is_empty() {
+                let ident: String = chars[ident_start..ident_end].iter().collect();
+                return format!("{}::{}", class_subject, ident);
+            }
+        }
+
         // Otherwise treat the whole thing as a simple variable like `$this` or `$var`
         Self::extract_simple_variable(chars, end)
     }

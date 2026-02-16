@@ -2229,3 +2229,312 @@ async fn test_completion_inline_var_docblock_unconditional_reassignment() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_completion_top_level_chained_method_on_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///toplevel_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "    public function getProfile(): UserProfile {\n",
+        "        return new UserProfile();\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "class UserProfile {\n",
+        "    public string $bio = '';\n",
+        "    public function getUser(): User {\n",
+        "        return new User();\n",
+        "    }\n",
+        "    public function getDisplayName(): string {\n",
+        "        return '';\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "$profile = new UserProfile();\n",
+        "$profile->getUser()->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 20,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $profile->getUser()->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName' from User via chain, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should include 'getEmail' from User via chain, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getProfile"),
+                "Should include 'getProfile' from User via chain, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_chained_method_on_variable_inside_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_in_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class UserProfile {\n",
+        "    public function getUser(): User {\n",
+        "        return new User();\n",
+        "    }\n",
+        "    public function test(): void {\n",
+        "        $p = new UserProfile();\n",
+        "        $p->getUser()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 23,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $p->getUser()-> inside a method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName' from User via chain, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should include 'getEmail' from User via chain, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_top_level_variable_new_classname() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $email;\n",
+        "    public function getName(): string { return ''; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "$user = new User();\n",
+        "$user->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for top-level $user = new User()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should include 'getEmail', got: {:?}",
+                method_names
+            );
+
+            let prop_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                prop_names.contains(&"email"),
+                "Should include property 'email', got: {:?}",
+                prop_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_top_level_variable_from_function_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///toplevel_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "    public function getStatus(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "function createOrder(): Order {\n",
+        "    return new Order();\n",
+        "}\n",
+        "\n",
+        "$order = createOrder();\n",
+        "$order->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for top-level $order = createOrder()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getTotal"),
+                "Should include 'getTotal', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getStatus"),
+                "Should include 'getStatus', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
