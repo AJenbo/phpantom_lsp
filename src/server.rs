@@ -293,6 +293,25 @@ impl LanguageServer for Backend {
                             name
                         }
                     } else {
+                        // The name contains `\` — check if the first segment
+                        // is a use-map alias (e.g. `OA\Endpoint` where
+                        // `use Swagger\OpenAPI as OA;` maps `OA` →
+                        // `Swagger\OpenAPI`).  Expand it to the FQN.
+                        let first_segment = name.split('\\').next().unwrap_or(name);
+                        if let Some(fqn_prefix) = file_use_map.get(first_segment) {
+                            let rest = &name[first_segment.len()..];
+                            let expanded = format!("{}{}", fqn_prefix, rest);
+                            if let Some(cls) = self.find_or_load_class(&expanded) {
+                                return Some(cls);
+                            }
+                        }
+                        // Also try prefixing with the current namespace.
+                        if let Some(ref ns) = file_namespace {
+                            let ns_qualified = format!("{}\\{}", ns, name);
+                            if let Some(cls) = self.find_or_load_class(&ns_qualified) {
+                                return Some(cls);
+                            }
+                        }
                         name
                     };
 

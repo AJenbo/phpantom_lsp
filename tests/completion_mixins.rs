@@ -2155,26 +2155,26 @@ async fn test_completion_inherited_mixin_static_method_via_double_colon() {
 
     let uri = Url::parse("file:///inherited_mixin_static.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class Builder {\n",                                // 1
-        "    /**\n",                                        // 2
-        "     * @return static\n",                          // 3
-        "     */\n",                                        // 4
-        "    public static function query(): self {\n",     // 5
-        "        return new static();\n",                   // 6
-        "    }\n",                                          // 7
-        "}\n",                                              // 8
-        "\n",                                               // 9
-        "/**\n",                                            // 10
-        " * @mixin Builder\n",                              // 11
-        " */\n",                                            // 12
-        "abstract class Model {\n",                         // 13
-        "}\n",                                              // 14
-        "\n",                                               // 15
-        "class User extends Model {\n",                     // 16
-        "}\n",                                              // 17
-        "\n",                                               // 18
-        "$query = User::\n",                                // 19
+        "<?php\n",                                      // 0
+        "class Builder {\n",                            // 1
+        "    /**\n",                                    // 2
+        "     * @return static\n",                      // 3
+        "     */\n",                                    // 4
+        "    public static function query(): self {\n", // 5
+        "        return new static();\n",               // 6
+        "    }\n",                                      // 7
+        "}\n",                                          // 8
+        "\n",                                           // 9
+        "/**\n",                                        // 10
+        " * @mixin Builder\n",                          // 11
+        " */\n",                                        // 12
+        "abstract class Model {\n",                     // 13
+        "}\n",                                          // 14
+        "\n",                                           // 15
+        "class User extends Model {\n",                 // 16
+        "}\n",                                          // 17
+        "\n",                                           // 18
+        "$query = User::\n",                            // 19
     );
 
     backend
@@ -2230,31 +2230,31 @@ async fn test_completion_inherited_mixin_instance_method_via_arrow() {
 
     let uri = Url::parse("file:///inherited_mixin_instance.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class Builder {\n",                                // 1
-        "    public function where(): self {\n",            // 2
-        "        return $this;\n",                          // 3
-        "    }\n",                                          // 4
-        "    public function get(): array {\n",             // 5
-        "        return [];\n",                             // 6
-        "    }\n",                                          // 7
-        "}\n",                                              // 8
-        "\n",                                               // 9
-        "/**\n",                                            // 10
-        " * @mixin Builder\n",                              // 11
-        " */\n",                                            // 12
-        "abstract class Model {\n",                         // 13
-        "    public function save(): void {}\n",            // 14
-        "}\n",                                              // 15
-        "\n",                                               // 16
-        "class User extends Model {\n",                     // 17
-        "    public function getName(): string {\n",        // 18
-        "        return '';\n",                             // 19
-        "    }\n",                                          // 20
-        "}\n",                                              // 21
-        "\n",                                               // 22
-        "$user = new User();\n",                            // 23
-        "$user->\n",                                        // 24
+        "<?php\n",                                   // 0
+        "class Builder {\n",                         // 1
+        "    public function where(): self {\n",     // 2
+        "        return $this;\n",                   // 3
+        "    }\n",                                   // 4
+        "    public function get(): array {\n",      // 5
+        "        return [];\n",                      // 6
+        "    }\n",                                   // 7
+        "}\n",                                       // 8
+        "\n",                                        // 9
+        "/**\n",                                     // 10
+        " * @mixin Builder\n",                       // 11
+        " */\n",                                     // 12
+        "abstract class Model {\n",                  // 13
+        "    public function save(): void {}\n",     // 14
+        "}\n",                                       // 15
+        "\n",                                        // 16
+        "class User extends Model {\n",              // 17
+        "    public function getName(): string {\n", // 18
+        "        return '';\n",                      // 19
+        "    }\n",                                   // 20
+        "}\n",                                       // 21
+        "\n",                                        // 22
+        "$user = new User();\n",                     // 23
+        "$user->\n",                                 // 24
     );
 
     backend
@@ -2325,26 +2325,26 @@ async fn test_goto_definition_inherited_mixin_static_method() {
 
     let uri = Url::parse("file:///inherited_mixin_goto.php").unwrap();
     let text = concat!(
-        "<?php\n",                                          // 0
-        "class Builder {\n",                                // 1
-        "    /**\n",                                        // 2
-        "     * @return static\n",                          // 3
-        "     */\n",                                        // 4
-        "    public static function query(): self {\n",     // 5
-        "        return new static();\n",                   // 6
-        "    }\n",                                          // 7
-        "}\n",                                              // 8
-        "\n",                                               // 9
-        "/**\n",                                            // 10
-        " * @mixin Builder\n",                              // 11
-        " */\n",                                            // 12
-        "abstract class Model {\n",                         // 13
-        "}\n",                                              // 14
-        "\n",                                               // 15
-        "class User extends Model {\n",                     // 16
-        "}\n",                                              // 17
-        "\n",                                               // 18
-        "User::query();\n",                                 // 19
+        "<?php\n",                                      // 0
+        "class Builder {\n",                            // 1
+        "    /**\n",                                    // 2
+        "     * @return static\n",                      // 3
+        "     */\n",                                    // 4
+        "    public static function query(): self {\n", // 5
+        "        return new static();\n",               // 6
+        "    }\n",                                      // 7
+        "}\n",                                          // 8
+        "\n",                                           // 9
+        "/**\n",                                        // 10
+        " * @mixin Builder\n",                          // 11
+        " */\n",                                        // 12
+        "abstract class Model {\n",                     // 13
+        "}\n",                                          // 14
+        "\n",                                           // 15
+        "class User extends Model {\n",                 // 16
+        "}\n",                                          // 17
+        "\n",                                           // 18
+        "User::query();\n",                             // 19
     );
 
     backend
