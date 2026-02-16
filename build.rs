@@ -8,6 +8,23 @@
 //!      indices into the embedded file array.
 //!
 //! The generated file is consumed by `src/stubs.rs` at compile time.
+//!
+//! ## Re-run strategy
+//!
+//! The `stubs/` directory is gitignored, so Cargo's default "re-run when
+//! any package file changes" behaviour does not notice when
+//! `composer install` creates it.  Explicit `rerun-if-changed` on paths
+//! inside `stubs/` also fails when the directory doesn't exist yet.
+//!
+//! Instead we watch the project root directory (`.`).  Its mtime changes
+//! whenever a direct child like `stubs/` is created or removed.  We also
+//! watch `build.rs` and `composer.lock` for targeted rebuilds.
+//!
+//! To avoid unnecessary recompilation of the main crate we compare the
+//! newly generated content against the existing output file and only write
+//! when something actually changed.  This way `rustc` sees a stable mtime
+//! on `stub_map_generated.rs` and skips recompilation when the stubs
+//! haven't changed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -22,12 +39,14 @@ const MAP_FILE: &str = "stubs/jetbrains/phpstorm-stubs/PhpStormStubsMap.php";
 const STUBS_DIR: &str = "stubs/jetbrains/phpstorm-stubs";
 
 fn main() {
-    // Tell Cargo to re-run this script when dependencies change.
-    // We watch composer.lock (rather than PhpStormStubsMap.php directly)
-    // because that's the file that changes when `composer update` pulls
-    // a new version of phpstorm-stubs — more natural for PHP developers.
-    println!("cargo:rerun-if-changed=composer.lock");
+    // Watch the project root directory so that creating/removing `stubs/`
+    // (which is gitignored) is detected via the directory mtime change.
+    // Without this, Cargo's default "any package file" check ignores
+    // gitignored paths, and explicit watches on non-existent paths don't
+    // reliably trigger when they first appear.
+    println!("cargo:rerun-if-changed=.");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=composer.lock");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let map_path = Path::new(&manifest_dir).join(MAP_FILE);
@@ -41,7 +60,13 @@ fn main() {
                 "cargo:warning=Could not read PhpStormStubsMap.php ({}); generating empty stub index",
                 e
             );
-            write_empty_generated_file();
+            let content = concat!(
+                "pub(crate) static STUB_FILES: [&str; 0] = [];\n",
+                "pub(crate) static STUB_CLASS_MAP: [(&str, usize); 0] = [];\n",
+                "pub(crate) static STUB_FUNCTION_MAP: [(&str, usize); 0] = [];\n",
+                "pub(crate) static STUB_CONSTANT_MAP: [(&str, usize); 0] = [];\n",
+            );
+            write_if_changed(content);
             return;
         }
     };
@@ -81,9 +106,6 @@ fn main() {
         .collect();
 
     // ── Generate Rust source ────────────────────────────────────────────
-
-    let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
-    let dest_path = Path::new(&out_dir).join("stub_map_generated.rs");
 
     let mut out = String::with_capacity(512 * 1024);
 
@@ -170,7 +192,7 @@ fn main() {
     }
     out.push_str("];\n");
 
-    fs::write(&dest_path, &out).expect("Failed to write generated stub map");
+    write_if_changed(&out);
 }
 
 /// Parse one of the `const CLASSES = array(...)`, `const FUNCTIONS = array(...)`,
@@ -223,15 +245,20 @@ fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// Write an empty generated file when stubs are not available.
-fn write_empty_generated_file() {
+/// Write the generated file only if its content has actually changed.
+///
+/// This avoids bumping the mtime on `stub_map_generated.rs` when nothing
+/// changed, which in turn prevents `rustc` from unnecessarily recompiling
+/// the main crate.
+fn write_if_changed(content: &str) {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let dest_path = Path::new(&out_dir).join("stub_map_generated.rs");
-    let content = concat!(
-        "pub(crate) static STUB_FILES: [&str; 0] = [];\n",
-        "pub(crate) static STUB_CLASS_MAP: [(&str, usize); 0] = [];\n",
-        "pub(crate) static STUB_FUNCTION_MAP: [(&str, usize); 0] = [];\n",
-        "pub(crate) static STUB_CONSTANT_MAP: [(&str, usize); 0] = [];\n",
-    );
-    fs::write(&dest_path, content).expect("Failed to write empty generated stub map");
+
+    if let Ok(existing) = fs::read_to_string(&dest_path)
+        && existing == content
+    {
+        return;
+    }
+
+    fs::write(&dest_path, content).expect("Failed to write generated stub map");
 }
