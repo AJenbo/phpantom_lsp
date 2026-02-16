@@ -1432,7 +1432,25 @@ impl Backend {
             .ok()
             .and_then(|map| map.get(uri).cloned())?;
 
-        let _class_info = classes.iter().find(|c| c.name == short_name)?;
+        let _class_info = classes.iter().find(|c| {
+            if c.name != short_name {
+                return false;
+            }
+            // Build the FQN of this class in the current file and compare
+            // against the requested FQN to avoid false matches when two
+            // namespaces contain classes with the same short name.
+            let file_namespace = self
+                .namespace_map
+                .lock()
+                .ok()
+                .and_then(|map| map.get(uri).cloned())
+                .flatten();
+            let class_fqn = match &file_namespace {
+                Some(ns) => format!("{}\\{}", ns, c.name),
+                None => c.name.clone(),
+            };
+            class_fqn == fqn
+        })?;
 
         // Convert start_offset to a position.  start_offset is the opening
         // brace — scan backwards to find the class/interface keyword line.

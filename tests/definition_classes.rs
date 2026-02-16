@@ -834,3 +834,89 @@ async fn test_goto_definition_extends_class() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+/// Regression test: when a file uses `use Foo\Bar\Controller as BaseController`,
+/// go-to-definition on `BaseController` should navigate to the imported class,
+/// NOT the same-file class whose short name (`Controller`) happens to match
+/// the short name of the imported FQN.
+#[tokio::test]
+async fn test_goto_definition_aliased_use_does_not_match_same_file_short_name() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/",
+                    "Illuminate\\": "vendor/illuminate/"
+                }
+            }
+        }"#,
+        &[(
+            "vendor/illuminate/Routing/Controller.php",
+            concat!(
+                "<?php\n",
+                "namespace Illuminate\\Routing;\n",
+                "\n",
+                "class Controller {\n",
+                "    public function middleware() {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Http\\Controllers;\n",
+        "\n",
+        "use Illuminate\\Routing\\Controller as BaseController;\n",
+        "\n",
+        "class Controller extends BaseController\n",
+        "{\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "BaseController" in the extends clause on line 5
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 30,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve aliased BaseController to Illuminate\\Routing\\Controller"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("vendor/illuminate/Routing/Controller.php"),
+                "Should point to vendor Controller.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 3,
+                "Controller class defined on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
