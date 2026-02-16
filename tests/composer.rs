@@ -1,6 +1,6 @@
 use phpantom_lsp::composer::{
-    normalise_path, parse_autoload_classmap, parse_autoload_files, parse_composer_json,
-    parse_vendor_autoload_psr4, resolve_class_path,
+    extract_require_once_paths, normalise_path, parse_autoload_classmap, parse_autoload_files,
+    parse_composer_json, parse_vendor_autoload_psr4, resolve_class_path,
 };
 use std::fs;
 use std::path::Path;
@@ -712,6 +712,121 @@ fn test_autoload_files_mixed_vendor_and_basedir() {
         assert!(f.is_absolute(), "Path should be absolute: {:?}", f);
         assert!(f.is_file(), "Path should exist on disk: {:?}", f);
     }
+}
+
+// ─── extract_require_once_paths Tests ───────────────────────────────────────
+
+#[test]
+fn test_require_once_statement_form() {
+    let content = concat!(
+        "<?php\n",
+        "require_once 'Trustly/exceptions.php';\n",
+        "require_once 'Trustly/Data/data.php';\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], "Trustly/exceptions.php");
+    assert_eq!(paths[1], "Trustly/Data/data.php");
+}
+
+#[test]
+fn test_require_once_function_form() {
+    let content = concat!(
+        "<?php\n",
+        "require_once('Trustly/exceptions.php');\n",
+        "require_once('Trustly/Data/data.php');\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], "Trustly/exceptions.php");
+    assert_eq!(paths[1], "Trustly/Data/data.php");
+}
+
+#[test]
+fn test_require_once_double_quotes() {
+    let content = concat!(
+        "<?php\n",
+        "require_once \"Trustly/exceptions.php\";\n",
+        "require_once(\"Trustly/Data/data.php\");\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], "Trustly/exceptions.php");
+    assert_eq!(paths[1], "Trustly/Data/data.php");
+}
+
+#[test]
+fn test_require_once_mixed_forms() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * Main include file for working with the trustly-client-php code.\n",
+        " */\n",
+        "\n",
+        "require_once('Trustly/exceptions.php');\n",
+        "require_once('Trustly/Data/data.php');\n",
+        "require_once 'Trustly/Api/api.php';\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(paths.len(), 3);
+    assert_eq!(paths[0], "Trustly/exceptions.php");
+    assert_eq!(paths[1], "Trustly/Data/data.php");
+    assert_eq!(paths[2], "Trustly/Api/api.php");
+}
+
+#[test]
+fn test_require_once_skips_dynamic_expressions() {
+    let content = concat!(
+        "<?php\n",
+        "require_once __DIR__ . '/Trustly/exceptions.php';\n",
+        "require_once $path;\n",
+        "require_once 'Trustly/Data/data.php';\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(
+        paths.len(),
+        1,
+        "Should skip dynamic expressions and only find the string literal"
+    );
+    assert_eq!(paths[0], "Trustly/Data/data.php");
+}
+
+#[test]
+fn test_require_once_ignores_other_includes() {
+    let content = concat!(
+        "<?php\n",
+        "include 'config.php';\n",
+        "include_once 'helpers.php';\n",
+        "require 'bootstrap.php';\n",
+        "require_once 'Trustly/exceptions.php';\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(
+        paths.len(),
+        1,
+        "Should only extract require_once, not include/include_once/require"
+    );
+    assert_eq!(paths[0], "Trustly/exceptions.php");
+}
+
+#[test]
+fn test_require_once_empty_file() {
+    let content = "<?php\n";
+    let paths = extract_require_once_paths(content);
+    assert!(paths.is_empty());
+}
+
+#[test]
+fn test_require_once_with_extra_whitespace() {
+    let content = concat!(
+        "<?php\n",
+        "  require_once  (  'Trustly/exceptions.php'  )  ;\n",
+        "    require_once   'Trustly/Data/data.php'  ;\n",
+    );
+    let paths = extract_require_once_paths(content);
+    assert_eq!(paths.len(), 2);
+    assert_eq!(paths[0], "Trustly/exceptions.php");
+    assert_eq!(paths[1], "Trustly/Data/data.php");
 }
 
 // ─── autoload_classmap.php tests ────────────────────────────────────────────

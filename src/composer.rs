@@ -416,3 +416,65 @@ fn is_builtin_type(name: &str) -> bool {
             | "iterable"
     )
 }
+
+/// Extract file paths from `require_once` statements in PHP source content.
+///
+/// Handles both the statement form and the function-like form:
+/// ```text
+///     require_once 'Trustly/exceptions.php';
+///     require_once('Trustly/Data/data.php');
+/// ```
+///
+/// Only bare string literals are supported — concatenations, variables,
+/// and other dynamic expressions are silently skipped.
+///
+/// Returns the raw path strings exactly as written in the source (e.g.
+/// `"Trustly/exceptions.php"`).  The caller is responsible for resolving
+/// them relative to the file's directory.
+pub fn extract_require_once_paths(content: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Quick reject: line must start with `require_once`.
+        // (We don't support `require_once` buried in complex expressions.)
+        if !trimmed.starts_with("require_once") {
+            continue;
+        }
+
+        let rest = trimmed["require_once".len()..].trim_start();
+
+        // Strip optional parentheses: `require_once('...')` → `'...'`
+        // Also handles `require_once '...'` without parens.
+        let rest = if let Some(inner) = rest.strip_prefix('(') {
+            // Find matching closing paren
+            if let Some(end) = inner.rfind(')') {
+                inner[..end].trim()
+            } else {
+                continue;
+            }
+        } else {
+            rest
+        };
+
+        // Strip trailing semicolon
+        let rest = rest.trim_end_matches(';').trim();
+
+        // Extract string literal — single or double quoted
+        let path = if (rest.starts_with('\'') && rest.ends_with('\''))
+            || (rest.starts_with('"') && rest.ends_with('"'))
+        {
+            &rest[1..rest.len() - 1]
+        } else {
+            // Not a simple string literal — skip
+            continue;
+        };
+
+        if !path.is_empty() {
+            paths.push(path.to_string());
+        }
+    }
+
+    paths
+}

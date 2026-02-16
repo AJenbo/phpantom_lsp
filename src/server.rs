@@ -3,7 +3,8 @@
 /// This module contains the `impl LanguageServer for Backend` block,
 /// which handles all LSP protocol messages (initialize, didOpen, didChange,
 /// didClose, completion, etc.).
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::Result;
@@ -97,13 +98,27 @@ impl LanguageServer for Backend {
             }
 
             // Parse autoload_files.php to discover global function definitions.
+            // Also follow `require_once` statements in those files to discover
+            // additional classes and functions (used by packages like Trustly
+            // that don't follow composer conventions).
             let autoload_files = composer::parse_autoload_files(&root, &vendor_dir);
             let autoload_count = autoload_files.len();
 
-            for file_path in &autoload_files {
-                if let Ok(content) = std::fs::read_to_string(file_path) {
+            // Work queue + visited set for following require_once chains.
+            let mut file_queue: Vec<PathBuf> = autoload_files;
+            let mut visited: HashSet<PathBuf> = HashSet::new();
+
+            while let Some(file_path) = file_queue.pop() {
+                // Canonicalise to avoid revisiting the same file via
+                // different relative paths.
+                let canonical = file_path.canonicalize().unwrap_or(file_path);
+                if !visited.insert(canonical.clone()) {
+                    continue;
+                }
+
+                if let Ok(content) = std::fs::read_to_string(&canonical) {
                     let functions = self.parse_functions(&content);
-                    let uri = format!("file://{}", file_path.display());
+                    let uri = format!("file://{}", canonical.display());
 
                     if let Ok(mut fmap) = self.global_functions.lock() {
                         for func in functions {
@@ -127,6 +142,17 @@ impl LanguageServer for Backend {
                     // Also cache classes from these files in the ast_map so
                     // that class definitions in autoload files are available.
                     self.update_ast(&uri, &content);
+
+                    // Follow require_once statements to discover more files.
+                    let require_paths = composer::extract_require_once_paths(&content);
+                    if let Some(file_dir) = canonical.parent() {
+                        for rel_path in require_paths {
+                            let resolved = file_dir.join(&rel_path);
+                            if resolved.is_file() {
+                                file_queue.push(resolved);
+                            }
+                        }
+                    }
                 }
             }
 
