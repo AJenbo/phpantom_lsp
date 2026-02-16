@@ -2682,7 +2682,10 @@ impl Backend {
                 // instance, NOT the consuming class.  Rewrite the return
                 // type to the concrete mixin class name so that resolution
                 // produces the mixin class rather than the consumer.
-                if method.return_type.as_deref() == Some("$this") {
+                if matches!(
+                    method.return_type.as_deref(),
+                    Some("$this" | "self" | "static")
+                ) {
                     method.return_type = Some(mixin_class.name.clone());
                 }
                 merged.methods.push(method);

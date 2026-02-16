@@ -433,11 +433,11 @@ $user->hasPermission('x');   // @method magic member
 
 // ── Static Completion (::) ──────────────────────────────────────────────────
 
-User::$defaultRole;          // static property
-User::TYPE_ADMIN;            // class constant
+User::$defaultRole;         // static property
+User::TYPE_ADMIN;           // class constant
 User::findByEmail('a@b.c'); // static method
-User::make('Bob');           // inherited static from Model
-User::query();               // from @mixin Builder on Model (inherited)
+User::make('Bob');          // inherited static from Model
+User::query();              // from @mixin Builder on Model (inherited)
 
 
 // ── Enum Completion ─────────────────────────────────────────────────────────

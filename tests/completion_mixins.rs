@@ -2388,3 +2388,184 @@ async fn test_goto_definition_inherited_mixin_static_method() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Mixin return type: self / static should resolve to mixin class ────────
+
+/// When a mixin method has `@return static` (or native return type `self`),
+/// chaining on that method should resolve to the **mixin class**, not the
+/// consuming class.
+///
+/// This is the same principle as `$this` — `@mixin` proxies calls via
+/// `__call` / `__callStatic`, so self/static refer to the mixin instance.
+#[tokio::test]
+async fn test_completion_mixin_return_static_resolves_to_mixin_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_return_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                             // 0
+        "class Builder {\n",                                                   // 1
+        "    /** @return static */\n",                                         // 2
+        "    public static function query(): self { return new static(); }\n", // 3
+        "    public function where(string $col, mixed $val): self {\n",        // 4
+        "        return $this;\n",                                             // 5
+        "    }\n",                                                             // 6
+        "    public function get(): array { return []; }\n",                   // 7
+        "}\n",                                                                 // 8
+        "/**\n",                                                               // 9
+        " * @mixin Builder\n",                                                 // 10
+        " */\n",                                                               // 11
+        "class Model {\n",                                                     // 12
+        "    public function save(): bool { return true; }\n",                 // 13
+        "}\n",                                                                 // 14
+        "class User extends Model {\n",                                        // 15
+        "    public function getEmail(): string { return ''; }\n",             // 16
+        "    public function test(): void {\n",                                // 17
+        "        User::query()->\n",                                           // 18
+        "    }\n",                                                             // 19
+        "}\n",                                                                 // 20
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 18,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // `@return static` / native `self` on a mixin method should
+            // resolve to Builder, so we see Builder's methods.
+            assert!(
+                method_names.contains(&"where"),
+                "Chaining after mixin @return static should show Builder methods (where), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"get"),
+                "Chaining after mixin @return static should show Builder methods (get), got: {:?}",
+                method_names
+            );
+            // Consumer class methods should NOT appear — the chain resolved
+            // to Builder, not User or Model.
+            assert!(
+                !method_names.contains(&"save"),
+                "Should NOT show Model methods (save) after mixin static return, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getEmail"),
+                "Should NOT show User methods (getEmail) after mixin static return, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Same as above but with native `self` return type and no docblock override.
+#[tokio::test]
+async fn test_completion_mixin_return_self_resolves_to_mixin_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_return_self.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                          // 0
+        "class QueryBuilder {\n",                                           // 1
+        "    public function where(string $col): self { return $this; }\n", // 2
+        "    public function toSql(): string { return ''; }\n",             // 3
+        "}\n",                                                              // 4
+        "/**\n",                                                            // 5
+        " * @mixin QueryBuilder\n",                                         // 6
+        " */\n",                                                            // 7
+        "class Model {\n",                                                  // 8
+        "    public function save(): bool { return true; }\n",              // 9
+        "    public function test(): void {\n",                             // 10
+        "        $this->where('active')->\n",                               // 11
+        "    }\n",                                                          // 12
+        "}\n",                                                              // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 33,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"where"),
+                "Chaining after mixin self return should show QueryBuilder methods (where), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"toSql"),
+                "Chaining after mixin self return should show QueryBuilder methods (toSql), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"save"),
+                "Should NOT show Model methods (save) after mixin self return, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
