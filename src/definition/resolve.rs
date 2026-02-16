@@ -68,9 +68,26 @@ impl Backend {
         // When the cursor is on a `$variable`, jump to its most recent
         // assignment or declaration (parameter, foreach, catch) above the
         // cursor position.
+        //
+        // When we are already *at* the definition (resolve returns None),
+        // fall through to type-hint resolution so the user can jump from
+        // e.g. `HtmlString|string $content` to the `HtmlString` class.
         if Self::cursor_is_on_variable(content, position, &word) {
             let var_name = format!("${}", word);
-            return Self::resolve_variable_definition(content, uri, position, &var_name);
+            if let Some(location) =
+                Self::resolve_variable_definition(content, uri, position, &var_name)
+            {
+                return Some(location);
+            }
+
+            // We are at the definition site — try to resolve the type hint.
+            if let Some(location) =
+                self.resolve_type_hint_at_variable(uri, content, position, &var_name)
+            {
+                return Some(location);
+            }
+
+            return None;
         }
 
         // ── NEW: Try member access resolution (::, ->, ?->) ──
@@ -1206,9 +1223,12 @@ impl Backend {
                             };
 
                             if is_declaration || is_promoted {
+                                // Place the cursor on the first letter after
+                                // `$` so that a second go-to-definition
+                                // triggers type-hint resolution.
                                 return Some(Position {
                                     line: line_idx as u32,
-                                    character: col as u32,
+                                    character: (col + 1) as u32,
                                 });
                             }
                         }
@@ -1238,7 +1258,7 @@ impl Backend {
                     {
                         return Some(Position {
                             line: line_idx as u32,
-                            character: col as u32,
+                            character: (col + 1) as u32,
                         });
                     }
                 }
@@ -1763,6 +1783,132 @@ impl Backend {
         // 5. Static / global declarations: `static $var` / `global $var`
         if before.ends_with("static") || before.ends_with("global") {
             return Some(var_pos);
+        }
+
+        None
+    }
+
+    // ─── Type-Hint Resolution at Variable Definition ────────────────────
+
+    /// When the cursor is on a variable that is already at its definition
+    /// site (parameter, property, promoted property), extract the type hint
+    /// and jump to the first class-like type in it.
+    ///
+    /// For example, given `public readonly HtmlString|string $content,`
+    /// this returns the location of the `HtmlString` class definition.
+    fn resolve_type_hint_at_variable(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        var_name: &str,
+    ) -> Option<Location> {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_idx = position.line as usize;
+        if line_idx >= lines.len() {
+            return None;
+        }
+        let line = lines[line_idx];
+
+        // The variable must actually appear on this line.
+        let var_pos = Self::find_whole_var(line, var_name)?;
+
+        // Extract the text before `$var` — this contains modifiers and the
+        // type hint.
+        let before_raw = line[..var_pos].trim_end();
+
+        // For function/method parameters the text includes the signature up
+        // to and including `(`, e.g. `public function handle(Request`.
+        // Strip everything up to the last `(` so we only look at the
+        // parameter's type portion.
+        let before = match before_raw.rfind('(') {
+            Some(pos) => before_raw[pos + 1..].trim_start(),
+            None => before_raw,
+        };
+
+        // Extract the type-hint portion: everything after the last PHP
+        // modifier keyword or visibility.  We split on whitespace and take
+        // the last token, which should be the full type expression
+        // (e.g. `HtmlString|string`, `?Foo`, `Foo&Bar`).
+        let type_hint = match before.rsplit_once(char::is_whitespace) {
+            Some((_, t)) => t,
+            None => before,
+        };
+        if type_hint.is_empty() {
+            return None;
+        }
+
+        // Split on `|` (union) and `&` (intersection), strip leading `?`
+        // (nullable shorthand), and find the first class-like type.
+        let scalars = [
+            "string", "int", "float", "bool", "array", "callable", "iterable", "object", "mixed",
+            "void", "never", "null", "false", "true", "self", "static", "parent",
+        ];
+
+        let class_name = type_hint
+            .split(['|', '&'])
+            .map(|t| t.trim_start_matches('?'))
+            .find(|t| !t.is_empty() && !scalars.contains(&t.to_lowercase().as_str()))?;
+
+        // Resolve to FQN and jump, reusing the standard class resolution
+        // path from resolve_definition.
+        let file_use_map = self
+            .use_map
+            .lock()
+            .ok()
+            .and_then(|map| map.get(uri).cloned())
+            .unwrap_or_default();
+
+        let file_namespace = self
+            .namespace_map
+            .lock()
+            .ok()
+            .and_then(|map| map.get(uri).cloned())
+            .flatten();
+
+        let fqn = Self::resolve_to_fqn(class_name, &file_use_map, &file_namespace);
+
+        let mut candidates = vec![fqn];
+        if class_name.contains('\\') && !candidates.contains(&class_name.to_string()) {
+            candidates.push(class_name.to_string());
+        }
+
+        // Try same-file first.
+        for fqn in &candidates {
+            if let Some(location) = self.find_definition_in_ast_map(fqn, content, uri) {
+                return Some(location);
+            }
+        }
+
+        // Try PSR-4 resolution.
+        let workspace_root = self
+            .workspace_root
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
+
+        if let Some(workspace_root) = workspace_root
+            && let Ok(mappings) = self.psr4_mappings.lock()
+        {
+            for fqn in &candidates {
+                if let Some(file_path) =
+                    composer::resolve_class_path(&mappings, &workspace_root, fqn)
+                    && let Ok(target_content) = std::fs::read_to_string(&file_path) {
+                        let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                        if let Some(target_position) =
+                            Self::find_definition_position(&target_content, short_name)
+                            && let Ok(target_uri) = Url::from_file_path(&file_path)
+                        {
+                            return Some(Location {
+                                uri: target_uri,
+                                range: Range {
+                                    start: target_position,
+                                    end: target_position,
+                                },
+                            });
+                        }
+                    }
+            }
         }
 
         None

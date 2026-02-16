@@ -1309,3 +1309,379 @@ async fn test_goto_definition_variable_foreach_key_value() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Type-Hint Resolution at Variable Definition ───────────────────────────
+
+/// When the cursor is on a promoted constructor property at its definition,
+/// go-to-definition should jump to the first class type in the type hint.
+///
+/// ```php
+/// public readonly HtmlString|string $content,
+/// ```
+///
+/// Clicking on `$content` should jump to the `HtmlString` class.
+#[tokio::test]
+async fn test_goto_definition_variable_at_definition_jumps_to_type_hint() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/",
+                    "Illuminate\\": "vendor/illuminate/"
+                }
+            }
+        }"#,
+        &[(
+            "vendor/illuminate/Support/HtmlString.php",
+            concat!(
+                "<?php\n",
+                "namespace Illuminate\\Support;\n",
+                "\n",
+                "class HtmlString {\n",
+                "    public function toHtml(): string {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///accordion.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "namespace App\\Helpers;\n",                             // 1
+        "\n",                                                    // 2
+        "use Illuminate\\Support\\HtmlString;\n",                // 3
+        "\n",                                                    // 4
+        "final class AccordionData\n",                           // 5
+        "{\n",                                                   // 6
+        "    public function __construct(\n",                    // 7
+        "        public readonly HtmlString|string $content,\n", // 8
+        "    ) {\n",                                             // 9
+        "    }\n",                                               // 10
+        "}\n",                                                   // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$content` on line 8 (the definition itself)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 45,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve to the HtmlString class from the type hint"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("vendor/illuminate/Support/HtmlString.php"),
+                "Should point to HtmlString.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 3,
+                "HtmlString class defined on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the cursor is on a parameter with a single class type hint,
+/// go-to-definition at the definition site should jump to that class.
+#[tokio::test]
+async fn test_goto_definition_parameter_at_definition_jumps_to_type_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///param_type.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                      // 0
+        "class Request {\n",                            // 1
+        "    public function input(): string {}\n",     // 2
+        "}\n",                                          // 3
+        "class Controller {\n",                         // 4
+        "    public function handle(Request $req) {\n", // 5
+        "    }\n",                                      // 6
+        "}\n",                                          // 7
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$req` on line 5 (the parameter definition)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 39,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve to the Request class from the type hint"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 1,
+                "Request class defined on line 1"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the type hint is a nullable class (`?Foo`), go-to-definition at the
+/// definition site should still resolve to the class.
+#[tokio::test]
+async fn test_goto_definition_variable_at_definition_nullable_type_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///nullable_type.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                      // 0
+        "class Logger {\n",                             // 1
+        "    public function info(): void {}\n",        // 2
+        "}\n",                                          // 3
+        "class App {\n",                                // 4
+        "    public function handle(?Logger $log) {\n", // 5
+        "    }\n",                                      // 6
+        "}\n",                                          // 7
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$log` on line 5 (l=36, o=37, g=38)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 37,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve to the Logger class from ?Logger type hint"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 1,
+                "Logger class defined on line 1"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the type hint is purely scalar (e.g. `string $name`), go-to-definition
+/// at the definition site should return None — there is no class to jump to.
+#[tokio::test]
+async fn test_goto_definition_variable_at_definition_scalar_type_returns_none() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///scalar_type.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                      // 0
+        "class App {\n",                                // 1
+        "    public function handle(string $name) {\n", // 2
+        "    }\n",                                      // 3
+        "}\n",                                          // 4
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$name` on line 2
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 37,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should return None when type hint is purely scalar"
+    );
+}
+
+/// When the type hint is a union with the class type second
+/// (e.g. `string|HtmlString`), go-to-definition should still find the class.
+#[tokio::test]
+async fn test_goto_definition_variable_at_definition_union_class_second() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///union_second.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                // 0
+        "class HtmlString {\n",                                   // 1
+        "    public function toHtml(): string {}\n",              // 2
+        "}\n",                                                    // 3
+        "class Widget {\n",                                       // 4
+        "    public function render(string|HtmlString $out) {\n", // 5
+        "    }\n",                                                // 6
+        "}\n",                                                    // 7
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$out` on line 5 (o=46, u=47, t=48)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 47,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve to HtmlString even though it's the second union member"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 1,
+                "HtmlString class defined on line 1"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the cursor is on a class property definition (not promoted),
+/// go-to-definition should jump to the type hint class.
+#[tokio::test]
+async fn test_goto_definition_property_at_definition_jumps_to_type_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///prop_type.php").unwrap();
+    let text = concat!(
+        "<?php\n",                         // 0
+        "class Logger {\n",                // 1
+        "    public function info() {}\n", // 2
+        "}\n",                             // 3
+        "class App {\n",                   // 4
+        "    private Logger $logger;\n",   // 5
+        "}\n",                             // 6
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$logger` on line 5
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve to the Logger class from the property type hint"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 1,
+                "Logger class defined on line 1"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
