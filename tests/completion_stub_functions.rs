@@ -347,6 +347,7 @@ async fn test_user_function_takes_precedence_over_stub() {
         return_type: Some("CustomReturn".to_string()),
         namespace: None,
         conditional_return: None,
+        type_assertions: vec![],
     };
 
     if let Ok(mut fmap) = backend.global_functions.lock() {

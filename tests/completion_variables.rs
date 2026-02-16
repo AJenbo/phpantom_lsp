@@ -5449,3 +5449,996 @@ async fn test_completion_get_class_loose_equality_narrows() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── @phpstan-assert / @psalm-assert narrowing ──────────────────────────────
+
+/// `@phpstan-assert User $value` on a standalone function call should narrow
+/// the variable unconditionally after the call.
+#[tokio::test]
+async fn test_completion_phpstan_assert_narrows_unconditionally() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///phpstan_assert_basic.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert User $value\n",                      // 8
+        " */\n",                                                 // 9
+        "function assertUser($value): void {}\n",                // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        assertUser($v);\n",                             // 13
+        "        $v->\n",                                        // 14
+        "    }\n",                                               // 15
+        "}\n",                                                   // 16
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' after assertUser(), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' after assertUser(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Negated `@phpstan-assert !User $value` should exclude User.
+#[tokio::test]
+async fn test_completion_phpstan_assert_negated_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///phpstan_assert_neg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert !User $value\n",                     // 8
+        " */\n",                                                 // 9
+        "function assertNotUser($value): void {}\n",             // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        assertNotUser($v);\n",                          // 13
+        "        $v->\n",                                        // 14
+        "    }\n",                                               // 15
+        "}\n",                                                   // 16
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' after assertNotUser(), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' after assertNotUser(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `@psalm-assert` should work identically to `@phpstan-assert`.
+#[tokio::test]
+async fn test_completion_psalm_assert_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///psalm_assert.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                        // 0
+        "class Dog {\n",                                  // 1
+        "    public function bark(): void {}\n",          // 2
+        "}\n",                                            // 3
+        "class Cat {\n",                                  // 4
+        "    public function purr(): void {}\n",          // 5
+        "}\n",                                            // 6
+        "/**\n",                                          // 7
+        " * @psalm-assert Dog $animal\n",                 // 8
+        " */\n",                                          // 9
+        "function assertDog($animal): void {}\n",         // 10
+        "class Svc {\n",                                  // 11
+        "    public function test(Dog|Cat $a): void {\n", // 12
+        "        assertDog($a);\n",                       // 13
+        "        $a->\n",                                 // 14
+        "    }\n",                                        // 15
+        "}\n",                                            // 16
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' after assertDog() with @psalm-assert, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' after assertDog() with @psalm-assert, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── @phpstan-assert-if-true narrowing ──────────────────────────────────────
+
+/// `@phpstan-assert-if-true User $value` should narrow inside the if-body
+/// when the function is used as a condition.
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_true_narrows_in_then() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_true_then.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert-if-true User $value\n",              // 8
+        " */\n",                                                 // 9
+        "function isUser($value): bool {}\n",                    // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        if (isUser($v)) {\n",                           // 13
+        "            $v->\n",                                    // 14
+        "        }\n",                                           // 15
+        "    }\n",                                               // 16
+        "}\n",                                                   // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' in if-body with assert-if-true, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' in if-body with assert-if-true, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `@phpstan-assert-if-true User $value` in the else-body means the function
+/// returned false, so $value is NOT User → exclude User from the union.
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_true_excludes_in_else() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_true_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert-if-true User $value\n",              // 8
+        " */\n",                                                 // 9
+        "function isUser($value): bool {}\n",                    // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        if (isUser($v)) {\n",                           // 13
+        "            // then branch\n",                          // 14
+        "        } else {\n",                                    // 15
+        "            $v->\n",                                    // 16
+        "        }\n",                                           // 17
+        "    }\n",                                               // 18
+        "}\n",                                                   // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // In the else branch, function returned false → User is excluded
+            // from User|AdminUser, leaving only AdminUser.
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' in else branch (User excluded), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' in else branch (User excluded), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Negated condition `if (!isUser($v))` with `@phpstan-assert-if-true`
+/// should NOT narrow in the then-body (function returned false).
+/// But the else-body should narrow (function returned true).
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_true_negated_narrows_in_else() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_true_neg.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                // 0
+        "class User {\n",                                         // 1
+        "    public function getName(): string {}\n",             // 2
+        "}\n",                                                    // 3
+        "class AdminUser {\n",                                    // 4
+        "    public function addRoles(string $r): void {}\n",     // 5
+        "}\n",                                                    // 6
+        "/**\n",                                                  // 7
+        " * @phpstan-assert-if-true User $value\n",               // 8
+        " */\n",                                                  // 9
+        "function isUser($value): bool {}\n",                     // 10
+        "class Svc {\n",                                          // 11
+        "    public function test(User|AdminUser $v): void {\n",  // 12
+        "        if (!isUser($v)) {\n",                           // 13
+        "            // negated then: function returned false\n", // 14
+        "        } else {\n",                                     // 15
+        "            $v->\n",                                     // 16
+        "        }\n",                                            // 17
+        "    }\n",                                                // 18
+        "}\n",                                                    // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // `!isUser($v)` in then means func returned false.
+            // In else, func returned true → IfTrue applies → narrow to User.
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' in else of negated assert-if-true, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' in else of negated assert-if-true, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── @phpstan-assert-if-false narrowing ─────────────────────────────────────
+
+/// `@phpstan-assert-if-false User $value` should narrow in the else-body
+/// (function returned false → assertion holds).
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_false_narrows_in_else() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_false_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert-if-false User $value\n",             // 8
+        " */\n",                                                 // 9
+        "function isNotUser($value): bool {}\n",                 // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        if (isNotUser($v)) {\n",                        // 13
+        "            // then branch: function returned true\n",  // 14
+        "        } else {\n",                                    // 15
+        "            $v->\n",                                    // 16
+        "        }\n",                                           // 17
+        "    }\n",                                               // 18
+        "}\n",                                                   // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // Else body: function returned false → IfFalse assertion applies
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' in else with assert-if-false, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' in else with assert-if-false, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `@phpstan-assert-if-false User $value` in the then-body means the function
+/// returned true, so $value is NOT User → exclude User from the union.
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_false_excludes_in_then() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_false_then.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert-if-false User $value\n",             // 8
+        " */\n",                                                 // 9
+        "function isNotUser($value): bool {}\n",                 // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        if (isNotUser($v)) {\n",                        // 13
+        "            $v->\n",                                    // 14
+        "        }\n",                                           // 15
+        "    }\n",                                               // 16
+        "}\n",                                                   // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // Then body: function returned true → User is excluded
+            // from User|AdminUser, leaving only AdminUser.
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include AdminUser's 'addRoles' in then branch (User excluded), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include User's 'getName' in then branch (User excluded), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `@phpstan-assert-if-true` in a while-loop condition should narrow
+/// inside the loop body.
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_true_in_while() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_true_while.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Node {\n",                                   // 1
+        "    public function next(): ?Node {}\n",           // 2
+        "    public function getValue(): string {}\n",      // 3
+        "}\n",                                              // 4
+        "class Leaf {\n",                                   // 5
+        "    public function leafOnly(): void {}\n",        // 6
+        "}\n",                                              // 7
+        "/**\n",                                            // 8
+        " * @phpstan-assert-if-true Node $item\n",          // 9
+        " */\n",                                            // 10
+        "function isNode($item): bool {}\n",                // 11
+        "class Svc {\n",                                    // 12
+        "    public function walk(Node|Leaf $n): void {\n", // 13
+        "        while (isNode($n)) {\n",                   // 14
+        "            $n->\n",                               // 15
+        "        }\n",                                      // 16
+        "    }\n",                                          // 17
+        "}\n",                                              // 18
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getValue"),
+                "Should include Node's 'getValue' in while body with assert-if-true, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"leafOnly"),
+                "Should NOT include Leaf's 'leafOnly' in while body with assert-if-true, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `@phpstan-assert` on the second parameter should narrow the correct variable.
+#[tokio::test]
+async fn test_completion_phpstan_assert_second_parameter() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///phpstan_assert_second.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert User $obj\n",                        // 8
+        " */\n",                                                 // 9
+        "function assertType(string $class, $obj): void {}\n",   // 10
+        "class Svc {\n",                                         // 11
+        "    public function test(User|AdminUser $v): void {\n", // 12
+        "        assertType(User::class, $v);\n",                // 13
+        "        $v->\n",                                        // 14
+        "    }\n",                                               // 15
+        "}\n",                                                   // 16
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include User's 'getName' (assert on second param), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"addRoles"),
+                "Should NOT include AdminUser's 'addRoles' (assert on second param), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `@phpstan-assert-if-true` + `@phpstan-assert-if-false` on the same
+/// function: each applies in the correct branch.
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_true_and_false_combined() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_combined.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class User {\n",                                        // 1
+        "    public function getName(): string {}\n",            // 2
+        "}\n",                                                   // 3
+        "class AdminUser {\n",                                   // 4
+        "    public function addRoles(string $r): void {}\n",    // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert-if-true User $value\n",              // 8
+        " * @phpstan-assert-if-false AdminUser $value\n",        // 9
+        " */\n",                                                 // 10
+        "function isUser($value): bool {}\n",                    // 11
+        "class Svc {\n",                                         // 12
+        "    public function test(User|AdminUser $v): void {\n", // 13
+        "        if (isUser($v)) {\n",                           // 14
+        "            $v->\n",                                    // 15
+        "        } else {\n",                                    // 16
+        "            $v->\n",                                    // 17
+        "        }\n",                                           // 18
+        "    }\n",                                               // 19
+        "}\n",                                                   // 20
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Test then-body: IfTrue → User
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 15,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions for then-body");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Then-body should include User's 'getName' (assert-if-true), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+
+    // Test else-body: IfFalse → AdminUser
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions for else-body");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Else-body should include AdminUser's 'addRoles' (assert-if-false), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Top-level code (outside class) should also support `@phpstan-assert`.
+#[tokio::test]
+async fn test_completion_phpstan_assert_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///phpstan_assert_top.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "class Dog {\n",                                         // 1
+        "    public function bark(): void {}\n",                 // 2
+        "}\n",                                                   // 3
+        "class Cat {\n",                                         // 4
+        "    public function purr(): void {}\n",                 // 5
+        "}\n",                                                   // 6
+        "/**\n",                                                 // 7
+        " * @phpstan-assert Dog $val\n",                         // 8
+        " */\n",                                                 // 9
+        "function assertDog($val): void {}\n",                   // 10
+        "\n",                                                    // 11
+        "function getAnimal(): Dog|Cat { return new Dog(); }\n", // 12
+        "$animal = getAnimal();\n",                              // 13
+        "assertDog($animal);\n",                                 // 14
+        "$animal->\n",                                           // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' at top level after assertDog(), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' at top level after assertDog(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

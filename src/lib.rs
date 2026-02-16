@@ -33,8 +33,8 @@ mod util;
 // Re-export public types so that dependents (tests, main) can import them
 // from the crate root, e.g. `use phpantom_lsp::{Backend, AccessKind}`.
 pub use types::{
-    AccessKind, ClassInfo, CompletionTarget, ConstantInfo, FunctionInfo, MethodInfo, ParameterInfo,
-    PropertyInfo, Visibility,
+    AccessKind, AssertionKind, ClassInfo, CompletionTarget, ConstantInfo, FunctionInfo, MethodInfo,
+    ParameterInfo, PropertyInfo, TypeAssertion, Visibility,
 };
 
 // ─── Backend ────────────────────────────────────────────────────────────────

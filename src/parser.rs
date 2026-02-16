@@ -367,8 +367,11 @@ impl Backend {
                         .map(|rth| Self::extract_hint_string(&rth.hint));
 
                     // Apply PHPDoc `@return` override for the function.
-                    // Also extract PHPStan conditional return types if present.
-                    let (return_type, conditional_return) = if let Some(ctx) = doc_ctx {
+                    // Also extract PHPStan conditional return types and
+                    // type assertion annotations if present.
+                    let (return_type, conditional_return, type_assertions) = if let Some(ctx) =
+                        doc_ctx
+                    {
                         let docblock_text =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, func);
 
@@ -382,9 +385,13 @@ impl Backend {
                         let conditional =
                             docblock_text.and_then(docblock::extract_conditional_return_type);
 
-                        (effective, conditional)
+                        let assertions = docblock_text
+                            .map(docblock::extract_type_assertions)
+                            .unwrap_or_default();
+
+                        (effective, conditional, assertions)
                     } else {
-                        (native_return_type, None)
+                        (native_return_type, None, Vec::new())
                     };
 
                     functions.push(FunctionInfo {
@@ -393,6 +400,7 @@ impl Backend {
                         return_type,
                         namespace: current_namespace.clone(),
                         conditional_return,
+                        type_assertions,
                     });
                 }
                 Statement::Namespace(namespace) => {

@@ -16,7 +16,10 @@
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
-use crate::types::{ConditionalReturnType, MethodInfo, ParamCondition, ParameterInfo, Visibility};
+use crate::types::{
+    AssertionKind, ConditionalReturnType, MethodInfo, ParamCondition, ParameterInfo, TypeAssertion,
+    Visibility,
+};
 
 /// Scalar / built-in type names that can never be an object and therefore
 /// must not be overridden by a class-name docblock annotation.
@@ -86,6 +89,84 @@ pub fn extract_mixin_tags(docblock: &str) -> Vec<String> {
         let cleaned = clean_type(class_name);
         if !cleaned.is_empty() {
             results.push(cleaned);
+        }
+    }
+
+    results
+}
+
+/// Extract `@phpstan-assert` / `@psalm-assert` type assertion annotations.
+///
+/// Supports all three variants:
+///   - `@phpstan-assert Type $param`          → unconditional assertion
+///   - `@phpstan-assert-if-true Type $param`  → assertion when return is true
+///   - `@phpstan-assert-if-false Type $param` → assertion when return is false
+///
+/// Also supports the `@psalm-assert` equivalents and negated types
+/// (`!Type`).
+///
+/// Returns a list of parsed assertions.  An empty list means no
+/// assertion tags were found.
+pub fn extract_type_assertions(docblock: &str) -> Vec<TypeAssertion> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    // The tags we recognise, longest-first so that `-if-true` / `-if-false`
+    // are matched before the bare `@phpstan-assert`.
+    const TAGS: &[(&str, AssertionKind)] = &[
+        ("@phpstan-assert-if-true", AssertionKind::IfTrue),
+        ("@phpstan-assert-if-false", AssertionKind::IfFalse),
+        ("@phpstan-assert", AssertionKind::Always),
+        ("@psalm-assert-if-true", AssertionKind::IfTrue),
+        ("@psalm-assert-if-false", AssertionKind::IfFalse),
+        ("@psalm-assert", AssertionKind::Always),
+    ];
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        for &(tag, kind) in TAGS {
+            if let Some(rest) = trimmed.strip_prefix(tag) {
+                // The tag must be followed by whitespace.
+                let rest = rest.trim_start();
+                if rest.is_empty() {
+                    break;
+                }
+
+                // Check for negation: `!Type $param`
+                let (negated, rest) = if let Some(r) = rest.strip_prefix('!') {
+                    (true, r.trim_start())
+                } else {
+                    (false, rest)
+                };
+
+                // Next token is the type, then the parameter name.
+                let mut tokens = rest.split_whitespace();
+                let type_str = match tokens.next() {
+                    Some(t) => t,
+                    None => break,
+                };
+                let param_str = match tokens.next() {
+                    Some(p) if p.starts_with('$') => p,
+                    _ => break,
+                };
+
+                results.push(TypeAssertion {
+                    kind,
+                    param_name: param_str.to_string(),
+                    asserted_type: clean_type(type_str),
+                    negated,
+                });
+
+                // Matched a tag — don't try shorter prefixes for this line.
+                break;
+            }
         }
     }
 
@@ -1757,5 +1838,153 @@ mod tests {
         let doc = concat!("/**\n", " * @mixin\n", " */",);
         let mixins = extract_mixin_tags(doc);
         assert!(mixins.is_empty());
+    }
+
+    // ─── @phpstan-assert / @psalm-assert extraction ─────────────────────────
+
+    #[test]
+    fn assert_simple_phpstan() {
+        let doc = concat!("/**\n", " * @phpstan-assert User $value\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::Always);
+        assert_eq!(assertions[0].param_name, "$value");
+        assert_eq!(assertions[0].asserted_type, "User");
+        assert!(!assertions[0].negated);
+    }
+
+    #[test]
+    fn assert_simple_psalm() {
+        let doc = concat!("/**\n", " * @psalm-assert AdminUser $obj\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::Always);
+        assert_eq!(assertions[0].param_name, "$obj");
+        assert_eq!(assertions[0].asserted_type, "AdminUser");
+        assert!(!assertions[0].negated);
+    }
+
+    #[test]
+    fn assert_negated() {
+        let doc = concat!("/**\n", " * @phpstan-assert !User $value\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::Always);
+        assert_eq!(assertions[0].asserted_type, "User");
+        assert!(assertions[0].negated);
+    }
+
+    #[test]
+    fn assert_if_true() {
+        let doc = concat!("/**\n", " * @phpstan-assert-if-true User $value\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::IfTrue);
+        assert_eq!(assertions[0].param_name, "$value");
+        assert_eq!(assertions[0].asserted_type, "User");
+        assert!(!assertions[0].negated);
+    }
+
+    #[test]
+    fn assert_if_false() {
+        let doc = concat!("/**\n", " * @phpstan-assert-if-false User $value\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::IfFalse);
+        assert_eq!(assertions[0].param_name, "$value");
+        assert_eq!(assertions[0].asserted_type, "User");
+        assert!(!assertions[0].negated);
+    }
+
+    #[test]
+    fn assert_psalm_if_true() {
+        let doc = concat!("/**\n", " * @psalm-assert-if-true AdminUser $obj\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::IfTrue);
+        assert_eq!(assertions[0].param_name, "$obj");
+        assert_eq!(assertions[0].asserted_type, "AdminUser");
+    }
+
+    #[test]
+    fn assert_fqn_type() {
+        let doc = concat!(
+            "/**\n",
+            " * @phpstan-assert \\App\\Models\\User $value\n",
+            " */",
+        );
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].asserted_type, "App\\Models\\User");
+    }
+
+    #[test]
+    fn assert_multiple_annotations() {
+        let doc = concat!(
+            "/**\n",
+            " * @phpstan-assert User $first\n",
+            " * @phpstan-assert AdminUser $second\n",
+            " */",
+        );
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 2);
+        assert_eq!(assertions[0].param_name, "$first");
+        assert_eq!(assertions[0].asserted_type, "User");
+        assert_eq!(assertions[1].param_name, "$second");
+        assert_eq!(assertions[1].asserted_type, "AdminUser");
+    }
+
+    #[test]
+    fn assert_mixed_with_other_tags() {
+        let doc = concat!(
+            "/**\n",
+            " * Some description.\n",
+            " *\n",
+            " * @param mixed $value\n",
+            " * @phpstan-assert User $value\n",
+            " * @return void\n",
+            " */",
+        );
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].asserted_type, "User");
+    }
+
+    #[test]
+    fn assert_none_when_missing() {
+        let doc = "/** @return void */";
+        let assertions = extract_type_assertions(doc);
+        assert!(assertions.is_empty());
+    }
+
+    #[test]
+    fn assert_empty_after_tag_ignored() {
+        let doc = concat!("/**\n", " * @phpstan-assert\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert!(assertions.is_empty());
+    }
+
+    #[test]
+    fn assert_missing_param_ignored() {
+        let doc = concat!("/**\n", " * @phpstan-assert User\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert!(assertions.is_empty());
+    }
+
+    #[test]
+    fn assert_param_without_dollar_ignored() {
+        let doc = concat!("/**\n", " * @phpstan-assert User value\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert!(assertions.is_empty());
+    }
+
+    #[test]
+    fn assert_negated_if_true() {
+        let doc = concat!("/**\n", " * @phpstan-assert-if-true !User $value\n", " */",);
+        let assertions = extract_type_assertions(doc);
+        assert_eq!(assertions.len(), 1);
+        assert_eq!(assertions[0].kind, AssertionKind::IfTrue);
+        assert!(assertions[0].negated);
+        assert_eq!(assertions[0].asserted_type, "User");
     }
 }

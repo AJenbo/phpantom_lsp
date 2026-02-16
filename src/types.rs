@@ -133,6 +133,57 @@ pub struct FunctionInfo {
     /// @return ($abstract is class-string<TClass> ? TClass : \Illuminate\Foundation\Application)
     /// ```
     pub conditional_return: Option<ConditionalReturnType>,
+    /// Type assertions parsed from `@phpstan-assert` / `@psalm-assert`
+    /// annotations in the function's docblock.
+    ///
+    /// These allow user-defined functions to act as custom type guards,
+    /// narrowing the type of a parameter after the call (or conditionally
+    /// when used in an `if` condition).
+    ///
+    /// Example docblocks:
+    /// ```text
+    /// @phpstan-assert User $value           — unconditional assertion
+    /// @phpstan-assert !User $value          — negated assertion
+    /// @phpstan-assert-if-true User $value   — assertion when return is true
+    /// @phpstan-assert-if-false User $value  — assertion when return is false
+    /// ```
+    pub type_assertions: Vec<TypeAssertion>,
+}
+
+// ─── PHPStan Type Assertions ────────────────────────────────────────────────
+
+/// A type assertion annotation parsed from `@phpstan-assert` /
+/// `@psalm-assert` (and their `-if-true` / `-if-false` variants).
+///
+/// These annotations let any function or method act as a custom type
+/// guard, telling the analyser that a parameter has been narrowed to
+/// a specific type after the call succeeds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeAssertion {
+    /// When the assertion applies.
+    pub kind: AssertionKind,
+    /// The parameter name **with** the `$` prefix (e.g. `"$value"`).
+    pub param_name: String,
+    /// The asserted type (e.g. `"User"`, `"AdminUser"`).
+    pub asserted_type: String,
+    /// Whether the assertion is negated (`!Type`), meaning the parameter
+    /// is guaranteed to *not* be this type.
+    pub negated: bool,
+}
+
+/// When a `@phpstan-assert` annotation takes effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssertionKind {
+    /// `@phpstan-assert` — unconditional: after the function returns
+    /// (without throwing), the assertion holds for all subsequent code.
+    Always,
+    /// `@phpstan-assert-if-true` — the assertion holds when the function
+    /// returns `true` (i.e. inside the `if` body).
+    IfTrue,
+    /// `@phpstan-assert-if-false` — the assertion holds when the function
+    /// returns `false` (i.e. inside the `else` body, or the `if` body of
+    /// a negated condition).
+    IfFalse,
 }
 
 // ─── PHPStan Conditional Return Types ───────────────────────────────────────

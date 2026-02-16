@@ -765,6 +765,12 @@ impl Backend {
                     // remainder of the current scope.
                     Self::try_apply_assert_instanceof_narrowing(expr_stmt.expression, ctx, results);
 
+                    // ── @phpstan-assert / @psalm-assert narrowing ──
+                    // When a function with `@phpstan-assert Type $param`
+                    // is called as a standalone statement, narrow the
+                    // corresponding argument variable unconditionally.
+                    Self::try_apply_custom_assert_narrowing(expr_stmt.expression, ctx, results);
+
                     // ── match(true) { $var instanceof Foo => … } narrowing ──
                     Self::try_apply_match_true_narrowing(expr_stmt.expression, ctx, results);
                 }
@@ -793,6 +799,14 @@ impl Backend {
                             ctx,
                             results,
                         );
+                        // ── @phpstan-assert-if-true/false narrowing for then-body ──
+                        Self::try_apply_assert_condition_narrowing(
+                            if_stmt.condition,
+                            body.statement.span(),
+                            ctx,
+                            results,
+                            false, // not inverted — this is the then-body
+                        );
                         Self::check_statement_for_assignments(body.statement, ctx, results, true);
 
                         for else_if in body.else_if_clauses.iter() {
@@ -802,6 +816,13 @@ impl Backend {
                                 else_if.statement.span(),
                                 ctx,
                                 results,
+                            );
+                            Self::try_apply_assert_condition_narrowing(
+                                else_if.condition,
+                                else_if.statement.span(),
+                                ctx,
+                                results,
+                                false,
                             );
                             Self::check_statement_for_assignments(
                                 else_if.statement,
@@ -819,6 +840,13 @@ impl Backend {
                                 else_clause.statement.span(),
                                 ctx,
                                 results,
+                            );
+                            Self::try_apply_assert_condition_narrowing(
+                                if_stmt.condition,
+                                else_clause.statement.span(),
+                                ctx,
+                                results,
+                                true, // inverted — this is the else-body
                             );
                             Self::check_statement_for_assignments(
                                 else_clause.statement,
@@ -855,6 +883,13 @@ impl Backend {
                             ctx,
                             results,
                         );
+                        Self::try_apply_assert_condition_narrowing(
+                            if_stmt.condition,
+                            then_span,
+                            ctx,
+                            results,
+                            false,
+                        );
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
                             ctx,
@@ -878,6 +913,13 @@ impl Backend {
                                 ei_span,
                                 ctx,
                                 results,
+                            );
+                            Self::try_apply_assert_condition_narrowing(
+                                else_if.condition,
+                                ei_span,
+                                ctx,
+                                results,
+                                false,
                             );
                             Self::walk_statements_for_assignments(
                                 else_if.statements.iter(),
@@ -904,6 +946,13 @@ impl Backend {
                                 else_span,
                                 ctx,
                                 results,
+                            );
+                            Self::try_apply_assert_condition_narrowing(
+                                if_stmt.condition,
+                                else_span,
+                                ctx,
+                                results,
+                                true, // inverted — else-body
                             );
                             Self::walk_statements_for_assignments(
                                 else_clause.statements.iter(),
@@ -936,6 +985,13 @@ impl Backend {
                             ctx,
                             results,
                         );
+                        Self::try_apply_assert_condition_narrowing(
+                            while_stmt.condition,
+                            inner.span(),
+                            ctx,
+                            results,
+                            false,
+                        );
                         Self::check_statement_for_assignments(inner, ctx, results, true);
                     }
                     WhileBody::ColonDelimited(body) => {
@@ -949,6 +1005,13 @@ impl Backend {
                             body_span,
                             ctx,
                             results,
+                        );
+                        Self::try_apply_assert_condition_narrowing(
+                            while_stmt.condition,
+                            body_span,
+                            ctx,
+                            results,
+                            false,
                         );
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
@@ -1307,6 +1370,171 @@ impl Backend {
             }
         }
         false
+    }
+
+    /// Apply narrowing from `@phpstan-assert` / `@psalm-assert` annotations
+    /// on a function called as a standalone expression statement.
+    ///
+    /// Only `AssertionKind::Always` assertions are applied here — the
+    /// `IfTrue` / `IfFalse` variants are handled by
+    /// `try_apply_assert_condition_narrowing`.
+    fn try_apply_custom_assert_narrowing(
+        expr: &Expression<'_>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        let expr = match expr {
+            Expression::Parenthesized(inner) => inner.expression,
+            other => other,
+        };
+        if let Expression::Call(Call::Function(func_call)) = expr {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value().to_string(),
+                _ => return,
+            };
+            let func_info = match ctx.function_loader {
+                Some(fl) => match fl(&func_name) {
+                    Some(fi) => fi,
+                    None => return,
+                },
+                None => return,
+            };
+            for assertion in &func_info.type_assertions {
+                if assertion.kind != AssertionKind::Always {
+                    continue;
+                }
+                // Find the parameter index for this assertion
+                if let Some(arg_var) = Self::find_assertion_arg_variable(
+                    &func_call.argument_list,
+                    &assertion.param_name,
+                    &func_info.parameters,
+                ) && arg_var == ctx.var_name
+                {
+                    if assertion.negated {
+                        Self::apply_instanceof_exclusion(&assertion.asserted_type, ctx, results);
+                    } else {
+                        Self::apply_instanceof_inclusion(&assertion.asserted_type, ctx, results);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply narrowing from `@phpstan-assert-if-true` / `-if-false`
+    /// annotations on a function call used as an `if` / `while` condition.
+    ///
+    /// * `inverted == false` → we're in the then-body (or while-body):
+    ///   apply `IfTrue` assertions (and `IfFalse` if the condition is negated).
+    /// * `inverted == true` → we're in the else-body:
+    ///   apply `IfFalse` assertions (and `IfTrue` if the condition is negated).
+    fn try_apply_assert_condition_narrowing(
+        condition: &Expression<'_>,
+        body_span: mago_span::Span,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        inverted: bool,
+    ) {
+        if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
+            return;
+        }
+
+        // Unwrap parentheses and detect negation (`!func($var)`)
+        let (func_call_expr, condition_negated) = Self::unwrap_condition_negation(condition);
+
+        let func_call = match func_call_expr {
+            Expression::Call(Call::Function(fc)) => fc,
+            _ => return,
+        };
+        let func_name = match func_call.function {
+            Expression::Identifier(ident) => ident.value().to_string(),
+            _ => return,
+        };
+        let func_info = match ctx.function_loader {
+            Some(fl) => match fl(&func_name) {
+                Some(fi) => fi,
+                None => return,
+            },
+            None => return,
+        };
+
+        // Determine whether the function returned true in this branch.
+        //
+        // - then-body (inverted=false), no negation  → function returned true
+        // - then-body (inverted=false), negated       → function returned false
+        // - else-body (inverted=true),  no negation  → function returned false
+        // - else-body (inverted=true),  negated       → function returned true
+        let function_returned_true = !(inverted ^ condition_negated);
+
+        for assertion in &func_info.type_assertions {
+            // Determine if this assertion's condition is satisfied in this
+            // branch.  IfTrue assertions apply positively when the function
+            // returned true; IfFalse assertions apply positively when the
+            // function returned false.  In the opposite branch, we apply
+            // the *inverse* (exclude instead of include, and vice-versa).
+            let applies_positively = match assertion.kind {
+                AssertionKind::IfTrue => function_returned_true,
+                AssertionKind::IfFalse => !function_returned_true,
+                AssertionKind::Always => continue, // handled elsewhere
+            };
+
+            if let Some(arg_var) = Self::find_assertion_arg_variable(
+                &func_call.argument_list,
+                &assertion.param_name,
+                &func_info.parameters,
+            ) && arg_var == ctx.var_name
+            {
+                // XOR the assertion's own negation with whether we're in the
+                // opposite branch: positive + non-negated → include,
+                // positive + negated → exclude, opposite + non-negated → exclude,
+                // opposite + negated → include.
+                let should_exclude = assertion.negated ^ !applies_positively;
+                if should_exclude {
+                    Self::apply_instanceof_exclusion(&assertion.asserted_type, ctx, results);
+                } else {
+                    Self::apply_instanceof_inclusion(&assertion.asserted_type, ctx, results);
+                }
+            }
+        }
+    }
+
+    /// Unwrap parentheses and a single `!` prefix from a condition,
+    /// returning `(inner_expr, negated)`.
+    fn unwrap_condition_negation<'b>(expr: &'b Expression<'b>) -> (&'b Expression<'b>, bool) {
+        match expr {
+            Expression::Parenthesized(inner) => Self::unwrap_condition_negation(inner.expression),
+            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+                let (inner, already_negated) = Self::unwrap_condition_negation(prefix.operand);
+                (inner, !already_negated)
+            }
+            _ => (expr, false),
+        }
+    }
+
+    /// Given a function's argument list and a parameter name (with `$`
+    /// prefix), find the variable name passed at that parameter's position.
+    ///
+    /// Returns `Some("$varName")` if the argument at the matching position
+    /// is a simple direct variable.
+    fn find_assertion_arg_variable(
+        argument_list: &ArgumentList<'_>,
+        param_name: &str,
+        parameters: &[ParameterInfo],
+    ) -> Option<String> {
+        // Find the parameter index
+        let param_idx = parameters.iter().position(|p| p.name == param_name)?;
+
+        // Get the argument at that position
+        let arg = argument_list.arguments.iter().nth(param_idx)?;
+        let arg_expr = match arg {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        };
+
+        // The argument must be a simple variable
+        match arg_expr {
+            Expression::Variable(Variable::Direct(dv)) => Some(dv.name.to_string()),
+            _ => None,
+        }
     }
 
     /// If `expr` is `assert($var instanceof ClassName)` (or the negated

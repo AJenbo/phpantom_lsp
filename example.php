@@ -423,6 +423,34 @@ function getUnknownValue()
     return new AdminUser('', '');
 }
 
+// ─── Custom Assert Functions (@phpstan-assert) ──────────────────────────────
+
+/**
+ * @phpstan-assert User $value
+ */
+function assertUser($value): void
+{
+    if (!$value instanceof User) {
+        throw new \InvalidArgumentException('Expected User');
+    }
+}
+
+/**
+ * @phpstan-assert-if-true AdminUser $value
+ */
+function isAdmin($value): bool
+{
+    return $value instanceof AdminUser;
+}
+
+/**
+ * @phpstan-assert-if-false AdminUser $value
+ */
+function isRegularUser($value): bool
+{
+    return !$value instanceof AdminUser;
+}
+
 // ─── Usage Examples ─────────────────────────────────────────────────────────
 
 // Instance member completion via ->
@@ -489,7 +517,7 @@ if (rand(0, 1)) {
 }
 $ambiguous->getStatus(); // Both Container and AdminUser have getStatus()
 if ($ambiguous instanceof AdminUser) {
-    $ambiguous->addRoles('reviewer');
+    $ambiguous->grantPermission('review');
 } else {
     $ambiguous->bind($ambiguous::class, $ambiguous);
 }
@@ -514,14 +542,14 @@ $asserted->addRoles();
 // while-loop instanceof narrowing
 // Inside the loop body, $found is narrowed to User because the condition
 // guarantees it on every iteration.
-$found2 = findOrFail(1); // User|AdminUser
+$found2 = getUnknownValue(1);
 while ($found2 instanceof User) {
     $found2->getEmail(); // ✅ User members only
     break;
 }
 
 // is_a() — treated the same as instanceof
-$pet = findOrFail(1); // User|AdminUser
+$pet = getUnknownValue(1);
 if (is_a($pet, AdminUser::class)) {
     $pet->grantPermission('edit'); // ✅ narrowed to AdminUser
 }
@@ -533,7 +561,7 @@ if (!is_a($pet2, AdminUser::class)) {
 }
 
 // assert() with is_a() — unconditional narrowing
-$pet3 = findOrFail(1); // User|AdminUser
+$pet3 = getUnknownValue(1);
 assert(is_a($pet3, AdminUser::class));
 $pet3->grantPermission('delete'); // ✅ narrowed to AdminUser
 
@@ -562,14 +590,14 @@ if (User::class === $entity4::class) {
 }
 
 // match(true) with instanceof — narrowing inside match arm bodies
-$value = findOrFail(1); // User|AdminUser
+$value = getUnknownValue(1);
 $result = match (true) {
     $value instanceof AdminUser => $value->grantPermission('approve'), // ✅ narrowed to AdminUser
     default => null,
 };
 
 // match(true) with is_a() — also works
-$value2 = findOrFail(1); // User|AdminUser
+$value2 = getUnknownValue(1);
 $result2 = match (true) {
     is_a($value2, AdminUser::class) => $value2->grantPermission('deploy'), // ✅ narrowed to AdminUser
     default => null,
@@ -581,6 +609,48 @@ if ($check instanceof AdminUser) {
     $check->grantPermission('sudo'); // ✅ narrowed to AdminUser
 } else {
     $check->getEmail(); // ✅ narrowed to User (AdminUser excluded)
+}
+
+// ─── Custom Assert Narrowing (@phpstan-assert) ─────────────────────────────
+//
+// Functions annotated with @phpstan-assert / @psalm-assert act as custom
+// type guards — PHPantomLSP reads the annotation and narrows accordingly.
+
+// @phpstan-assert — unconditional narrowing after the call
+$unknown = getUnknownValue(1);
+assertUser($unknown);
+$unknown->getEmail(); // ✅ narrowed to User (assertUser guarantees it)
+
+// @phpstan-assert-if-true — narrows inside the if-body when function returns true
+$maybe = findOrFail(1); // User|AdminUser
+if (isAdmin($maybe)) {
+    $maybe->grantPermission('sudo'); // ✅ narrowed to AdminUser
+} else {
+    $maybe->getEmail(); // ✅ narrowed to User (AdminUser excluded)
+}
+
+// @phpstan-assert-if-false — narrows in the else-body when function returns false
+// and excludes in the then-body (function returned true → AdminUser is excluded)
+$maybe2 = findOrFail(1); // User|AdminUser
+if (isRegularUser($maybe2)) {
+    $maybe2->getEmail(); // ✅ narrowed to User (AdminUser excluded)
+} else {
+    $maybe2->grantPermission('deploy'); // ✅ narrowed to AdminUser
+}
+
+// Negated condition flips which branch gets the narrowing
+$maybe3 = findOrFail(1); // User|AdminUser
+if (!isAdmin($maybe3)) {
+    $maybe3->getEmail(); // ✅ narrowed to User (function returned false → AdminUser excluded)
+} else {
+    $maybe3->grantPermission('edit'); // ✅ narrowed to AdminUser (function returned true)
+}
+
+// @phpstan-assert-if-true in a while-loop condition
+$cursor = getUnknownValue(1);
+while (isAdmin($cursor)) {
+    $cursor->grantPermission('loop'); // ✅ narrowed to AdminUser inside loop
+    break;
 }
 
 // Go-to-definition targets:
