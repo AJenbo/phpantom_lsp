@@ -3,3 +3,4 @@
 *.phprj
 *.workspace
 /stubs/
+/zed-extension/extension.wasm
