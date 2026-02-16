@@ -67,7 +67,7 @@ impl LanguageServer for Backend {
             let mappings = composer::parse_composer_json(&root);
             let mapping_count = mappings.len();
 
-            // Determine the vendor directory (needed for autoload_files.php).
+            // Determine the vendor directory (needed for autoload files).
             let vendor_dir = {
                 let composer_path = root.join("composer.json");
                 if let Ok(content) = std::fs::read_to_string(&composer_path) {
@@ -87,6 +87,13 @@ impl LanguageServer for Backend {
 
             if let Ok(mut m) = self.psr4_mappings.lock() {
                 *m = mappings;
+            }
+
+            // Parse autoload_classmap.php to get direct FQN → file path mappings.
+            let classmap = composer::parse_autoload_classmap(&root, &vendor_dir);
+            let classmap_count = classmap.len();
+            if let Ok(mut cm) = self.classmap.lock() {
+                *cm = classmap;
             }
 
             // Parse autoload_files.php to discover global function definitions.
@@ -126,8 +133,8 @@ impl LanguageServer for Backend {
             self.log(
                 MessageType::INFO,
                 format!(
-                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s), {} autoload file(s)",
-                    mapping_count, autoload_count
+                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s), {} classmap entries, {} autoload file(s)",
+                    mapping_count, classmap_count, autoload_count
                 ),
             )
             .await;
@@ -241,27 +248,29 @@ impl LanguageServer for Backend {
             None
         };
 
-        if let (Some(content), Some(classes)) = (content, classes) {
+        if let Some(content) = content {
+            let classes = classes.unwrap_or_default();
+
+            // Gather the current file's `use` statement mappings and namespace
+            // so the class_loader can resolve short names like `Resource` to
+            // their fully-qualified equivalents like `Klarna\Rest\Resource`.
+            let file_use_map: HashMap<String, String> = if let Ok(map) = self.use_map.lock() {
+                map.get(&uri).cloned().unwrap_or_default()
+            } else {
+                HashMap::new()
+            };
+
+            let file_namespace: Option<String> = if let Ok(map) = self.namespace_map.lock() {
+                map.get(&uri).cloned().flatten()
+            } else {
+                None
+            };
+
             // Try to extract a completion target (requires `->` or `::`)
             if let Some(target) = Self::extract_completion_target(&content, position) {
                 let cursor_offset = Self::position_to_offset(&content, position);
                 let current_class =
                     cursor_offset.and_then(|off| Self::find_class_at_offset(&classes, off));
-
-                // Gather the current file's `use` statement mappings and namespace
-                // so the class_loader can resolve short names like `Resource` to
-                // their fully-qualified equivalents like `Klarna\Rest\Resource`.
-                let file_use_map: HashMap<String, String> = if let Ok(map) = self.use_map.lock() {
-                    map.get(&uri).cloned().unwrap_or_default()
-                } else {
-                    HashMap::new()
-                };
-
-                let file_namespace: Option<String> = if let Ok(map) = self.namespace_map.lock() {
-                    map.get(&uri).cloned().flatten()
-                } else {
-                    None
-                };
 
                 // Build the class_loader closure that provides cross-file /
                 // PSR-4 resolution.  This captures `&self`, the current file's
@@ -401,6 +410,18 @@ impl LanguageServer for Backend {
                     if !all_items.is_empty() {
                         return Ok(Some(CompletionResponse::Array(all_items)));
                     }
+                }
+            }
+
+            // ── Class name completion ───────────────────────────────
+            // When there is no `->` or `::` operator, check whether the
+            // user is typing a class name and offer completions from all
+            // known sources (use-imports, same namespace, stubs, classmap,
+            // class_index).
+            if Self::extract_partial_class_name(&content, position).is_some() {
+                let class_items = self.build_class_name_completions(&file_use_map, &file_namespace);
+                if !class_items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(class_items)));
                 }
             }
         }

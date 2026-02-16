@@ -1,6 +1,9 @@
 mod common;
 
 use common::create_psr4_workspace;
+use phpantom_lsp::Backend;
+use phpantom_lsp::composer::parse_autoload_classmap;
+use std::fs;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -845,6 +848,244 @@ async fn test_cross_file_use_statement_param_type_hint() {
                 method_names.contains(&"send"),
                 "Should include 'send', got {:?}",
                 method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_cross_file_classmap_resolution() {
+    // Set up a temp workspace with a classmap entry (no PSR-4 mapping)
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{"name": "test/project"}"#,
+    )
+    .expect("failed to write composer.json");
+
+    // Create the PHP class file that the classmap points to
+    let class_dir = dir.path().join("lib").join("Legacy");
+    fs::create_dir_all(&class_dir).expect("failed to create dirs");
+    fs::write(
+        class_dir.join("Widget.php"),
+        concat!(
+            "<?php\n",
+            "namespace Legacy;\n",
+            "class Widget {\n",
+            "    public function render(): string { return ''; }\n",
+            "    public static function create(): self { return new self(); }\n",
+            "    const TYPE = 'widget';\n",
+            "}\n",
+        ),
+    )
+    .expect("failed to write class file");
+
+    // Create autoload_classmap.php pointing to the class
+    let composer_dir = dir.path().join("vendor").join("composer");
+    fs::create_dir_all(&composer_dir).expect("failed to create vendor/composer");
+    fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        concat!(
+            "<?php\n",
+            "\n",
+            "$vendorDir = dirname(__DIR__);\n",
+            "$baseDir = dirname($vendorDir);\n",
+            "\n",
+            "return array(\n",
+            "    'Legacy\\\\Widget' => $baseDir . '/lib/Legacy/Widget.php',\n",
+            ");\n",
+        ),
+    )
+    .expect("failed to write autoload_classmap.php");
+
+    // Build a Backend with NO PSR-4 mappings — only the classmap
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+
+    // Populate the classmap from the autoload_classmap.php file
+    let classmap = parse_autoload_classmap(dir.path(), "vendor");
+    assert_eq!(classmap.len(), 1, "Should parse 1 classmap entry");
+    if let Ok(mut cm) = backend.classmap.lock() {
+        *cm = classmap;
+    }
+
+    // Open a file that uses Legacy\Widget via ->
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class App {\n",
+        "    function boot() {\n",
+        "        $w = new Legacy\\Widget();\n",
+        "        $w->\n",
+        "    }\n",
+        "}\n",
+    );
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$w->` on line 4
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve Legacy\\Widget via classmap"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"render"),
+                "Should include instance method 'render' resolved via classmap, got {:?}",
+                method_names
+            );
+            // Static method should not appear via ->
+            assert!(
+                !method_names.contains(&"create"),
+                "Should exclude static 'create' from -> access"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_cross_file_classmap_double_colon() {
+    // Verify classmap works with :: access (static methods + constants)
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{"name": "test/project"}"#,
+    )
+    .expect("failed to write composer.json");
+
+    let class_dir = dir.path().join("vendor").join("acme").join("src");
+    fs::create_dir_all(&class_dir).expect("failed to create dirs");
+    fs::write(
+        class_dir.join("Factory.php"),
+        concat!(
+            "<?php\n",
+            "namespace Acme;\n",
+            "class Factory {\n",
+            "    public static function build(): self { return new self(); }\n",
+            "    public function configure(): void {}\n",
+            "    const DEFAULT_CONFIG = 'default';\n",
+            "}\n",
+        ),
+    )
+    .expect("failed to write class file");
+
+    let composer_dir = dir.path().join("vendor").join("composer");
+    fs::create_dir_all(&composer_dir).expect("failed to create vendor/composer");
+    fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        concat!(
+            "<?php\n",
+            "$vendorDir = dirname(__DIR__);\n",
+            "$baseDir = dirname($vendorDir);\n",
+            "\n",
+            "return array(\n",
+            "    'Acme\\\\Factory' => $vendorDir . '/acme/src/Factory.php',\n",
+            ");\n",
+        ),
+    )
+    .expect("failed to write autoload_classmap.php");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    let classmap = parse_autoload_classmap(dir.path(), "vendor");
+    if let Ok(mut cm) = backend.classmap.lock() {
+        *cm = classmap;
+    }
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class App {\n",
+        "    function boot() {\n",
+        "        Acme\\Factory::\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 3,
+                    character: 23,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Completion should resolve Acme\\Factory via classmap"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            let constant_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                method_names.contains(&"build"),
+                "Should include static 'build' via classmap, got {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"configure"),
+                "Should exclude non-static 'configure' from :: access"
+            );
+            assert!(
+                constant_names.contains(&"DEFAULT_CONFIG"),
+                "Should include constant 'DEFAULT_CONFIG' via classmap, got {:?}",
+                constant_names
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

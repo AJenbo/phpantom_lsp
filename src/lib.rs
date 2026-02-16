@@ -5,7 +5,7 @@
 //! - [`types`]: Data structures for extracted PHP information (classes, methods, functions, etc.)
 //! - [`parser`]: PHP parsing and AST extraction using mago_syntax
 //! - [`completion`]: Completion logic (target extraction, type resolution, item building)
-//! - [`composer`]: Composer autoload (PSR-4) parsing and class-to-file resolution
+//! - [`composer`]: Composer autoload (PSR-4, classmap) parsing and class-to-file resolution
 //! - [`server`]: The LSP `LanguageServer` trait implementation
 //! - [`util`]: Utility helpers (position conversion, class lookup, logging)
 //! - [`definition`]: Go-to-definition support for classes, members, and functions
@@ -85,6 +85,17 @@ pub struct Backend {
     /// Populated during `update_ast` (using the file's namespace + class
     /// short name) and during server initialization for autoload files.
     pub class_index: Arc<Mutex<HashMap<String, String>>>,
+    /// Composer classmap: fully-qualified class name → file path on disk.
+    ///
+    /// Parsed from `<vendor>/composer/autoload_classmap.php` during server
+    /// initialization.  This provides a direct FQN-to-file lookup that
+    /// covers classes not discoverable via PSR-4 — and when the user runs
+    /// `composer install -o`, Composer converts *all* PSR-0/PSR-4
+    /// mappings into a classmap, giving complete class coverage.
+    ///
+    /// Consulted by `find_or_load_class` as a resolution step between
+    /// the ast_map scan (Phase 1) and PSR-4 resolution (Phase 2).
+    pub classmap: Arc<Mutex<HashMap<String, PathBuf>>>,
     /// Embedded PHP stubs for built-in classes/interfaces (e.g. `UnitEnum`,
     /// `BackedEnum`, `Iterator`, `Countable`, …).
     /// Maps class short name → raw PHP source code.
@@ -123,6 +134,7 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),
             stub_function_index: stubs::build_stub_function_index(),
             stub_constant_index: stubs::build_stub_constant_index(),
@@ -143,6 +155,7 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),
             stub_function_index: stubs::build_stub_function_index(),
             stub_constant_index: stubs::build_stub_constant_index(),
@@ -166,6 +179,7 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index,
             stub_function_index: stubs::build_stub_function_index(),
             stub_constant_index: stubs::build_stub_constant_index(),
@@ -194,6 +208,7 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index,
             stub_function_index,
             stub_constant_index,
@@ -218,6 +233,7 @@ impl Backend {
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
+            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),
             stub_function_index: stubs::build_stub_function_index(),
             stub_constant_index: stubs::build_stub_constant_index(),

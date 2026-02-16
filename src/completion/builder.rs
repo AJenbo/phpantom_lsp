@@ -2,7 +2,10 @@
 ///
 /// This module contains the logic for constructing LSP `CompletionItem`s from
 /// resolved `ClassInfo`, filtered by the `AccessKind` (arrow, double-colon,
-/// or parent double-colon).
+/// or parent double-colon), as well as class name completion when no member
+/// access operator is present.
+use std::collections::{HashMap, HashSet};
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -244,6 +247,191 @@ impl Backend {
 
         for (i, item) in items.iter_mut().enumerate() {
             item.sort_text = Some(format!("{:05}", i));
+        }
+
+        items
+    }
+
+    // ─── Class name completion ──────────────────────────────────────────
+
+    /// Extract the partial identifier (class name fragment) that the user
+    /// is currently typing at the given cursor position.
+    ///
+    /// Walks backward from the cursor through alphanumeric characters,
+    /// underscores, and backslashes (namespace separators).  Returns
+    /// `None` if the resulting text starts with `$` (variable context)
+    /// or is empty.
+    pub fn extract_partial_class_name(content: &str, position: Position) -> Option<String> {
+        let lines: Vec<&str> = content.lines().collect();
+        if position.line as usize >= lines.len() {
+            return None;
+        }
+
+        let line = lines[position.line as usize];
+        let chars: Vec<char> = line.chars().collect();
+        let col = (position.character as usize).min(chars.len());
+
+        // Walk backwards through identifier characters (including `\`)
+        let mut i = col;
+        while i > 0
+            && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '\\')
+        {
+            i -= 1;
+        }
+
+        if i == col {
+            // Nothing typed — no partial identifier
+            return None;
+        }
+
+        // If preceded by `$`, this is a variable, not a class name
+        if i > 0 && chars[i - 1] == '$' {
+            return None;
+        }
+
+        // If preceded by `->` or `::`, member completion handles this
+        if i >= 2 && chars[i - 2] == '-' && chars[i - 1] == '>' {
+            return None;
+        }
+        if i >= 2 && chars[i - 2] == ':' && chars[i - 1] == ':' {
+            return None;
+        }
+
+        let partial: String = chars[i..col].iter().collect();
+        if partial.is_empty() {
+            return None;
+        }
+
+        Some(partial)
+    }
+
+    /// Build completion items for class names from all known sources.
+    ///
+    /// Sources (in priority order):
+    ///   1. Classes imported via `use` statements in the current file
+    ///   2. Classes in the same namespace (from the ast_map)
+    ///   3. Built-in PHP classes from embedded stubs
+    ///   4. Classes from the Composer classmap (`autoload_classmap.php`)
+    ///   5. Classes from the class_index (discovered during parsing)
+    ///
+    /// Each item uses the short class name as `label` and the
+    /// fully-qualified name as `detail`.  Items are deduplicated by FQN.
+    pub(crate) fn build_class_name_completions(
+        &self,
+        file_use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Vec<CompletionItem> {
+        let mut seen_fqns: HashSet<String> = HashSet::new();
+        let mut items: Vec<CompletionItem> = Vec::new();
+
+        // ── 1. Use-imported classes (highest priority) ──────────────
+        for (short_name, fqn) in file_use_map {
+            if !seen_fqns.insert(fqn.clone()) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: short_name.clone(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(fqn.clone()),
+                insert_text: Some(short_name.clone()),
+                filter_text: Some(short_name.clone()),
+                sort_text: Some(format!("0_{}", short_name.to_lowercase())),
+                ..CompletionItem::default()
+            });
+        }
+
+        // ── 2. Same-namespace classes (from ast_map) ────────────────
+        if let Some(ns) = file_namespace
+            && let Ok(nmap) = self.namespace_map.lock()
+        {
+            // Find all URIs that share the same namespace
+            let same_ns_uris: Vec<String> = nmap
+                .iter()
+                .filter_map(|(uri, opt_ns)| {
+                    if opt_ns.as_deref() == Some(ns.as_str()) {
+                        Some(uri.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            drop(nmap);
+
+            if let Ok(amap) = self.ast_map.lock() {
+                for uri in &same_ns_uris {
+                    if let Some(classes) = amap.get(uri) {
+                        for cls in classes {
+                            let fqn = format!("{}\\{}", ns, cls.name);
+                            if !seen_fqns.insert(fqn.clone()) {
+                                continue;
+                            }
+                            items.push(CompletionItem {
+                                label: cls.name.clone(),
+                                kind: Some(CompletionItemKind::CLASS),
+                                detail: Some(fqn),
+                                insert_text: Some(cls.name.clone()),
+                                filter_text: Some(cls.name.clone()),
+                                sort_text: Some(format!("1_{}", cls.name.to_lowercase())),
+                                ..CompletionItem::default()
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── 3. Built-in PHP classes from stubs ──────────────────────
+        for &name in self.stub_index.keys() {
+            if !seen_fqns.insert(name.to_string()) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::CLASS),
+                detail: Some(name.to_string()),
+                insert_text: Some(name.to_string()),
+                filter_text: Some(name.to_string()),
+                sort_text: Some(format!("2_{}", name.to_lowercase())),
+                ..CompletionItem::default()
+            });
+        }
+
+        // ── 4. Composer classmap ────────────────────────────────────
+        if let Ok(cmap) = self.classmap.lock() {
+            for fqn in cmap.keys() {
+                if !seen_fqns.insert(fqn.clone()) {
+                    continue;
+                }
+                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                items.push(CompletionItem {
+                    label: short_name.to_string(),
+                    kind: Some(CompletionItemKind::CLASS),
+                    detail: Some(fqn.clone()),
+                    insert_text: Some(short_name.to_string()),
+                    filter_text: Some(short_name.to_string()),
+                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
+                    ..CompletionItem::default()
+                });
+            }
+        }
+
+        // ── 5. class_index (discovered classes) ─────────────────────
+        if let Ok(idx) = self.class_index.lock() {
+            for fqn in idx.keys() {
+                if !seen_fqns.insert(fqn.clone()) {
+                    continue;
+                }
+                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                items.push(CompletionItem {
+                    label: short_name.to_string(),
+                    kind: Some(CompletionItemKind::CLASS),
+                    detail: Some(fqn.clone()),
+                    insert_text: Some(short_name.to_string()),
+                    filter_text: Some(short_name.to_string()),
+                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
+                    ..CompletionItem::default()
+                });
+            }
         }
 
         items

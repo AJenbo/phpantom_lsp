@@ -209,6 +209,44 @@ impl Backend {
             }
         }
 
+        // ── Phase 1.5: Try Composer classmap ──
+        // The classmap (from `vendor/composer/autoload_classmap.php`) maps
+        // FQNs directly to file paths.  This is more targeted than PSR-4
+        // (a single hash lookup) and covers classes that don't follow PSR-4
+        // conventions.  When the user runs `composer install -o`, *all*
+        // classes end up in the classmap, giving complete coverage.
+        if let Ok(cmap) = self.classmap.lock()
+            && let Some(file_path) = cmap.get(name)
+        {
+            let file_path = file_path.clone();
+            drop(cmap); // release lock before doing I/O
+
+            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                let mut classes = self.parse_php(&content);
+
+                let file_use_map = self.parse_use_statements(&content);
+                let file_namespace = self.parse_namespace(&content);
+                Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
+
+                let result = classes.iter().find(|c| c.name == last_segment).cloned();
+
+                let uri = format!("file://{}", file_path.display());
+                if let Ok(mut map) = self.ast_map.lock() {
+                    map.insert(uri.clone(), classes);
+                }
+                if let Ok(mut map) = self.use_map.lock() {
+                    map.insert(uri.clone(), file_use_map);
+                }
+                if let Ok(mut map) = self.namespace_map.lock() {
+                    map.insert(uri, file_namespace);
+                }
+
+                if result.is_some() {
+                    return result;
+                }
+            }
+        }
+
         // ── Phase 2: Try PSR-4 resolution ──
         if let Some(workspace_root) = self
             .workspace_root
