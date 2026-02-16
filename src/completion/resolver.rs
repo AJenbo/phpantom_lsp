@@ -508,6 +508,12 @@ impl Backend {
     ) -> Vec<ClassInfo> {
         let hint = type_hint.strip_prefix('?').unwrap_or(type_hint);
 
+        // Strip surrounding parentheses that appear in DNF types like `(A&B)|C`.
+        let hint = hint
+            .strip_prefix('(')
+            .and_then(|h| h.strip_suffix(')'))
+            .unwrap_or(hint);
+
         // ── Union type: split on `|` and resolve each part ──
         if hint.contains('|') {
             let mut results = Vec::new();
@@ -516,7 +522,29 @@ impl Backend {
                 if part.is_empty() {
                     continue;
                 }
-                // Recursively resolve each part (handles self/static, scalars, etc.)
+                // Recursively resolve each part (handles self/static, scalars,
+                // intersection components, etc.)
+                let resolved =
+                    Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
+                for cls in resolved {
+                    if !results.iter().any(|c: &ClassInfo| c.name == cls.name) {
+                        results.push(cls);
+                    }
+                }
+            }
+            return results;
+        }
+
+        // ── Intersection type: split on `&` and resolve each part ──
+        // `User&JsonSerializable` means the value satisfies *all* listed
+        // types, so completions should include members from every part.
+        if hint.contains('&') {
+            let mut results = Vec::new();
+            for part in hint.split('&') {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
                 let resolved =
                     Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
                 for cls in resolved {

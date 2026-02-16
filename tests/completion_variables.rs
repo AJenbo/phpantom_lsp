@@ -6442,3 +6442,152 @@ async fn test_completion_phpstan_assert_top_level() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_completion_intersection_parameter_type_shows_all_members() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///intersection_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Loggable {\n",
+        "    public function log(): void;\n",
+        "}\n",
+        "\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function handle(User&Loggable $user): void {\n",
+        "        $user->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$user->` on line 11
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for intersection param type User&Loggable"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include getName from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("log")),
+                "Should include log from Loggable, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_dnf_type_shows_all_members() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///dnf_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Serializable {\n",
+        "    public function serialize(): string;\n",
+        "}\n",
+        "\n",
+        "interface Loggable {\n",
+        "    public function log(): void;\n",
+        "}\n",
+        "\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function handle((Serializable&Loggable)|User $input): void {\n",
+        "        $input->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor after `$input->` on line 15
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 15,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for DNF param type (Serializable&Loggable)|User"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("serialize")),
+                "Should include serialize from Serializable, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("log")),
+                "Should include log from Loggable, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include getName from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

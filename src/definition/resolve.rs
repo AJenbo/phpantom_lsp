@@ -64,6 +64,15 @@ impl Backend {
             return None;
         }
 
+        // ── Variable go-to-definition ──
+        // When the cursor is on a `$variable`, jump to its most recent
+        // assignment or declaration (parameter, foreach, catch) above the
+        // cursor position.
+        if Self::cursor_is_on_variable(content, position, &word) {
+            let var_name = format!("${}", word);
+            return Self::resolve_variable_definition(content, uri, position, &var_name);
+        }
+
         // ── NEW: Try member access resolution (::, ->, ?->) ──
         // If the cursor is on a member name (right side of an operator),
         // resolve the owning class and jump to the member declaration.
@@ -1529,6 +1538,173 @@ impl Backend {
                     }
                 }
             }
+        }
+
+        None
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Variable go-to-definition helpers
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// Returns `true` when the cursor is sitting on a `$variable` token.
+    ///
+    /// `extract_word_at_position` strips `$`, so we peek at the character
+    /// immediately before the word to see if it is `$`.
+    fn cursor_is_on_variable(content: &str, position: Position, _word: &str) -> bool {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_idx = position.line as usize;
+        if line_idx >= lines.len() {
+            return false;
+        }
+        let line = lines[line_idx];
+        let chars: Vec<char> = line.chars().collect();
+        let col = (position.character as usize).min(chars.len());
+
+        // Find where `word` starts on this line (same logic as
+        // extract_word_at_position: walk left from cursor).
+        let is_word_char = |c: char| c.is_alphanumeric() || c == '_' || c == '\\';
+        let mut start = col;
+        if start < chars.len() && is_word_char(chars[start]) {
+            // on a word char
+        } else if start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        } else {
+            return false;
+        }
+        while start > 0 && is_word_char(chars[start - 1]) {
+            start -= 1;
+        }
+
+        // The character just before the word must be `$`.
+        if start == 0 {
+            return false;
+        }
+        chars[start - 1] == '$'
+    }
+
+    /// Find the most recent assignment or declaration of `$var_name` before
+    /// `position` and return its location.
+    ///
+    /// Recognised definition sites (searched bottom-up):
+    ///   - Assignment:          `$var = …`  (but not `==` / `===`)
+    ///   - Parameter:           `Type $var` in a function/method signature
+    ///   - Foreach:             `as $var`  /  `=> $var`
+    ///   - Catch:               `catch (…Exception $var)`
+    ///   - Static / global:     `static $var` / `global $var`
+    fn resolve_variable_definition(
+        content: &str,
+        uri: &str,
+        position: Position,
+        var_name: &str,
+    ) -> Option<Location> {
+        let lines: Vec<&str> = content.lines().collect();
+        let cursor_line = position.line as usize;
+
+        // Scan backwards from the line *before* the cursor.  If the cursor
+        // line itself contains a definition we skip it — the user is
+        // presumably already looking at it.  (If the cursor is on the
+        // definition, there is nothing earlier to jump to, so we fall
+        // through and return None.)
+        let search_end = cursor_line;
+
+        for line_idx in (0..search_end).rev() {
+            let line = lines[line_idx];
+
+            // Quick reject: line must mention the variable at all.
+            if !line.contains(var_name) {
+                continue;
+            }
+
+            if let Some(col) = Self::line_defines_variable(line, var_name) {
+                let target_uri = Url::parse(uri).ok()?;
+                return Some(Location {
+                    uri: target_uri,
+                    range: Range {
+                        start: Position {
+                            line: line_idx as u32,
+                            character: col as u32,
+                        },
+                        end: Position {
+                            line: line_idx as u32,
+                            character: (col + var_name.len()) as u32,
+                        },
+                    },
+                });
+            }
+        }
+
+        None
+    }
+
+    /// Find a whole-word occurrence of `var_name` in `line`, skipping
+    /// partial matches like `$item` inside `$items`.
+    ///
+    /// Returns the byte offset of the match, or `None` when no whole-word
+    /// occurrence exists.
+    fn find_whole_var(line: &str, var_name: &str) -> Option<usize> {
+        let is_ident_char = |c: char| c.is_alphanumeric() || c == '_';
+        let mut start = 0;
+        while let Some(pos) = line[start..].find(var_name) {
+            let abs = start + pos;
+            let after = abs + var_name.len();
+            // Check that the character immediately after is NOT an
+            // identifier character (prevents `$item` matching `$items`).
+            let boundary_ok =
+                after >= line.len() || !line[after..].starts_with(|c: char| is_ident_char(c));
+            if boundary_ok {
+                return Some(abs);
+            }
+            // Skip past this false match and keep searching.
+            start = abs + 1;
+        }
+        None
+    }
+
+    /// Heuristically decide whether `line` *defines* (assigns / declares)
+    /// `$var_name`.
+    ///
+    /// Returns `Some(column)` with the byte offset of the variable on the
+    /// line when it is a definition site, or `None` otherwise.
+    fn line_defines_variable(line: &str, var_name: &str) -> Option<usize> {
+        // Find a whole-word occurrence of the variable in the line.
+        let var_pos = Self::find_whole_var(line, var_name)?;
+        let after_var = var_pos + var_name.len();
+        let rest = &line[after_var..];
+
+        // 1. Assignment: `$var =` but NOT `$var ==` / `$var ===`
+        let rest_trimmed = rest.trim_start();
+        if rest_trimmed.starts_with('=') && !rest_trimmed.starts_with("==") {
+            return Some(var_pos);
+        }
+
+        // 2. Foreach value: `as $var` or `=> $var`
+        //    Look at what precedes the variable.
+        let before = line[..var_pos].trim_end();
+        if before.ends_with("as") || before.ends_with("=>") {
+            return Some(var_pos);
+        }
+
+        // 3. Function / method parameter: the variable appears after a
+        //    type hint (or bare) inside `(…)`.  A simple heuristic: the
+        //    line contains `function ` and `$var` appears after `(`.
+        if (line.contains("function ")
+            || line.contains("function(")
+            || line.contains("fn ")
+            || line.contains("fn("))
+            && before.contains('(')
+        {
+            return Some(var_pos);
+        }
+
+        // 4. Catch variable: `catch (SomeException $var)`
+        if before.contains("catch") && before.contains('(') {
+            return Some(var_pos);
+        }
+
+        // 5. Static / global declarations: `static $var` / `global $var`
+        if before.ends_with("static") || before.ends_with("global") {
+            return Some(var_pos);
         }
 
         None

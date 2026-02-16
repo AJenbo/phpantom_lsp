@@ -861,3 +861,451 @@ async fn test_goto_definition_inline_var_docblock_override_allowed_for_object() 
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Variable Go-To-Definition ─────────────────────────────────────────────
+
+/// Clicking on `$typed` in `return $typed;` should jump to the assignment
+/// on the previous line: `$typed = getUnknownValue();`.
+#[tokio::test]
+async fn test_goto_definition_variable_jumps_to_assignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_assign.php").unwrap();
+    let text = concat!(
+        "<?php\n",                           // 0
+        "function demo(): mixed {\n",        // 1
+        "    $typed = getUnknownValue();\n", // 2
+        "    return $typed;\n",              // 3
+        "}\n",                               // 4
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$typed` in `return $typed;` (line 3, character 12 = on 't')
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $typed to its assignment on the previous line"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 2, "$typed is assigned on line 2");
+            assert_eq!(
+                location.range.start.character, 4,
+                "$typed starts at column 4"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When the cursor is already on the definition line (the assignment),
+/// go-to-definition should return None — the user is already there.
+#[tokio::test]
+async fn test_goto_definition_variable_on_definition_returns_none() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_on_def.php").unwrap();
+    let text = concat!(
+        "<?php\n",                           // 0
+        "function demo(): void {\n",         // 1
+        "    $typed = getUnknownValue();\n", // 2
+        "}\n",                               // 3
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$typed` on line 2 (the assignment itself)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 5,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should return None when cursor is already on the definition"
+    );
+}
+
+/// Go-to-definition on a variable should jump to a function parameter
+/// declaration when that is the most recent definition.
+#[tokio::test]
+async fn test_goto_definition_variable_jumps_to_parameter() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                       // 0
+        "class App {\n",                                 // 1
+        "    public function handle(int $id): void {\n", // 2
+        "        echo $id;\n",                           // 3
+        "    }\n",                                       // 4
+        "}\n",                                           // 5
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$id` in `echo $id;` (line 3)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $id to the parameter declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "$id is declared as a parameter on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Go-to-definition on a variable used after a foreach should jump to the
+/// foreach `as $var` declaration.
+#[tokio::test]
+async fn test_goto_definition_variable_jumps_to_foreach() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_foreach.php").unwrap();
+    let text = concat!(
+        "<?php\n",                           // 0
+        "function demo(): void {\n",         // 1
+        "    $items = [1, 2, 3];\n",         // 2
+        "    foreach ($items as $item) {\n", // 3
+        "        echo $item;\n",             // 4
+        "    }\n",                           // 5
+        "}\n",                               // 6
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$item` in `echo $item;` (line 4)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $item to the foreach declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 3,
+                "$item is declared in the foreach on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// When a variable is reassigned, go-to-definition should jump to the
+/// most recent assignment before the cursor.
+#[tokio::test]
+async fn test_goto_definition_variable_jumps_to_most_recent_reassignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_reassign.php").unwrap();
+    let text = concat!(
+        "<?php\n",                   // 0
+        "function demo(): void {\n", // 1
+        "    $val = 1;\n",           // 2
+        "    $val = 2;\n",           // 3
+        "    $val = 3;\n",           // 4
+        "    echo $val;\n",          // 5
+        "}\n",                       // 6
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$val` in `echo $val;` (line 5)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $val to the most recent assignment"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 4,
+                "$val's most recent assignment is on line 4"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Go-to-definition on `$e` in a catch block should jump to the catch
+/// declaration.
+#[tokio::test]
+async fn test_goto_definition_variable_jumps_to_catch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_catch.php").unwrap();
+    let text = concat!(
+        "<?php\n",                          // 0
+        "function demo(): void {\n",        // 1
+        "    try {\n",                      // 2
+        "        riskyOperation();\n",      // 3
+        "    } catch (\\Exception $e) {\n", // 4
+        "        echo $e;\n",               // 5
+        "    }\n",                          // 6
+        "}\n",                              // 7
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$e` in `echo $e;` (line 5)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $e to the catch declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 4,
+                "$e is declared in the catch on line 4"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Go-to-definition on a variable at the top level (outside any class)
+/// should still resolve to its assignment.
+#[tokio::test]
+async fn test_goto_definition_variable_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",                       // 0
+        "$typed = getUnknownValue();\n", // 1
+        "return $typed;\n",              // 2
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$typed` in `return $typed;` (line 2)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $typed to assignment on line 1"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 1, "$typed is assigned on line 1");
+            assert_eq!(
+                location.range.start.character, 0,
+                "$typed starts at column 0"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Clicking on `$val` in a foreach key-value `=> $val` should jump
+/// to the foreach declaration.
+#[tokio::test]
+async fn test_goto_definition_variable_foreach_key_value() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_goto_foreach_kv.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // 0
+        "function demo(): void {\n",              // 1
+        "    $map = ['a' => 1];\n",               // 2
+        "    foreach ($map as $key => $val) {\n", // 3
+        "        echo $val;\n",                   // 4
+        "    }\n",                                // 5
+        "}\n",                                    // 6
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$val` in `echo $val;` (line 4)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $val to the foreach key-value declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 3,
+                "$val is declared in the foreach on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
