@@ -6591,3 +6591,407 @@ async fn test_completion_dnf_type_shows_all_members() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_completion_closure_param_type_hint_in_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///closure_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Carrier {\n",
+        "    public string $name;\n",
+        "    public function ship(): void {}\n",
+        "}\n",
+        "class Service {\n",
+        "    public function process(): void {\n",
+        "        $fn = function (Carrier $carrier) {\n",
+        "            $carrier->\n",
+        "        };\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$carrier->` on line 8
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $carrier via closure parameter type hint"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("ship")),
+                "Should include ship method, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_closure_param_type_hint_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///closure_top.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public int $id;\n",
+        "    public function cancel(): void {}\n",
+        "}\n",
+        "$cb = function (Order $order) {\n",
+        "    $order->\n",
+        "};\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$order->` on line 6
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $order via top-level closure parameter type hint"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("id")),
+                "Should include id property, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("cancel")),
+                "Should include cancel method, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_closure_param_as_function_argument() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///closure_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Item {\n",
+        "    public float $price;\n",
+        "    public function discount(): void {}\n",
+        "}\n",
+        "array_map(function (Item $item) {\n",
+        "    $item->\n",
+        "}, $items);\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$item->` on line 6
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $item via closure parameter passed as argument"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("price")),
+                "Should include price property, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("discount")),
+                "Should include discount method, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_arrow_function_param_type_hint() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///arrow_fn.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $sku;\n",
+        "    public function label(): string { return ''; }\n",
+        "}\n",
+        "$items = array_map(fn(Product $p) => $p->sku, []);\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$p->` on line 5 (inside the arrow function body)
+    // `$items = array_map(fn(Product $p) => $p->`
+    //  0         1         2         3
+    //  0123456789012345678901234567890123456789012
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 42,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $p via arrow function parameter type hint"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("sku")),
+                "Should include sku property, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include label method, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_nested_closure_resolves_inner_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///nested_closure.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Outer {\n",
+        "    public string $outerProp;\n",
+        "}\n",
+        "class Inner {\n",
+        "    public string $innerProp;\n",
+        "    public function doStuff(): void {}\n",
+        "}\n",
+        "$a = function (Outer $o) {\n",
+        "    $b = function (Inner $i) {\n",
+        "        $i->\n",
+        "    };\n",
+        "};\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$i->` on line 10
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $i via inner closure parameter type hint"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("innerProp")),
+                "Should include innerProp from Inner, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("doStuff")),
+                "Should include doStuff from Inner, got: {:?}",
+                labels
+            );
+            assert!(
+                !labels.iter().any(|l| l.starts_with("outerProp")),
+                "Should NOT include outerProp from Outer, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_closure_param_in_method_argument() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///closure_method_arg.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Task {\n",
+        "    public string $title;\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "class Runner {\n",
+        "    public function execute(): void {\n",
+        "        $this->each(function (Task $task) {\n",
+        "            $task->\n",
+        "        });\n",
+        "    }\n",
+        "    public function each(callable $fn): void {}\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$task->` on line 8
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $task via closure parameter in method argument"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("title")),
+                "Should include title property, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("run")),
+                "Should include run method, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
