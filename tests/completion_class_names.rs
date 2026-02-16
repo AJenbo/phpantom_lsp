@@ -447,7 +447,13 @@ async fn test_class_name_completion_from_classmap() {
     );
 
     // Check that detail shows the FQN
-    let collection = classes.iter().find(|i| i.label == "Collection").unwrap();
+    let collection = classes
+        .iter()
+        .find(|i| {
+            i.label == "Collection"
+                && i.detail.as_deref() == Some("Illuminate\\Support\\Collection")
+        })
+        .expect("Should have a Collection item with FQN Illuminate\\Support\\Collection in detail");
     assert_eq!(
         collection.detail.as_deref(),
         Some("Illuminate\\Support\\Collection"),

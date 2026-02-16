@@ -237,7 +237,26 @@ fn parse_map_entry(line: &str) -> Option<(String, String)> {
     let key = lhs.trim().strip_prefix('\'')?.strip_suffix('\'')?;
     let value = rhs.trim().strip_prefix('\'')?.strip_suffix('\'')?;
 
-    Some((key.to_string(), value.to_string()))
+    // Unescape PHP single-quoted string escapes:
+    //   `\\` → `\`   and   `\'` → `'`
+    // This is needed because the PhpStormStubsMap.php file uses PHP
+    // single-quoted strings where namespace separators are written as
+    // `\\` (e.g. `'Couchbase\\GetUserOptions'` → `Couchbase\GetUserOptions`).
+    let key = php_unescape_single_quoted(key);
+    let value = php_unescape_single_quoted(value);
+
+    Some((key, value))
+}
+
+/// Unescape a PHP single-quoted string value.
+///
+/// PHP single-quoted strings only recognise two escape sequences:
+///   - `\\` → `\`
+///   - `\'` → `'`
+fn php_unescape_single_quoted(s: &str) -> String {
+    s.replace("\\\\", "\x00")
+        .replace("\\'", "'")
+        .replace('\x00', "\\")
 }
 
 /// Escape a string for embedding in a Rust string literal.

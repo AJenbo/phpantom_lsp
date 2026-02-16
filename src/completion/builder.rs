@@ -409,13 +409,14 @@ impl Backend {
             if !seen_fqns.insert(name.to_string()) {
                 continue;
             }
+            let short_name = name.rsplit('\\').next().unwrap_or(name);
             items.push(CompletionItem {
-                label: name.to_string(),
+                label: short_name.to_string(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(name.to_string()),
-                insert_text: Some(name.to_string()),
-                filter_text: Some(name.to_string()),
-                sort_text: Some(format!("2_{}", name.to_lowercase())),
+                insert_text: Some(short_name.to_string()),
+                filter_text: Some(short_name.to_string()),
+                sort_text: Some(format!("2_{}", short_name.to_lowercase())),
                 ..CompletionItem::default()
             });
         }
