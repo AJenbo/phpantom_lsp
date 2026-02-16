@@ -361,10 +361,12 @@ impl LanguageServer for Backend {
                     // deduplicating by label so ambiguous variables show
                     // the union of all possible members.
                     let mut all_items: Vec<CompletionItem> = Vec::new();
+                    let current_class_name =
+                        current_class.map(|cc| cc.name.as_str());
                     for target_class in &candidates {
                         let merged =
                             Self::resolve_class_with_inheritance(target_class, &class_loader);
-                        let items = Self::build_completion_items(&merged, effective_access);
+                        let items = Self::build_completion_items(&merged, effective_access, current_class_name);
                         for item in items {
                             if !all_items
                                 .iter()

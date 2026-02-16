@@ -76,17 +76,31 @@ impl Backend {
         format!("{}({}){}", method.name, params.join(", "), ret)
     }
 
-    /// Build completion items for a resolved class, filtered by access kind.
+    /// Build completion items for a resolved class, filtered by access kind
+    /// and visibility scope.
     ///
     /// - `Arrow` access: returns only non-static methods and properties.
     /// - `DoubleColon` access: returns only static methods, static properties, and constants.
     /// - `ParentDoubleColon` access: returns both static and non-static methods,
     ///   static properties, and constants — but excludes private members.
     /// - `Other` access: returns all members.
+    ///
+    /// Visibility filtering based on `current_class_name`:
+    /// - `None` (top-level code): only **public** members are shown.
+    /// - `Some(name)` where `name == target_class.name`: all members are shown
+    ///   (same-class access, e.g. `$this->`).
+    /// - `Some(name)` where `name != target_class.name`: **public** and
+    ///   **protected** members are shown (the caller might be in a subclass).
     pub(crate) fn build_completion_items(
         target_class: &ClassInfo,
         access_kind: AccessKind,
+        current_class_name: Option<&str>,
     ) -> Vec<CompletionItem> {
+        // Determine whether we are inside the same class as the target.
+        let same_class = current_class_name
+            .is_some_and(|name| name == target_class.name);
+        // Inside *some* class (possibly a subclass) — show protected.
+        let in_class = current_class_name.is_some();
         let mut items: Vec<CompletionItem> = Vec::new();
 
         // Methods — filtered by static / instance, excluding magic methods
@@ -107,10 +121,14 @@ impl Backend {
                 }
             }
 
-            // parent:: excludes private members
-            if access_kind == AccessKind::ParentDoubleColon
-                && method.visibility == Visibility::Private
-            {
+            // Visibility filtering:
+            // - private: only visible from within the same class
+            // - protected: visible from the same class or a subclass
+            //   (we approximate by allowing when inside any class)
+            if method.visibility == Visibility::Private && !same_class {
+                continue;
+            }
+            if method.visibility == Visibility::Protected && !same_class && !in_class {
                 continue;
             }
 
@@ -142,10 +160,10 @@ impl Backend {
 
         // Properties — filtered by static / instance
         for property in &target_class.properties {
-            // parent:: excludes private members
-            if access_kind == AccessKind::ParentDoubleColon
-                && property.visibility == Visibility::Private
-            {
+            if property.visibility == Visibility::Private && !same_class {
+                continue;
+            }
+            if property.visibility == Visibility::Protected && !same_class && !in_class {
                 continue;
             }
 
@@ -191,10 +209,10 @@ impl Backend {
             || access_kind == AccessKind::Other
         {
             for constant in &target_class.constants {
-                // parent:: excludes private members
-                if access_kind == AccessKind::ParentDoubleColon
-                    && constant.visibility == Visibility::Private
-                {
+                if constant.visibility == Visibility::Private && !same_class {
+                    continue;
+                }
+                if constant.visibility == Visibility::Protected && !same_class && !in_class {
                     continue;
                 }
 

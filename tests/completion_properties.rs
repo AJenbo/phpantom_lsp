@@ -1,6 +1,6 @@
 mod common;
 
-use common::create_test_backend;
+use common::{create_psr4_workspace, create_test_backend};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -344,6 +344,620 @@ async fn test_completion_promoted_properties_appear_in_this() {
             assert!(
                 names.contains(&"promoted"),
                 "Should contain promoted property 'promoted', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Visibility filtering ───────────────────────────────────────────────────
+
+/// Private properties should NOT appear when accessing a variable from
+/// outside the class (e.g. top-level code).
+#[tokio::test]
+async fn test_completion_private_property_hidden_outside_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_private_hidden.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Container {\n",
+        "    private array $bindings = [];\n",
+        "    public function bind(string $k, object $v): void {}\n",
+        "    public function getStatus(): int { return 0; }\n",
+        "}\n",
+        "$c = new Container();\n",
+        "$c->\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 4,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                names.contains(&"bind"),
+                "Should include public method 'bind', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"getStatus"),
+                "Should include public method 'getStatus', got: {:?}",
+                names
+            );
+            assert!(
+                !names.contains(&"bindings"),
+                "Should NOT include private property 'bindings', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Private methods should NOT appear when accessing from outside the class.
+#[tokio::test]
+async fn test_completion_private_method_hidden_outside_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_private_method_hidden.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service {\n",
+        "    private function internalHelper(): void {}\n",
+        "    protected function onSetup(): void {}\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "$svc = new Service();\n",
+        "$svc->\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 6,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"run"),
+                "Should include public method 'run', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"internalHelper"),
+                "Should NOT include private method 'internalHelper', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"onSetup"),
+                "Should NOT include protected method 'onSetup' from top-level, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `$this->` inside the same class should show private and protected members.
+#[tokio::test]
+async fn test_completion_private_and_protected_visible_inside_own_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_private_visible.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Vault {\n",
+        "    private string $secret = 'x';\n",
+        "    protected int $level = 1;\n",
+        "    public string $name = 'vault';\n",
+        "    private function decrypt(): string { return ''; }\n",
+        "    protected function validate(): bool { return true; }\n",
+        "    public function open(): void {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                names.contains(&"secret"),
+                "Should include private property 'secret' via $this->, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"level"),
+                "Should include protected property 'level' via $this->, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"name"),
+                "Should include public property 'name' via $this->, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"decrypt"),
+                "Should include private method 'decrypt' via $this->, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"validate"),
+                "Should include protected method 'validate' via $this->, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"open"),
+                "Should include public method 'open' via $this->, got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// A variable of the same class type inside the class should also show
+/// private/protected members (PHP allows same-class access).
+#[tokio::test]
+async fn test_completion_private_visible_on_same_class_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_same_class_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    private int $id;\n",
+        "    public string $label;\n",
+        "    public function merge(Node $other): void {\n",
+        "        $other->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                names.contains(&"id"),
+                "Should include private 'id' on same-class variable, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"label"),
+                "Should include public 'label', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Protected members should be visible when accessing from a different
+/// class (the caller might be a subclass).
+#[tokio::test]
+async fn test_completion_protected_visible_from_different_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_protected_subclass.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    private function secret(): void {}\n",
+        "    protected function hook(): void {}\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public function doWork(): void {\n",
+        "        $b = new Base();\n",
+        "        $b->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"run"),
+                "Should include public 'run', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"hook"),
+                "Should include protected 'hook' from inside another class, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"secret"),
+                "Should NOT include private 'secret' from different class, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Private constants should be hidden from outside the class via `::`.
+#[tokio::test]
+async fn test_completion_private_constant_hidden_outside_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_const_hidden.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    private const SECRET_KEY = 'abc';\n",
+        "    protected const INTERNAL_VER = 2;\n",
+        "    public const VERSION = '1.0';\n",
+        "    public static function create(): void {}\n",
+        "}\n",
+        "Config::\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let const_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                const_names.contains(&"VERSION"),
+                "Should include public constant 'VERSION', got: {:?}",
+                const_names
+            );
+            assert!(
+                !const_names.contains(&"SECRET_KEY"),
+                "Should NOT include private constant 'SECRET_KEY', got: {:?}",
+                const_names
+            );
+            assert!(
+                !const_names.contains(&"INTERNAL_VER"),
+                "Should NOT include protected constant 'INTERNAL_VER' from top-level, got: {:?}",
+                const_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `self::` inside the class should show all constants including private.
+#[tokio::test]
+async fn test_completion_private_constant_visible_via_self() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///vis_const_self.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    private const SECRET_KEY = 'abc';\n",
+        "    protected const INTERNAL_VER = 2;\n",
+        "    public const VERSION = '1.0';\n",
+        "    public function check(): void {\n",
+        "        self::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let const_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                const_names.contains(&"VERSION"),
+                "Should include public constant 'VERSION', got: {:?}",
+                const_names
+            );
+            assert!(
+                const_names.contains(&"SECRET_KEY"),
+                "Should include private constant 'SECRET_KEY' via self::, got: {:?}",
+                const_names
+            );
+            assert!(
+                const_names.contains(&"INTERNAL_VER"),
+                "Should include protected constant 'INTERNAL_VER' via self::, got: {:?}",
+                const_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Cross-file: private property of a PSR-4 class should be hidden from
+/// top-level code.
+#[tokio::test]
+async fn test_completion_private_hidden_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Repo.php",
+            concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "class Repo {\n",
+                "    private array $cache = [];\n",
+                "    protected string $table = '';\n",
+                "    public function find(int $id): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///vis_cross_file.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Repo;\n",
+        "$repo = new Repo();\n",
+        "$repo->\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 3,
+                    character: 7,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                names.contains(&"find"),
+                "Should include public method 'find', got: {:?}",
+                names
+            );
+            assert!(
+                !names.contains(&"cache"),
+                "Should NOT include private property 'cache', got: {:?}",
+                names
+            );
+            assert!(
+                !names.contains(&"table"),
+                "Should NOT include protected property 'table' from top-level, got: {:?}",
                 names
             );
         }
