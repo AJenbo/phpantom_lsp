@@ -99,11 +99,11 @@ enum Mode
 class Builder
 {
     /**
-     * @return $this
+     * @return static
      */
-    public function query(): self
+    public static function query(): self
     {
-        return $this;
+        return new static();
     }
 }
 
@@ -179,13 +179,13 @@ abstract class Model
  * @property-read bool $isAdmin
  * @method bool hasPermission(string $permission)
  */
-class User extends Model implements Renderable
+class User extends Model implements Renderable // Press go-to on `Model` or `Renderable` to jump to there definitions
 {
-    use HasTimestamps;
+    use HasTimestamps; // Press go-to on `HasTimestamps` to jump to the trait definition
     use HasSlug;
 
     public string $email;
-    protected Status $status;
+    protected Status $status; // Press go-to on `Status` to jump to the enum definition
     private array $roles = [];
 
     public static string $defaultRole = 'user';
@@ -311,8 +311,8 @@ final class AdminUser extends User
 
     public function __construct(string $name, string $email)
     {
-        // parent:: completion shows parent's non-private members
         parent::__construct($name, $email);
+        // parent:: shows inherited non-private methods and constants
     }
 
     public function toArray(): array
@@ -462,6 +462,7 @@ $user->generateSlug('Test'); // Completion: methods from HasSlug trait
 
 // Static member completion via ::
 User::$defaultRole; // Completion: static properties
+// Press go-to on `TYPE_ADMIN` to jump to its constant definition
 User::TYPE_ADMIN; // Completion: class constants
 User::findByEmail('a@b.c'); // Completion: static methods
 User::make('Bob'); // Completion: inherited static methods from Model
@@ -470,8 +471,6 @@ User::make('Bob'); // Completion: inherited static methods from Model
 Status::Active; // Completion: enum cases
 Status::Active->label(); // Completion: methods on enum
 
-// parent:: completion (in AdminUser context)
-// parent::toArray()         — shows inherited non-private methods and constants
 
 // self / static / $this resolution
 // Inside User class:
@@ -494,7 +493,7 @@ $made = User::make('Charlie');
 $made->getEmail(); // Resolves static return type
 
 // Function return type resolution
-$u = createUser('Dana', 'dana@example.com');
+$u = createUser('Dana', 'dana@example.com'); // Press go-to on `createUser` to jump to the function definition
 $u->getName(); // Resolves createUser() return type -> User
 
 // Constructor promoted properties (readonly)
@@ -653,28 +652,16 @@ while (isAdmin($cursor)) {
     break;
 }
 
-// Go-to-definition targets:
-// - Hover over `User` to jump to its class definition
-// - Hover over `getEmail` to jump to its method definition
-// - Hover over `$email` property to jump to its definition
-// - Hover over `TYPE_ADMIN` to jump to its constant definition
-// - Hover over `Renderable` to jump to the interface definition
-// - Hover over `HasTimestamps` to jump to the trait definition
-// - Hover over `Status` to jump to the enum definition
-// - Hover over `Model` to jump to the parent class definition
-// - Hover over `createUser` to jump to the standalone function definition
-
-// PHPDoc @property and @method (magic members)
-// $user->displayName           — from @property tag on User
-// $user->hasPermission('edit') — from @method tag on User
-
 // @mixin resolution
-// Model has @mixin HasTimestamps — mixin members appear in completion
+// Model has @mixin Builder — mixin members appear in completion
+$query = User::query(); // Press go-to on `query()` to jump to its class definition
 
 // @var type override
 /** @var User $typed */
 $typed = getUnknownValue();
-$typed->getEmail(); // Type comes from @var docblock
+// Press go-to on `getEmail()` to jump to its method definition
+$email = $typed->getEmail(); // Type comes from @var docblock
+echo $email; // Press go-to on `$email` to jump to its assignment
 
 // Inline @var docblock for variable type hints
 /** @var AdminUser $inlineTyped */
@@ -682,13 +669,16 @@ $inlineTyped = getUnknownValue(AdminUser::class);
 $inlineTyped->grantPermission('write');
 
 // Null-safe operator chaining
-$maybeUser = User::find(1);
+$maybeUser = User::find(1); // Press go-to on `User` to jump to its class definition
 $maybeUser?->getProfile()?->getDisplayName();
 
+// PHPDoc @property and @method (magic members)
+echo $maybeUser->displayName; // from @property tag on User
+$maybeUser->hasPermission('edit'); // from @method tag on User
+
 // Visibility filtering:
-// - Arrow completion shows only accessible members
-// - parent:: excludes private members
-// - Static :: shows only static members, constants, and enum cases
+// - $obj-> shows only accessible dynamic members
+// - MyClass:: shows only accessible static members
 
 // Namespace and use statement resolution:
 // - Fully qualified: \Demo\User

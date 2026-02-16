@@ -891,6 +891,27 @@ impl Backend {
             return Some(found);
         }
 
+        // Also check @mixin classes declared on ancestor classes.
+        // e.g. `User extends Model` where `Model` has `@mixin Builder`.
+        let mut ancestor = class.clone();
+        for _ in 0..MAX_DEPTH {
+            let parent_name = match ancestor.parent_class.as_ref() {
+                Some(name) => name.clone(),
+                None => break,
+            };
+            let parent = match class_loader(&parent_name) {
+                Some(p) => p,
+                None => break,
+            };
+            if !parent.mixins.is_empty()
+                && let Some(found) =
+                    Self::find_declaring_in_mixins(&parent.mixins, member_name, class_loader, 0)
+            {
+                return Some(found);
+            }
+            ancestor = parent;
+        }
+
         None
     }
 

@@ -2171,7 +2171,31 @@ impl Backend {
         //    its traits, or its parent chain.  This models the PHP pattern
         //    where `@mixin` documents that magic methods (__call, __get,
         //    etc.) proxy to another class.
+        //
+        //    Mixins are inherited: if `User extends Model` and `Model`
+        //    has `@mixin Builder`, then `User` also gains Builder's
+        //    members.  We merge the class's own mixins first, then walk
+        //    up the parent chain again to collect ancestor mixins.
         Self::merge_mixins_into(&mut merged, &class.mixins, class_loader);
+
+        // Also merge mixins declared on ancestor classes.
+        let mut ancestor = class.clone();
+        let mut mixin_depth = 0u32;
+        while let Some(ref parent_name) = ancestor.parent_class {
+            mixin_depth += 1;
+            if mixin_depth > MAX_DEPTH {
+                break;
+            }
+            let parent = if let Some(p) = class_loader(parent_name) {
+                p
+            } else {
+                break;
+            };
+            if !parent.mixins.is_empty() {
+                Self::merge_mixins_into(&mut merged, &parent.mixins, class_loader);
+            }
+            ancestor = parent;
+        }
 
         merged
     }

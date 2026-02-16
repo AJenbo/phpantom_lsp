@@ -1735,12 +1735,10 @@ async fn test_completion_mixin_static_methods_via_double_colon() {
 // ─── Child inherits mixin from parent ───────────────────────────────────────
 
 #[tokio::test]
-async fn test_completion_child_does_not_inherit_parent_mixin() {
-    // @mixin is a docblock annotation on a specific class, not inherited
-    // via extends. A child class would need its own @mixin annotation.
-    // However, if the parent's mixin members are merged into the parent,
-    // and the child inherits from the parent, the mixin members should
-    // still be available through normal inheritance resolution.
+async fn test_completion_child_inherits_parent_mixin() {
+    // @mixin on a parent class should be inherited by child classes.
+    // e.g. `User extends Model` where `Model` has `@mixin Builder`
+    // means `User` should gain Builder's members.
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///mixin_child.php").unwrap();
@@ -1809,9 +1807,11 @@ async fn test_completion_child_does_not_inherit_parent_mixin() {
                 "Should include parent method, got: {:?}",
                 method_names
             );
-            // Mixin on parent — whether it appears depends on whether the
-            // parent resolution includes mixin members before the child
-            // inherits from it. This is implementation-defined behavior.
+            assert!(
+                method_names.contains(&"mixinMethod"),
+                "Should include mixin method from parent's @mixin, got: {:?}",
+                method_names
+            );
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -2144,5 +2144,247 @@ async fn test_completion_inherited_return_this_resolves_to_child() {
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `User extends Model` where `Model` has `@mixin Builder`.
+/// `User::` should suggest static methods from `Builder` (e.g. `query()`).
+#[tokio::test]
+async fn test_completion_inherited_mixin_static_method_via_double_colon() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inherited_mixin_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Builder {\n",                                // 1
+        "    /**\n",                                        // 2
+        "     * @return static\n",                          // 3
+        "     */\n",                                        // 4
+        "    public static function query(): self {\n",     // 5
+        "        return new static();\n",                   // 6
+        "    }\n",                                          // 7
+        "}\n",                                              // 8
+        "\n",                                               // 9
+        "/**\n",                                            // 10
+        " * @mixin Builder\n",                              // 11
+        " */\n",                                            // 12
+        "abstract class Model {\n",                         // 13
+        "}\n",                                              // 14
+        "\n",                                               // 15
+        "class User extends Model {\n",                     // 16
+        "}\n",                                              // 17
+        "\n",                                               // 18
+        "$query = User::\n",                                // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 19,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "User:: should return completions including Builder's static methods"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("query")),
+                "Should include query() from Builder via parent Model's @mixin, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `User extends Model` where `Model` has `@mixin Builder`.
+/// `$user->` should also suggest instance-accessible methods from `Builder`.
+#[tokio::test]
+async fn test_completion_inherited_mixin_instance_method_via_arrow() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inherited_mixin_instance.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Builder {\n",                                // 1
+        "    public function where(): self {\n",            // 2
+        "        return $this;\n",                          // 3
+        "    }\n",                                          // 4
+        "    public function get(): array {\n",             // 5
+        "        return [];\n",                             // 6
+        "    }\n",                                          // 7
+        "}\n",                                              // 8
+        "\n",                                               // 9
+        "/**\n",                                            // 10
+        " * @mixin Builder\n",                              // 11
+        " */\n",                                            // 12
+        "abstract class Model {\n",                         // 13
+        "    public function save(): void {}\n",            // 14
+        "}\n",                                              // 15
+        "\n",                                               // 16
+        "class User extends Model {\n",                     // 17
+        "    public function getName(): string {\n",        // 18
+        "        return '';\n",                             // 19
+        "    }\n",                                          // 20
+        "}\n",                                              // 21
+        "\n",                                               // 22
+        "$user = new User();\n",                            // 23
+        "$user->\n",                                        // 24
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 24,
+                    character: 7,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "$user-> should return completions including Builder's methods"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include getName() from User itself, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("save")),
+                "Should include save() from parent Model, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("where")),
+                "Should include where() from Builder via Model's @mixin, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("get")),
+                "Should include get() from Builder via Model's @mixin, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Go-to-definition on `User::query()` should jump to `Builder::query()`
+/// when `Builder` is a `@mixin` on `Model` (User's parent).
+#[tokio::test]
+async fn test_goto_definition_inherited_mixin_static_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inherited_mixin_goto.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Builder {\n",                                // 1
+        "    /**\n",                                        // 2
+        "     * @return static\n",                          // 3
+        "     */\n",                                        // 4
+        "    public static function query(): self {\n",     // 5
+        "        return new static();\n",                   // 6
+        "    }\n",                                          // 7
+        "}\n",                                              // 8
+        "\n",                                               // 9
+        "/**\n",                                            // 10
+        " * @mixin Builder\n",                              // 11
+        " */\n",                                            // 12
+        "abstract class Model {\n",                         // 13
+        "}\n",                                              // 14
+        "\n",                                               // 15
+        "class User extends Model {\n",                     // 16
+        "}\n",                                              // 17
+        "\n",                                               // 18
+        "User::query();\n",                                 // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Cursor on `query` in `User::query();` (line 19)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 19,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve User::query() to Builder::query() via inherited @mixin"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 5,
+                "query() is declared on line 5 in Builder"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
