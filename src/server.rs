@@ -457,8 +457,12 @@ impl LanguageServer for Backend {
             // known sources (use-imports, same namespace, stubs, classmap,
             // class_index).
             if let Some(partial) = Self::extract_partial_class_name(&content, position) {
-                let (class_items, is_incomplete) =
-                    self.build_class_name_completions(&file_use_map, &file_namespace, &partial);
+                let (class_items, is_incomplete) = self.build_class_name_completions(
+                    &file_use_map,
+                    &file_namespace,
+                    &partial,
+                    &content,
+                );
                 if !class_items.is_empty() {
                     return Ok(Some(CompletionResponse::List(CompletionList {
                         is_incomplete,

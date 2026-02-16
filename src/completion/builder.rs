@@ -12,6 +12,114 @@ use crate::Backend;
 use crate::types::Visibility;
 use crate::types::*;
 
+/// Find the position where a new `use` statement should be inserted.
+///
+/// Scans the file content and returns a `Position` pointing to the
+/// beginning of the line **after** the best insertion point:
+///
+///   1. After the last existing `use` statement (so the new import is
+///      grouped with the others).
+///   2. After the `namespace` declaration (if present but no `use`
+///      statements exist yet).
+///   3. After the `<?php` opening tag (fallback).
+///
+/// The returned position is always at column 0 of the target line, so
+/// callers can insert `"use Foo\\Bar;\n"` directly.
+pub(crate) fn find_use_insert_position(content: &str) -> Position {
+    let mut last_use_line: Option<u32> = None;
+    let mut namespace_line: Option<u32> = None;
+    let mut php_open_line: Option<u32> = None;
+
+    // Track brace depth so we can distinguish top-level `use` imports
+    // from trait `use` statements inside class/enum/trait bodies.
+    //
+    // With semicolon-style namespaces (`namespace Foo;`), imports live
+    // at depth 0 and class bodies are at depth 1.
+    //
+    // With brace-style namespaces (`namespace Foo { ... }`), imports
+    // live at depth 1 and class bodies are at depth 2.
+    //
+    // We compute depth at the START of each line and track whether we
+    // saw a brace-style namespace to set the right threshold.
+    let mut brace_depth: u32 = 0;
+    let mut uses_brace_namespace = false;
+
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+
+        // The depth at the start of this line (before counting its braces).
+        let depth_at_start = brace_depth;
+
+        // Update brace depth for the NEXT line.
+        for ch in trimmed.chars() {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => brace_depth = brace_depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+
+        if trimmed.starts_with("<?php") && php_open_line.is_none() {
+            php_open_line = Some(i as u32);
+        }
+
+        // Match `namespace Foo\Bar;` or `namespace Foo\Bar {`
+        // but not `namespace\something` (which is a different construct).
+        if trimmed.starts_with("namespace ") || trimmed.starts_with("namespace\t") {
+            namespace_line = Some(i as u32);
+            if trimmed.contains('{') {
+                uses_brace_namespace = true;
+            }
+        }
+
+        // The maximum brace depth at which `use` statements are still
+        // namespace imports (not trait imports inside a class body).
+        let max_import_depth = if uses_brace_namespace { 1 } else { 0 };
+
+        // Match `use Foo\Bar;`, `use Foo\{Bar, Baz};`, etc.
+        // Only at the import level — deeper means trait `use` inside a
+        // class/enum/trait body.
+        if depth_at_start <= max_import_depth
+            && (trimmed.starts_with("use ") || trimmed.starts_with("use\t"))
+            && !trimmed.starts_with("use (")
+            && !trimmed.starts_with("use(")
+        {
+            last_use_line = Some(i as u32);
+        }
+    }
+
+    // Insert after the last `use`, or after `namespace`, or after `<?php`.
+    let target_line = last_use_line
+        .or(namespace_line)
+        .or(php_open_line)
+        .unwrap_or(0);
+
+    Position {
+        line: target_line + 1,
+        character: 0,
+    }
+}
+
+/// Build an `additional_text_edits` entry that inserts a `use` statement
+/// for the given fully-qualified class name.
+///
+/// Returns `None` when the FQN has no namespace separator (e.g. bare
+/// `DateTime`), meaning no import is needed.
+pub(crate) fn build_use_edit(fqn: &str, insert_pos: Position) -> Option<Vec<TextEdit>> {
+    // No namespace → no import needed (e.g. `DateTime`, `Iterator`)
+    if !fqn.contains('\\') {
+        return None;
+    }
+
+    Some(vec![TextEdit {
+        range: Range {
+            start: insert_pos,
+            end: insert_pos,
+        },
+        new_text: format!("use {};\n", fqn),
+    }])
+}
+
 /// PHP magic methods that should not appear in completion results.
 /// These are invoked implicitly by the language runtime rather than
 /// called directly by user code.
@@ -352,10 +460,16 @@ impl Backend {
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
         prefix: &str,
+        content: &str,
     ) -> (Vec<CompletionItem>, bool) {
         let prefix_lower = prefix.to_lowercase();
         let mut seen_fqns: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
+
+        // Pre-compute the insertion position for `use` statements.
+        // Only items from sources 3–5 (not already imported, not same
+        // namespace) will carry an `additional_text_edits` entry.
+        let use_insert_pos = find_use_insert_position(content);
 
         // ── 1. Use-imported classes (highest priority) ──────────────
         for (short_name, fqn) in file_use_map {
@@ -436,6 +550,7 @@ impl Backend {
                     insert_text: Some(short_name.to_string()),
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("2_{}", short_name.to_lowercase())),
+                    additional_text_edits: build_use_edit(fqn, use_insert_pos),
                     ..CompletionItem::default()
                 });
             }
@@ -458,6 +573,7 @@ impl Backend {
                     insert_text: Some(short_name.to_string()),
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("3_{}", short_name.to_lowercase())),
+                    additional_text_edits: build_use_edit(fqn, use_insert_pos),
                     ..CompletionItem::default()
                 });
             }
@@ -479,6 +595,7 @@ impl Backend {
                 insert_text: Some(short_name.to_string()),
                 filter_text: Some(short_name.to_string()),
                 sort_text: Some(format!("4_{}", short_name.to_lowercase())),
+                additional_text_edits: build_use_edit(name, use_insert_pos),
                 ..CompletionItem::default()
             });
         }

@@ -841,3 +841,295 @@ async fn test_class_name_completion_insert_text_is_short_name() {
         "detail should show the FQN"
     );
 }
+
+// ─── Auto-import (additional_text_edits) tests ──────────────────────────────
+
+/// Selecting a classmap class should add `use FQN;` after existing use statements.
+#[tokio::test]
+async fn test_auto_import_classmap_class_adds_use_statement() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{"name": "test/project"}"#,
+    )
+    .expect("failed to write composer.json");
+
+    let composer_dir = dir.path().join("vendor").join("composer");
+    fs::create_dir_all(&composer_dir).expect("failed to create vendor/composer");
+    fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        concat!(
+            "<?php\n",
+            "$vendorDir = dirname(__DIR__);\n",
+            "return array(\n",
+            "    'Illuminate\\\\Support\\\\Collection' => $vendorDir . '/laravel/framework/src/Collection.php',\n",
+            ");\n",
+        ),
+    )
+    .expect("failed to write autoload_classmap.php");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    let classmap = parse_autoload_classmap(dir.path(), "vendor");
+    if let Ok(mut cm) = backend.classmap.lock() {
+        *cm = classmap;
+    }
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Helpers\\Foo;\n",
+        "\n",
+        "new Coll\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let collection = items
+        .iter()
+        .find(|i| {
+            i.label == "Collection"
+                && i.detail.as_deref() == Some("Illuminate\\Support\\Collection")
+        })
+        .expect("Should have Collection completion");
+
+    let edits = collection
+        .additional_text_edits
+        .as_ref()
+        .expect("Classmap class should have additional_text_edits for auto-import");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0].new_text, "use Illuminate\\Support\\Collection;\n",
+        "Should insert a use statement for the FQN"
+    );
+    // Should insert after the last `use` line (line 2), so at line 3
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 3,
+            character: 0,
+        },
+        "Should insert after the last existing use statement"
+    );
+}
+
+/// Selecting a class_index class should add `use FQN;` too.
+#[tokio::test]
+async fn test_auto_import_class_index_adds_use_statement() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index.lock() {
+        idx.insert(
+            "App\\Services\\PaymentService".to_string(),
+            "file:///app/Services/PaymentService.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "\n",
+        "new Payment\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 11).await;
+    let payment = items
+        .iter()
+        .find(|i| {
+            i.label == "PaymentService"
+                && i.detail.as_deref() == Some("App\\Services\\PaymentService")
+        })
+        .expect("Should have PaymentService completion");
+
+    let edits = payment
+        .additional_text_edits
+        .as_ref()
+        .expect("class_index class should have additional_text_edits");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "use App\\Services\\PaymentService;\n",);
+    // No existing use statements; should insert after namespace (line 1), so at line 2
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 2,
+            character: 0,
+        },
+    );
+}
+
+/// Non-namespaced classes (e.g. `DateTime`) should NOT get auto-import edits.
+#[tokio::test]
+async fn test_no_auto_import_for_non_namespaced_class() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "DateTime",
+        "<?php\nclass DateTime {\n    public function format(string $f): string {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!("<?php\n", "new DateT\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 9).await;
+    let dt = items
+        .iter()
+        .find(|i| i.label == "DateTime")
+        .expect("Should have DateTime completion");
+
+    assert!(
+        dt.additional_text_edits.is_none(),
+        "Non-namespaced class should not get auto-import edits, got: {:?}",
+        dt.additional_text_edits
+    );
+}
+
+/// Already-imported classes (source 1) should NOT get auto-import edits.
+#[tokio::test]
+async fn test_no_auto_import_for_already_imported_class() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{"name": "test/project"}"#,
+    )
+    .expect("failed to write composer.json");
+
+    let composer_dir = dir.path().join("vendor").join("composer");
+    fs::create_dir_all(&composer_dir).expect("failed to create vendor/composer");
+    fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        concat!(
+            "<?php\n",
+            "$vendorDir = dirname(__DIR__);\n",
+            "return array(\n",
+            "    'Illuminate\\\\Support\\\\Collection' => $vendorDir . '/laravel/framework/src/Collection.php',\n",
+            ");\n",
+        ),
+    )
+    .expect("failed to write autoload_classmap.php");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    let classmap = parse_autoload_classmap(dir.path(), "vendor");
+    if let Ok(mut cm) = backend.classmap.lock() {
+        *cm = classmap;
+    }
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use Illuminate\\Support\\Collection;\n",
+        "\n",
+        "new Coll\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 8).await;
+    // The use-imported version (source 1) should be the first match
+    let collection = items
+        .iter()
+        .find(|i| i.label == "Collection")
+        .expect("Should have Collection completion");
+
+    assert!(
+        collection.additional_text_edits.is_none(),
+        "Already-imported class should not get auto-import edits"
+    );
+}
+
+/// When there are no use statements and no namespace, insert after `<?php`.
+#[tokio::test]
+async fn test_auto_import_inserts_after_php_open_tag() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index.lock() {
+        idx.insert(
+            "Vendor\\Lib\\Widget".to_string(),
+            "file:///vendor/lib/Widget.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///bare.php").unwrap();
+    let text = concat!("<?php\n", "\n", "new Wid\n",);
+
+    let items = complete_at(&backend, &uri, text, 2, 7).await;
+    let widget = items
+        .iter()
+        .find(|i| i.label == "Widget" && i.detail.as_deref() == Some("Vendor\\Lib\\Widget"))
+        .expect("Should have Widget completion");
+
+    let edits = widget
+        .additional_text_edits
+        .as_ref()
+        .expect("Should have auto-import edit");
+
+    assert_eq!(edits[0].new_text, "use Vendor\\Lib\\Widget;\n");
+    // Insert after `<?php` (line 0), so at line 1
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 1,
+            character: 0,
+        },
+    );
+}
+
+/// Trait `use` statements inside a class body must NOT be mistaken for
+/// namespace `use` imports.  The auto-import should insert after the
+/// top-level `use` statements, not after `use HasSlug;` etc.
+#[tokio::test]
+async fn test_auto_import_not_confused_by_trait_use_in_class_body() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index.lock() {
+        idx.insert(
+            "Cassandra\\DefaultCluster".to_string(),
+            "file:///vendor/cassandra/DefaultCluster.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///showcase.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // line 0
+        "\n",                                               // line 1
+        "namespace Demo;\n",                                // line 2
+        "\n",                                               // line 3
+        "use Exception;\n",                                 // line 4
+        "use Stringable;\n",                                // line 5
+        "\n",                                               // line 6
+        "class User extends Model implements Renderable\n", // line 7
+        "{\n",                                              // line 8
+        "    use HasTimestamps;\n",                         // line 9
+        "    use HasSlug;\n",                               // line 10
+        "\n",                                               // line 11
+        "    function test() {\n",                          // line 12
+        "        new Default\n",                            // line 13
+        "    }\n",                                          // line 14
+        "}\n",                                              // line 15
+    );
+
+    let items = complete_at(&backend, &uri, text, 13, 19).await;
+    let cluster = items
+        .iter()
+        .find(|i| {
+            i.label == "DefaultCluster" && i.detail.as_deref() == Some("Cassandra\\DefaultCluster")
+        })
+        .expect("Should have DefaultCluster completion");
+
+    let edits = cluster
+        .additional_text_edits
+        .as_ref()
+        .expect("Should have auto-import edit");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "use Cassandra\\DefaultCluster;\n",);
+    // Should insert after the last top-level `use` (line 5: `use Stringable;`),
+    // NOT after `use HasSlug;` (line 10) which is a trait import inside the class.
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 6,
+            character: 0,
+        },
+        "Auto-import should go after top-level use statements, not after trait use in class body"
+    );
+}
