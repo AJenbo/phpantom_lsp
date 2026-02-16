@@ -1,6 +1,6 @@
 mod common;
 
-use common::create_test_backend;
+use common::{create_test_backend, create_test_backend_with_function_stubs};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -42,7 +42,7 @@ async fn complete_at(
 /// function from the embedded stubs and return its `FunctionInfo`.
 #[tokio::test]
 async fn test_stub_function_index_resolves_array_map() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     // `array_map` is a standard PHP function that should be in the stubs.
     let result = backend.find_or_load_function(&["array_map"]);
@@ -63,7 +63,7 @@ async fn test_stub_function_index_resolves_array_map() {
 /// Verify that `find_or_load_function` can resolve `str_contains`.
 #[tokio::test]
 async fn test_stub_function_index_resolves_str_contains() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["str_contains"]);
     assert!(
@@ -83,7 +83,7 @@ async fn test_stub_function_index_resolves_str_contains() {
 /// Verify that `find_or_load_function` can resolve `json_decode`.
 #[tokio::test]
 async fn test_stub_function_index_resolves_json_decode() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["json_decode"]);
     assert!(
@@ -103,7 +103,7 @@ async fn test_stub_function_index_resolves_json_decode() {
 /// first lookup, so subsequent lookups are fast (Phase 1 hit).
 #[tokio::test]
 async fn test_stub_function_cached_after_first_lookup() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     // First lookup triggers parsing and caching.
     let first = backend.find_or_load_function(&["str_contains"]);
@@ -142,7 +142,7 @@ async fn test_stub_function_nonexistent_returns_none() {
 /// Verify that when multiple candidates are provided, the first match wins.
 #[tokio::test]
 async fn test_stub_function_multiple_candidates() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     // Try a non-existent name first, then a real one.
     let result = backend.find_or_load_function(&["nonexistent_func_xyz", "array_pop"]);
@@ -154,7 +154,7 @@ async fn test_stub_function_multiple_candidates() {
 /// that includes `DateTime` (it returns `DateTime|false`).
 #[tokio::test]
 async fn test_stub_function_date_create_return_type() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["date_create"]);
     assert!(
@@ -178,7 +178,7 @@ async fn test_stub_function_date_create_return_type() {
 /// via `->` completion.
 #[tokio::test]
 async fn test_completion_variable_from_stub_function_date_create() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let uri = Url::parse("file:///stub_func_test.php").unwrap();
     let text = concat!(
@@ -208,7 +208,7 @@ async fn test_completion_variable_from_stub_function_date_create() {
 /// to DateTime so chained `->` offers DateTime methods.
 #[tokio::test]
 async fn test_completion_chained_stub_function_call() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let uri = Url::parse("file:///stub_chain.php").unwrap();
     let text = concat!(
@@ -234,7 +234,7 @@ async fn test_completion_chained_stub_function_call() {
 /// includes `SimpleXMLElement`.
 #[tokio::test]
 async fn test_stub_function_simplexml_load_string() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["simplexml_load_string"]);
     assert!(
@@ -256,7 +256,7 @@ async fn test_stub_function_simplexml_load_string() {
 /// resolve its return type.
 #[tokio::test]
 async fn test_completion_stub_function_in_expression_subject() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let uri = Url::parse("file:///stub_expr.php").unwrap();
     // `simplexml_load_string(...)` returns `SimpleXMLElement|false`.
@@ -292,7 +292,7 @@ async fn test_completion_stub_function_in_expression_subject() {
 /// parsed, so other functions from the same file should also be cached.
 #[tokio::test]
 async fn test_stub_function_sibling_functions_cached() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     // Look up array_push — this triggers parsing of its stub file.
     let result = backend.find_or_load_function(&["array_push"]);
@@ -317,7 +317,7 @@ async fn test_stub_function_sibling_functions_cached() {
 /// extracted correctly.
 #[tokio::test]
 async fn test_stub_function_parameters_extracted() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["str_contains"]);
     assert!(result.is_some());
@@ -371,7 +371,7 @@ async fn test_user_function_takes_precedence_over_stub() {
 /// resolution, the infrastructure should be in place).
 #[tokio::test]
 async fn test_stub_constant_index_built() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     // The stub_constant_index should be populated from the embedded stubs.
     // PHP_EOL is a very common constant that should be present.
@@ -382,7 +382,7 @@ async fn test_stub_constant_index_built() {
 /// Verify that common constants are present in the constant index.
 #[tokio::test]
 async fn test_stub_constant_index_common_constants() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     // Note: TRUE, FALSE, NULL are language constructs, not in the stubs map.
     let expected = [
@@ -407,7 +407,7 @@ async fn test_stub_constant_index_common_constants() {
 /// subjects in go-to-definition member resolution).
 #[tokio::test]
 async fn test_definition_resolver_uses_stub_functions() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let uri = Url::parse("file:///def_stub.php").unwrap();
     // When cursor is on `format` after `date_create()->`, the definition
@@ -446,7 +446,7 @@ async fn test_definition_resolver_uses_stub_functions() {
 /// built-in function).
 #[tokio::test]
 async fn test_stub_function_array_key_exists() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["array_key_exists"]);
     assert!(result.is_some(), "array_key_exists should be in stubs");
@@ -459,7 +459,7 @@ async fn test_stub_function_array_key_exists() {
 /// Verify that `substr` is resolvable.
 #[tokio::test]
 async fn test_stub_function_substr() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["substr"]);
     assert!(result.is_some(), "substr should be in stubs");
@@ -473,7 +473,7 @@ async fn test_stub_function_substr() {
 /// Verify that `preg_match` is resolvable.
 #[tokio::test]
 async fn test_stub_function_preg_match() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_function_stubs();
 
     let result = backend.find_or_load_function(&["preg_match"]);
     assert!(result.is_some(), "preg_match should be in stubs");

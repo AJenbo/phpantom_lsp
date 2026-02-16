@@ -172,6 +172,34 @@ impl Backend {
         }
     }
 
+    /// Create a `Backend` for tests with custom class, function, and constant
+    /// stub indices.
+    ///
+    /// This allows tests to inject minimal stub content so that they are
+    /// fully self-contained and do not depend on `composer install`.
+    pub fn new_test_with_all_stubs(
+        stub_index: HashMap<&'static str, &'static str>,
+        stub_function_index: HashMap<&'static str, &'static str>,
+        stub_constant_index: HashMap<&'static str, &'static str>,
+    ) -> Self {
+        Self {
+            name: "PHPantomLSP".to_string(),
+            version: "0.1.0".to_string(),
+            open_files: Arc::new(Mutex::new(HashMap::new())),
+            ast_map: Arc::new(Mutex::new(HashMap::new())),
+            client: None,
+            workspace_root: Arc::new(Mutex::new(None)),
+            psr4_mappings: Arc::new(Mutex::new(Vec::new())),
+            use_map: Arc::new(Mutex::new(HashMap::new())),
+            namespace_map: Arc::new(Mutex::new(HashMap::new())),
+            global_functions: Arc::new(Mutex::new(HashMap::new())),
+            class_index: Arc::new(Mutex::new(HashMap::new())),
+            stub_index,
+            stub_function_index,
+            stub_constant_index,
+        }
+    }
+
     /// Create a `Backend` for tests with a specific workspace root and PSR-4
     /// mappings pre-configured.
     pub fn new_test_with_workspace(
