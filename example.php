@@ -380,6 +380,11 @@ class Container
     {
         $this->bindings[$abstract] = $obj;
     }
+
+    public function getStatus(): int
+    {
+        return 404;
+    }
 }
 
 // ─── Standalone Functions ───────────────────────────────────────────────────
@@ -478,15 +483,28 @@ $admin->getCreatedAt(); // Inherited via trait from User
 
 // Union types — ambiguous variable across conditional branches
 if (rand(0, 1)) {
-    $ambiguous = new User('X', 'x@example.com');
+    $ambiguous = new Container();
 } else {
     $ambiguous = new AdminUser('Y', 'y@example.com');
 }
-$ambiguous->getName(); // Both User and AdminUser have getName()
+$ambiguous->getStatus(); // Both Container and AdminUser have getStatus()
+if ($ambiguous instanceof AdminUser) {
+    $ambiguous->addRoles('reviewer');
+} else {
+    $ambiguous->bind($ambiguous::class, $ambiguous);
+}
 
 // Union return type resolution
 $found = findOrFail(1);
 $found->getName(); // User|AdminUser — union completion
+if ($found instanceof User) {
+    $found->addRoles('triage'); // AdminUser extends User
+}
+
+// Narrow using assert()
+$asserted = getUnknownValue(1);
+assert($asserted instanceof User);
+$asserted->addRoles();
 
 // Go-to-definition targets:
 // - Hover over `User` to jump to its class definition

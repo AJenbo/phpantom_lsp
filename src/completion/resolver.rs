@@ -665,7 +665,10 @@ impl Backend {
     ) -> Vec<ClassInfo> {
         for member in members {
             if let ClassLikeMember::Method(method) = member {
-                // Check parameter type hints first
+                // Collect parameter type hint as initial candidate set.
+                // We no longer return early here so that the method body
+                // can be scanned for instanceof narrowing / reassignments.
+                let mut param_results: Vec<ClassInfo> = Vec::new();
                 for param in method.parameter_list.parameters.iter() {
                     let pname = param.variable.name.to_string();
                     if pname == ctx.var_name
@@ -679,38 +682,40 @@ impl Backend {
                             ctx.class_loader,
                         );
                         if !resolved.is_empty() {
-                            return resolved;
+                            param_results = resolved;
+                            break;
                         }
                     }
                 }
+
                 if let MethodBody::Concrete(block) = &method.body {
                     let blk_start = block.left_brace.start.offset;
                     let blk_end = block.right_brace.end.offset;
                     if ctx.cursor_offset >= blk_start && ctx.cursor_offset <= blk_end {
-                        let results = Self::find_assignment_types_in_block(block, ctx);
+                        // Seed the result set with the parameter type hint
+                        // (if any) so that instanceof narrowing and
+                        // unconditional reassignments can refine it.
+                        let mut results = param_results.clone();
+                        Self::walk_statements_for_assignments(
+                            block.statements.iter(),
+                            ctx,
+                            &mut results,
+                            false,
+                        );
                         if !results.is_empty() {
                             return results;
                         }
                     }
                 }
+
+                // Cursor is outside the method body — return the
+                // parameter type hint as-is (no body to narrow in).
+                if !param_results.is_empty() {
+                    return param_results;
+                }
             }
         }
         vec![]
-    }
-
-    /// Walk a block's statements looking for assignments to `$var_name`
-    /// that occur *before* the cursor.
-    ///
-    /// Returns all possible types: unconditional assignments replace
-    /// previous candidates, while conditional assignments (inside
-    /// if/else/try/catch/loops) add to the list.
-    fn find_assignment_types_in_block<'b>(
-        block: &'b Block<'b>,
-        ctx: &VarResolutionCtx<'_>,
-    ) -> Vec<ClassInfo> {
-        let mut results: Vec<ClassInfo> = Vec::new();
-        Self::walk_statements_for_assignments(block.statements.iter(), ctx, &mut results, false);
-        results
     }
 
     /// Walk statements collecting variable assignment types.
@@ -753,6 +758,16 @@ impl Backend {
                             conditional,
                         );
                     }
+
+                    // ── assert($var instanceof ClassName) narrowing ──
+                    // When `assert($var instanceof Foo)` appears before
+                    // the cursor, narrow the variable to `Foo` for the
+                    // remainder of the current scope.
+                    Self::try_apply_assert_instanceof_narrowing(
+                        expr_stmt.expression,
+                        ctx,
+                        results,
+                    );
                 }
                 // Recurse into blocks — these are just `{ … }` groupings,
                 // not conditional, so preserve the current `conditional` flag.
@@ -765,10 +780,30 @@ impl Backend {
                     );
                 }
                 // ── Conditional blocks: recurse with conditional = true ──
+                //
+                // When the condition is `$var instanceof ClassName` and the
+                // cursor falls inside the corresponding branch body, we
+                // *narrow* the variable to only that class — replacing all
+                // previous candidates.
                 Statement::If(if_stmt) => match &if_stmt.body {
                     IfBody::Statement(body) => {
+                        // ── instanceof narrowing for then-body ──
+                        Self::try_apply_instanceof_narrowing(
+                            if_stmt.condition,
+                            body.statement.span(),
+                            ctx,
+                            results,
+                        );
                         Self::check_statement_for_assignments(body.statement, ctx, results, true);
+
                         for else_if in body.else_if_clauses.iter() {
+                            // ── instanceof narrowing for elseif-body ──
+                            Self::try_apply_instanceof_narrowing(
+                                else_if.condition,
+                                else_if.statement.span(),
+                                ctx,
+                                results,
+                            );
                             Self::check_statement_for_assignments(
                                 else_if.statement,
                                 ctx,
@@ -777,6 +812,15 @@ impl Backend {
                             );
                         }
                         if let Some(else_clause) = &body.else_clause {
+                            // ── inverse instanceof narrowing for else-body ──
+                            // `if ($v instanceof Foo) { … } else { ← here }`
+                            // means $v is NOT Foo in the else branch.
+                            Self::try_apply_instanceof_narrowing_inverse(
+                                if_stmt.condition,
+                                else_clause.statement.span(),
+                                ctx,
+                                results,
+                            );
                             Self::check_statement_for_assignments(
                                 else_clause.statement,
                                 ctx,
@@ -786,6 +830,26 @@ impl Backend {
                         }
                     }
                     IfBody::ColonDelimited(body) => {
+                        // Determine the then-body span: from the colon to
+                        // the first elseif / else / endif keyword.
+                        let then_end = if !body.else_if_clauses.is_empty() {
+                            body.else_if_clauses.first().unwrap().elseif.span().start.offset
+                        } else if let Some(ref ec) = body.else_clause {
+                            ec.r#else.span().start.offset
+                        } else {
+                            body.endif.span().start.offset
+                        };
+                        let then_span = mago_span::Span::new(
+                            body.colon.file_id,
+                            body.colon.start,
+                            mago_span::Position::new(then_end),
+                        );
+                        Self::try_apply_instanceof_narrowing(
+                            if_stmt.condition,
+                            then_span,
+                            ctx,
+                            results,
+                        );
                         Self::walk_statements_for_assignments(
                             body.statements.iter(),
                             ctx,
@@ -793,6 +857,19 @@ impl Backend {
                             true,
                         );
                         for else_if in body.else_if_clauses.iter() {
+                            let ei_span = mago_span::Span::new(
+                                else_if.colon.file_id,
+                                else_if.colon.start,
+                                mago_span::Position::new(
+                                    else_if.statements.span(else_if.colon.file_id, else_if.colon.end).end.offset,
+                                ),
+                            );
+                            Self::try_apply_instanceof_narrowing(
+                                else_if.condition,
+                                ei_span,
+                                ctx,
+                                results,
+                            );
                             Self::walk_statements_for_assignments(
                                 else_if.statements.iter(),
                                 ctx,
@@ -801,6 +878,27 @@ impl Backend {
                             );
                         }
                         if let Some(else_clause) = &body.else_clause {
+                            // ── inverse instanceof narrowing for else-body ──
+                            let else_span = mago_span::Span::new(
+                                else_clause.colon.file_id,
+                                else_clause.colon.start,
+                                mago_span::Position::new(
+                                    else_clause
+                                        .statements
+                                        .span(
+                                            else_clause.colon.file_id,
+                                            else_clause.colon.end,
+                                        )
+                                        .end
+                                        .offset,
+                                ),
+                            );
+                            Self::try_apply_instanceof_narrowing_inverse(
+                                if_stmt.condition,
+                                else_span,
+                                ctx,
+                                results,
+                            );
                             Self::walk_statements_for_assignments(
                                 else_clause.statements.iter(),
                                 ctx,
@@ -879,6 +977,223 @@ impl Backend {
                 _ => {}
             }
         }
+    }
+
+    /// Check if `condition` is `$var instanceof ClassName` (possibly
+    /// parenthesised or negated) where the variable matches `ctx.var_name`.
+    ///
+    /// If the cursor falls inside `body_span`:
+    ///   - positive match → narrow `results` to only the instanceof class
+    ///   - negated match (`!($var instanceof ClassName)`) → *exclude* the
+    ///     class from the current candidates
+    fn try_apply_instanceof_narrowing(
+        condition: &Expression<'_>,
+        body_span: mago_span::Span,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        if ctx.cursor_offset < body_span.start.offset
+            || ctx.cursor_offset > body_span.end.offset
+        {
+            return;
+        }
+        if let Some((cls_name, negated)) =
+            Self::try_extract_instanceof_with_negation(condition, ctx.var_name)
+        {
+            if negated {
+                Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+            } else {
+                Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+            }
+        }
+    }
+
+    /// Inverse of `try_apply_instanceof_narrowing` — used for the `else`
+    /// branch of an `if ($var instanceof ClassName)` check.
+    ///
+    /// A positive instanceof in the condition means the variable is NOT
+    /// that class inside the else body (→ exclude), and vice-versa for a
+    /// negated condition (→ include only that class).
+    fn try_apply_instanceof_narrowing_inverse(
+        condition: &Expression<'_>,
+        body_span: mago_span::Span,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        if ctx.cursor_offset < body_span.start.offset
+            || ctx.cursor_offset > body_span.end.offset
+        {
+            return;
+        }
+        if let Some((cls_name, negated)) =
+            Self::try_extract_instanceof_with_negation(condition, ctx.var_name)
+        {
+            // Flip the polarity: positive condition → exclude in else,
+            // negated condition → include in else.
+            if negated {
+                Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+            } else {
+                Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+            }
+        }
+    }
+
+    /// Replace `results` with only the resolved classes for `cls_name`.
+    fn apply_instanceof_inclusion(
+        cls_name: &str,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        let narrowed = Self::type_hint_to_classes(
+            cls_name,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        if !narrowed.is_empty() {
+            results.clear();
+            for cls in narrowed {
+                if !results.iter().any(|c| c.name == cls.name) {
+                    results.push(cls);
+                }
+            }
+        }
+    }
+
+    /// Remove the resolved classes for `cls_name` from `results`.
+    fn apply_instanceof_exclusion(
+        cls_name: &str,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        let excluded = Self::type_hint_to_classes(
+            cls_name,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        if !excluded.is_empty() {
+            results.retain(|r| !excluded.iter().any(|e| e.name == r.name));
+        }
+    }
+
+    /// If `expr` is `$var instanceof ClassName` and the variable name
+    /// matches `var_name`, return the class name.
+    ///
+    /// Handles parenthesised expressions recursively so that
+    /// `($var instanceof Foo)` also works.
+    fn try_extract_instanceof<'b>(
+        expr: &'b Expression<'b>,
+        var_name: &str,
+    ) -> Option<String> {
+        match expr {
+            Expression::Parenthesized(inner) => {
+                Self::try_extract_instanceof(inner.expression, var_name)
+            }
+            Expression::Binary(bin) if bin.operator.is_instanceof() => {
+                // LHS must be our variable
+                let lhs_name = match bin.lhs {
+                    Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+                    _ => return None,
+                };
+                if lhs_name != var_name {
+                    return None;
+                }
+                // RHS is the class name
+                match bin.rhs {
+                    Expression::Identifier(ident) => Some(ident.value().to_string()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Like `try_extract_instanceof` but also detects negation.
+    ///
+    /// Returns `Some((class_name, negated))` where `negated` is `true`
+    /// when the expression is `!($var instanceof ClassName)` or
+    /// `!$var instanceof ClassName` (PHP precedence: `instanceof` binds
+    /// tighter than `!`, so both forms are equivalent).
+    ///
+    /// Handles arbitrary parenthesisation.
+    fn try_extract_instanceof_with_negation<'b>(
+        expr: &'b Expression<'b>,
+        var_name: &str,
+    ) -> Option<(String, bool)> {
+        match expr {
+            Expression::Parenthesized(inner) => {
+                Self::try_extract_instanceof_with_negation(inner.expression, var_name)
+            }
+            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+                // `!expr` — the inner expr should be a (possibly parenthesised) instanceof
+                Self::try_extract_instanceof(prefix.operand, var_name)
+                    .map(|cls| (cls, true))
+            }
+            _ => {
+                Self::try_extract_instanceof(expr, var_name)
+                    .map(|cls| (cls, false))
+            }
+        }
+    }
+
+    /// If `expr` is `assert($var instanceof ClassName)` (or the negated
+    /// form `assert(!$var instanceof ClassName)`), narrow or exclude
+    /// `results` accordingly.
+    ///
+    /// Unlike `if`-based narrowing which is scoped to the block body,
+    /// `assert()` narrows unconditionally for all subsequent code in the
+    /// same scope — the statement being before the cursor is already
+    /// guaranteed by the caller.
+    fn try_apply_assert_instanceof_narrowing(
+        expr: &Expression<'_>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        if let Some((cls_name, negated)) =
+            Self::try_extract_assert_instanceof(expr, ctx.var_name)
+        {
+            if negated {
+                Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+            } else {
+                Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+            }
+        }
+    }
+
+    /// If `expr` is `assert($var instanceof ClassName)` (or the negated
+    /// form), return `Some((class_name, negated))`.
+    ///
+    /// Supports parenthesised inner expressions and the function name
+    /// `assert`.
+    fn try_extract_assert_instanceof<'b>(
+        expr: &'b Expression<'b>,
+        var_name: &str,
+    ) -> Option<(String, bool)> {
+        // Unwrap parenthesised wrapper on the whole expression
+        let expr = match expr {
+            Expression::Parenthesized(inner) => inner.expression,
+            other => other,
+        };
+        if let Expression::Call(Call::Function(func_call)) = expr {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value().to_string(),
+                _ => return None,
+            };
+            if func_name != "assert" {
+                return None;
+            }
+            // The first argument should be the instanceof expression
+            // (possibly negated)
+            if let Some(first_arg) = func_call.argument_list.arguments.iter().next() {
+                let arg_expr = match first_arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                return Self::try_extract_instanceof_with_negation(arg_expr, var_name);
+            }
+        }
+        None
     }
 
     /// Helper: treat a single statement as an iterator of one and recurse.

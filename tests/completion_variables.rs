@@ -2230,6 +2230,598 @@ async fn test_completion_inline_var_docblock_unconditional_reassignment() {
     }
 }
 
+// ─── instanceof narrowing ───────────────────────────────────────────────────
+
+/// When the cursor is inside `if ($var instanceof Foo) { … }`, only
+/// members of `Foo` should be suggested — not the full union.
+#[tokio::test]
+async fn test_completion_instanceof_narrows_to_single_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_basic.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Animal {\n",                                 // 1
+        "    public function breathe(): void {}\n",         // 2
+        "}\n",                                              // 3
+        "class Dog extends Animal {\n",                     // 4
+        "    public function bark(): void {}\n",            // 5
+        "}\n",                                              // 6
+        "class Cat extends Animal {\n",                     // 7
+        "    public function purr(): void {}\n",            // 8
+        "}\n",                                              // 9
+        "class Svc {\n",                                    // 10
+        "    public function test(): void {\n",             // 11
+        "        if (rand(0,1)) {\n",                       // 12
+        "            $pet = new Dog();\n",                  // 13
+        "        } else {\n",                               // 14
+        "            $pet = new Cat();\n",                  // 15
+        "        }\n",                                      // 16
+        "        if ($pet instanceof Dog) {\n",             // 17
+        "            $pet->\n",                             // 18
+        "        }\n",                                      // 19
+        "    }\n",                                          // 20
+        "}\n",                                              // 21
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 18,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's own method 'bark', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"breathe"),
+                "Should include inherited method 'breathe', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's method 'purr', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// After the instanceof block, the full union should be restored.
+#[tokio::test]
+async fn test_completion_instanceof_no_narrowing_outside_block() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_outside.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Alpha {\n",                                  // 1
+        "    public function alphaMethod(): void {}\n",     // 2
+        "}\n",                                              // 3
+        "class Beta {\n",                                   // 4
+        "    public function betaMethod(): void {}\n",      // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(): void {\n",             // 8
+        "        if (rand(0,1)) {\n",                       // 9
+        "            $obj = new Alpha();\n",                // 10
+        "        } else {\n",                               // 11
+        "            $obj = new Beta();\n",                 // 12
+        "        }\n",                                      // 13
+        "        if ($obj instanceof Alpha) {\n",           // 14
+        "            // narrowed here\n",                   // 15
+        "        }\n",                                      // 16
+        "        $obj->\n",                                 // 17
+        "    }\n",                                          // 18
+        "}\n",                                              // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // Outside the instanceof block, both types should be available
+            assert!(
+                method_names.contains(&"alphaMethod"),
+                "Should still include 'alphaMethod' after instanceof block, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"betaMethod"),
+                "Should still include 'betaMethod' after instanceof block, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `elseif ($var instanceof OtherClass)` should narrow to OtherClass.
+#[tokio::test]
+async fn test_completion_instanceof_elseif_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_elseif.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Foo {\n",                                    // 1
+        "    public function fooMethod(): void {}\n",       // 2
+        "}\n",                                              // 3
+        "class Bar {\n",                                    // 4
+        "    public function barMethod(): void {}\n",       // 5
+        "}\n",                                              // 6
+        "class Baz {\n",                                    // 7
+        "    public function bazMethod(): void {}\n",       // 8
+        "}\n",                                              // 9
+        "class Svc {\n",                                    // 10
+        "    public function test(): void {\n",             // 11
+        "        if (rand(0,1)) {\n",                       // 12
+        "            $x = new Foo();\n",                    // 13
+        "        } elseif (rand(0,1)) {\n",                 // 14
+        "            $x = new Bar();\n",                    // 15
+        "        } else {\n",                               // 16
+        "            $x = new Baz();\n",                    // 17
+        "        }\n",                                      // 18
+        "        if ($x instanceof Foo) {\n",               // 19
+        "            // cursor NOT here\n",                 // 20
+        "        } elseif ($x instanceof Bar) {\n",         // 21
+        "            $x->\n",                               // 22
+        "        }\n",                                      // 23
+        "    }\n",                                          // 24
+        "}\n",                                              // 25
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 22,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"barMethod"),
+                "elseif instanceof Bar should narrow to Bar, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"fooMethod"),
+                "Should NOT include Foo methods inside Bar elseif, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"bazMethod"),
+                "Should NOT include Baz methods inside Bar elseif, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// instanceof with a different variable name should NOT narrow our variable.
+#[tokio::test]
+async fn test_completion_instanceof_different_variable_no_effect() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_other_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class TypeA {\n",                                  // 1
+        "    public function aMethod(): void {}\n",         // 2
+        "}\n",                                              // 3
+        "class TypeB {\n",                                  // 4
+        "    public function bMethod(): void {}\n",         // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(): void {\n",             // 8
+        "        if (rand(0,1)) {\n",                       // 9
+        "            $obj = new TypeA();\n",                // 10
+        "        } else {\n",                               // 11
+        "            $obj = new TypeB();\n",                // 12
+        "        }\n",                                      // 13
+        "        $other = new TypeA();\n",                  // 14
+        "        if ($other instanceof TypeA) {\n",         // 15
+        "            $obj->\n",                             // 16
+        "        }\n",                                      // 17
+        "    }\n",                                          // 18
+        "}\n",                                              // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // $obj should NOT be narrowed because the instanceof checks $other
+            assert!(
+                method_names.contains(&"aMethod"),
+                "Should include aMethod (union not narrowed), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"bMethod"),
+                "Should include bMethod (union not narrowed), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// instanceof narrowing in top-level code (outside any class).
+#[tokio::test]
+async fn test_completion_instanceof_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Container {\n",                              // 1
+        "    public function bind(): void {}\n",            // 2
+        "}\n",                                              // 3
+        "class AdminUser {\n",                              // 4
+        "    public function grantPermission(): void {}\n", // 5
+        "}\n",                                              // 6
+        "\n",                                               // 7
+        "if (rand(0, 1)) {\n",                              // 8
+        "    $ambiguous = new Container();\n",               // 9
+        "} else {\n",                                       // 10
+        "    $ambiguous = new AdminUser();\n",               // 11
+        "}\n",                                              // 12
+        "if ($ambiguous instanceof AdminUser) {\n",         // 13
+        "    $ambiguous->\n",                                // 14
+        "}\n",                                              // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"grantPermission"),
+                "Should include AdminUser's 'grantPermission', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"bind"),
+                "Should NOT include Container's 'bind', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// instanceof narrowing should resolve the class via cross-file PSR-4.
+#[tokio::test]
+async fn test_completion_instanceof_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Vehicle.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class Vehicle {\n",
+                    "    public function drive(): void {}\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Truck.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "class Truck extends Vehicle {\n",
+                    "    public function haul(): void {}\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let uri = Url::parse("file:///main.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Vehicle;\n",
+        "use App\\Truck;\n",
+        "class Dispatch {\n",
+        "    public function run(Vehicle $v): void {\n",
+        "        if ($v instanceof Truck) {\n",
+        "            $v->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"haul"),
+                "Should include Truck's own method 'haul', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"drive"),
+                "Should include inherited method 'drive', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Parenthesised instanceof condition should also narrow.
+#[tokio::test]
+async fn test_completion_instanceof_parenthesised_condition() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_parens.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class One {\n",                                    // 1
+        "    public function oneMethod(): void {}\n",       // 2
+        "}\n",                                              // 3
+        "class Two {\n",                                    // 4
+        "    public function twoMethod(): void {}\n",       // 5
+        "}\n",                                              // 6
+        "class Svc {\n",                                    // 7
+        "    public function test(): void {\n",             // 8
+        "        if (rand(0,1)) {\n",                       // 9
+        "            $val = new One();\n",                  // 10
+        "        } else {\n",                               // 11
+        "            $val = new Two();\n",                  // 12
+        "        }\n",                                      // 13
+        "        if (($val instanceof Two)) {\n",           // 14
+        "            $val->\n",                             // 15
+        "        }\n",                                      // 16
+        "    }\n",                                          // 17
+        "}\n",                                              // 18
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"twoMethod"),
+                "Parenthesised instanceof should narrow to Two, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"oneMethod"),
+                "Should NOT include One's methods, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 #[tokio::test]
 async fn test_completion_top_level_chained_method_on_variable() {
     let backend = create_test_backend();
@@ -2532,6 +3124,1117 @@ async fn test_completion_top_level_variable_from_function_call() {
             assert!(
                 method_names.contains(&"getStatus"),
                 "Should include 'getStatus', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── assert($var instanceof …) narrowing ────────────────────────────────────
+
+/// When `assert($var instanceof Foo)` appears before the cursor,
+/// only members of `Foo` should be suggested.
+#[tokio::test]
+async fn test_completion_assert_instanceof_narrows_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_instanceof_basic.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Animal {\n",                                     // 1
+        "    public function breathe(): void {}\n",             // 2
+        "}\n",                                                  // 3
+        "class Dog extends Animal {\n",                         // 4
+        "    public function bark(): void {}\n",                // 5
+        "}\n",                                                  // 6
+        "class Cat extends Animal {\n",                         // 7
+        "    public function purr(): void {}\n",                // 8
+        "}\n",                                                  // 9
+        "class Svc {\n",                                        // 10
+        "    public function test(): void {\n",                 // 11
+        "        if (rand(0,1)) {\n",                           // 12
+        "            $pet = new Dog();\n",                      // 13
+        "        } else {\n",                                   // 14
+        "            $pet = new Cat();\n",                      // 15
+        "        }\n",                                          // 16
+        "        assert($pet instanceof Dog);\n",               // 17
+        "        $pet->\n",                                     // 18
+        "    }\n",                                              // 19
+        "}\n",                                                  // 20
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 18,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's own method 'bark', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"breathe"),
+                "Should include inherited method 'breathe', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's method 'purr', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert()` narrowing should work in top-level code (outside a class).
+#[tokio::test]
+async fn test_completion_assert_instanceof_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_instanceof_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Alpha {\n",                                      // 1
+        "    public function alphaMethod(): void {}\n",         // 2
+        "}\n",                                                  // 3
+        "class Beta {\n",                                       // 4
+        "    public function betaMethod(): void {}\n",          // 5
+        "}\n",                                                  // 6
+        "if (rand(0,1)) {\n",                                   // 7
+        "    $obj = new Alpha();\n",                             // 8
+        "} else {\n",                                            // 9
+        "    $obj = new Beta();\n",                              // 10
+        "}\n",                                                   // 11
+        "assert($obj instanceof Alpha);\n",                     // 12
+        "$obj->\n",                                              // 13
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 6,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"alphaMethod"),
+                "Should include 'alphaMethod', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"betaMethod"),
+                "Should NOT include 'betaMethod' after assert, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert()` narrowing should work on parameters with type hints.
+#[tokio::test]
+async fn test_completion_assert_instanceof_narrows_parameter() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_instanceof_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Base {\n",                                       // 1
+        "    public function baseMethod(): void {}\n",          // 2
+        "}\n",                                                  // 3
+        "class Child extends Base {\n",                         // 4
+        "    public function childMethod(): void {}\n",         // 5
+        "}\n",                                                  // 6
+        "class Handler {\n",                                    // 7
+        "    public function handle(Base $item): void {\n",     // 8
+        "        assert($item instanceof Child);\n",            // 9
+        "        $item->\n",                                    // 10
+        "    }\n",                                              // 11
+        "}\n",                                                  // 12
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"childMethod"),
+                "Should include Child's 'childMethod', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"baseMethod"),
+                "Should include inherited 'baseMethod', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert()` with a different variable should not affect the target variable.
+#[tokio::test]
+async fn test_completion_assert_instanceof_different_variable_no_effect() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_instanceof_diffvar.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Foo {\n",                                        // 1
+        "    public function fooMethod(): void {}\n",           // 2
+        "}\n",                                                  // 3
+        "class Bar {\n",                                        // 4
+        "    public function barMethod(): void {}\n",           // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        $a = new Foo();\n",                            // 9
+        "        $b = new Bar();\n",                            // 10
+        "        assert($b instanceof Foo);\n",                 // 11
+        "        $a->\n",                                       // 12
+        "    }\n",                                              // 13
+        "}\n",                                                  // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // $a is still Foo — the assert on $b should not affect $a
+            assert!(
+                method_names.contains(&"fooMethod"),
+                "Should include 'fooMethod' for $a, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"barMethod"),
+                "Should NOT include 'barMethod' for $a, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert()` narrowing should work with cross-file PSR-4 class resolution.
+#[tokio::test]
+async fn test_completion_assert_instanceof_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Models/User.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\Models;\n",
+                "class User {\n",
+                "    public function addRoles(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///assert_instanceof_cross.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Models\\User;\n",
+        "class Base {\n",
+        "    public function baseMethod(): void {}\n",
+        "}\n",
+        "function getUnknownValue(int $i): Base { return new Base(); }\n",
+        "$asserted = getUnknownValue(1);\n",
+        "assert($asserted instanceof User);\n",
+        "$asserted->\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"addRoles"),
+                "Should include User's 'addRoles' via cross-file resolution, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"baseMethod"),
+                "Should NOT include Base's 'baseMethod' after assert narrowing, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert()` with parenthesised inner expression should also narrow.
+#[tokio::test]
+async fn test_completion_assert_instanceof_parenthesised() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_instanceof_parens.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class X {\n",                                          // 1
+        "    public function xMethod(): void {}\n",             // 2
+        "}\n",                                                  // 3
+        "class Y {\n",                                          // 4
+        "    public function yMethod(): void {}\n",             // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $v = new X();\n",                          // 10
+        "        } else {\n",                                   // 11
+        "            $v = new Y();\n",                          // 12
+        "        }\n",                                          // 13
+        "        assert(($v instanceof X));\n",                 // 14
+        "        $v->\n",                                       // 15
+        "    }\n",                                              // 16
+        "}\n",                                                  // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"xMethod"),
+                "Should include X's 'xMethod', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"yMethod"),
+                "Should NOT include Y's 'yMethod' after assert narrowing, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── negated instanceof narrowing ───────────────────────────────────────────
+
+/// `assert(!$var instanceof ClassName)` should *exclude* ClassName from
+/// the candidate set (PHP precedence: `instanceof` binds tighter than `!`,
+/// so `!$x instanceof Foo` ≡ `!($x instanceof Foo)`).
+#[tokio::test]
+async fn test_completion_assert_negated_instanceof_excludes_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_neg_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Alpha {\n",                                      // 1
+        "    public function alphaMethod(): void {}\n",         // 2
+        "}\n",                                                  // 3
+        "class Beta {\n",                                       // 4
+        "    public function betaMethod(): void {}\n",          // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $obj = new Alpha();\n",                    // 10
+        "        } else {\n",                                   // 11
+        "            $obj = new Beta();\n",                     // 12
+        "        }\n",                                          // 13
+        "        assert(!$obj instanceof Alpha);\n",            // 14
+        "        $obj->\n",                                     // 15
+        "    }\n",                                              // 16
+        "}\n",                                                  // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"betaMethod"),
+                "Should include Beta's 'betaMethod' after excluding Alpha, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"alphaMethod"),
+                "Should NOT include Alpha's 'alphaMethod' after negated assert, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `assert(!($var instanceof ClassName))` with explicit parens should
+/// also exclude ClassName.
+#[tokio::test]
+async fn test_completion_assert_negated_instanceof_parenthesised_excludes_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_neg_instanceof_parens.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Foo {\n",                                        // 1
+        "    public function fooMethod(): void {}\n",           // 2
+        "}\n",                                                  // 3
+        "class Bar {\n",                                        // 4
+        "    public function barMethod(): void {}\n",           // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $x = new Foo();\n",                        // 10
+        "        } else {\n",                                   // 11
+        "            $x = new Bar();\n",                        // 12
+        "        }\n",                                          // 13
+        "        assert(!($x instanceof Foo));\n",              // 14
+        "        $x->\n",                                       // 15
+        "    }\n",                                              // 16
+        "}\n",                                                  // 17
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"barMethod"),
+                "Should include Bar's 'barMethod', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"fooMethod"),
+                "Should NOT include Foo's 'fooMethod' after negated assert, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if (!($var instanceof ClassName)) { … }` should exclude ClassName
+/// inside the if body.
+#[tokio::test]
+async fn test_completion_if_negated_instanceof_excludes_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///if_neg_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Cat {\n",                                        // 1
+        "    public function purr(): void {}\n",                // 2
+        "}\n",                                                  // 3
+        "class Dog {\n",                                        // 4
+        "    public function bark(): void {}\n",                // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $pet = new Cat();\n",                      // 10
+        "        } else {\n",                                   // 11
+        "            $pet = new Dog();\n",                      // 12
+        "        }\n",                                          // 13
+        "        if (!($pet instanceof Cat)) {\n",              // 14
+        "            $pet->\n",                                 // 15
+        "        }\n",                                          // 16
+        "    }\n",                                              // 17
+        "}\n",                                                  // 18
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' inside negated instanceof block, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' inside negated instanceof block, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if (!$var instanceof ClassName)` without explicit inner parens should
+/// also exclude (PHP precedence: `instanceof` > `!`).
+#[tokio::test]
+async fn test_completion_if_negated_instanceof_no_inner_parens() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///if_neg_instanceof_no_parens.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class A1 {\n",                                         // 1
+        "    public function a1Method(): void {}\n",            // 2
+        "}\n",                                                  // 3
+        "class B1 {\n",                                         // 4
+        "    public function b1Method(): void {}\n",            // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $v = new A1();\n",                         // 10
+        "        } else {\n",                                   // 11
+        "            $v = new B1();\n",                         // 12
+        "        }\n",                                          // 13
+        "        if (!$v instanceof A1) {\n",                   // 14
+        "            $v->\n",                                   // 15
+        "        }\n",                                          // 16
+        "    }\n",                                              // 17
+        "}\n",                                                  // 18
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"b1Method"),
+                "Should include B1's 'b1Method', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"a1Method"),
+                "Should NOT include A1's 'a1Method' after negated instanceof, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if ($var instanceof ClassName) { … } else { … }` — inside the else
+/// branch the variable is NOT ClassName, so exclude it.
+#[tokio::test]
+async fn test_completion_if_instanceof_else_excludes_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///if_instanceof_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Red {\n",                                        // 1
+        "    public function redMethod(): void {}\n",           // 2
+        "}\n",                                                  // 3
+        "class Blue {\n",                                       // 4
+        "    public function blueMethod(): void {}\n",          // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $c = new Red();\n",                        // 10
+        "        } else {\n",                                   // 11
+        "            $c = new Blue();\n",                       // 12
+        "        }\n",                                          // 13
+        "        if ($c instanceof Red) {\n",                   // 14
+        "            // narrowed to Red here\n",                // 15
+        "        } else {\n",                                   // 16
+        "            $c->\n",                                   // 17
+        "        }\n",                                          // 18
+        "    }\n",                                              // 19
+        "}\n",                                                  // 20
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"blueMethod"),
+                "Should include Blue's 'blueMethod' in else branch, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"redMethod"),
+                "Should NOT include Red's 'redMethod' in else branch, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if ($var instanceof ClassName) { … } else { … }` — the then branch
+/// should still narrow positively (regression check).
+#[tokio::test]
+async fn test_completion_if_instanceof_then_still_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///if_instanceof_then_check.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Red {\n",                                        // 1
+        "    public function redMethod(): void {}\n",           // 2
+        "}\n",                                                  // 3
+        "class Blue {\n",                                       // 4
+        "    public function blueMethod(): void {}\n",          // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(): void {\n",                  // 8
+        "        if (rand(0,1)) {\n",                           // 9
+        "            $c = new Red();\n",                        // 10
+        "        } else {\n",                                   // 11
+        "            $c = new Blue();\n",                       // 12
+        "        }\n",                                          // 13
+        "        if ($c instanceof Red) {\n",                   // 14
+        "            $c->\n",                                   // 15
+        "        } else {\n",                                   // 16
+        "            // excluded here\n",                       // 17
+        "        }\n",                                          // 18
+        "    }\n",                                              // 19
+        "}\n",                                                  // 20
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"redMethod"),
+                "Should include Red's 'redMethod' in then branch, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"blueMethod"),
+                "Should NOT include Blue's 'blueMethod' in then branch, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `if ($param instanceof ClassName) { … } else { … }` — the else branch
+/// should exclude ClassName when the variable comes from a parameter.
+#[tokio::test]
+async fn test_completion_if_instanceof_else_excludes_with_parameter() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///if_instanceof_else_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Sun {\n",                                        // 1
+        "    public function shine(): void {}\n",               // 2
+        "}\n",                                                  // 3
+        "class Moon {\n",                                       // 4
+        "    public function glow(): void {}\n",                // 5
+        "}\n",                                                  // 6
+        "class Svc {\n",                                        // 7
+        "    public function run(Sun|Moon $s): void {\n",       // 8
+        "        if ($s instanceof Sun) {\n",                   // 9
+        "            // narrowed to Sun\n",                     // 10
+        "        } else {\n",                                   // 11
+        "            $s->\n",                                   // 12
+        "        }\n",                                          // 13
+        "    }\n",                                              // 14
+        "}\n",                                                  // 15
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 16,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"glow"),
+                "Should include Moon's 'glow' in else branch, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"shine"),
+                "Should NOT include Sun's 'shine' in else branch, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Top-level `if ($var instanceof …) {} else {}` should also narrow in
+/// the else branch.
+#[tokio::test]
+async fn test_completion_if_instanceof_else_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///if_instanceof_else_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class Up {\n",                                         // 1
+        "    public function rise(): void {}\n",                // 2
+        "}\n",                                                  // 3
+        "class Down {\n",                                       // 4
+        "    public function fall(): void {}\n",                // 5
+        "}\n",                                                  // 6
+        "if (rand(0,1)) {\n",                                   // 7
+        "    $dir = new Up();\n",                                // 8
+        "} else {\n",                                            // 9
+        "    $dir = new Down();\n",                              // 10
+        "}\n",                                                   // 11
+        "if ($dir instanceof Up) {\n",                           // 12
+        "    // narrowed to Up\n",                               // 13
+        "} else {\n",                                            // 14
+        "    $dir->\n",                                          // 15
+        "}\n",                                                   // 16
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"fall"),
+                "Should include Down's 'fall' in else branch, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"rise"),
+                "Should NOT include Up's 'rise' in else branch, got: {:?}",
                 method_names
             );
         }
