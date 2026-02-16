@@ -94,10 +94,18 @@ impl Backend {
     ///   (same-class access, e.g. `$this->`).
     /// - `Some(name)` where `name != target_class.name`: **public** and
     ///   **protected** members are shown (the caller might be in a subclass).
+    ///
+    /// `is_self_or_ancestor` should be `true` when the cursor is inside the
+    /// target class itself or inside a class that (transitively) extends the
+    /// target.  When `true`, `__construct` is offered for `::` access
+    /// (e.g. `self::__construct()`, `parent::__construct()`,
+    /// `ClassName::__construct()` from within a subclass).  When `false`,
+    /// magic methods are suppressed entirely.
     pub(crate) fn build_completion_items(
         target_class: &ClassInfo,
         access_kind: AccessKind,
         current_class_name: Option<&str>,
+        is_self_or_ancestor: bool,
     ) -> Vec<CompletionItem> {
         // Determine whether we are inside the same class as the target.
         let same_class = current_class_name.is_some_and(|name| name == target_class.name);
@@ -108,12 +116,13 @@ impl Backend {
         // Methods — filtered by static / instance, excluding magic methods
         for method in &target_class.methods {
             // `__construct` is meaningful to call explicitly via `::` or
-            // `parent::` (e.g. `parent::__construct(...)` in a child class),
-            // so we only suppress it for `->` access.  All other magic
-            // methods are always suppressed.
+            // `parent::` when inside the same class or a subclass
+            // (e.g. `parent::__construct(...)`, `self::__construct()`).
+            // Outside of that relationship, magic methods are suppressed.
             let is_constructor = method.name.eq_ignore_ascii_case("__construct");
             if Self::is_magic_method(&method.name) {
                 let allow = is_constructor
+                    && is_self_or_ancestor
                     && matches!(
                         access_kind,
                         AccessKind::DoubleColon | AccessKind::ParentDoubleColon
@@ -233,6 +242,19 @@ impl Backend {
                     ..CompletionItem::default()
                 });
             }
+        }
+
+        // `::class` keyword — returns the fully qualified class name as a string.
+        // Available on any class, interface, or enum via `::` access.
+        if access_kind == AccessKind::DoubleColon || access_kind == AccessKind::ParentDoubleColon {
+            items.push(CompletionItem {
+                label: "class".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("class-string".to_string()),
+                insert_text: Some("class".to_string()),
+                filter_text: Some("class".to_string()),
+                ..CompletionItem::default()
+            });
         }
 
         // Sort all items alphabetically (case-insensitive) and assign

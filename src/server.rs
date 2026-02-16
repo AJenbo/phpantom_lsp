@@ -393,10 +393,43 @@ impl LanguageServer for Backend {
                     for target_class in &candidates {
                         let merged =
                             Self::resolve_class_with_inheritance(target_class, &class_loader);
+
+                        // Determine whether the cursor is inside the target
+                        // class itself or inside a (transitive) subclass.
+                        // This controls whether `__construct` is offered
+                        // via `::` access.
+                        let is_self_or_ancestor = if let Some(cc) = current_class {
+                            if cc.name == target_class.name {
+                                true
+                            } else {
+                                // Walk the parent chain of the current class
+                                // to see if the target is an ancestor.
+                                let mut ancestor_name = cc.parent_class.clone();
+                                let mut found = false;
+                                let mut depth = 0u32;
+                                while let Some(ref name) = ancestor_name {
+                                    depth += 1;
+                                    if depth > 20 {
+                                        break;
+                                    }
+                                    if *name == target_class.name {
+                                        found = true;
+                                        break;
+                                    }
+                                    ancestor_name =
+                                        class_loader(name).and_then(|ci| ci.parent_class.clone());
+                                }
+                                found
+                            }
+                        } else {
+                            false
+                        };
+
                         let items = Self::build_completion_items(
                             &merged,
                             effective_access,
                             current_class_name,
+                            is_self_or_ancestor,
                         );
                         for item in items {
                             if !all_items
