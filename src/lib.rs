@@ -149,6 +149,29 @@ impl Backend {
         }
     }
 
+    /// Create a `Backend` for tests with custom stub class index.
+    ///
+    /// This allows tests to inject minimal stub content (e.g. `UnitEnum`,
+    /// `BackedEnum`) without depending on `composer install` having been run.
+    pub fn new_test_with_stubs(stub_index: HashMap<&'static str, &'static str>) -> Self {
+        Self {
+            name: "PHPantomLSP".to_string(),
+            version: "0.1.0".to_string(),
+            open_files: Arc::new(Mutex::new(HashMap::new())),
+            ast_map: Arc::new(Mutex::new(HashMap::new())),
+            client: None,
+            workspace_root: Arc::new(Mutex::new(None)),
+            psr4_mappings: Arc::new(Mutex::new(Vec::new())),
+            use_map: Arc::new(Mutex::new(HashMap::new())),
+            namespace_map: Arc::new(Mutex::new(HashMap::new())),
+            global_functions: Arc::new(Mutex::new(HashMap::new())),
+            class_index: Arc::new(Mutex::new(HashMap::new())),
+            stub_index,
+            stub_function_index: stubs::build_stub_function_index(),
+            stub_constant_index: stubs::build_stub_constant_index(),
+        }
+    }
+
     /// Create a `Backend` for tests with a specific workspace root and PSR-4
     /// mappings pre-configured.
     pub fn new_test_with_workspace(

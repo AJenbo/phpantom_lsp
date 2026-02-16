@@ -1,6 +1,6 @@
 mod common;
 
-use common::{create_psr4_workspace, create_test_backend};
+use common::{create_psr4_workspace, create_test_backend, create_test_backend_with_stubs};
 
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 /// just like `Priority::tryFrom($int)->` does.
 #[tokio::test]
 async fn test_completion_nullsafe_arrow_on_tryfrom() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
 
     let uri = Url::parse("file:///nullsafe_enum.php").unwrap();
     let text = concat!(
@@ -80,7 +80,7 @@ async fn test_completion_nullsafe_arrow_on_tryfrom() {
 /// Test: Verify that `->` (without `?`) on tryFrom still works (regression guard).
 #[tokio::test]
 async fn test_completion_regular_arrow_on_tryfrom() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
 
     let uri = Url::parse("file:///regular_arrow_enum.php").unwrap();
     let text = concat!(
@@ -1851,7 +1851,7 @@ async fn test_parser_enum_with_trait_also_has_implicit_interface() {
 /// `$name` without any manually opened stub files.
 #[tokio::test]
 async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
 
     let uri = Url::parse("file:///embedded_unit.php").unwrap();
     let text = concat!(
@@ -1938,7 +1938,7 @@ async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
 /// BackedEnum extends UnitEnum.
 #[tokio::test]
 async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
 
     let uri = Url::parse("file:///embedded_backed.php").unwrap();
     let text = concat!(
@@ -2037,7 +2037,7 @@ async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() 
 /// (from UnitEnum) and `$value` (from BackedEnum) plus instance methods.
 #[tokio::test]
 async fn test_completion_backed_enum_arrow_gets_properties_from_embedded_stubs() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
 
     let uri = Url::parse("file:///embedded_arrow.php").unwrap();
     let text = concat!(
@@ -2124,7 +2124,7 @@ async fn test_completion_backed_enum_arrow_gets_properties_from_embedded_stubs()
 /// enum in the same session also gets the methods without re-parsing.
 #[tokio::test]
 async fn test_completion_embedded_stub_caching_across_files() {
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_stubs();
 
     // First file: a unit enum
     let uri1 = Url::parse("file:///cache_test_1.php").unwrap();

@@ -53,6 +53,20 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer
+
+      - name: Cache Composer stubs
+        uses: actions/cache@v4
+        with:
+          path: stubs
+          key: composer-stubs-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-stubs-
+
+      - run: composer install --no-interaction --prefer-dist
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
