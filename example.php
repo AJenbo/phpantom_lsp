@@ -328,6 +328,110 @@ class Response
     }
 }
 
+// ─── Generics (@template / @extends) ───────────────────────────────────────
+
+/**
+ * A generic repository — the base class declares template parameters
+ * that child classes fill in with concrete types via @extends.
+ *
+ * @template T
+ */
+class Repository
+{
+    /** @var T|null */
+    protected $cached = null;
+
+    /** @return T */
+    public function find(int $id)
+    {
+        return $this->cached;
+    }
+
+    /** @return T|null */
+    public function findOrNull(int $id)
+    {
+        return $this->cached;
+    }
+
+    /** @return T */
+    public function first()
+    {
+        return $this->cached;
+    }
+}
+
+/**
+ * Concrete repository: @extends tells the engine that T = User.
+ * All inherited methods now return User instead of the abstract T.
+ *
+ * @extends Repository<User>
+ */
+class UserRepository extends Repository
+{
+    public function findByEmail(string $email): ?User
+    {
+        return null;
+    }
+}
+
+/**
+ * A generic collection with two template parameters.
+ *
+ * @template TKey of array-key
+ * @template-covariant TValue
+ */
+class TypedCollection
+{
+    /** @var array<TKey, TValue> */
+    protected array $items = [];
+
+    /** @return TValue */
+    public function first() { return reset($this->items); }
+
+    /** @return ?TValue */
+    public function last() { return end($this->items) ?: null; }
+
+    /** @return static */
+    public function filter(callable $fn): static { return $this; }
+
+    /** @return int */
+    public function count(): int { return count($this->items); }
+
+    /** @return array<TKey, TValue> */
+    public function all(): array { return $this->items; }
+}
+
+/**
+ * A user collection — TKey = int, TValue = User.
+ *
+ * @extends TypedCollection<int, User>
+ */
+class UserCollection extends TypedCollection
+{
+    public function adminsOnly(): self
+    {
+        return $this;
+    }
+}
+
+/**
+ * Chained generics: this extends UserRepository, which extends
+ * Repository<User>.  Grandparent methods resolve through the chain.
+ */
+class CachingUserRepository extends UserRepository
+{
+    public function clearCache(): void {}
+}
+
+/**
+ * Demonstrates @phpstan-extends (the PHPStan-prefixed variant).
+ *
+ * @phpstan-extends TypedCollection<string, Response>
+ */
+class ResponseCollection extends TypedCollection
+{
+}
+
 // ─── Container (conditional return types) ───────────────────────────────────
 
 class Container
@@ -693,3 +797,56 @@ $admin->grantPermission('z');    // assigned from array access → AdminUser
 
 $user = $users[0];
 $user->getEmail();               // assigned from array access → User
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Generics — @template / @extends type resolution
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  When a parent class declares @template parameters and a child class
+//  provides concrete types via @extends, all inherited methods and
+//  properties have their template types replaced with the real types.
+
+
+// ── Basic @extends — Repository<User> ───────────────────────────────────────
+
+$repo = new UserRepository();
+$repo->find(1)->getEmail();      // find() returns T → User
+$repo->first()->getName();       // first() returns T → User
+$repo->findOrNull(1)?->getEmail(); // findOrNull() returns ?T → ?User
+$repo->findByEmail('a@b.c');     // own method still works
+
+
+// ── Two Template Parameters — TypedCollection<int, User> ────────────────────
+
+$users = new UserCollection();
+$users->first()->getEmail();     // first() returns TValue → User
+$users->last()?->getName();      // last() returns ?TValue → ?User
+$users->adminsOnly();            // own method returns self
+$users->filter(fn($u) => true); // filter() returns static → UserCollection
+$users->count();                 // count() returns int (non-template, unchanged)
+
+
+// ── Chained / Grandparent Generics ──────────────────────────────────────────
+
+$cachingRepo = new CachingUserRepository();
+$cachingRepo->find(1)->getEmail();    // grandparent Repository<User>::find() → User
+$cachingRepo->first()->getName();     // grandparent first() → User
+$cachingRepo->clearCache();           // own method
+
+
+// ── @phpstan-extends Variant ────────────────────────────────────────────────
+
+$responses = new ResponseCollection();
+$responses->first()->getStatusCode(); // first() returns TValue → Response
+$responses->last()?->getBody();       // last() returns ?TValue → ?Response
+
+
+// ── Property Type Substitution ──────────────────────────────────────────────
+//  Inherited properties with template types are also substituted.
+
+class PropertyDemo extends UserRepository {
+    function test() {
+        $this->cached->getEmail();   // $cached has type T → User
+    }
+}

@@ -280,4 +280,22 @@ pub struct ClassInfo {
     pub is_final: bool,
     /// Whether this class is marked `@deprecated` in its PHPDoc.
     pub is_deprecated: bool,
+    /// Template parameter names declared via `@template` / `@template-covariant`
+    /// / `@template-contravariant` tags in the class-level docblock.
+    ///
+    /// For example, `Collection` with `@template TKey` and `@template TValue`
+    /// would have `template_params: vec!["TKey".into(), "TValue".into()]`.
+    pub template_params: Vec<String>,
+    /// Generic type arguments from `@extends` / `@phpstan-extends` tags.
+    ///
+    /// Each entry is `(ClassName, [TypeArg1, TypeArg2, …])`.
+    /// For example, `@extends Collection<int, Language>` produces
+    /// `("Collection", ["int", "Language"])`.
+    pub extends_generics: Vec<(String, Vec<String>)>,
+    /// Generic type arguments from `@implements` / `@phpstan-implements` tags.
+    ///
+    /// Each entry is `(InterfaceName, [TypeArg1, TypeArg2, …])`.
+    /// For example, `@implements ArrayAccess<int, User>` produces
+    /// `("ArrayAccess", ["int", "User"])`.
+    pub implements_generics: Vec<(String, Vec<String>)>,
 }

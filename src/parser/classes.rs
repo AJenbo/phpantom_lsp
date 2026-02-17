@@ -36,15 +36,22 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, @mixin, and @deprecated tags from
-                    // the class-level docblock.
+                    // Extract @property, @method, @mixin, @template, @extends,
+                    // @implements, and @deprecated tags from the class-level docblock.
                     let mut mixins = Vec::new();
+                    let mut template_params = Vec::new();
+                    let mut extends_generics = Vec::new();
+                    let mut implements_generics = Vec::new();
                     let mut class_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, class)
                     {
                         class_deprecated = docblock::has_deprecated_tag(doc_text);
+                        template_params = docblock::extract_template_params(doc_text);
+                        extends_generics = docblock::extract_generics_tag(doc_text, "@extends");
+                        implements_generics =
+                            docblock::extract_generics_tag(doc_text, "@implements");
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             // Only add if not already declared as a real property.
@@ -90,6 +97,9 @@ impl Backend {
                         mixins,
                         is_final,
                         is_deprecated: class_deprecated,
+                        template_params,
+                        extends_generics,
+                        implements_generics,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -105,15 +115,23 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, @mixin, and @deprecated tags
-                    // from the interface-level docblock.
+                    // Extract @property, @method, @mixin, @template, @extends,
+                    // @implements, and @deprecated tags from the interface-level
+                    // docblock.
                     let mut mixins = Vec::new();
+                    let mut template_params = Vec::new();
+                    let mut extends_generics = Vec::new();
+                    let mut implements_generics = Vec::new();
                     let mut iface_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, iface)
                     {
                         iface_deprecated = docblock::has_deprecated_tag(doc_text);
+                        template_params = docblock::extract_template_params(doc_text);
+                        extends_generics = docblock::extract_generics_tag(doc_text, "@extends");
+                        implements_generics =
+                            docblock::extract_generics_tag(doc_text, "@implements");
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
@@ -155,6 +173,9 @@ impl Backend {
                         mixins,
                         is_final: false,
                         is_deprecated: iface_deprecated,
+                        template_params,
+                        extends_generics,
+                        implements_generics,
                     });
                 }
                 Statement::Trait(trait_def) => {
@@ -163,9 +184,10 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, @mixin, and @deprecated tags
-                    // from the trait-level docblock.
+                    // Extract @property, @method, @mixin, @template, and
+                    // @deprecated tags from the trait-level docblock.
                     let mut mixins = Vec::new();
+                    let mut template_params = Vec::new();
                     let mut trait_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) = docblock::get_docblock_text_for_node(
@@ -175,6 +197,7 @@ impl Backend {
                         )
                     {
                         trait_deprecated = docblock::has_deprecated_tag(doc_text);
+                        template_params = docblock::extract_template_params(doc_text);
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
@@ -216,6 +239,9 @@ impl Backend {
                         mixins,
                         is_final: false,
                         is_deprecated: trait_deprecated,
+                        template_params,
+                        extends_generics: vec![],
+                        implements_generics: vec![],
                     });
                 }
                 Statement::Enum(enum_def) => {
@@ -291,6 +317,9 @@ impl Backend {
                         mixins,
                         is_final: true,
                         is_deprecated: enum_deprecated,
+                        template_params: vec![],
+                        extends_generics: vec![],
+                        implements_generics: vec![],
                     });
                 }
                 Statement::Namespace(namespace) => {

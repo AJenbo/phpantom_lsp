@@ -726,6 +726,192 @@ pub fn get_docblock_text_for_node<'a>(
     None
 }
 
+// ─── Generics / Template Support ────────────────────────────────────────────
+
+/// Extract template parameter names from `@template` tags in a docblock.
+///
+/// Handles the common PHPStan / Psalm variants:
+///   - `@template T`
+///   - `@template TKey of array-key`
+///   - `@template-covariant TValue`
+///   - `@template-contravariant TValue`
+///   - `@phpstan-template T`
+///
+/// Returns the parameter names in declaration order (e.g. `["TKey", "TValue"]`).
+pub fn extract_template_params(docblock: &str) -> Vec<String> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        // Match all @template variants:
+        //   @template, @template-covariant, @template-contravariant,
+        //   @phpstan-template, @phpstan-template-covariant, etc.
+        let rest = if let Some(r) = trimmed.strip_prefix("@phpstan-template") {
+            r
+        } else if let Some(r) = trimmed.strip_prefix("@template") {
+            r
+        } else {
+            continue;
+        };
+
+        // After stripping the tag prefix, we may have a variance suffix
+        // like `-covariant` or `-contravariant` still attached.
+        let rest = if let Some(r) = rest.strip_prefix("-covariant") {
+            r
+        } else if let Some(r) = rest.strip_prefix("-contravariant") {
+            r
+        } else {
+            rest
+        };
+
+        // Must be followed by whitespace.
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+
+        // The template parameter name is the first whitespace-delimited token.
+        if let Some(name) = rest.split_whitespace().next() {
+            // Sanity: template names are identifiers (start with a letter or _).
+            if name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            {
+                results.push(name.to_string());
+            }
+        }
+    }
+
+    results
+}
+
+/// Extract generic type arguments from `@extends`, `@implements`, or `@use`
+/// tags (and their `@phpstan-` prefixed variants) in a docblock.
+///
+/// The `tag` parameter should be one of `"@extends"`, `"@implements"`, or
+/// `"@use"`.
+///
+/// For example, given `@extends Collection<int, Language>`, returns
+/// `[("Collection", ["int", "Language"])]`.
+///
+/// Handles:
+///   - `@extends Collection<int, Language>`
+///   - `@phpstan-extends Collection<int, Language>`
+///   - `@implements ArrayAccess<string, User>`
+///   - Nested generics: `@extends Base<array<int, string>, User>`
+pub fn extract_generics_tag(docblock: &str, tag: &str) -> Vec<(String, Vec<String>)> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    // Build the tag variants we accept.  For `@extends` we also accept
+    // `@phpstan-extends`.
+    let bare_tag = tag.strip_prefix('@').unwrap_or(tag);
+    let phpstan_tag = format!("@phpstan-{bare_tag}");
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        let rest = if let Some(r) = trimmed.strip_prefix(&phpstan_tag) {
+            r
+        } else if let Some(r) = trimmed.strip_prefix(tag) {
+            r
+        } else {
+            continue;
+        };
+
+        // Must be followed by whitespace.
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+
+        // Extract the full type token (e.g. `Collection<int, Language>`),
+        // respecting `<…>` nesting.
+        let (type_token, _remainder) = split_type_token(rest);
+
+        // Split into base class name and generic arguments.
+        if let Some(angle_pos) = type_token.find('<') {
+            let base_name = type_token[..angle_pos].trim();
+            let base_name = base_name.strip_prefix('\\').unwrap_or(base_name);
+            if base_name.is_empty() {
+                continue;
+            }
+
+            // Extract the inner generic arguments (between `<` and `>`).
+            let inner_generics = &type_token[angle_pos + 1..];
+            let inner_generics = inner_generics
+                .strip_suffix('>')
+                .unwrap_or(inner_generics)
+                .trim();
+
+            if inner_generics.is_empty() {
+                continue;
+            }
+
+            // Split on commas respecting nesting.
+            let args = split_generic_args(inner_generics);
+            if !args.is_empty() {
+                results.push((base_name.to_string(), args));
+            }
+        }
+        // No `<…>` means no generic args — skip.
+    }
+
+    results
+}
+
+/// Split a comma-separated generic argument list, respecting `<…>` and `(…)`
+/// nesting.  Returns cleaned argument strings.
+///
+/// - `"int, Language"` → `["int", "Language"]`
+/// - `"int, array<string, mixed>"` → `["int", "array<string, mixed>"]`
+fn split_generic_args(s: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            ',' if depth_angle == 0 && depth_paren == 0 => {
+                let arg = s[start..i].trim();
+                if !arg.is_empty() {
+                    let arg = arg.strip_prefix('\\').unwrap_or(arg);
+                    parts.push(arg.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    // Push the last segment.
+    let last = s[start..].trim();
+    if !last.is_empty() {
+        let last = last.strip_prefix('\\').unwrap_or(last);
+        parts.push(last.to_string());
+    }
+    parts
+}
+
 /// Apply docblock type override logic to a type hint.
 ///
 /// If the docblock provides a type that is compatible as an override for the

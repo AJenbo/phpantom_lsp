@@ -234,6 +234,9 @@ impl Backend {
                         mixins: vec![],
                         is_final: false,
                         is_deprecated: false,
+                        template_params: vec![],
+                        extends_generics: vec![],
+                        implements_generics: vec![],
                     };
                     &dummy_class
                 }
@@ -523,7 +526,12 @@ impl Backend {
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> Vec<ClassInfo> {
-        let prop = match class_info.properties.iter().find(|p| p.name == prop_name) {
+        // Resolve inheritance so that inherited (and generic-substituted)
+        // properties are visible.  For example, if `ConfigWrapper extends
+        // Wrapper<Config>` and `Wrapper` has `/** @var T */ public $value`,
+        // the merged class will have `$value` with type `Config`.
+        let merged = Self::resolve_class_with_inheritance(class_info, class_loader);
+        let prop = match merged.properties.iter().find(|p| p.name == prop_name) {
             Some(p) => p,
             None => return vec![],
         };

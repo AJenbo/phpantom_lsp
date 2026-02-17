@@ -6,9 +6,16 @@
 /// access, respecting PHP's precedence rules:
 ///
 ///   class own > traits > parent chain > mixins
+///
+/// It also supports **generic type substitution**: when a child class
+/// declares `@extends Parent<ConcreteType1, ConcreteType2>` and the parent
+/// has `@template T1` / `@template T2`, the inherited methods and properties
+/// have their template parameter references replaced with the concrete types.
+use std::collections::HashMap;
+
 use crate::Backend;
-use crate::types::ClassInfo;
 use crate::types::Visibility;
+use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
 
 impl Backend {
     /// Resolve a class together with all inherited members from its parent
@@ -20,6 +27,11 @@ impl Backend {
     /// member, the child's version wins (even if the signatures differ).
     ///
     /// Private members are never inherited.
+    ///
+    /// When the child declares `@extends Parent<Type1, Type2>` and the parent
+    /// has `@template` parameters, the inherited members have their template
+    /// parameter types replaced with the concrete types from the `@extends`
+    /// annotation.  This substitution chains through the entire ancestry.
     ///
     /// A depth limit of 20 prevents infinite loops from circular inheritance.
     pub(crate) fn resolve_class_with_inheritance(
@@ -39,6 +51,20 @@ impl Backend {
         let mut depth = 0;
         const MAX_DEPTH: u32 = 20;
 
+        // The substitution map accumulates as we walk the chain.
+        // It maps template parameter names → concrete types, and is
+        // re-computed at each level based on the `@extends` generics
+        // of the current class and the `@template` params of the parent.
+        let mut active_subs: HashMap<String, String> = HashMap::new();
+
+        // Seed the initial substitution map from the root class's
+        // `@extends` generics.  If the root class has
+        // `@extends Collection<int, Language>`, this will be applied
+        // when we load `Collection` as the first parent.
+        //
+        // We don't apply it yet — it's matched against the parent's
+        // template_params in the loop below.
+
         while let Some(ref parent_name) = current.parent_class {
             depth += 1;
             if depth > MAX_DEPTH {
@@ -50,6 +76,13 @@ impl Backend {
             } else {
                 break;
             };
+
+            // Build the substitution map for this parent level.
+            //
+            // Look through current's `extends_generics` for an entry
+            // whose class name matches this parent, and zip its type
+            // arguments with the parent's `template_params`.
+            let level_subs = build_substitution_map(&current, &parent, &active_subs);
 
             // Merge traits used by the parent class as well, so that
             // grandparent-level trait members are visible.
@@ -63,7 +96,11 @@ impl Backend {
                 if merged.methods.iter().any(|m| m.name == method.name) {
                     continue;
                 }
-                merged.methods.push(method.clone());
+                let mut method = method.clone();
+                if !level_subs.is_empty() {
+                    apply_substitution_to_method(&mut method, &level_subs);
+                }
+                merged.methods.push(method);
             }
 
             // Merge parent properties
@@ -74,7 +111,11 @@ impl Backend {
                 if merged.properties.iter().any(|p| p.name == property.name) {
                     continue;
                 }
-                merged.properties.push(property.clone());
+                let mut property = property.clone();
+                if !level_subs.is_empty() {
+                    apply_substitution_to_property(&mut property, &level_subs);
+                }
+                merged.properties.push(property);
             }
 
             // Merge parent constants
@@ -88,6 +129,11 @@ impl Backend {
                 merged.constants.push(constant.clone());
             }
 
+            // Carry the substitution map forward for the next level.
+            // If `Collection` extends `AbstractCollection<TKey, TValue>`,
+            // we need to apply the current substitutions to those type
+            // arguments so that `TKey` → `int` flows through.
+            active_subs = level_subs;
             current = parent;
         }
 
@@ -347,5 +393,551 @@ impl Backend {
                 merged.constants.push(constant.clone());
             }
         }
+    }
+}
+
+// ─── Generic Type Substitution ──────────────────────────────────────────────
+
+/// Build a substitution map for a parent class based on the child's
+/// `@extends` generics and the parent's `@template` parameters.
+///
+/// If the child declares `@extends Collection<int, Language>` and the
+/// parent `Collection` has `@template TKey` and `@template TValue`,
+/// the returned map is `{TKey => int, TValue => Language}`.
+///
+/// When `active_subs` is non-empty (from a higher-level ancestor), the
+/// type arguments are first resolved through those substitutions.  This
+/// handles chained generics like:
+///
+/// ```text
+/// class A { @template U }
+/// class B extends A { @template T, @extends A<T> }
+/// class C extends B { @extends B<Foo> }
+/// ```
+///
+/// When resolving `C`: at level 1 (B), `active_subs` is empty and we
+/// build `{T => Foo}`.  At level 2 (A), `current` is B whose
+/// `@extends A<T>` gets the active substitution `{T => Foo}` applied,
+/// yielding `{U => Foo}`.
+fn build_substitution_map(
+    current: &ClassInfo,
+    parent: &ClassInfo,
+    active_subs: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    if parent.template_params.is_empty() {
+        return active_subs.clone();
+    }
+
+    let parent_short = short_name(&parent.name);
+
+    // Search `current.extends_generics` for an entry matching this parent.
+    // Also check `implements_generics` for interface inheritance.
+    let type_args = current
+        .extends_generics
+        .iter()
+        .chain(current.implements_generics.iter())
+        .find(|(name, _)| {
+            let name_short = short_name(name);
+            name_short == parent_short
+        })
+        .map(|(_, args)| args);
+
+    let type_args = match type_args {
+        Some(args) => args,
+        None => {
+            // No @extends/@implements generics for this parent.
+            // Carry forward any active substitutions — they may still
+            // apply if the parent's methods reference template params
+            // from a grandchild.
+            return active_subs.clone();
+        }
+    };
+
+    let mut map = HashMap::new();
+
+    for (i, param_name) in parent.template_params.iter().enumerate() {
+        if let Some(arg) = type_args.get(i) {
+            // Apply any active substitutions to the type argument.
+            // This handles chaining: if arg is "T" and active_subs has
+            // {T => Foo}, the result is {param_name => Foo}.
+            let resolved = if active_subs.is_empty() {
+                arg.clone()
+            } else {
+                apply_substitution(arg, active_subs)
+            };
+            map.insert(param_name.clone(), resolved);
+        }
+    }
+
+    map
+}
+
+/// Apply generic type substitution to a method's return type and parameter
+/// type hints.
+fn apply_substitution_to_method(method: &mut MethodInfo, subs: &HashMap<String, String>) {
+    if let Some(ref mut ret) = method.return_type {
+        let substituted = apply_substitution(ret, subs);
+        if substituted != *ret {
+            *ret = substituted;
+        }
+    }
+    for param in &mut method.parameters {
+        if let Some(ref mut hint) = param.type_hint {
+            let substituted = apply_substitution(hint, subs);
+            if substituted != *hint {
+                *hint = substituted;
+            }
+        }
+    }
+}
+
+/// Apply generic type substitution to a property's type hint.
+fn apply_substitution_to_property(property: &mut PropertyInfo, subs: &HashMap<String, String>) {
+    if let Some(ref mut hint) = property.type_hint {
+        let substituted = apply_substitution(hint, subs);
+        if substituted != *hint {
+            *hint = substituted;
+        }
+    }
+}
+
+/// Apply a substitution map to a type string.
+///
+/// Handles:
+///   - Direct match: `"TValue"` → `"Language"`
+///   - Nullable: `"?TValue"` → `"?Language"`
+///   - Union types: `"TValue|null"` → `"Language|null"`
+///   - Intersection types: `"TValue&Countable"` → `"Language&Countable"`
+///   - Generic params: `"array<TKey, TValue>"` → `"array<int, Language>"`
+///   - Nested generics: `"Collection<TKey, list<TValue>>"` →
+///     `"Collection<int, list<Language>>"`
+///   - Combinations: `"?Collection<TKey, TValue>|null"` → resolved correctly
+fn apply_substitution(type_str: &str, subs: &HashMap<String, String>) -> String {
+    let s = type_str.trim();
+    if s.is_empty() {
+        return s.to_string();
+    }
+
+    // Handle nullable prefix.
+    if let Some(inner) = s.strip_prefix('?') {
+        let resolved = apply_substitution(inner, subs);
+        return format!("?{resolved}");
+    }
+
+    // Handle union types: split on `|` at depth 0.
+    if let Some(parts) = split_at_depth_0(s, '|') {
+        let resolved: Vec<String> = parts.iter().map(|p| apply_substitution(p, subs)).collect();
+        return resolved.join("|");
+    }
+
+    // Handle intersection types: split on `&` at depth 0.
+    if let Some(parts) = split_at_depth_0(s, '&') {
+        let resolved: Vec<String> = parts.iter().map(|p| apply_substitution(p, subs)).collect();
+        return resolved.join("&");
+    }
+
+    // Handle generic types: `Base<Arg1, Arg2>`.
+    if let Some(angle_pos) = find_angle_at_depth_0(s) {
+        let base = &s[..angle_pos];
+        // Find the matching closing `>`.
+        let rest = &s[angle_pos + 1..];
+        let close_pos = find_matching_close_angle(rest);
+        let inner = &rest[..close_pos];
+        let after = &rest[close_pos + 1..]; // anything after `>`
+
+        // Resolve the base (it might itself be a template param).
+        let resolved_base = apply_substitution(base, subs);
+
+        // Split inner on commas at depth 0 and resolve each arg.
+        let args = split_generic_args_at_depth_0(inner);
+        let resolved_args: Vec<String> = args
+            .iter()
+            .map(|a| apply_substitution(a.trim(), subs))
+            .collect();
+
+        let mut result = format!("{resolved_base}<{}>", resolved_args.join(", "));
+        if !after.is_empty() {
+            result.push_str(after);
+        }
+        return result;
+    }
+
+    // Handle array shorthand: `TValue[]`.
+    if let Some(base) = s.strip_suffix("[]") {
+        let resolved = apply_substitution(base, subs);
+        return format!("{resolved}[]");
+    }
+
+    // Strip parentheses from DNF types like `(A&B)`.
+    if s.starts_with('(') && s.ends_with(')') {
+        let inner = &s[1..s.len() - 1];
+        let resolved = apply_substitution(inner, subs);
+        return format!("({resolved})");
+    }
+
+    // Base case: direct lookup.
+    if let Some(replacement) = subs.get(s) {
+        return replacement.clone();
+    }
+
+    // No match — return as-is.
+    s.to_string()
+}
+
+/// Extract the short (unqualified) class name from a potentially
+/// fully-qualified name.
+fn short_name(name: &str) -> &str {
+    name.rsplit('\\').next().unwrap_or(name)
+}
+
+/// Split a type string on `delimiter` at nesting depth 0 (respecting
+/// `<…>` and `(…)` nesting).
+///
+/// Returns `None` if the delimiter does not appear at depth 0 (i.e. the
+/// string cannot be split).  Returns `Some(parts)` with at least 2 parts
+/// otherwise.
+fn split_at_depth_0(s: &str, delimiter: char) -> Option<Vec<&str>> {
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut found = false;
+
+    // First pass: check if splitting is needed.
+    for ch in s.chars() {
+        match ch {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            c if c == delimiter && depth_angle == 0 && depth_paren == 0 => {
+                found = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if !found {
+        return None;
+    }
+
+    // Second pass: collect parts.
+    let mut parts = Vec::new();
+    depth_angle = 0;
+    depth_paren = 0;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            c if c == delimiter && depth_angle == 0 && depth_paren == 0 => {
+                parts.push(&s[start..i]);
+                start = i + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+
+    Some(parts)
+}
+
+/// Find the position of the first `<` at nesting depth 0.
+fn find_angle_at_depth_0(s: &str) -> Option<usize> {
+    let mut depth_paren = 0i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '<' if depth_paren == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find the position of the matching `>` for an opening `<` that has
+/// already been consumed.  `s` starts right after the `<`.
+fn find_matching_close_angle(s: &str) -> usize {
+    let mut depth = 1i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+    }
+    // Fallback: end of string (malformed type).
+    s.len()
+}
+
+/// Split generic arguments on commas at depth 0, respecting `<…>` and
+/// `(…)` nesting.
+fn split_generic_args_at_depth_0(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            ',' if depth_angle == 0 && depth_paren == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_apply_substitution_direct() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "Language".to_string());
+        subs.insert("TKey".to_string(), "int".to_string());
+
+        assert_eq!(apply_substitution("TValue", &subs), "Language");
+        assert_eq!(apply_substitution("TKey", &subs), "int");
+        assert_eq!(apply_substitution("string", &subs), "string");
+    }
+
+    #[test]
+    fn test_apply_substitution_nullable() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "Language".to_string());
+
+        assert_eq!(apply_substitution("?TValue", &subs), "?Language");
+    }
+
+    #[test]
+    fn test_apply_substitution_union() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "Language".to_string());
+
+        assert_eq!(apply_substitution("TValue|null", &subs), "Language|null");
+        assert_eq!(
+            apply_substitution("TValue|string", &subs),
+            "Language|string"
+        );
+    }
+
+    #[test]
+    fn test_apply_substitution_intersection() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "Language".to_string());
+
+        assert_eq!(
+            apply_substitution("TValue&Countable", &subs),
+            "Language&Countable"
+        );
+    }
+
+    #[test]
+    fn test_apply_substitution_generic() {
+        let mut subs = HashMap::new();
+        subs.insert("TKey".to_string(), "int".to_string());
+        subs.insert("TValue".to_string(), "Language".to_string());
+
+        assert_eq!(
+            apply_substitution("array<TKey, TValue>", &subs),
+            "array<int, Language>"
+        );
+    }
+
+    #[test]
+    fn test_apply_substitution_nested_generic() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "User".to_string());
+
+        assert_eq!(
+            apply_substitution("Collection<int, list<TValue>>", &subs),
+            "Collection<int, list<User>>"
+        );
+    }
+
+    #[test]
+    fn test_apply_substitution_array_shorthand() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "User".to_string());
+
+        assert_eq!(apply_substitution("TValue[]", &subs), "User[]");
+    }
+
+    #[test]
+    fn test_apply_substitution_no_match() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "User".to_string());
+
+        assert_eq!(apply_substitution("string", &subs), "string");
+        assert_eq!(apply_substitution("void", &subs), "void");
+        assert_eq!(apply_substitution("$this", &subs), "$this");
+    }
+
+    #[test]
+    fn test_apply_substitution_complex_union_with_generic() {
+        let mut subs = HashMap::new();
+        subs.insert("TKey".to_string(), "int".to_string());
+        subs.insert("TValue".to_string(), "User".to_string());
+
+        assert_eq!(
+            apply_substitution("array<TKey, TValue>|null", &subs),
+            "array<int, User>|null"
+        );
+    }
+
+    #[test]
+    fn test_apply_substitution_dnf_parens() {
+        let mut subs = HashMap::new();
+        subs.insert("T".to_string(), "User".to_string());
+
+        assert_eq!(
+            apply_substitution("(T&Countable)", &subs),
+            "(User&Countable)"
+        );
+    }
+
+    #[test]
+    fn test_build_substitution_map_basic() {
+        let child = ClassInfo {
+            name: "LanguageCollection".to_string(),
+            methods: vec![],
+            properties: vec![],
+            constants: vec![],
+            start_offset: 0,
+            end_offset: 0,
+            parent_class: Some("Collection".to_string()),
+            used_traits: vec![],
+            mixins: vec![],
+            is_final: true,
+            is_deprecated: false,
+            template_params: vec![],
+            extends_generics: vec![(
+                "Collection".to_string(),
+                vec!["int".to_string(), "Language".to_string()],
+            )],
+            implements_generics: vec![],
+        };
+
+        let parent = ClassInfo {
+            name: "Collection".to_string(),
+            methods: vec![],
+            properties: vec![],
+            constants: vec![],
+            start_offset: 0,
+            end_offset: 0,
+            parent_class: None,
+            used_traits: vec![],
+            mixins: vec![],
+            is_final: false,
+            is_deprecated: false,
+            template_params: vec!["TKey".to_string(), "TValue".to_string()],
+            extends_generics: vec![],
+            implements_generics: vec![],
+        };
+
+        let subs = build_substitution_map(&child, &parent, &HashMap::new());
+        assert_eq!(subs.get("TKey").unwrap(), "int");
+        assert_eq!(subs.get("TValue").unwrap(), "Language");
+    }
+
+    #[test]
+    fn test_build_substitution_map_chained() {
+        // Simulates: C extends B<Foo>, B extends A<T>, A has @template U
+        // When resolving A's methods for C, active_subs = {T => Foo}
+        // B's @extends A<T> should resolve to A<Foo>, giving {U => Foo}
+
+        let current_b = ClassInfo {
+            name: "B".to_string(),
+            methods: vec![],
+            properties: vec![],
+            constants: vec![],
+            start_offset: 0,
+            end_offset: 0,
+            parent_class: Some("A".to_string()),
+            used_traits: vec![],
+            mixins: vec![],
+            is_final: false,
+            is_deprecated: false,
+            template_params: vec!["T".to_string()],
+            extends_generics: vec![("A".to_string(), vec!["T".to_string()])],
+            implements_generics: vec![],
+        };
+
+        let parent_a = ClassInfo {
+            name: "A".to_string(),
+            methods: vec![],
+            properties: vec![],
+            constants: vec![],
+            start_offset: 0,
+            end_offset: 0,
+            parent_class: None,
+            used_traits: vec![],
+            mixins: vec![],
+            is_final: false,
+            is_deprecated: false,
+            template_params: vec!["U".to_string()],
+            extends_generics: vec![],
+            implements_generics: vec![],
+        };
+
+        let mut active = HashMap::new();
+        active.insert("T".to_string(), "Foo".to_string());
+
+        let subs = build_substitution_map(&current_b, &parent_a, &active);
+        assert_eq!(subs.get("U").unwrap(), "Foo");
+    }
+
+    #[test]
+    fn test_short_name() {
+        assert_eq!(short_name("Collection"), "Collection");
+        assert_eq!(short_name("Illuminate\\Support\\Collection"), "Collection");
+        assert_eq!(short_name("\\Collection"), "Collection");
+    }
+
+    #[test]
+    fn test_apply_substitution_to_method_modifies_return_and_params() {
+        let mut subs = HashMap::new();
+        subs.insert("TValue".to_string(), "Language".to_string());
+        subs.insert("TKey".to_string(), "int".to_string());
+
+        let mut method = MethodInfo {
+            name: "first".to_string(),
+            parameters: vec![crate::types::ParameterInfo {
+                name: "$key".to_string(),
+                is_required: false,
+                type_hint: Some("TKey".to_string()),
+                is_variadic: false,
+                is_reference: false,
+            }],
+            return_type: Some("TValue".to_string()),
+            is_static: false,
+            visibility: Visibility::Public,
+            conditional_return: None,
+            is_deprecated: false,
+        };
+
+        apply_substitution_to_method(&mut method, &subs);
+
+        assert_eq!(method.return_type.as_deref(), Some("Language"));
+        assert_eq!(method.parameters[0].type_hint.as_deref(), Some("int"));
     }
 }
