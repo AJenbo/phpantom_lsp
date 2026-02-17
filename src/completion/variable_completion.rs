@@ -371,16 +371,21 @@ fn collect_from_statements<'b>(
                 }
             },
             Statement::Foreach(foreach) => {
-                // Collect the key and value variables — they are defined
-                // in the foreach header which starts before the cursor
-                // (guaranteed by the span check above).
-                if let Some(key_expr) = foreach.target.key() {
-                    collect_var_name_from_expression(key_expr, vars);
-                }
-                collect_var_name_from_expression(foreach.target.value(), vars);
-                // Recurse into body
-                for inner in foreach.body.statements() {
-                    collect_from_statement(inner, cursor_offset, vars);
+                // Only collect the key/value variables when the cursor is
+                // inside the foreach body.  Outside the loop these
+                // iteration variables should not be in scope.
+                let body_span = foreach.body.span();
+                if cursor_offset >= body_span.start.offset
+                    && cursor_offset <= body_span.end.offset
+                {
+                    if let Some(key_expr) = foreach.target.key() {
+                        collect_var_name_from_expression(key_expr, vars);
+                    }
+                    collect_var_name_from_expression(foreach.target.value(), vars);
+                    // Recurse into body
+                    for inner in foreach.body.statements() {
+                        collect_from_statement(inner, cursor_offset, vars);
+                    }
                 }
             }
             Statement::For(for_stmt) => {

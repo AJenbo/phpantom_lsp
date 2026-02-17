@@ -476,29 +476,40 @@ impl Backend {
                     }
                 },
                 Statement::Foreach(foreach) => {
-                    // ── Foreach value type from generic iterables ────
-                    // When the variable we're resolving is the foreach
-                    // *value* variable, try to infer its type from the
-                    // iterated expression's generic type annotation.
-                    //
-                    // Example:
-                    //   /** @var list<User> $users */
-                    //   foreach ($users as $user) { $user-> }
-                    //
-                    // Here `$user` is resolved to `User`.
-                    Self::try_resolve_foreach_value_type(foreach, ctx, results, conditional);
+                    // Only resolve the foreach value variable and recurse
+                    // into the body when the cursor is actually inside it.
+                    // Outside the loop the iteration variables are out of
+                    // scope.
+                    let body_span = foreach.body.span();
+                    if ctx.cursor_offset >= body_span.start.offset
+                        && ctx.cursor_offset <= body_span.end.offset
+                    {
+                        // ── Foreach value type from generic iterables ──
+                        // When the variable we're resolving is the foreach
+                        // *value* variable, try to infer its type from the
+                        // iterated expression's generic type annotation.
+                        //
+                        // Example:
+                        //   /** @var list<User> $users */
+                        //   foreach ($users as $user) { $user-> }
+                        //
+                        // Here `$user` is resolved to `User`.
+                        Self::try_resolve_foreach_value_type(foreach, ctx, results, conditional);
 
-                    match &foreach.body {
-                        ForeachBody::Statement(inner) => {
-                            Self::check_statement_for_assignments(inner, ctx, results, true);
-                        }
-                        ForeachBody::ColonDelimited(body) => {
-                            Self::walk_statements_for_assignments(
-                                body.statements.iter(),
-                                ctx,
-                                results,
-                                true,
-                            );
+                        match &foreach.body {
+                            ForeachBody::Statement(inner) => {
+                                Self::check_statement_for_assignments(
+                                    inner, ctx, results, true,
+                                );
+                            }
+                            ForeachBody::ColonDelimited(body) => {
+                                Self::walk_statements_for_assignments(
+                                    body.statements.iter(),
+                                    ctx,
+                                    results,
+                                    true,
+                                );
+                            }
                         }
                     }
                 }

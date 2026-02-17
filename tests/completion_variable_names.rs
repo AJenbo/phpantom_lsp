@@ -1298,6 +1298,121 @@ async fn test_completion_variable_used_in_different_contexts() {
 
 /// Superglobals should not be duplicated even if they also appear in file content.
 #[tokio::test]
+async fn test_completion_foreach_variable_not_visible_after_loop() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_foreach_scope.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "foreach ($items as $key => $value) {\n",
+        "    echo $value;\n",
+        "}\n",
+        "$\n",
+    );
+
+    // Cursor is after the foreach on line 5 — `$value` and `$key` should
+    // NOT appear because they are scoped to the loop body.
+    let items = complete_at(&backend, &uri, text, 5, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        !var_labels.contains(&"$value"),
+        "$value should NOT be visible after the foreach loop. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        !var_labels.contains(&"$key"),
+        "$key should NOT be visible after the foreach loop. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should still be visible after the foreach loop. Got: {:?}",
+        var_labels
+    );
+}
+
+#[tokio::test]
+async fn test_completion_foreach_variable_not_visible_before_loop() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_foreach_before.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "$\n",
+        "foreach ($items as $value) {\n",
+        "    echo $value;\n",
+        "}\n",
+    );
+
+    // Cursor is before the foreach on line 2
+    let items = complete_at(&backend, &uri, text, 2, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        !var_labels.contains(&"$value"),
+        "$value should NOT be visible before the foreach loop. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible before the foreach loop. Got: {:?}",
+        var_labels
+    );
+}
+
+#[tokio::test]
+async fn test_completion_foreach_variable_visible_inside_loop() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_foreach_inside.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "foreach ($items as $key => $value) {\n",
+        "    $\n",
+        "}\n",
+    );
+
+    // Cursor is inside the foreach on line 3
+    let items = complete_at(&backend, &uri, text, 3, 5).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$value"),
+        "$value should be visible inside the foreach loop. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$key"),
+        "$key should be visible inside the foreach loop. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible inside the foreach loop. Got: {:?}",
+        var_labels
+    );
+}
+
+#[tokio::test]
 async fn test_completion_superglobal_not_duplicated() {
     let backend = create_test_backend();
 
