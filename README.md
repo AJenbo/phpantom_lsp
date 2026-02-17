@@ -12,12 +12,19 @@ A fast, lightweight PHP language server that stays out of your way. Using only a
 - **Static members** via `::` — static methods, static properties, constants, enum cases
 - **`parent::`** — inherited and overridden members (excludes private)
 - **Traits and interfaces** — trait members appear on the using class; interface contracts are resolved
-- **`@mixin` classes** — members from `@mixin` annotations are included, even when the mixin is declared on a parent class (the Laravel `Model`/`Builder` pattern works out of the box)
+- **`@mixin` classes** — members from `@mixin` annotations are included
 - **Magic members** — `@property`, `@property-read`, `@method` from PHPDoc
 - **Method chaining** — return types are followed through arbitrarily long chains
 - **Null-safe chaining** — `?->` is handled identically to `->`
 - **Full signatures** in completion labels (parameters, types, return type)
-- Magic methods (`__construct`, `__destruct`, etc.) are filtered out of results
+- Magic methods (`__construct`, `__call`, etc.) are only suggested interally
+- **Named argument completion** — when typing inside call parentheses, parameter names are suggested with a trailing `:`.
+- **PHPDoc tag completion** — context-aware suggestions inside `/** … */` blocks.
+- **Variable name completion** — typing `$` suggests variables that are in scope.
+- **Class name completion** — unqualified and partially-qualified class names are completed from the current file
+- **Function completion** — standalone functions are completed
+- **Constant completion** — constants defined via `define()` are offered alongside class names
+- **Deprecated detection** — members, classes, and functions marked with `@deprecated` in their PHPDoc are shown with strikethrough in the completion list
 
 <img width="683" height="339" alt="image" src="https://github.com/user-attachments/assets/65e8220d-5d94-466f-aea7-2f239a8d4b19" />
 
@@ -27,6 +34,7 @@ A fast, lightweight PHP language server that stays out of your way. Using only a
 - **Methods, properties, constants** — resolves through inheritance, traits, and mixins
 - **Standalone functions** — including PHP built-ins via embedded stubs
 - **Variables** — jumps to the most recent assignment or declaration (assignment, parameter, `foreach`, `catch`, `static`/`global`)
+- **Property type definition** — when the cursor is on a property or parameter at its declaration site, jumps to the class definition of its type hint
 - **Namespace resolution** — fully-qualified, partially-qualified, and aliased names via `use ... as ...`
 
 ### Type Resolution
@@ -53,8 +61,26 @@ Completion results adapt to runtime type checks. PHPantomLSP narrows union types
 
 ### Composer & Project Awareness
 
-- Parses `composer.json` for PSR-4 and file autoload mappings
+- Parses `composer.json` for PSR-4, classmap, and file autoload mappings
 - Resolves cross-file class lookups on demand
+- Discovers classes and functions from `require_once` files
+
+> **Note:**
+> - Run `composer install -o` (or `composer dump-autoload -o`) to generate autoload files needed for full class completion.
+> - If your project doesn’t use Composer, you can create a minimal `composer.json` to generate a classmap:
+>
+>   ```json
+>   {
+>     "autoload": {
+>       "classmap": ["src/"]
+>     }
+>   }
+>   ```
+>
+>   Then run:
+>   ```bash
+>   composer dump-autoload -o
+>   ```
 
 ## Building
 
