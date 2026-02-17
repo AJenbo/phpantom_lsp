@@ -37,6 +37,7 @@ impl LanguageServer for Backend {
                         "$".to_string(),
                         ">".to_string(),
                         ":".to_string(),
+                        "@".to_string(),
                     ]),
                     all_commit_characters: None,
                     work_done_progress_options: WorkDoneProgressOptions {
@@ -263,6 +264,21 @@ impl LanguageServer for Backend {
 
         if let Some(content) = content {
             let classes = classes.unwrap_or_default();
+
+            // ── PHPDoc tag completion ────────────────────────────────
+            // When the user types `@` inside a `/** … */` docblock,
+            // offer context-aware PHPDoc / PHPStan tag suggestions.
+            if let Some(prefix) =
+                crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
+            {
+                let context = crate::completion::phpdoc::detect_context(&content, position);
+                let items = crate::completion::phpdoc::build_phpdoc_completions(
+                    &content, &prefix, context, position,
+                );
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
 
             // Gather the current file's `use` statement mappings and namespace
             // so the class_loader can resolve short names like `Resource` to
