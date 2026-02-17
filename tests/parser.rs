@@ -1409,3 +1409,138 @@ async fn test_parse_php_enum_with_trait_also_has_implicit_interface() {
         enum_info.used_traits
     );
 }
+
+// ─── parse_defines (AST-based) tests ────────────────────────────────────────
+
+#[tokio::test]
+async fn test_parse_defines_single_quoted() {
+    let backend = create_test_backend();
+    let defines = backend.parse_defines("<?php\ndefine('MY_CONST', 42);\n");
+    assert_eq!(defines, vec!["MY_CONST"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_double_quoted() {
+    let backend = create_test_backend();
+    let defines = backend.parse_defines("<?php\ndefine(\"MY_CONST\", 'hello');\n");
+    assert_eq!(defines, vec!["MY_CONST"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_multiple() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "define('PHP_EOL', \"\\n\");\n",
+        "define('PHP_INT_MAX', 9223372036854775807);\n",
+        "define('SORT_ASC', 4);\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["PHP_EOL", "PHP_INT_MAX", "SORT_ASC"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_with_third_argument() {
+    let backend = create_test_backend();
+    let defines = backend.parse_defines("<?php\ndefine('__DIR__', '', true);\n");
+    assert_eq!(defines, vec!["__DIR__"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_skips_non_define_calls() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "some_define('NOT_A_CONST', 1);\n",
+        "user_define('ALSO_NOT', 2);\n",
+        "define('REAL_CONST', 3);\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["REAL_CONST"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_skips_dynamic_names() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "define($varName, 42);\n",
+        "define('GOOD_CONST', 1);\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["GOOD_CONST"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_empty_file() {
+    let backend = create_test_backend();
+    let defines = backend.parse_defines("<?php\n");
+    assert!(defines.is_empty());
+}
+
+#[tokio::test]
+async fn test_parse_defines_no_defines() {
+    let backend = create_test_backend();
+    let defines = backend.parse_defines("<?php\necho 'hello';\nfunction foo() {}\n");
+    assert!(defines.is_empty());
+}
+
+#[tokio::test]
+async fn test_parse_defines_inside_if_guard() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "if (!defined('MY_CONST')) {\n",
+        "    define('MY_CONST', 'value');\n",
+        "}\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["MY_CONST"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_inside_namespace() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "define('APP_VERSION', '2.0');\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["APP_VERSION"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_inside_block() {
+    let backend = create_test_backend();
+    let content = concat!("<?php\n", "{\n", "    define('BLOCK_CONST', 1);\n", "}\n",);
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["BLOCK_CONST"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_mixed_with_classes_and_functions() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "define('VERSION', '1.0');\n",
+        "class Foo { public function bar() {} }\n",
+        "define('DEBUG', true);\n",
+        "function helper() {}\n",
+        "define('MAX_RETRIES', 3);\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["VERSION", "DEBUG", "MAX_RETRIES"]);
+}
+
+#[tokio::test]
+async fn test_parse_defines_ignores_method_calls_named_define() {
+    let backend = create_test_backend();
+    let content = concat!(
+        "<?php\n",
+        "$obj->define('NOT_A_CONST', 1);\n",
+        "define('REAL_CONST', 2);\n",
+    );
+    let defines = backend.parse_defines(content);
+    assert_eq!(defines, vec!["REAL_CONST"]);
+}

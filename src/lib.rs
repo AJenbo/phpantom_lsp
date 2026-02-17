@@ -74,6 +74,13 @@ pub struct Backend {
     /// time, and also from any opened/changed files that contain standalone
     /// function declarations.
     pub global_functions: Arc<Mutex<HashMap<String, (String, FunctionInfo)>>>,
+    /// Global constants defined via `define('NAME', value)` calls.
+    ///
+    /// Maps constant name → file URI where it was defined.
+    /// Populated from files listed in Composer's `autoload_files.php` at init
+    /// time, and also from any opened/changed files that contain `define()`
+    /// calls.  Used to offer constant name completions alongside class names.
+    pub global_defines: Arc<Mutex<HashMap<String, String>>>,
     /// Index of fully-qualified class names to file URIs.
     ///
     /// This allows reliable lookup of classes that don't follow PSR-4
@@ -133,6 +140,7 @@ impl Backend {
             use_map: Arc::new(Mutex::new(HashMap::new())),
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
+            global_defines: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
             classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),
@@ -154,6 +162,7 @@ impl Backend {
             use_map: Arc::new(Mutex::new(HashMap::new())),
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
+            global_defines: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
             classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),
@@ -178,6 +187,7 @@ impl Backend {
             use_map: Arc::new(Mutex::new(HashMap::new())),
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
+            global_defines: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
             classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index,
@@ -207,6 +217,7 @@ impl Backend {
             use_map: Arc::new(Mutex::new(HashMap::new())),
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
+            global_defines: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
             classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index,
@@ -232,6 +243,7 @@ impl Backend {
             use_map: Arc::new(Mutex::new(HashMap::new())),
             namespace_map: Arc::new(Mutex::new(HashMap::new())),
             global_functions: Arc::new(Mutex::new(HashMap::new())),
+            global_defines: Arc::new(Mutex::new(HashMap::new())),
             class_index: Arc::new(Mutex::new(HashMap::new())),
             classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),

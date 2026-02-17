@@ -97,10 +97,16 @@ impl LanguageServer for Backend {
                 *cm = classmap;
             }
 
-            // Parse autoload_files.php to discover global function definitions.
-            // Also follow `require_once` statements in those files to discover
-            // additional classes and functions (used by packages like Trustly
-            // that don't follow composer conventions).
+            // Parse autoload_files.php to discover global symbols.
+            // These files can contain any kind of PHP symbol (classes,
+            // functions, define() constants, etc.).  Classes, traits,
+            // interfaces, and enums can also be loaded via PSR-4 / classmap,
+            // but functions and define() constants can *only* be discovered
+            // through these files.
+            //
+            // We also follow `require_once` statements in those files to
+            // discover additional files (used by packages like Trustly
+            // that don't follow Composer conventions).
             let autoload_files = composer::parse_autoload_files(&root, &vendor_dir);
             let autoload_count = autoload_files.len();
 
@@ -117,30 +123,11 @@ impl LanguageServer for Backend {
                 }
 
                 if let Ok(content) = std::fs::read_to_string(&canonical) {
-                    let functions = self.parse_functions(&content);
                     let uri = format!("file://{}", canonical.display());
 
-                    if let Ok(mut fmap) = self.global_functions.lock() {
-                        for func in functions {
-                            let fqn = if let Some(ref ns) = func.namespace {
-                                format!("{}\\{}", ns, &func.name)
-                            } else {
-                                func.name.clone()
-                            };
-
-                            // Insert both the FQN and the short name so that
-                            // callers using `use function Ns\func;` or bare
-                            // `func()` can both resolve.
-                            fmap.insert(fqn.clone(), (uri.clone(), func.clone()));
-                            if func.namespace.is_some() {
-                                fmap.entry(func.name.clone())
-                                    .or_insert_with(|| (uri.clone(), func.clone()));
-                            }
-                        }
-                    }
-
-                    // Also cache classes from these files in the ast_map so
-                    // that class definitions in autoload files are available.
+                    // Full AST parse: extracts classes, use statements,
+                    // namespaces, standalone functions, and define()
+                    // constants — all in a single pass.
                     self.update_ast(&uri, &content);
 
                     // Follow require_once statements to discover more files.
@@ -477,22 +464,27 @@ impl LanguageServer for Backend {
                 }
             }
 
-            // ── Class name completion ───────────────────────────────
+            // ── Class name + constant completion ────────────────────
             // When there is no `->` or `::` operator, check whether the
-            // user is typing a class name and offer completions from all
-            // known sources (use-imports, same namespace, stubs, classmap,
-            // class_index).
+            // user is typing a class name or constant and offer
+            // completions from all known sources (use-imports, same
+            // namespace, stubs, classmap, class_index, global_defines,
+            // stub_constant_index).
             if let Some(partial) = Self::extract_partial_class_name(&content, position) {
-                let (class_items, is_incomplete) = self.build_class_name_completions(
+                let (class_items, class_incomplete) = self.build_class_name_completions(
                     &file_use_map,
                     &file_namespace,
                     &partial,
                     &content,
                 );
-                if !class_items.is_empty() {
+                let (constant_items, const_incomplete) = self.build_constant_completions(&partial);
+
+                if !class_items.is_empty() || !constant_items.is_empty() {
+                    let mut items = class_items;
+                    items.extend(constant_items);
                     return Ok(Some(CompletionResponse::List(CompletionList {
-                        is_incomplete,
-                        items: class_items,
+                        is_incomplete: class_incomplete || const_incomplete,
+                        items,
                     })));
                 }
             }

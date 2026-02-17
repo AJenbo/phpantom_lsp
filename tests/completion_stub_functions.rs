@@ -34,6 +34,7 @@ async fn complete_at(
 
     match backend.completion(completion_params).await.unwrap() {
         Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
         _ => vec![],
     }
 }
@@ -480,4 +481,236 @@ async fn test_stub_function_preg_match() {
 
     let func = result.unwrap();
     assert_eq!(func.name, "preg_match");
+}
+
+// ─── Constant completion tests ──────────────────────────────────────────────
+
+/// Typing a partial constant name should suggest matching SPL constants
+/// from the stub_constant_index.
+#[tokio::test]
+async fn test_completion_stub_constant_php_eol() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///const_test.php").unwrap();
+    let text = concat!("<?php\n", "echo PHP_E\n",);
+
+    // Cursor at the end of `PHP_E` on line 1
+    let items = complete_at(&backend, &uri, text, 1, 10).await;
+
+    let constant_items: Vec<_> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .collect();
+
+    assert!(
+        constant_items.iter().any(|i| i.label == "PHP_EOL"),
+        "Should suggest PHP_EOL when typing 'PHP_E'. Got: {:?}",
+        constant_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Typing `SORT` should suggest both SORT_ASC and SORT_DESC.
+#[tokio::test]
+async fn test_completion_stub_constant_sort() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///sort_test.php").unwrap();
+    let text = concat!("<?php\n", "$x = SORT\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 9).await;
+
+    let labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        labels.contains(&"SORT_ASC"),
+        "Should suggest SORT_ASC. Got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"SORT_DESC"),
+        "Should suggest SORT_DESC. Got: {:?}",
+        labels
+    );
+}
+
+/// Constants from user-defined `define()` calls should appear in completions.
+#[tokio::test]
+async fn test_completion_user_defined_constant() {
+    let backend = create_test_backend_with_function_stubs();
+
+    // First open a file that defines a constant
+    let defs_uri = Url::parse("file:///constants.php").unwrap();
+    let defs_text = concat!(
+        "<?php\n",
+        "define('MY_APP_VERSION', '1.0.0');\n",
+        "define('MY_APP_NAME', 'TestApp');\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: defs_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: defs_text.to_string(),
+            },
+        })
+        .await;
+
+    // Now open another file and type the partial constant name
+    let uri = Url::parse("file:///use_const.php").unwrap();
+    let text = concat!("<?php\n", "echo MY_APP\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 11).await;
+
+    let labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        labels.contains(&"MY_APP_VERSION"),
+        "Should suggest MY_APP_VERSION from define(). Got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"MY_APP_NAME"),
+        "Should suggest MY_APP_NAME from define(). Got: {:?}",
+        labels
+    );
+}
+
+/// Stub constants should have `detail` set to "PHP constant".
+#[tokio::test]
+async fn test_completion_stub_constant_detail() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///detail_test.php").unwrap();
+    let text = concat!("<?php\n", "echo PHP_EOL\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 12).await;
+
+    let php_eol = items.iter().find(|i| i.label == "PHP_EOL");
+    assert!(php_eol.is_some(), "Should find PHP_EOL in completions");
+    assert_eq!(
+        php_eol.unwrap().detail.as_deref(),
+        Some("PHP constant"),
+        "Stub constants should have 'PHP constant' as detail"
+    );
+    assert_eq!(
+        php_eol.unwrap().kind,
+        Some(CompletionItemKind::CONSTANT),
+        "Constants should use CONSTANT kind"
+    );
+}
+
+/// User-defined constants should have `detail` set to "define constant".
+#[tokio::test]
+async fn test_completion_user_constant_detail() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///user_detail_test.php").unwrap();
+    let text = concat!("<?php\n", "define('CUSTOM_FLAG', true);\n", "echo CUSTOM\n",);
+
+    let items = complete_at(&backend, &uri, text, 2, 11).await;
+
+    let custom = items.iter().find(|i| i.label == "CUSTOM_FLAG");
+    assert!(custom.is_some(), "Should find CUSTOM_FLAG in completions");
+    assert_eq!(
+        custom.unwrap().detail.as_deref(),
+        Some("define constant"),
+        "User-defined constants should have 'define constant' as detail"
+    );
+}
+
+/// Constants should NOT appear when typing after `->` (member access).
+#[tokio::test]
+async fn test_completion_constants_not_after_arrow() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///arrow_test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo { public string $PHP_EOL; }\n",
+        "$f = new Foo();\n",
+        "$f->PHP\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 7).await;
+
+    // After `->`, we should NOT get standalone constants
+    let constant_items: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            i.kind == Some(CompletionItemKind::CONSTANT)
+                && i.detail.as_deref() == Some("PHP constant")
+        })
+        .collect();
+
+    assert!(
+        constant_items.is_empty(),
+        "Standalone constants should not appear after '->'. Got: {:?}",
+        constant_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Constants should NOT appear when typing after `$` (variable context).
+#[tokio::test]
+async fn test_completion_constants_not_for_variables() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///var_test.php").unwrap();
+    let text = concat!("<?php\n", "$PHP_EOL\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 8).await;
+
+    let constant_items: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            i.kind == Some(CompletionItemKind::CONSTANT)
+                && i.detail.as_deref() == Some("PHP constant")
+        })
+        .collect();
+
+    assert!(
+        constant_items.is_empty(),
+        "Standalone constants should not appear when typing a variable. Got: {:?}",
+        constant_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Both class names and constants should appear together when prefix matches.
+#[tokio::test]
+async fn test_completion_constants_alongside_classes() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///mixed_test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "define('SORT_HELPER_FLAG', 1);\n",
+        "class SORT_Helper {}\n",
+        "SORT\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 4).await;
+
+    let has_class = items
+        .iter()
+        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+    let has_constant = items
+        .iter()
+        .any(|i| i.kind == Some(CompletionItemKind::CONSTANT));
+
+    assert!(
+        has_class,
+        "Should include class completions matching the prefix"
+    );
+    assert!(
+        has_constant,
+        "Should include constant completions matching the prefix"
+    );
 }

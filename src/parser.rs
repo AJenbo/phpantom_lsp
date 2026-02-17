@@ -188,6 +188,21 @@ impl Backend {
         functions
     }
 
+    /// Parse PHP source text and extract constant names from `define()` calls.
+    ///
+    /// Returns a list of constant name strings for every `define('NAME', …)`
+    /// call found at the top level, inside namespace blocks, block
+    /// statements, or `if` guards.
+    pub fn parse_defines(&self, content: &str) -> Vec<String> {
+        let arena = Bump::new();
+        let file_id = mago_database::file::FileId::new("input.php");
+        let program = parse_file_content(&arena, file_id, content);
+
+        let mut defines = Vec::new();
+        Self::extract_defines_from_statements(program.statements.iter(), &mut defines);
+        defines
+    }
+
     /// Parse PHP source text and extract `use` statement mappings.
     ///
     /// Returns a `HashMap` mapping short (imported) names to their
@@ -508,6 +523,102 @@ impl Backend {
                 }
             }
         }
+    }
+
+    // ─── define() constant extraction ───────────────────────────────
+
+    /// Walk statements and extract constant names from `define()` calls.
+    ///
+    /// Handles top-level `define('NAME', value)` calls, as well as those
+    /// nested inside namespace blocks, block statements, and `if` guards
+    /// (the common `if (!defined('X')) { define('X', …); }` pattern).
+    ///
+    /// Uses the parsed AST rather than regex, so it piggybacks on the
+    /// parse pass that `update_ast` already performs.
+    pub(crate) fn extract_defines_from_statements<'a>(
+        statements: impl Iterator<Item = &'a Statement<'a>>,
+        defines: &mut Vec<String>,
+    ) {
+        for statement in statements {
+            match statement {
+                Statement::Expression(expr_stmt) => {
+                    if let Some(name) = Self::try_extract_define_name(expr_stmt.expression) {
+                        defines.push(name);
+                    }
+                }
+                Statement::Namespace(namespace) => {
+                    Self::extract_defines_from_statements(namespace.statements().iter(), defines);
+                }
+                Statement::Block(block) => {
+                    Self::extract_defines_from_statements(block.statements.iter(), defines);
+                }
+                Statement::If(if_stmt) => {
+                    Self::extract_defines_from_if_body(&if_stmt.body, defines);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Helper: recurse into an `if` statement body to extract `define()`
+    /// calls.  Mirrors `extract_functions_from_if_body`.
+    fn extract_defines_from_if_body<'a>(body: &'a IfBody<'a>, defines: &mut Vec<String>) {
+        match body {
+            IfBody::Statement(body) => {
+                Self::extract_defines_from_statements(std::iter::once(body.statement), defines);
+                for else_if in body.else_if_clauses.iter() {
+                    Self::extract_defines_from_statements(
+                        std::iter::once(else_if.statement),
+                        defines,
+                    );
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    Self::extract_defines_from_statements(
+                        std::iter::once(else_clause.statement),
+                        defines,
+                    );
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                Self::extract_defines_from_statements(body.statements.iter(), defines);
+                for else_if in body.else_if_clauses.iter() {
+                    Self::extract_defines_from_statements(else_if.statements.iter(), defines);
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    Self::extract_defines_from_statements(else_clause.statements.iter(), defines);
+                }
+            }
+        }
+    }
+
+    /// Try to extract the constant name from a `define('NAME', …)` call
+    /// expression.  Returns `Some(name)` if the expression is a function
+    /// call to `define` whose first argument is a string literal.
+    fn try_extract_define_name(expr: &Expression<'_>) -> Option<String> {
+        if let Expression::Call(Call::Function(func_call)) = expr {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value(),
+                _ => return None,
+            };
+            if !func_name.eq_ignore_ascii_case("define") {
+                return None;
+            }
+            let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
+            if args.is_empty() {
+                return None;
+            }
+            let first_expr = match &args[0] {
+                Argument::Positional(pos) => pos.value,
+                Argument::Named(named) => named.value,
+            };
+            if let Expression::Literal(Literal::String(lit_str)) = first_expr
+                && let Some(value) = lit_str.value
+                && !value.is_empty()
+            {
+                return Some(value.to_string());
+            }
+        }
+        None
     }
 
     pub(crate) fn extract_classes_from_statements<'a>(
@@ -1018,6 +1129,20 @@ impl Backend {
                     fmap.entry(func_info.name.clone())
                         .or_insert_with(|| (uri.to_string(), func_info));
                 }
+            }
+        }
+
+        // Extract define() constants from the already-parsed AST and
+        // store them in the global_defines map so they appear in
+        // completions.  This reuses the parse pass above rather than
+        // doing a separate regex scan over the raw content.
+        let mut define_names = Vec::new();
+        Self::extract_defines_from_statements(program.statements.iter(), &mut define_names);
+        if !define_names.is_empty()
+            && let Ok(mut dmap) = self.global_defines.lock()
+        {
+            for name in define_names {
+                dmap.entry(name).or_insert_with(|| uri.to_string());
             }
         }
 
