@@ -295,6 +295,53 @@ impl LanguageServer for Backend {
                 None
             };
 
+            // ── Named argument completion ───────────────────────────
+            // When the cursor is inside the parentheses of a function or
+            // method call, offer parameter names as `name:` completions.
+            if let Some(na_ctx) =
+                crate::completion::named_args::detect_named_arg_context(&content, position)
+            {
+                let mut params = self.resolve_named_arg_params(
+                    &na_ctx,
+                    &content,
+                    position,
+                    &classes,
+                    &file_use_map,
+                    &file_namespace,
+                );
+
+                // If resolution failed, the parser may have choked on
+                // incomplete code (e.g. an unclosed `(`).  Patch the
+                // content by inserting `);` at the cursor position so
+                // the class body becomes syntactically valid, then
+                // re-parse and retry resolution.
+                if params.is_empty() {
+                    let patched = Self::patch_content_at_cursor(&content, position);
+                    if patched != content {
+                        let patched_classes = self.parse_php(&patched);
+                        if !patched_classes.is_empty() {
+                            params = self.resolve_named_arg_params(
+                                &na_ctx,
+                                &patched,
+                                position,
+                                &patched_classes,
+                                &file_use_map,
+                                &file_namespace,
+                            );
+                        }
+                    }
+                }
+
+                if !params.is_empty() {
+                    let items = crate::completion::named_args::build_named_arg_completions(
+                        &na_ctx, &params,
+                    );
+                    if !items.is_empty() {
+                        return Ok(Some(CompletionResponse::Array(items)));
+                    }
+                }
+            }
+
             // Try to extract a completion target (requires `->` or `::`)
             if let Some(target) = Self::extract_completion_target(&content, position) {
                 let cursor_offset = Self::position_to_offset(&content, position);
@@ -542,5 +589,228 @@ impl LanguageServer for Backend {
             insert_text: Some("PHPantomLSP".to_string()),
             ..CompletionItem::default()
         }])))
+    }
+}
+
+// ─── Named argument parameter resolution ────────────────────────────────────
+
+impl Backend {
+    /// Insert `);` at the given cursor position in `content`.
+    ///
+    /// This produces a patched version of the source that the parser can
+    /// handle when the user is in the middle of typing a function call
+    /// (e.g. `$this->greet(|` where the closing `)` hasn't been typed
+    /// yet).  Closing the call expression lets the parser recover the
+    /// surrounding class/function structure.
+    fn patch_content_at_cursor(content: &str, position: Position) -> String {
+        let line_idx = position.line as usize;
+        let col = position.character as usize;
+        let mut result = String::with_capacity(content.len() + 2);
+
+        for (i, line) in content.lines().enumerate() {
+            if i == line_idx {
+                // Insert `);` at the cursor column
+                let byte_col = line
+                    .char_indices()
+                    .nth(col)
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(line.len());
+                result.push_str(&line[..byte_col]);
+                result.push_str(");");
+                result.push_str(&line[byte_col..]);
+            } else {
+                result.push_str(line);
+            }
+            result.push('\n');
+        }
+
+        // Remove the trailing newline we may have added if the original
+        // content did not end with one.
+        if !content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
+        }
+
+        result
+    }
+
+    /// Resolve the parameter list for a named-argument completion context.
+    ///
+    /// Examines the `call_expression` in the context and looks up the
+    /// corresponding function or method to extract its parameters.
+    fn resolve_named_arg_params(
+        &self,
+        ctx: &crate::completion::named_args::NamedArgContext,
+        content: &str,
+        position: Position,
+        classes: &[crate::ClassInfo],
+        file_use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Vec<crate::ParameterInfo> {
+        let expr = &ctx.call_expression;
+
+        // ── Constructor: `new ClassName` ─────────────────────────────
+        if let Some(class_name) = expr.strip_prefix("new ") {
+            let class_name = class_name.trim();
+            if let Some(ci) =
+                self.resolve_class_name(class_name, classes, file_use_map, file_namespace)
+            {
+                let merged = Self::resolve_class_with_inheritance(&ci, &|name| {
+                    self.resolve_class_name(name, classes, file_use_map, file_namespace)
+                });
+                if let Some(ctor) = merged.methods.iter().find(|m| m.name == "__construct") {
+                    return ctor.parameters.clone();
+                }
+            }
+            return vec![];
+        }
+
+        // ── Instance method: `$subject->method` ─────────────────────
+        if let Some(pos) = expr.rfind("->") {
+            let subject = &expr[..pos];
+            let method_name = &expr[pos + 2..];
+            let class_loader = |name: &str| -> Option<crate::ClassInfo> {
+                self.resolve_class_name(name, classes, file_use_map, file_namespace)
+            };
+
+            let owner_classes: Vec<crate::ClassInfo> =
+                if subject == "$this" || subject == "self" || subject == "static" {
+                    let cursor_offset = Self::position_to_offset(content, position);
+                    let current_class =
+                        cursor_offset.and_then(|off| Self::find_class_at_offset(classes, off));
+                    current_class.cloned().into_iter().collect()
+                } else if subject.starts_with('$') {
+                    // Variable — resolve via assignment scanning
+                    let cursor_offset = Self::position_to_offset(content, position).unwrap_or(0);
+                    let current_class = Self::find_class_at_offset(classes, cursor_offset);
+                    let function_loader = |name: &str| -> Option<crate::FunctionInfo> {
+                        let candidates: Vec<&str> = vec![name];
+                        self.find_or_load_function(&candidates)
+                    };
+                    Self::resolve_target_classes(
+                        subject,
+                        crate::AccessKind::Arrow,
+                        current_class,
+                        classes,
+                        content,
+                        cursor_offset,
+                        &class_loader,
+                        Some(&function_loader),
+                    )
+                } else {
+                    vec![]
+                };
+
+            for owner in &owner_classes {
+                let merged = Self::resolve_class_with_inheritance(owner, &class_loader);
+                if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
+                    return method.parameters.clone();
+                }
+            }
+            return vec![];
+        }
+
+        // ── Static method: `ClassName::method` ──────────────────────
+        if let Some(pos) = expr.rfind("::") {
+            let class_part = &expr[..pos];
+            let method_name = &expr[pos + 2..];
+            let class_loader = |name: &str| -> Option<crate::ClassInfo> {
+                self.resolve_class_name(name, classes, file_use_map, file_namespace)
+            };
+
+            let owner_class = if class_part == "self" || class_part == "static" {
+                let cursor_offset = Self::position_to_offset(content, position);
+                let current_class =
+                    cursor_offset.and_then(|off| Self::find_class_at_offset(classes, off));
+                current_class.cloned()
+            } else if class_part == "parent" {
+                let cursor_offset = Self::position_to_offset(content, position);
+                let current_class =
+                    cursor_offset.and_then(|off| Self::find_class_at_offset(classes, off));
+                current_class
+                    .and_then(|cc| cc.parent_class.as_ref())
+                    .and_then(|p| class_loader(p))
+            } else {
+                class_loader(class_part)
+            };
+
+            if let Some(ref owner) = owner_class {
+                let merged = Self::resolve_class_with_inheritance(owner, &class_loader);
+                if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
+                    return method.parameters.clone();
+                }
+            }
+            return vec![];
+        }
+
+        // ── Standalone function: `functionName` ─────────────────────
+        {
+            let mut candidates: Vec<&str> = vec![expr.as_str()];
+            let use_resolved: Option<String> = file_use_map.get(expr.as_str()).cloned();
+            if let Some(ref fqn) = use_resolved {
+                candidates.push(fqn.as_str());
+            }
+            let ns_qualified: Option<String> = file_namespace
+                .as_ref()
+                .map(|ns| format!("{}\\{}", ns, expr));
+            if let Some(ref nq) = ns_qualified {
+                candidates.push(nq.as_str());
+            }
+
+            if let Some(func) = self.find_or_load_function(&candidates) {
+                return func.parameters.clone();
+            }
+        }
+
+        vec![]
+    }
+
+    /// Resolve a class name using use-map, namespace, local classes, and
+    /// cross-file / PSR-4 / stubs — a lightweight helper for named-arg
+    /// resolution that mirrors the class_loader closure logic.
+    fn resolve_class_name(
+        &self,
+        name: &str,
+        local_classes: &[crate::ClassInfo],
+        file_use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<crate::ClassInfo> {
+        // Fully qualified name
+        if let Some(stripped) = name.strip_prefix('\\') {
+            return self.find_or_load_class(stripped);
+        }
+
+        // Unqualified name
+        if !name.contains('\\') {
+            if let Some(fqn) = file_use_map.get(name) {
+                return self.find_or_load_class(fqn);
+            }
+            // Check local classes
+            let lookup = name.rsplit('\\').next().unwrap_or(name);
+            if let Some(cls) = local_classes.iter().find(|c| c.name == lookup) {
+                return Some(cls.clone());
+            }
+            if let Some(ns) = file_namespace {
+                let ns_qualified = format!("{}\\{}", ns, name);
+                return self.find_or_load_class(&ns_qualified);
+            }
+            return self.find_or_load_class(name);
+        }
+
+        // Qualified name
+        let first_segment = name.split('\\').next().unwrap_or(name);
+        if let Some(fqn_prefix) = file_use_map.get(first_segment) {
+            let rest = &name[first_segment.len()..];
+            let expanded = format!("{}{}", fqn_prefix, rest);
+            if let Some(cls) = self.find_or_load_class(&expanded) {
+                return Some(cls);
+            }
+        }
+        if let Some(ns) = file_namespace {
+            let ns_qualified = format!("{}\\{}", ns, name);
+            if let Some(cls) = self.find_or_load_class(&ns_qualified) {
+                return Some(cls);
+            }
+        }
+        self.find_or_load_class(name)
     }
 }
