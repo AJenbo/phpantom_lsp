@@ -1433,3 +1433,584 @@ async fn test_completion_superglobal_not_duplicated() {
         get_items.len()
     );
 }
+
+// ─── End-of-file variable visibility ────────────────────────────────────────
+
+/// Variables should be visible at the very end of the file (no trailing newline).
+#[tokio::test]
+async fn test_completion_variables_visible_at_eof_no_newline() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_eof_no_nl.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "$name = 'hello';\n",
+        "$",
+    );
+
+    // Cursor on last line (line 3), character 1 (right after `$`)
+    let items = complete_at(&backend, &uri, text, 3, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible at end of file. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$name"),
+        "$name should be visible at end of file. Got: {:?}",
+        var_labels
+    );
+}
+
+/// Variables should be visible at the very end of the file (with trailing newline).
+#[tokio::test]
+async fn test_completion_variables_visible_at_eof_with_newline() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_eof_nl.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "$name = 'hello';\n",
+        "$\n",
+    );
+
+    // Cursor on line 3, character 1 (right after `$`)
+    let items = complete_at(&backend, &uri, text, 3, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible at end of file (trailing newline). Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$name"),
+        "$name should be visible at end of file (trailing newline). Got: {:?}",
+        var_labels
+    );
+}
+
+/// Variables should be visible at the end of a class method body.
+#[tokio::test]
+async fn test_completion_variables_visible_at_end_of_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_eof_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function bar() {\n",
+        "        $items = [1, 2, 3];\n",
+        "        $\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Cursor on line 4, character 9 (right after `$`)
+    let items = complete_at(&backend, &uri, text, 4, 9).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible at end of method body. Got: {:?}",
+        var_labels
+    );
+}
+
+/// Variables defined before a foreach should still be visible after the
+/// loop, even when the foreach is the last statement in the file.
+#[tokio::test]
+async fn test_completion_variables_visible_after_foreach_at_eof() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_after_foreach_eof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "foreach ($items as $item) {\n",
+        "    echo $item;\n",
+        "}\n",
+        "$\n",
+    );
+
+    // Cursor is after the foreach on line 5
+    let items = complete_at(&backend, &uri, text, 5, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible after foreach at end of file. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        !var_labels.contains(&"$item"),
+        "$item should NOT leak out of foreach. Got: {:?}",
+        var_labels
+    );
+}
+
+/// Minimal repro: class + top-level variable + bare `$` at EOF.
+#[tokio::test]
+async fn test_completion_variables_at_eof_after_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_eof_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public function bar(): void {}\n",
+        "}\n",
+        "$items = [1, 2, 3];\n",
+        "$\n",
+    );
+
+    // Cursor on line 5 (the `$` line), character 1
+    let items = complete_at(&backend, &uri, text, 5, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible after class at EOF. Got: {:?}",
+        var_labels
+    );
+}
+
+/// Minimal repro: function declaration + top-level variable + bare `$` at EOF.
+#[tokio::test]
+async fn test_completion_variables_at_eof_after_function_decl() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_eof_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function helper(): mixed { return null; }\n",
+        "$items = [1, 2, 3];\n",
+        "$\n",
+    );
+
+    // Cursor on line 3 (the `$` line), character 1
+    let items = complete_at(&backend, &uri, text, 3, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible after function decl at EOF. Got: {:?}",
+        var_labels
+    );
+}
+
+/// Minimal repro: class + function + foreach + bare `$` at EOF.
+#[tokio::test]
+async fn test_completion_variables_at_eof_class_function_foreach() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_eof_cls_fn_fe.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "}\n",
+        "function helper(): mixed { return null; }\n",
+        "$items = [1, 2, 3];\n",
+        "foreach ($items as $item) {\n",
+        "    echo $item;\n",
+        "}\n",
+        "$\n",
+    );
+
+    // Cursor on line 9 (the `$` line), character 1
+    let items = complete_at(&backend, &uri, text, 9, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible after foreach at EOF with class+function above. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        !var_labels.contains(&"$item"),
+        "$item should NOT leak out of foreach. Got: {:?}",
+        var_labels
+    );
+}
+
+#[tokio::test]
+async fn test_completion_variables_after_foreach_with_classes_above() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_classes_foreach_eof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class AdminUser extends User {\n",
+        "    public function grantPermission(string $p): void {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "\n",
+        "/** @var list<User> $users */\n",
+        "$users = getUnknownValue();\n",
+        "foreach ($users as $user) {\n",
+        "    $user->getEmail();\n",
+        "}\n",
+        "\n",
+        "/** @var User[] $members */\n",
+        "$members = getUnknownValue();\n",
+        "foreach ($members as $member) {\n",
+        "    $member->getEmail();\n",
+        "}\n",
+        "\n",
+        "/** @var array<int, AdminUser> $admins */\n",
+        "$admins = getUnknownValue();\n",
+        "foreach ($admins as $admin) {\n",
+        "    $admin->grantPermission('x');\n",
+        "}\n",
+        "$\n",
+    );
+
+    // Cursor is on the very last line (line 27), after `$`
+    let items = complete_at(&backend, &uri, text, 27, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$users"),
+        "$users should be visible after all foreach loops. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$members"),
+        "$members should be visible after all foreach loops. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$admins"),
+        "$admins should be visible after all foreach loops. Got: {:?}",
+        var_labels
+    );
+    // Foreach iteration variables should NOT leak out
+    assert!(
+        !var_labels.contains(&"$user"),
+        "$user should NOT leak out of foreach. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        !var_labels.contains(&"$member"),
+        "$member should NOT leak out of foreach. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        !var_labels.contains(&"$admin"),
+        "$admin should NOT leak out of foreach. Got: {:?}",
+        var_labels
+    );
+}
+
+/// When the last line of the file is a bare `$` (the user just started
+/// typing a variable name), variables defined earlier should be visible.
+/// The content ends with `$\n` so `.lines()` includes the `$` line, but
+/// the editor may report the cursor on the NEXT line (past-end) because
+/// of the trailing newline.
+#[tokio::test]
+async fn test_completion_variables_visible_when_cursor_past_last_line() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_past_eof.php").unwrap();
+    // Content ends with "$\n" — 4 lines (0..3).  The editor may place
+    // the cursor on line 4 (past the last line) after the trailing newline.
+    let text = concat!(
+        "<?php\n",
+        "$items = [1, 2, 3];\n",
+        "$name = 'hello';\n",
+        "$\n",
+    );
+
+    // Line 3 has `$` — that's the normal case and should work already.
+    // Line 4 does NOT exist; the editor can send this position when the
+    // cursor sits after the trailing newline.
+    let items_on_dollar = complete_at(&backend, &uri, text, 3, 1).await;
+
+    let var_labels: Vec<&str> = items_on_dollar
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$items"),
+        "$items should be visible on the $ line. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$name"),
+        "$name should be visible on the $ line. Got: {:?}",
+        var_labels
+    );
+
+    // Now test with cursor past the end (line 4) — should still see
+    // variables because the editor may report this position.
+    let uri2 = Url::parse("file:///var_past_eof2.php").unwrap();
+    let items_past_end = complete_at(&backend, &uri2, text, 4, 0).await;
+
+    let var_labels_past: Vec<&str> = items_past_end
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels_past.contains(&"$items"),
+        "$items should be visible when cursor is past end of file. Got: {:?}",
+        var_labels_past
+    );
+    assert!(
+        var_labels_past.contains(&"$name"),
+        "$name should be visible when cursor is past end of file. Got: {:?}",
+        var_labels_past
+    );
+}
+
+#[tokio::test]
+async fn test_completion_variables_at_eof_real_file_scenario() {
+    // Reproduce: user is at the very end of a file similar to example.php
+    // and types `$` — should see all variables defined at top level.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///eof_real.php").unwrap();
+
+    // Simulate a large file with classes, functions, and top-level code
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public string $email;\n",
+        "    public function __construct(string $name, string $email) {\n",
+        "        $this->name = $name;\n",
+        "        $this->email = $email;\n",
+        "    }\n",
+        "    public function getEmail(): string { return $this->email; }\n",
+        "    public function getName(): string { return $this->name; }\n",
+        "}\n",
+        "class AdminUser extends User {\n",
+        "    public function grantPermission(string $p): void {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "function findOrFail(int $id): User|AdminUser { return new User('a','b'); }\n",
+        "\n",
+        "$found = findOrFail(1);\n",
+        "$found->getName();\n",
+        "\n",
+        "if (rand(0, 1)) {\n",
+        "    $ambiguous = new User('x', 'x@x.com');\n",
+        "} else {\n",
+        "    $ambiguous = new AdminUser('y', 'y@y.com');\n",
+        "}\n",
+        "$ambiguous->getName();\n",
+        "\n",
+        "$a = findOrFail(1);\n",
+        "if ($a instanceof AdminUser) {\n",
+        "    $a->grantPermission('x');\n",
+        "}\n",
+        "\n",
+        "/** @var list<User> $users */\n",
+        "$users = getUnknownValue();\n",
+        "foreach ($users as $user) {\n",
+        "    $user->getEmail();\n",
+        "}\n",
+        "\n",
+        "/** @var array<int, AdminUser> $admins */\n",
+        "$admins = getUnknownValue();\n",
+        "foreach ($admins as $admin) {\n",
+        "    $admin->grantPermission('x');\n",
+        "}\n",
+        "$\n",
+    );
+
+    let line_count = text.lines().count() as u32;
+    let items = complete_at(&backend, &uri, text, line_count - 1, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$found"),
+        "$found should be visible at EOF. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$ambiguous"),
+        "$ambiguous should be visible at EOF. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$a"),
+        "$a should be visible at EOF. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$users"),
+        "$users should be visible at EOF. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$admins"),
+        "$admins should be visible at EOF. Got: {:?}",
+        var_labels
+    );
+}
+
+#[tokio::test]
+async fn test_completion_variables_at_eof_with_actual_example_php() {
+    // Use the actual example.php content to reproduce the real-world issue
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///example_eof.php").unwrap();
+
+    let base_content = std::fs::read_to_string("example.php")
+        .expect("example.php must exist in the project root");
+    
+    // Scenario: user appends "$" on a new line at the end.
+    // base_content already ends with "\n", so we just append "$\n".
+    let text = format!("{}$\n", base_content);
+    let line_count = text.lines().count() as u32;
+    
+    // The `$` is on the last non-empty line (line_count - 2, since
+    // trailing \n produces an empty final line that .lines() drops,
+    // but the `$` line is the last element returned by .lines()).
+    let dollar_line = line_count - 1;  // 0-indexed, last line from .lines()
+
+    let items = complete_at(&backend, &uri, &text, dollar_line, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$found"),
+        "$found should be visible at EOF of example.php. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$users"),
+        "$users should be visible at EOF of example.php. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$admins"),
+        "$admins should be visible at EOF of example.php. Got: {:?}",
+        var_labels
+    );
+}
+
+#[tokio::test]
+async fn test_completion_variables_at_eof_inside_namespace() {
+    // Regression: when the file has `namespace Foo;` (unbraced), the parser
+    // wraps all code in a Namespace statement.  If the user types `$` at
+    // EOF, the cursor offset is past the namespace's span end (because
+    // the parser stops the span at the last successfully parsed statement).
+    // Variable completion must still find variables inside the namespace.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///ns_eof.php").unwrap();
+
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class User {\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "\n",
+        "$found = new User();\n",
+        "$name = 'hello';\n",
+        "\n",
+        "/** @var list<User> $users */\n",
+        "$users = getUnknownValue();\n",
+        "foreach ($users as $user) {\n",
+        "    $user->getEmail();\n",
+        "}\n",
+        "$\n",
+    );
+
+    let line_count = text.lines().count() as u32;
+    let dollar_line = line_count - 1; // 0-indexed, `$` is on the last line from .lines()
+
+    let items = complete_at(&backend, &uri, text, dollar_line, 1).await;
+
+    let var_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        var_labels.contains(&"$found"),
+        "$found should be visible at EOF inside namespace. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$name"),
+        "$name should be visible at EOF inside namespace. Got: {:?}",
+        var_labels
+    );
+    assert!(
+        var_labels.contains(&"$users"),
+        "$users should be visible at EOF inside namespace. Got: {:?}",
+        var_labels
+    );
+    // Foreach variable should NOT leak
+    assert!(
+        !var_labels.contains(&"$user"),
+        "$user should NOT leak out of foreach. Got: {:?}",
+        var_labels
+    );
+}

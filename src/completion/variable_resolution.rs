@@ -498,9 +498,7 @@ impl Backend {
 
                         match &foreach.body {
                             ForeachBody::Statement(inner) => {
-                                Self::check_statement_for_assignments(
-                                    inner, ctx, results, true,
-                                );
+                                Self::check_statement_for_assignments(inner, ctx, results, true);
                             }
                             ForeachBody::ColonDelimited(body) => {
                                 Self::walk_statements_for_assignments(

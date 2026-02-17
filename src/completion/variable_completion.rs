@@ -48,13 +48,22 @@ impl Backend {
     ///   - `foo|`  → `None`
     pub fn extract_partial_variable_name(content: &str, position: Position) -> Option<String> {
         let lines: Vec<&str> = content.lines().collect();
-        if position.line as usize >= lines.len() {
+        if lines.is_empty() {
             return None;
         }
 
-        let line = lines[position.line as usize];
+        // When the cursor is past the last line (editor can send this for
+        // a trailing blank line after the final newline), treat it as the
+        // end of the last line so variables defined earlier are still found.
+        let (line, col) = if position.line as usize >= lines.len() {
+            let last = lines[lines.len() - 1];
+            (last, last.chars().count())
+        } else {
+            let l = lines[position.line as usize];
+            (l, (position.character as usize).min(l.chars().count()))
+        };
+
         let chars: Vec<char> = line.chars().collect();
-        let col = (position.character as usize).min(chars.len());
 
         // Walk backwards through identifier characters
         let mut i = col;
@@ -181,7 +190,10 @@ impl Backend {
             // +1 for the newline character
             offset += line.len() + 1;
         }
-        None
+        // Line number is past the end of the file — treat the cursor as
+        // being at the very end of the content so that all preceding
+        // statements are still visible.
+        Some(content.len())
     }
 }
 
@@ -265,6 +277,20 @@ fn find_scope_and_collect<'b>(
                 }
             }
             _ => {}
+        }
+    }
+
+    // If the cursor is past the end of the last statement and that
+    // statement is a namespace, the user is typing at EOF inside an
+    // unbraced namespace (`namespace Foo;`).  The parser's span for the
+    // namespace may not extend to cover newly-typed content (e.g. a bare
+    // `$`), so the range check above misses it.  Recurse into the last
+    // namespace so variables declared inside it are still visible.
+    if let Some(&Statement::Namespace(ns)) = stmts.last() {
+        let ns_span = ns.span();
+        if cursor_offset > ns_span.end.offset {
+            find_scope_and_collect(ns.statements().iter(), cursor_offset, vars);
+            return;
         }
     }
 
@@ -375,8 +401,7 @@ fn collect_from_statements<'b>(
                 // inside the foreach body.  Outside the loop these
                 // iteration variables should not be in scope.
                 let body_span = foreach.body.span();
-                if cursor_offset >= body_span.start.offset
-                    && cursor_offset <= body_span.end.offset
+                if cursor_offset >= body_span.start.offset && cursor_offset <= body_span.end.offset
                 {
                     if let Some(key_expr) = foreach.target.key() {
                         collect_var_name_from_expression(key_expr, vars);
