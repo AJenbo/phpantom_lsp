@@ -54,6 +54,8 @@ pub struct MethodInfo {
     /// @return ($abstract is class-string<TClass> ? TClass : mixed)
     /// ```
     pub conditional_return: Option<ConditionalReturnType>,
+    /// Whether this method is marked `@deprecated` in its PHPDoc.
+    pub is_deprecated: bool,
 }
 
 /// Stores extracted property information from a parsed PHP class.
@@ -68,6 +70,8 @@ pub struct PropertyInfo {
     pub is_static: bool,
     /// Visibility of the property (public, protected, or private).
     pub visibility: Visibility,
+    /// Whether this property is marked `@deprecated` in its PHPDoc.
+    pub is_deprecated: bool,
 }
 
 /// Stores extracted constant information from a parsed PHP class.
@@ -79,6 +83,8 @@ pub struct ConstantInfo {
     pub type_hint: Option<String>,
     /// Visibility of the constant (public, protected, or private).
     pub visibility: Visibility,
+    /// Whether this constant is marked `@deprecated` in its PHPDoc.
+    pub is_deprecated: bool,
 }
 
 /// Describes the access operator that triggered completion.
@@ -152,6 +158,8 @@ pub struct FunctionInfo {
     /// @phpstan-assert-if-false User $value  — assertion when return is false
     /// ```
     pub type_assertions: Vec<TypeAssertion>,
+    /// Whether this function is marked `@deprecated` in its PHPDoc.
+    pub is_deprecated: bool,
 }
 
 // ─── PHPStan Type Assertions ────────────────────────────────────────────────
@@ -270,4 +278,6 @@ pub struct ClassInfo {
     /// Final classes cannot be extended, so `static::` is equivalent to
     /// `self::` and need not be offered as a separate completion subject.
     pub is_final: bool,
+    /// Whether this class is marked `@deprecated` in its PHPDoc.
+    pub is_deprecated: bool,
 }

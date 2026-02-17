@@ -287,6 +287,11 @@ impl Backend {
                 detail: Some(format!("Class: {}", target_class.name)),
                 insert_text: Some(method.name.clone()),
                 filter_text: Some(method.name.clone()),
+                deprecated: if method.is_deprecated {
+                    Some(true)
+                } else {
+                    None
+                },
                 ..CompletionItem::default()
             });
         }
@@ -332,6 +337,11 @@ impl Backend {
                 detail: Some(detail),
                 insert_text: Some(display_name.clone()),
                 filter_text: Some(display_name),
+                deprecated: if property.is_deprecated {
+                    Some(true)
+                } else {
+                    None
+                },
                 ..CompletionItem::default()
             });
         }
@@ -361,6 +371,11 @@ impl Backend {
                     detail: Some(detail),
                     insert_text: Some(constant.name.clone()),
                     filter_text: Some(constant.name.clone()),
+                    deprecated: if constant.is_deprecated {
+                        Some(true)
+                    } else {
+                        None
+                    },
                     ..CompletionItem::default()
                 });
             }
@@ -1098,6 +1113,7 @@ impl Backend {
                                 insert_text: Some(cls.name.clone()),
                                 filter_text: Some(cls.name.clone()),
                                 sort_text: Some(format!("1_{}", cls.name.to_lowercase())),
+                                deprecated: if cls.is_deprecated { Some(true) } else { None },
                                 ..CompletionItem::default()
                             });
                         }
@@ -1336,6 +1352,7 @@ impl Backend {
                     insert_text: Some(info.name.clone()),
                     filter_text: Some(info.name.clone()),
                     sort_text: Some(format!("4_{}", info.name.to_lowercase())),
+                    deprecated: if info.is_deprecated { Some(true) } else { None },
                     ..CompletionItem::default()
                 });
             }

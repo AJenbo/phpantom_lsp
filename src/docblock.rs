@@ -45,6 +45,35 @@ pub fn extract_return_type(docblock: &str) -> Option<String> {
     extract_tag_type(docblock, "@return")
 }
 
+/// Check whether a PHPDoc block contains an `@deprecated` tag.
+///
+/// Handles common formats:
+///   - `@deprecated`
+///   - `@deprecated Some explanation text`
+///   - `@deprecated since 2.0`
+///
+/// Returns `true` if the tag is present, `false` otherwise.
+pub fn has_deprecated_tag(docblock: &str) -> bool {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+        if trimmed == "@deprecated"
+            || trimmed.starts_with("@deprecated ")
+            || trimmed.starts_with("@deprecated\t")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Extract all `@mixin` tags from a class-level docblock.
 ///
 /// PHPDoc `@mixin` tags declare that the annotated class exposes public
@@ -457,6 +486,7 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             is_static,
             visibility: Visibility::Public,
             conditional_return: None,
+            is_deprecated: false,
         });
     }
 
@@ -1986,5 +2016,77 @@ mod tests {
         assert_eq!(assertions[0].kind, AssertionKind::IfTrue);
         assert!(assertions[0].negated);
         assert_eq!(assertions[0].asserted_type, "User");
+    }
+
+    // ─── @deprecated tag tests ──────────────────────────────────────
+
+    #[test]
+    fn deprecated_tag_bare() {
+        let doc = concat!("/**\n", " * @deprecated\n", " */",);
+        assert!(has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_with_message() {
+        let doc = concat!("/**\n", " * @deprecated Use newMethod() instead.\n", " */",);
+        assert!(has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_with_version() {
+        let doc = concat!("/**\n", " * @deprecated since 2.0\n", " */",);
+        assert!(has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_mixed_with_other_tags() {
+        let doc = concat!(
+            "/**\n",
+            " * Some description.\n",
+            " *\n",
+            " * @param string $name\n",
+            " * @deprecated Use something else.\n",
+            " * @return void\n",
+            " */",
+        );
+        assert!(has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_not_present() {
+        let doc = concat!(
+            "/**\n",
+            " * @param string $name\n",
+            " * @return void\n",
+            " */",
+        );
+        assert!(!has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_empty_docblock() {
+        let doc = "/** */";
+        assert!(!has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_not_confused_with_similar_words() {
+        // A word like "@deprecatedAlias" should NOT match — the tag must
+        // be exactly "@deprecated" followed by whitespace or end-of-line.
+        let doc = concat!("/**\n", " * @deprecatedAlias\n", " */",);
+        assert!(!has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_at_end_of_line() {
+        // Tag alone on the line with no trailing text.
+        let doc = "/** @deprecated */";
+        assert!(has_deprecated_tag(doc));
+    }
+
+    #[test]
+    fn deprecated_tag_with_tab_separator() {
+        let doc = concat!("/**\n", " * @deprecated\tUse foo() instead\n", " */",);
+        assert!(has_deprecated_tag(doc));
     }
 }

@@ -138,6 +138,7 @@ impl Backend {
                     type_hint: type_hint.clone(),
                     is_static,
                     visibility,
+                    is_deprecated: false,
                 }
             })
             .collect()
@@ -382,32 +383,37 @@ impl Backend {
                         .map(|rth| Self::extract_hint_string(&rth.hint));
 
                     // Apply PHPDoc `@return` override for the function.
-                    // Also extract PHPStan conditional return types and
-                    // type assertion annotations if present.
-                    let (return_type, conditional_return, type_assertions) = if let Some(ctx) =
-                        doc_ctx
-                    {
-                        let docblock_text =
-                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, func);
+                    // Also extract PHPStan conditional return types,
+                    // type assertion annotations, and `@deprecated` if present.
+                    let (return_type, conditional_return, type_assertions, is_deprecated) =
+                        if let Some(ctx) = doc_ctx {
+                            let docblock_text = docblock::get_docblock_text_for_node(
+                                ctx.trivias,
+                                ctx.content,
+                                func,
+                            );
 
-                        let doc_type = docblock_text.and_then(docblock::extract_return_type);
+                            let doc_type = docblock_text.and_then(docblock::extract_return_type);
 
-                        let effective = docblock::resolve_effective_type(
-                            native_return_type.as_deref(),
-                            doc_type.as_deref(),
-                        );
+                            let effective = docblock::resolve_effective_type(
+                                native_return_type.as_deref(),
+                                doc_type.as_deref(),
+                            );
 
-                        let conditional =
-                            docblock_text.and_then(docblock::extract_conditional_return_type);
+                            let conditional =
+                                docblock_text.and_then(docblock::extract_conditional_return_type);
 
-                        let assertions = docblock_text
-                            .map(docblock::extract_type_assertions)
-                            .unwrap_or_default();
+                            let assertions = docblock_text
+                                .map(docblock::extract_type_assertions)
+                                .unwrap_or_default();
 
-                        (effective, conditional, assertions)
-                    } else {
-                        (native_return_type, None, Vec::new())
-                    };
+                            let deprecated =
+                                docblock_text.is_some_and(docblock::has_deprecated_tag);
+
+                            (effective, conditional, assertions, deprecated)
+                        } else {
+                            (native_return_type, None, Vec::new(), false)
+                        };
 
                     functions.push(FunctionInfo {
                         name,
@@ -416,6 +422,7 @@ impl Backend {
                         namespace: current_namespace.clone(),
                         conditional_return,
                         type_assertions,
+                        is_deprecated,
                     });
                 }
                 Statement::Namespace(namespace) => {
@@ -640,13 +647,16 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, and @mixin tags from the class-level docblock.
-                    // These declare magic properties/methods accessible via __get/__set/__call.
+                    // Extract @property, @method, @mixin, and @deprecated tags from
+                    // the class-level docblock.
                     let mut mixins = Vec::new();
+                    let mut class_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, class)
                     {
+                        class_deprecated = docblock::has_deprecated_tag(doc_text);
+
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             // Only add if not already declared as a real property.
                             if !properties.iter().any(|p| p.name == name) {
@@ -659,6 +669,7 @@ impl Backend {
                                     },
                                     is_static: false,
                                     visibility: Visibility::Public,
+                                    is_deprecated: false,
                                 });
                             }
                         }
@@ -689,6 +700,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final,
+                        is_deprecated: class_deprecated,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -704,12 +716,16 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
-                    // Extract @property and @method tags from the interface-level docblock.
+                    // Extract @property, @method, @mixin, and @deprecated tags
+                    // from the interface-level docblock.
                     let mut mixins = Vec::new();
+                    let mut iface_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, iface)
                     {
+                        iface_deprecated = docblock::has_deprecated_tag(doc_text);
+
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
                                 properties.push(PropertyInfo {
@@ -721,6 +737,7 @@ impl Backend {
                                     },
                                     is_static: false,
                                     visibility: Visibility::Public,
+                                    is_deprecated: false,
                                 });
                             }
                         }
@@ -748,6 +765,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final: false,
+                        is_deprecated: iface_deprecated,
                     });
                 }
                 Statement::Trait(trait_def) => {
@@ -756,8 +774,10 @@ impl Backend {
                     let (mut methods, mut properties, constants, used_traits) =
                         Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
 
-                    // Extract @property and @method tags from the trait-level docblock.
+                    // Extract @property, @method, @mixin, and @deprecated tags
+                    // from the trait-level docblock.
                     let mut mixins = Vec::new();
+                    let mut trait_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) = docblock::get_docblock_text_for_node(
                             ctx.trivias,
@@ -765,6 +785,8 @@ impl Backend {
                             trait_def,
                         )
                     {
+                        trait_deprecated = docblock::has_deprecated_tag(doc_text);
+
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
                                 properties.push(PropertyInfo {
@@ -776,6 +798,7 @@ impl Backend {
                                     },
                                     is_static: false,
                                     visibility: Visibility::Public,
+                                    is_deprecated: false,
                                 });
                             }
                         }
@@ -803,6 +826,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final: false,
+                        is_deprecated: trait_deprecated,
                     });
                 }
                 Statement::Enum(enum_def) => {
@@ -824,12 +848,16 @@ impl Backend {
                     };
                     used_traits.push(implicit_interface.to_string());
 
-                    // Extract @property, @method, and @mixin tags from the enum-level docblock.
+                    // Extract @property, @method, @mixin, and @deprecated tags
+                    // from the enum-level docblock.
                     let mut mixins = Vec::new();
+                    let mut enum_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, enum_def)
                     {
+                        enum_deprecated = docblock::has_deprecated_tag(doc_text);
+
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
                                 properties.push(PropertyInfo {
@@ -841,6 +869,7 @@ impl Backend {
                                     },
                                     is_static: false,
                                     visibility: Visibility::Public,
+                                    is_deprecated: false,
                                 });
                             }
                         }
@@ -872,6 +901,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final: true,
+                        is_deprecated: enum_deprecated,
                     });
                 }
                 Statement::Namespace(namespace) => {
@@ -923,8 +953,10 @@ impl Backend {
 
                     // Look up the PHPDoc `@return` tag (if any) and apply
                     // type override logic.  Also extract PHPStan conditional
-                    // return types if present.
-                    let (return_type, conditional_return) = if let Some(ctx) = doc_ctx {
+                    // return types if present.  Also check for `@deprecated`.
+                    let (return_type, conditional_return, is_deprecated) = if let Some(ctx) =
+                        doc_ctx
+                    {
                         let docblock_text =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method);
 
@@ -939,9 +971,11 @@ impl Backend {
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
                                 .and_then(docblock::extract_conditional_return_type);
 
-                        (effective, conditional)
+                        let deprecated = docblock_text.is_some_and(docblock::has_deprecated_tag);
+
+                        (effective, conditional, deprecated)
                     } else {
-                        (native_return_type, None)
+                        (native_return_type, None, false)
                     };
 
                     // Extract promoted properties from constructor parameters.
@@ -963,6 +997,7 @@ impl Backend {
                                     type_hint,
                                     is_static: false,
                                     visibility: prop_visibility,
+                                    is_deprecated: false,
                                 });
                             }
                         }
@@ -975,22 +1010,30 @@ impl Backend {
                         is_static,
                         visibility,
                         conditional_return,
+                        is_deprecated,
                     });
                 }
                 ClassLikeMember::Property(property) => {
                     let mut prop_infos = Self::extract_property_info(property);
 
-                    // Apply PHPDoc `@var` override for each property.
+                    // Apply PHPDoc `@var` override and `@deprecated` for each property.
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, member)
-                        && let Some(doc_type) = docblock::extract_var_type(doc_text)
                     {
-                        for prop in &mut prop_infos {
-                            prop.type_hint = docblock::resolve_effective_type(
-                                prop.type_hint.as_deref(),
-                                Some(&doc_type),
-                            );
+                        let deprecated = docblock::has_deprecated_tag(doc_text);
+                        if let Some(doc_type) = docblock::extract_var_type(doc_text) {
+                            for prop in &mut prop_infos {
+                                prop.type_hint = docblock::resolve_effective_type(
+                                    prop.type_hint.as_deref(),
+                                    Some(&doc_type),
+                                );
+                            }
+                        }
+                        if deprecated {
+                            for prop in &mut prop_infos {
+                                prop.is_deprecated = true;
+                            }
                         }
                     }
 
@@ -999,11 +1042,18 @@ impl Backend {
                 ClassLikeMember::Constant(constant) => {
                     let type_hint = constant.hint.as_ref().map(|h| Self::extract_hint_string(h));
                     let visibility = Self::extract_visibility(constant.modifiers.iter());
+                    let is_deprecated = if let Some(ctx) = doc_ctx {
+                        docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, member)
+                            .is_some_and(docblock::has_deprecated_tag)
+                    } else {
+                        false
+                    };
                     for item in constant.items.iter() {
                         constants.push(ConstantInfo {
                             name: item.name.value.to_string(),
                             type_hint: type_hint.clone(),
                             visibility,
+                            is_deprecated,
                         });
                     }
                 }
@@ -1013,6 +1063,7 @@ impl Backend {
                         name: case_name,
                         type_hint: None,
                         visibility: Visibility::Public,
+                        is_deprecated: false,
                     });
                 }
                 ClassLikeMember::TraitUse(trait_use) => {

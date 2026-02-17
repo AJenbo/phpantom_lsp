@@ -227,6 +227,7 @@ impl Backend {
                         used_traits: vec![],
                         mixins: vec![],
                         is_final: false,
+                        is_deprecated: false,
                     };
                     &dummy_class
                 }

@@ -145,6 +145,7 @@ abstract class Model
         return $this;
     }
 
+    /** @deprecated */
     public static function find(int $id): ?static
     {
         return null;

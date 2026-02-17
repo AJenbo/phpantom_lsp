@@ -166,6 +166,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
                     namespace: None,
                     conditional_return: None,
                     type_assertions: vec![],
+                    is_deprecated: false,
                 },
             ),
         );
