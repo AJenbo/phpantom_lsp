@@ -15,22 +15,57 @@ PHPantomLSP is a language server that provides completion and go-to-definition f
 
 ```
 src/
-├── lib.rs              # Backend struct, state, constructors
-├── server.rs           # LSP protocol handlers (initialize, didOpen, completion, …)
-├── parser.rs           # PHP parsing → ClassInfo / FunctionInfo extraction
-├── types.rs            # Data structures (ClassInfo, MethodInfo, PropertyInfo, …)
-├── composer.rs         # composer.json / PSR-4 autoload parsing
-├── stubs.rs            # Embedded phpstorm-stubs (build-time generated index)
-├── docblock.rs         # PHPDoc tag extraction (@return, @var, @property, …)
-├── util.rs             # Position conversion, class lookup, find_or_load_class
+├── lib.rs                  # Backend struct, state, constructors
+├── main.rs                 # Entry point (stdin/stdout LSP transport)
+├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …)
+├── types.rs                # Data structures (ClassInfo, MethodInfo, PropertyInfo, …)
+├── composer.rs             # composer.json / PSR-4 autoload parsing
+├── stubs.rs                # Embedded phpstorm-stubs (build-time generated index)
+├── resolution.rs           # Multi-phase class/function lookup and name resolution
+├── inheritance.rs          # Class inheritance merging (traits, mixins, parent chain)
+├── subject_extraction.rs   # Shared helpers for extracting subjects before ->, ?->, ::
+├── util.rs                 # Position conversion, class lookup, logging
+├── parser/
+│   ├── mod.rs              # Top-level parse entry points (parse_php, parse_functions, …)
+│   ├── classes.rs          # Class, interface, trait, and enum extraction
+│   ├── functions.rs        # Standalone function and define() constant extraction
+│   ├── use_statements.rs   # use statement and namespace extraction
+│   └── ast_update.rs       # update_ast orchestrator and name resolution helpers
+├── docblock/
+│   ├── mod.rs              # Re-exports from submodules
+│   ├── tags.rs             # PHPDoc tag extraction (@return, @var, @property, @mixin, …)
+│   ├── conditional.rs      # PHPStan conditional return type parsing
+│   └── types.rs            # Type cleaning utilities (clean_type, strip_nullable, …)
 ├── completion/
-│   ├── target.rs       # Extract what the user is completing (subject + access kind)
-│   ├── resolver.rs     # Resolve subject → ClassInfo (type resolution engine)
-│   └── builder.rs      # Build LSP CompletionItems from resolved ClassInfo
+│   ├── mod.rs              # Submodule declarations
+│   ├── handler.rs          # Top-level completion request orchestration
+│   ├── target.rs           # Extract what the user is completing (subject + access kind)
+│   ├── resolver.rs         # Resolve subject → ClassInfo (type resolution engine)
+│   ├── builder.rs          # Build LSP CompletionItems from resolved ClassInfo
+│   ├── class_completion.rs # Class name, constant, and function completions
+│   ├── variable_completion.rs  # Variable name completions and scope collection
+│   ├── variable_resolution.rs  # Variable type resolution via assignment scanning
+│   ├── closure_resolution.rs   # Closure and arrow-function parameter resolution
+│   ├── type_narrowing.rs       # instanceof / assert / custom type guard narrowing
+│   ├── conditional_resolution.rs  # PHPStan conditional return type resolution at call sites
+│   ├── named_args.rs       # Named argument completion inside function/method call parens
+│   ├── phpdoc.rs           # PHPDoc tag completion inside /** … */ blocks
+│   └── use_edit.rs         # Use-statement insertion helpers
 ├── definition/
-│   └── resolve.rs      # Go-to-definition resolution
-build.rs                # Parses PhpStormStubsMap.php, generates stub index
-stubs/                  # Composer vendor dir for jetbrains/phpstorm-stubs
+│   ├── mod.rs              # Submodule declarations
+│   ├── resolve.rs          # Core go-to-definition resolution (classes, functions)
+│   ├── member.rs           # Member-access resolution (->method, ::$prop, ::CONST)
+│   └── variable.rs         # Variable definition resolution ($var jump-to-definition)
+build.rs                    # Parses PhpStormStubsMap.php, generates stub index
+stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
+tests/
+├── common/mod.rs           # Shared test helpers and minimal PHP stubs
+├── completion_*.rs         # Completion integration tests (by feature area)
+├── definition_*.rs         # Go-to-definition integration tests
+├── docblock_*.rs           # Docblock parsing and type tests
+├── parser.rs               # PHP parser / AST extraction tests
+├── composer.rs             # Composer integration tests
+└── …
 ```
 
 ## Symbol Resolution: `find_or_load_class`

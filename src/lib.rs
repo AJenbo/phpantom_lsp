@@ -4,11 +4,25 @@
 //!
 //! - [`types`]: Data structures for extracted PHP information (classes, methods, functions, etc.)
 //! - [`parser`]: PHP parsing and AST extraction using mago_syntax
-//! - [`completion`]: Completion logic (target extraction, type resolution, item building)
+//! - [`completion`]: Completion logic (target extraction, type resolution, item building,
+//!   and the top-level completion request handler)
 //! - [`composer`]: Composer autoload (PSR-4, classmap) parsing and class-to-file resolution
-//! - [`server`]: The LSP `LanguageServer` trait implementation
+//! - [`server`]: The LSP `LanguageServer` trait implementation (thin wrapper that delegates
+//!   to feature-specific modules)
 //! - [`util`]: Utility helpers (position conversion, class lookup, logging)
 //! - [`definition`]: Go-to-definition support for classes, members, and functions
+//! - [`inheritance`]: Class inheritance resolution — merging members from parent
+//!   classes, traits, and `@mixin` classes into a unified `ClassInfo`
+//! - [`resolution`]: Class and function lookup / name resolution (multi-phase:
+//!   class_index → ast_map → classmap → PSR-4 → stubs)
+//! - [`subject_extraction`]: Shared helpers for extracting the left-hand side of
+//!   `->`, `?->`, and `::` access operators (used by both completion and definition)
+//! - [`docblock`]: PHPDoc block parsing, split into submodules:
+//!   - `docblock::tags` — tag extraction (`@return`, `@var`, `@property`, `@method`,
+//!     `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval)
+//!   - `docblock::conditional` — PHPStan conditional return type parsing
+//!   - `docblock::types` — type cleaning utilities (`clean_type`, `strip_nullable`,
+//!     `is_scalar`, `split_type_token`)
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,13 +32,16 @@ use tower_lsp::Client;
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
-mod completion;
+pub mod completion;
 pub mod composer;
 mod definition;
 pub mod docblock;
+pub(crate) mod inheritance;
 mod parser;
+mod resolution;
 mod server;
 pub mod stubs;
+pub(crate) mod subject_extraction;
 pub mod types;
 mod util;
 
@@ -43,11 +60,16 @@ pub use types::{
 ///
 /// Method implementations are spread across several modules:
 /// - [`parser`]: `parse_php`, `update_ast`, AST extraction helpers
+/// - [`completion::handler`]: Top-level completion request orchestration
 /// - [`completion::target`]: `extract_completion_target`, `detect_access_kind`
 /// - [`completion::resolver`]: `resolve_target_class` and type-resolution helpers
 /// - [`completion::builder`]: `build_completion_items`, `build_method_label`
 /// - [`composer`]: PSR-4 autoload mapping and class file resolution
 /// - [`server`]: `impl LanguageServer` (initialize, completion, did_open, …)
+/// - [`resolution`]: `find_or_load_class`, `find_or_load_function`, `resolve_class_name`,
+///   `resolve_function_name`
+/// - [`inheritance`]: `resolve_class_with_inheritance`, trait/mixin/parent merging
+/// - [`subject_extraction`]: Shared subject extraction helpers for `->`, `?->`, `::` operators
 /// - [`util`]: `position_to_offset`, `find_class_at_offset`, `log`, `get_classes_for_uri`
 /// - [`definition`]: `resolve_definition`, member resolution, function resolution
 pub struct Backend {
@@ -127,30 +149,12 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Create a new `Backend` connected to an LSP client.
-    pub fn new(client: Client) -> Self {
-        Self {
-            name: "PHPantomLSP".to_string(),
-            version: "0.2.0".to_string(),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
-            ast_map: Arc::new(Mutex::new(HashMap::new())),
-            client: Some(client),
-            workspace_root: Arc::new(Mutex::new(None)),
-            psr4_mappings: Arc::new(Mutex::new(Vec::new())),
-            use_map: Arc::new(Mutex::new(HashMap::new())),
-            namespace_map: Arc::new(Mutex::new(HashMap::new())),
-            global_functions: Arc::new(Mutex::new(HashMap::new())),
-            global_defines: Arc::new(Mutex::new(HashMap::new())),
-            class_index: Arc::new(Mutex::new(HashMap::new())),
-            classmap: Arc::new(Mutex::new(HashMap::new())),
-            stub_index: stubs::build_stub_class_index(),
-            stub_function_index: stubs::build_stub_function_index(),
-            stub_constant_index: stubs::build_stub_constant_index(),
-        }
-    }
-
-    /// Create a `Backend` without an LSP client (for unit / integration tests).
-    pub fn new_test() -> Self {
+    /// Shared defaults for all Backend constructors.
+    ///
+    /// Returns a `Backend` with no LSP client, empty maps, and the full
+    /// embedded stub indices.  Each public constructor customises only the
+    /// fields that differ.
+    fn defaults() -> Self {
         Self {
             name: "PHPantomLSP".to_string(),
             version: "0.2.0".to_string(),
@@ -169,6 +173,19 @@ impl Backend {
             stub_function_index: stubs::build_stub_function_index(),
             stub_constant_index: stubs::build_stub_constant_index(),
         }
+    }
+
+    /// Create a new `Backend` connected to an LSP client.
+    pub fn new(client: Client) -> Self {
+        Self {
+            client: Some(client),
+            ..Self::defaults()
+        }
+    }
+
+    /// Create a `Backend` without an LSP client (for unit / integration tests).
+    pub fn new_test() -> Self {
+        Self::defaults()
     }
 
     /// Create a `Backend` for tests with custom stub class index.
@@ -177,22 +194,8 @@ impl Backend {
     /// `BackedEnum`) without depending on `composer install` having been run.
     pub fn new_test_with_stubs(stub_index: HashMap<&'static str, &'static str>) -> Self {
         Self {
-            name: "PHPantomLSP".to_string(),
-            version: "0.2.0".to_string(),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
-            ast_map: Arc::new(Mutex::new(HashMap::new())),
-            client: None,
-            workspace_root: Arc::new(Mutex::new(None)),
-            psr4_mappings: Arc::new(Mutex::new(Vec::new())),
-            use_map: Arc::new(Mutex::new(HashMap::new())),
-            namespace_map: Arc::new(Mutex::new(HashMap::new())),
-            global_functions: Arc::new(Mutex::new(HashMap::new())),
-            global_defines: Arc::new(Mutex::new(HashMap::new())),
-            class_index: Arc::new(Mutex::new(HashMap::new())),
-            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index,
-            stub_function_index: stubs::build_stub_function_index(),
-            stub_constant_index: stubs::build_stub_constant_index(),
+            ..Self::defaults()
         }
     }
 
@@ -207,22 +210,10 @@ impl Backend {
         stub_constant_index: HashMap<&'static str, &'static str>,
     ) -> Self {
         Self {
-            name: "PHPantomLSP".to_string(),
-            version: "0.2.0".to_string(),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
-            ast_map: Arc::new(Mutex::new(HashMap::new())),
-            client: None,
-            workspace_root: Arc::new(Mutex::new(None)),
-            psr4_mappings: Arc::new(Mutex::new(Vec::new())),
-            use_map: Arc::new(Mutex::new(HashMap::new())),
-            namespace_map: Arc::new(Mutex::new(HashMap::new())),
-            global_functions: Arc::new(Mutex::new(HashMap::new())),
-            global_defines: Arc::new(Mutex::new(HashMap::new())),
-            class_index: Arc::new(Mutex::new(HashMap::new())),
-            classmap: Arc::new(Mutex::new(HashMap::new())),
             stub_index,
             stub_function_index,
             stub_constant_index,
+            ..Self::defaults()
         }
     }
 
@@ -233,22 +224,9 @@ impl Backend {
         psr4_mappings: Vec<composer::Psr4Mapping>,
     ) -> Self {
         Self {
-            name: "PHPantomLSP".to_string(),
-            version: "0.2.0".to_string(),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
-            ast_map: Arc::new(Mutex::new(HashMap::new())),
-            client: None,
             workspace_root: Arc::new(Mutex::new(Some(workspace_root))),
             psr4_mappings: Arc::new(Mutex::new(psr4_mappings)),
-            use_map: Arc::new(Mutex::new(HashMap::new())),
-            namespace_map: Arc::new(Mutex::new(HashMap::new())),
-            global_functions: Arc::new(Mutex::new(HashMap::new())),
-            global_defines: Arc::new(Mutex::new(HashMap::new())),
-            class_index: Arc::new(Mutex::new(HashMap::new())),
-            classmap: Arc::new(Mutex::new(HashMap::new())),
-            stub_index: stubs::build_stub_class_index(),
-            stub_function_index: stubs::build_stub_function_index(),
-            stub_constant_index: stubs::build_stub_constant_index(),
+            ..Self::defaults()
         }
     }
 }

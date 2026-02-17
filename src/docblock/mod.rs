@@ -1,0 +1,49 @@
+//! PHPDoc block parsing.
+//!
+//! This module extracts type information from PHPDoc comments (`/** ... */`),
+//! specifically `@return`, `@var`, `@property`, `@method`, `@mixin`,
+//! `@deprecated`, and `@phpstan-assert` / `@psalm-assert` tags.  It also
+//! provides a compatibility check so that a docblock type only overrides a
+//! native type hint when the native hint is broad enough to be refined
+//! (e.g. `object`, `mixed`, or another class name) and is *not* a concrete
+//! scalar that could never be an object.
+//!
+//! Additionally, it supports PHPStan conditional return type annotations
+//! such as:
+//! ```text
+//! @return ($abstract is class-string<TClass> ? TClass : mixed)
+//! ```
+//!
+//! # Submodules
+//!
+//! - [`tags`]: PHPDoc tag extraction (`@return`, `@var`, `@property`,
+//!   `@method`, `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text
+//!   retrieval, and type override logic).
+//! - [`conditional`]: PHPStan conditional return type parsing.
+//! - [`types`]: Type cleaning utilities (`clean_type`, `strip_nullable`,
+//!   `is_scalar`, `split_type_token`).
+
+mod conditional;
+mod tags;
+pub(crate) mod types;
+
+// ─── Re-exports ─────────────────────────────────────────────────────────────
+//
+// Everything below was previously a public or crate-visible item in the
+// single-file `docblock.rs`.  Re-exporting here keeps all existing call
+// sites (`use crate::docblock;` and `use phpantom_lsp::docblock::*;`)
+// working without modification.
+
+// Tags
+pub use tags::{
+    extract_method_tags, extract_mixin_tags, extract_property_tags, extract_return_type,
+    extract_type_assertions, extract_var_type, extract_var_type_with_name,
+    find_inline_var_docblock, get_docblock_text_for_node, has_deprecated_tag,
+    resolve_effective_type, should_override_type,
+};
+
+// Conditional return types
+pub use conditional::extract_conditional_return_type;
+
+// Type utilities
+pub use types::clean_type;
