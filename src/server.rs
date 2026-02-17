@@ -293,51 +293,57 @@ impl LanguageServer for Backend {
                 //   3. Search the full ast_map
                 //   4. Load files on demand via PSR-4
                 let class_loader = |name: &str| -> Option<crate::ClassInfo> {
-                    // If the name has no namespace separator, it might be a
-                    // short name imported via `use`.  Resolve it first.
-                    let resolved_name = if !name.contains('\\') {
+                    // ── Fully qualified name (leading `\`) ──────────────
+                    // `\PDO`, `\Couchbase\Cluster` — strip the leading `\`
+                    // and resolve globally.  PHP rule: fully qualified names
+                    // always resolve to the name without the leading `\`.
+                    if let Some(stripped) = name.strip_prefix('\\') {
+                        return self.find_or_load_class(stripped);
+                    }
+
+                    // ── Unqualified name (no `\` at all) ────────────────
+                    if !name.contains('\\') {
+                        // Check the import table first (`use` statements).
                         if let Some(fqn) = file_use_map.get(name) {
-                            fqn.as_str()
-                        } else if let Some(ref ns) = file_namespace {
-                            // Not in use map — try current namespace
-                            // (e.g. bare `Sibling` inside `namespace Foo\Bar;`
-                            //  becomes `Foo\Bar\Sibling`)
-                            // We build a temporary owned string and leak it into
-                            // a short-lived search, so use a two-phase approach:
-                            // first try the namespace-qualified name, then fall
-                            // back to the bare name.
-                            let ns_qualified = format!("{}\\{}", ns, name);
-                            if let Some(cls) = self.find_or_load_class(&ns_qualified) {
-                                return Some(cls);
-                            }
-                            name
-                        } else {
-                            name
+                            return self.find_or_load_class(fqn);
                         }
-                    } else {
-                        // The name contains `\` — check if the first segment
-                        // is a use-map alias (e.g. `OA\Endpoint` where
-                        // `use Swagger\OpenAPI as OA;` maps `OA` →
-                        // `Swagger\OpenAPI`).  Expand it to the FQN.
-                        let first_segment = name.split('\\').next().unwrap_or(name);
-                        if let Some(fqn_prefix) = file_use_map.get(first_segment) {
-                            let rest = &name[first_segment.len()..];
-                            let expanded = format!("{}{}", fqn_prefix, rest);
-                            if let Some(cls) = self.find_or_load_class(&expanded) {
-                                return Some(cls);
-                            }
-                        }
-                        // Also try prefixing with the current namespace.
+                        // In a namespace, prepend the current namespace.
+                        // Class names do NOT fall back to global scope —
+                        // unlike functions/constants.  See:
+                        // https://www.php.net/manual/en/language.namespaces.fallback.php
                         if let Some(ref ns) = file_namespace {
                             let ns_qualified = format!("{}\\{}", ns, name);
-                            if let Some(cls) = self.find_or_load_class(&ns_qualified) {
-                                return Some(cls);
-                            }
+                            return self.find_or_load_class(&ns_qualified);
                         }
-                        name
-                    };
+                        // No namespace — we're in global scope already.
+                        return self.find_or_load_class(name);
+                    }
 
-                    self.find_or_load_class(resolved_name)
+                    // ── Qualified name (contains `\`, no leading `\`) ───
+                    // Check if the first segment is a use-map alias
+                    // (e.g. `OA\Endpoint` where `use Swagger\OpenAPI as OA;`
+                    // maps `OA` → `Swagger\OpenAPI`).  Expand to FQN.
+                    let first_segment = name.split('\\').next().unwrap_or(name);
+                    if let Some(fqn_prefix) = file_use_map.get(first_segment) {
+                        let rest = &name[first_segment.len()..];
+                        let expanded = format!("{}{}", fqn_prefix, rest);
+                        if let Some(cls) = self.find_or_load_class(&expanded) {
+                            return Some(cls);
+                        }
+                    }
+                    // Prepend current namespace (if any).
+                    if let Some(ref ns) = file_namespace {
+                        let ns_qualified = format!("{}\\{}", ns, name);
+                        if let Some(cls) = self.find_or_load_class(&ns_qualified) {
+                            return Some(cls);
+                        }
+                    }
+                    // Fall back to the name as-is.  Qualified names that
+                    // reach here are typically already-resolved FQNs from
+                    // the parser (parent classes, traits, mixins) that
+                    // were resolved by `resolve_parent_class_names` before
+                    // being stored.
+                    self.find_or_load_class(name)
                 };
 
                 // Build a function_loader closure that looks up standalone

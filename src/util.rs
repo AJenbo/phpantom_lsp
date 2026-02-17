@@ -186,6 +186,15 @@ impl Backend {
         // so we match against the last segment of the namespace-qualified name.
         let last_segment = name.rsplit('\\').next().unwrap_or(name);
 
+        // Extract the expected namespace prefix (if any).
+        // For "Demo\\PDO" → expected_ns = Some("Demo")
+        // For "PDO"       → expected_ns = None (global scope)
+        let expected_ns: Option<&str> = if name.contains('\\') {
+            Some(&name[..name.len() - last_segment.len() - 1])
+        } else {
+            None
+        };
+
         // ── Phase 0: Try the class_index for a direct FQN → URI lookup ──
         // This handles classes that don't follow PSR-4 conventions, such as
         // classes defined in Composer autoload_files.php entries.  Using the
@@ -201,9 +210,25 @@ impl Backend {
         }
 
         // ── Phase 1: Search all already-parsed files in the ast_map ──
+        // When the requested name is namespace-qualified (e.g. "Demo\\PDO"),
+        // only match classes in files whose namespace matches the expected
+        // prefix.  This prevents "Demo\\PDO" from matching the global "PDO"
+        // stub that was cached under a different URI.
         if let Ok(map) = self.ast_map.lock() {
-            for classes in map.values() {
+            let nmap = self.namespace_map.lock().ok();
+            for (uri, classes) in map.iter() {
                 if let Some(cls) = classes.iter().find(|c| c.name == last_segment) {
+                    // Verify namespace matches when a specific namespace is
+                    // expected.
+                    if let Some(exp_ns) = expected_ns {
+                        let file_ns = nmap
+                            .as_ref()
+                            .and_then(|nm| nm.get(uri))
+                            .and_then(|opt| opt.as_deref());
+                        if file_ns != Some(exp_ns) {
+                            continue;
+                        }
+                    }
                     return Some(cls.clone());
                 }
             }
@@ -286,7 +311,13 @@ impl Backend {
         // (e.g. UnitEnum, BackedEnum).  Parse on first access and cache in
         // the ast_map under a `phpantom-stub://` URI so subsequent lookups
         // hit Phase 1 and skip parsing entirely.
-        if let Some(&stub_content) = self.stub_index.get(last_segment) {
+        //
+        // Stubs live in the global namespace, so skip this phase when the
+        // caller is looking for a class in a specific namespace (e.g.
+        // "Demo\\PDO" should NOT match the global PDO stub).
+        if expected_ns.is_none()
+            && let Some(&stub_content) = self.stub_index.get(last_segment)
+        {
             let mut classes = self.parse_php(stub_content);
 
             // Stubs are in the root namespace — use an empty use_map / namespace.

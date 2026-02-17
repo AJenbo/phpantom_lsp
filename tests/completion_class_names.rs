@@ -1133,3 +1133,119 @@ async fn test_auto_import_not_confused_by_trait_use_in_class_body() {
         "Auto-import should go after top-level use statements, not after trait use in class body"
     );
 }
+
+/// Global classes (no namespace separator in FQN, e.g. `PDO`) should get a
+/// `use PDO;` import when the current file declares a namespace.
+#[tokio::test]
+async fn test_auto_import_global_class_when_file_has_namespace() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public function query(string $q): mixed {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",              // line 0
+        "\n",                   // line 1
+        "namespace App\\Db;\n", // line 2
+        "\n",                   // line 3
+        "new PD\n",             // line 4
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 6).await;
+    let pdo = items
+        .iter()
+        .find(|i| i.label == "PDO")
+        .expect("Should have PDO completion");
+
+    let edits = pdo
+        .additional_text_edits
+        .as_ref()
+        .expect("Global class should get auto-import when file has a namespace");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "use PDO;\n");
+    // Insert after `namespace App\Db;` (line 2), so at line 3
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 3,
+            character: 0,
+        },
+    );
+}
+
+/// Global classes should NOT get an auto-import when the file has no namespace.
+/// (This complements `test_no_auto_import_for_non_namespaced_class`.)
+#[tokio::test]
+async fn test_no_auto_import_global_class_when_file_has_no_namespace() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public function query(string $q): mixed {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!("<?php\n", "new PD\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+    let pdo = items
+        .iter()
+        .find(|i| i.label == "PDO")
+        .expect("Should have PDO completion");
+
+    assert!(
+        pdo.additional_text_edits.is_none(),
+        "Global class should NOT get auto-import when file has no namespace, got: {:?}",
+        pdo.additional_text_edits
+    );
+}
+
+/// When a file has a namespace and existing use statements, the global class
+/// import should be inserted after the last use statement.
+#[tokio::test]
+async fn test_auto_import_global_class_inserts_after_existing_use_statements() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public function query(string $q): mixed {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                // line 0
+        "\n",                                     // line 1
+        "namespace App\\Service;\n",              // line 2
+        "\n",                                     // line 3
+        "use App\\Repository\\UserRepository;\n", // line 4
+        "use App\\Entity\\User;\n",               // line 5
+        "\n",                                     // line 6
+        "new PD\n",                               // line 7
+    );
+
+    let items = complete_at(&backend, &uri, text, 7, 6).await;
+    let pdo = items
+        .iter()
+        .find(|i| i.label == "PDO")
+        .expect("Should have PDO completion");
+
+    let edits = pdo
+        .additional_text_edits
+        .as_ref()
+        .expect("Global class should get auto-import when file has a namespace");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "use PDO;\n");
+    // Insert after last use statement (line 5), so at line 6
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 6,
+            character: 0,
+        },
+    );
+}

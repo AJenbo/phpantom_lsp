@@ -103,11 +103,19 @@ pub(crate) fn find_use_insert_position(content: &str) -> Position {
 /// Build an `additional_text_edits` entry that inserts a `use` statement
 /// for the given fully-qualified class name.
 ///
-/// Returns `None` when the FQN has no namespace separator (e.g. bare
-/// `DateTime`), meaning no import is needed.
-pub(crate) fn build_use_edit(fqn: &str, insert_pos: Position) -> Option<Vec<TextEdit>> {
-    // No namespace → no import needed (e.g. `DateTime`, `Iterator`)
-    if !fqn.contains('\\') {
+/// When the FQN has no namespace separator (e.g. `PDO`, `DateTime`),
+/// an import is only needed if the current file declares a namespace —
+/// otherwise we are already in the global namespace and no `use`
+/// statement is required.  Returns `None` in that case.
+pub(crate) fn build_use_edit(
+    fqn: &str,
+    insert_pos: Position,
+    file_namespace: &Option<String>,
+) -> Option<Vec<TextEdit>> {
+    // No namespace separator → this is a global class (e.g. `PDO`, `DateTime`).
+    // Only needs an import when the current file declares a namespace;
+    // otherwise we're already in the global namespace.
+    if !fqn.contains('\\') && file_namespace.is_none() {
         return None;
     }
 
@@ -550,7 +558,7 @@ impl Backend {
                     insert_text: Some(short_name.to_string()),
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("2_{}", short_name.to_lowercase())),
-                    additional_text_edits: build_use_edit(fqn, use_insert_pos),
+                    additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
                     ..CompletionItem::default()
                 });
             }
@@ -573,7 +581,7 @@ impl Backend {
                     insert_text: Some(short_name.to_string()),
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("3_{}", short_name.to_lowercase())),
-                    additional_text_edits: build_use_edit(fqn, use_insert_pos),
+                    additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
                     ..CompletionItem::default()
                 });
             }
@@ -595,7 +603,7 @@ impl Backend {
                 insert_text: Some(short_name.to_string()),
                 filter_text: Some(short_name.to_string()),
                 sort_text: Some(format!("4_{}", short_name.to_lowercase())),
-                additional_text_edits: build_use_edit(name, use_insert_pos),
+                additional_text_edits: build_use_edit(name, use_insert_pos, file_namespace),
                 ..CompletionItem::default()
             });
         }

@@ -3,6 +3,7 @@ mod common;
 use common::create_psr4_workspace;
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
+use std::collections::HashMap;
 use std::fs;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -1169,6 +1170,431 @@ async fn test_cross_file_namespace_relative_resolution() {
             assert!(
                 method_names.contains(&"greet"),
                 "Should include 'greet', got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Namespace resolution tests ─────────────────────────────────────────────
+//
+// PHP name resolution rules for classes:
+//   - Unqualified names (e.g. `PDO`) in a namespace resolve to
+//     CurrentNamespace\PDO — NO fallback to global scope.
+//   - Fully qualified names (e.g. `\PDO`) always resolve globally.
+//   - Imported names (`use PDO;`) resolve via the import table.
+//   - In global scope, unqualified names resolve as-is.
+//
+// See https://www.php.net/manual/en/language.namespaces.rules.php
+
+/// Bare `PDO::` inside `namespace Demo;` should NOT resolve to the global
+/// `\PDO` class.  PHP treats this as `Demo\PDO` which doesn't exist.
+#[tokio::test]
+async fn test_unqualified_class_in_namespace_does_not_resolve_globally() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public static function getAvailableDrivers(): array {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "\n",
+        "class Foo {\n",
+        "    function test() {\n",
+        "        PDO::\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 13,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    // Should get no static member completions (or only the fallback),
+    // because `PDO` in `namespace Demo;` resolves to `Demo\PDO`.
+    let has_pdo_methods = match &result {
+        Some(CompletionResponse::Array(items)) => items
+            .iter()
+            .any(|i| i.kind == Some(CompletionItemKind::METHOD)),
+        _ => false,
+    };
+    assert!(
+        !has_pdo_methods,
+        "Bare `PDO::` in namespace Demo should NOT resolve to global \\PDO"
+    );
+}
+
+/// Fully qualified `\PDO::` inside `namespace Demo;` SHOULD resolve to the
+/// global PDO class — the leading `\` means "global scope".
+#[tokio::test]
+async fn test_fqn_class_in_namespace_resolves_globally() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public static function getAvailableDrivers(): array {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "\n",
+        "class Foo {\n",
+        "    function test() {\n",
+        "        \\PDO::\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "\\PDO:: should resolve to global PDO");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getAvailableDrivers"),
+                "\\PDO:: should show global PDO methods, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `PDO::` with `use PDO;` in a namespace SHOULD resolve to the global PDO
+/// because the import table maps `PDO` → `PDO` (global).
+#[tokio::test]
+async fn test_imported_class_in_namespace_resolves_via_use() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public static function getAvailableDrivers(): array {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "\n",
+        "use PDO;\n",
+        "\n",
+        "class Foo {\n",
+        "    function test() {\n",
+        "        PDO::\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 13,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "PDO:: with `use PDO;` should resolve to global PDO"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getAvailableDrivers"),
+                "Imported PDO:: should show global PDO methods, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `PDO::` in global scope (no namespace) should resolve to the global PDO.
+#[tokio::test]
+async fn test_unqualified_class_in_global_scope_resolves() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public static function getAvailableDrivers(): array {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!("<?php\n", "PDO::\n",);
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 1,
+                    character: 5,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "PDO:: in global scope should resolve to PDO"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getAvailableDrivers"),
+                "PDO:: in global scope should show methods, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Fully qualified `\Acme\Service::` in a namespace should resolve to the
+/// global `Acme\Service` class — the leading `\` bypasses namespace
+/// prefixing.
+#[tokio::test]
+async fn test_fqn_namespaced_class_resolves_globally() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "Acme\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/Service.php",
+            concat!(
+                "<?php\n",
+                "namespace Acme;\n",
+                "class Service {\n",
+                "    public static function create(): self { return new self(); }\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Other;\n",
+        "\n",
+        "class Foo {\n",
+        "    function test() {\n",
+        "        \\Acme\\Service::\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "\\Acme\\Service:: should resolve via FQN");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"create"),
+                "\\Acme\\Service:: should show 'create', got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Aliased import: `use PDO as DB;` then `DB::` should resolve to global PDO.
+#[tokio::test]
+async fn test_aliased_import_resolves_in_namespace() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert(
+        "PDO",
+        "<?php\nclass PDO {\n    public static function getAvailableDrivers(): array {}\n}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "\n",
+        "use PDO as DB;\n",
+        "\n",
+        "class Foo {\n",
+        "    function test() {\n",
+        "        DB::\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "DB:: with `use PDO as DB;` should resolve to global PDO"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getAvailableDrivers"),
+                "Aliased DB:: should show global PDO methods, got {:?}",
                 method_names
             );
         }
