@@ -18,6 +18,7 @@
 /// - [`super::conditional_resolution`]: PHPStan conditional return type
 ///   resolution at call sites.
 use crate::Backend;
+use crate::docblock;
 use crate::types::*;
 
 use super::conditional_resolution::{
@@ -191,6 +192,26 @@ impl Backend {
             return vec![];
         }
 
+        // ── Array-element access: `$var[]` ──
+        // When the subject ends with `[]`, the user wrote `$var[0]->` or
+        // `$var[$key]->`.  Resolve the base variable's generic/iterable
+        // type and extract the element type.
+        if let Some(base_var) = subject.strip_suffix("[]")
+            && base_var.starts_with('$')
+        {
+            let resolved = Self::resolve_array_element_type(
+                base_var,
+                content,
+                cursor_offset,
+                current_class,
+                all_classes,
+                class_loader,
+            );
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
+
         // ── Variable like `$var` — resolve via assignments / parameter hints ──
         if subject.starts_with('$') {
             // When the cursor is inside a class, use the enclosing class
@@ -243,6 +264,43 @@ impl Backend {
     ///
     /// Returns all candidate classes when the return type is a union
     /// (e.g. `A|B`).
+    /// Resolve the element type of an array/list variable accessed with `[]`.
+    ///
+    /// Given a base variable name like `$admins`, searches backward from
+    /// `cursor_offset` for a `@var` / `@param` docblock annotation that
+    /// declares a generic iterable type (e.g. `array<int, AdminUser>`,
+    /// `list<User>`, `User[]`).  Extracts the element type and resolves
+    /// it to `ClassInfo`.
+    fn resolve_array_element_type(
+        base_var: &str,
+        content: &str,
+        cursor_offset: u32,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Vec<ClassInfo> {
+        let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
+
+        // Search backward from the cursor for a @var/@param annotation on
+        // this variable that includes a generic type.
+        let raw_type = match docblock::find_iterable_raw_type_in_source(
+            content,
+            cursor_offset as usize,
+            base_var,
+        ) {
+            Some(t) => t,
+            None => return vec![],
+        };
+
+        // Extract the generic element type (e.g. `list<User>` → `User`).
+        let element_type = match docblock::types::extract_generic_value_type(&raw_type) {
+            Some(t) => t,
+            None => return vec![],
+        };
+
+        Self::type_hint_to_classes(&element_type, current_class_name, all_classes, class_loader)
+    }
+
     pub(super) fn resolve_call_return_types(
         call_body: &str,
         text_args: &str,

@@ -59,6 +59,32 @@ pub(crate) fn skip_balanced_parens_back(chars: &[char], pos: usize) -> Option<us
     None
 }
 
+/// Skip backwards past a balanced bracket group `[…]` in a char slice.
+///
+/// `pos` must point one past the closing `]`.  Returns the index of the
+/// opening `[`, or `None` if brackets are unbalanced.
+pub(crate) fn skip_balanced_brackets_back(chars: &[char], pos: usize) -> Option<usize> {
+    if pos == 0 || chars[pos - 1] != ']' {
+        return None;
+    }
+    let mut depth: u32 = 0;
+    let mut j = pos;
+    while j > 0 {
+        j -= 1;
+        match chars[j] {
+            ']' => depth += 1,
+            '[' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Check if the `new` keyword (followed by whitespace) appears immediately
 /// before the identifier starting at position `ident_start`.
 ///
@@ -184,6 +210,22 @@ pub(crate) fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String 
     // bottom of this function also starts from the correct position
     // (past any `?` and whitespace).
     end = i;
+
+    // ── Array access: detect `]` ──
+    // e.g. `$admins[0]->`, `$admins[$key]->`
+    // Skip backwards past balanced `[…]` and extract the variable before it.
+    if i > 0
+        && chars[i - 1] == ']'
+        && let Some(bracket_open) = skip_balanced_brackets_back(chars, i)
+    {
+        // Now extract whatever is before the `[` — typically a variable.
+        let before_bracket = extract_simple_variable(chars, bracket_open);
+        if !before_bracket.is_empty() {
+            // Return subject with `[]` suffix so the resolver knows
+            // this is an array-element access.
+            return format!("{}[]", before_bracket);
+        }
+    }
 
     // ── Function / method call or `new` expression: detect `)` ──
     // e.g. `app()->`, `$this->getService()->`, `Class::make()->`,

@@ -7544,3 +7544,588 @@ async fn test_completion_foreach_scalar_list_no_completion() {
         );
     }
 }
+
+// ─── Array access element type resolution ───────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_array_access_list_generic() {
+    // `$users[0]->` should suggest User members when $users is `list<User>`
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_access_list.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "/** @var list<User> $users */\n",
+        "$users = getUnknownValue();\n",
+        "$users[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$users[0]->` on line 8
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $users[0]-> from list<User>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_array_access_array_generic() {
+    // `$admins[0]->` should suggest AdminUser members when $admins is `array<int, AdminUser>`
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_access_generic.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class AdminUser extends User {\n",
+        "    public function grantPermission(string $p): void {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "/** @var array<int, AdminUser> $admins */\n",
+        "$admins = getUnknownValue();\n",
+        "$admins[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $admins[0]-> from array<int, AdminUser>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("grantPermission")),
+                "Should include grantPermission from AdminUser, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail from inherited User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_array_access_bracket_shorthand() {
+    // `$members[0]->` should suggest User members when $members is `User[]`
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_access_shorthand.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "/** @var User[] $members */\n",
+        "$members = getUnknownValue();\n",
+        "$members[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $members[0]-> from User[]"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_array_access_variable_key() {
+    // `$admins[$key]->` should work the same as `$admins[0]->`
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_access_varkey.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class AdminUser {\n",
+        "    public function grantPermission(string $p): void {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "/** @var array<int, AdminUser> $admins */\n",
+        "$admins = getUnknownValue();\n",
+        "$key = 0;\n",
+        "$admins[$key]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $admins[$key]-> from array<int, AdminUser>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("grantPermission")),
+                "Should include grantPermission from AdminUser, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_variable_assigned_from_array_access() {
+    // `$admin = $admins[0]; $admin->` should suggest AdminUser members
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_from_array_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class AdminUser extends User {\n",
+        "    public function grantPermission(string $p): void {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "/** @var array<int, AdminUser> $admins */\n",
+        "$admins = getUnknownValue();\n",
+        "$admin = $admins[0];\n",
+        "$admin->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $admin assigned from $admins[0]"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("grantPermission")),
+                "Should include grantPermission from AdminUser, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail from inherited User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_variable_assigned_from_list_array_access() {
+    // `$user = $users[0]; $user->` with `list<User>` annotation
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_from_list_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "function getUnknownValue(): mixed { return null; }\n",
+        "/** @var list<User> $users */\n",
+        "$users = getUnknownValue();\n",
+        "$user = $users[0];\n",
+        "$user->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $user assigned from $users[0]"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_array_access_inside_method() {
+    // Array access inside a class method body
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_access_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function index() {\n",
+        "        /** @var list<User> $users */\n",
+        "        $users = [];\n",
+        "        $users[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $users[0]-> inside method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_variable_assigned_from_array_access_inside_method() {
+    // `$admin = $admins[0]; $admin->` inside a method
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_array_access_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class AdminUser {\n",
+        "    public function grantPermission(string $p): void {}\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function index() {\n",
+        "        /** @var list<AdminUser> $admins */\n",
+        "        $admins = [];\n",
+        "        $admin = $admins[0];\n",
+        "        $admin->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $admin from $admins[0] inside method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("grantPermission")),
+                "Should include grantPermission from AdminUser, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_array_access_scalar_no_completion() {
+    // `$items[0]->` should NOT suggest anything when $items is `int[]`
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_access_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** @var int[] $items */\n",
+        "$items = [1, 2, 3];\n",
+        "$items[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 3,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // Should not get class-member completions for a scalar element type
+    if let Some(response) = result {
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        let method_items: Vec<_> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    || i.kind == Some(CompletionItemKind::PROPERTY)
+            })
+            .collect();
+        assert!(
+            method_items.is_empty(),
+            "Should not offer method/property completions for scalar element type (int), got: {:?}",
+            method_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+}

@@ -944,6 +944,34 @@ impl Backend {
                 }
                 return;
             }
+            // Check RHS is an array access: `$var = $arr[0]` or `$var = $arr[$key]`
+            // Resolve the base array's generic/iterable type and extract
+            // the element type.
+            if let Expression::ArrayAccess(array_access) = assignment.rhs {
+                // The base expression must be a simple variable (e.g. `$admins`).
+                if let Expression::Variable(Variable::Direct(base_dv)) = array_access.array {
+                    let base_var = base_dv.name.to_string();
+                    // Search backward from this assignment for a @var/@param
+                    // annotation on the base variable with a generic type.
+                    let assign_offset = assignment.span().start.offset as usize;
+                    if let Some(raw_type) = docblock::find_iterable_raw_type_in_source(
+                        content,
+                        assign_offset,
+                        &base_var,
+                    ) && let Some(element_type) =
+                        docblock::types::extract_generic_value_type(&raw_type)
+                    {
+                        let resolved = Self::type_hint_to_classes(
+                            &element_type,
+                            current_class_name,
+                            all_classes,
+                            class_loader,
+                        );
+                        push_results(results, resolved, conditional);
+                    }
+                }
+                return;
+            }
             // Check RHS is a function call: `$var = someFunction(…)`
             // Look up the function's return type and resolve to a class.
             if let Expression::Call(call) = assignment.rhs {

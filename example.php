@@ -670,3 +670,26 @@ $admins = getUnknownValue();
 foreach ($admins as $admin) {
     $admin->grantPermission('x'); // $admin resolved to AdminUser via array<int, AdminUser>
 }
+
+
+// ── Array Access Element Types ──────────────────────────────────────────────
+
+/** @var list<User> $users */
+$users = getUnknownValue();
+$users[0]->getEmail();           // element resolved to User via list<User>
+
+/** @var User[] $members */
+$members = getUnknownValue();
+$members[0]->getName();          // element resolved to User via User[]
+
+/** @var array<int, AdminUser> $admins */
+$admins = getUnknownValue();
+$admins[0]->grantPermission('x'); // element resolved to AdminUser via array<int, AdminUser>
+$key = 0;
+$admins[$key]->grantPermission('y'); // variable key works too
+
+$admin = $admins[0];
+$admin->grantPermission('z');    // assigned from array access → AdminUser
+
+$user = $users[0];
+$user->getEmail();               // assigned from array access → User

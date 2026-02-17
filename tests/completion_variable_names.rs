@@ -1912,18 +1912,18 @@ async fn test_completion_variables_at_eof_with_actual_example_php() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///example_eof.php").unwrap();
 
-    let base_content = std::fs::read_to_string("example.php")
-        .expect("example.php must exist in the project root");
-    
+    let base_content =
+        std::fs::read_to_string("example.php").expect("example.php must exist in the project root");
+
     // Scenario: user appends "$" on a new line at the end.
     // base_content already ends with "\n", so we just append "$\n".
     let text = format!("{}$\n", base_content);
     let line_count = text.lines().count() as u32;
-    
+
     // The `$` is on the last non-empty line (line_count - 2, since
     // trailing \n produces an empty final line that .lines() drops,
     // but the `$` line is the last element returned by .lines()).
-    let dollar_line = line_count - 1;  // 0-indexed, last line from .lines()
+    let dollar_line = line_count - 1; // 0-indexed, last line from .lines()
 
     let items = complete_at(&backend, &uri, &text, dollar_line, 1).await;
 
