@@ -504,7 +504,7 @@ return array(
 
     // App\ from composer.json should be present
     let app_entries: Vec<_> = mappings.iter().filter(|m| m.prefix == "App\\").collect();
-    assert!(app_entries.len() >= 1);
+    assert!(!app_entries.is_empty());
     assert!(app_entries.iter().any(|m| m.base_path == "src/"));
 }
 

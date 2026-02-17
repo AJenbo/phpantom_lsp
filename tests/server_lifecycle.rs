@@ -47,7 +47,7 @@ async fn test_did_open_stores_file() {
     backend.did_open(params).await;
 
     // Verify the file was stored by checking the AST map has an entry
-    let classes = backend.get_classes_for_uri(&uri.to_string());
+    let classes = backend.get_classes_for_uri(uri.as_ref());
     assert!(
         classes.is_some(),
         "AST map should have an entry after did_open"
@@ -121,7 +121,7 @@ async fn test_did_change_updates_content() {
     };
     backend.did_open(open_params).await;
 
-    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 1);
 
     // Change the content to add a second method
@@ -139,7 +139,7 @@ async fn test_did_change_updates_content() {
     backend.did_change(change_params).await;
 
     // Verify content was updated by checking the re-parsed AST
-    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(
         classes[0].methods.len(),
         2,
@@ -164,7 +164,7 @@ async fn test_did_close_removes_file() {
     };
     backend.did_open(open_params).await;
 
-    assert!(backend.get_classes_for_uri(&uri.to_string()).is_some());
+    assert!(backend.get_classes_for_uri(uri.as_ref()).is_some());
 
     // Close the file
     let close_params = DidCloseTextDocumentParams {
@@ -174,7 +174,7 @@ async fn test_did_close_removes_file() {
 
     // AST map entry should be removed after close
     assert!(
-        backend.get_classes_for_uri(&uri.to_string()).is_none(),
+        backend.get_classes_for_uri(uri.as_ref()).is_none(),
         "After close, AST map should not have an entry"
     );
 }
@@ -198,7 +198,7 @@ async fn test_did_open_populates_ast_map() {
     backend.did_open(params).await;
 
     let classes = backend
-        .get_classes_for_uri(&uri.to_string())
+        .get_classes_for_uri(uri.as_ref())
         .expect("ast_map should have entry for URI");
     assert_eq!(classes.len(), 1);
     assert_eq!(classes[0].name, "User");
@@ -226,7 +226,7 @@ async fn test_did_change_reparses_ast() {
     };
     backend.did_open(open_params).await;
 
-    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 1);
     assert_eq!(classes[0].methods[0].name, "first");
 
@@ -246,14 +246,14 @@ async fn test_did_change_reparses_ast() {
     backend.did_change(change_params).await;
 
     // Verify the AST was re-parsed
-    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 2);
     let method_names: Vec<&str> = classes[0].methods.iter().map(|m| m.name.as_str()).collect();
     assert!(method_names.contains(&"first"));
     assert!(method_names.contains(&"second"));
 
     // Verify the AST was re-parsed and has both methods
-    let classes = backend.get_classes_for_uri(&uri.to_string()).unwrap();
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
     assert_eq!(classes[0].methods.len(), 2);
     let method_names: Vec<&str> = classes[0].methods.iter().map(|m| m.name.as_str()).collect();
     assert!(method_names.contains(&"first"));
@@ -279,7 +279,7 @@ async fn test_did_close_cleans_up_ast_map() {
     backend.did_open(open_params).await;
 
     // Verify ast_map is populated
-    assert!(backend.get_classes_for_uri(&uri.to_string()).is_some());
+    assert!(backend.get_classes_for_uri(uri.as_ref()).is_some());
 
     // Close
     let close_params = DidCloseTextDocumentParams {
@@ -289,7 +289,7 @@ async fn test_did_close_cleans_up_ast_map() {
 
     // Verify ast_map entry was removed
     assert!(
-        backend.get_classes_for_uri(&uri.to_string()).is_none(),
+        backend.get_classes_for_uri(uri.as_ref()).is_none(),
         "ast_map should be cleaned up after did_close"
     );
 }

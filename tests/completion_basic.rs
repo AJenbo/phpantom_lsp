@@ -339,7 +339,7 @@ async fn test_completion_with_multiple_classes() {
 
     // Verify two classes were parsed
     let classes = backend
-        .get_classes_for_uri(&uri.to_string())
+        .get_classes_for_uri(uri.as_ref())
         .expect("ast_map should have entry");
     assert_eq!(classes.len(), 2);
 

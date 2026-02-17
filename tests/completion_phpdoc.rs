@@ -122,7 +122,7 @@ async fn test_phpdoc_not_triggered_outside_docblock() {
         .filter(|i| {
             i.filter_text
                 .as_deref()
-                .map_or(false, |ft| ft.starts_with('@'))
+                .is_some_and(|ft| ft.starts_with('@'))
         })
         .collect();
     assert!(
@@ -146,7 +146,7 @@ async fn test_phpdoc_not_triggered_in_regular_comment() {
         .filter(|i| {
             i.filter_text
                 .as_deref()
-                .map_or(false, |ft| ft.starts_with('@'))
+                .is_some_and(|ft| ft.starts_with('@'))
         })
         .collect();
     assert!(

@@ -522,11 +522,7 @@ async fn test_named_args_not_triggered_for_variables() {
     // Variable completions also use VARIABLE kind but start with `$`.
     let named_arg_items: Vec<_> = items
         .iter()
-        .filter(|i| {
-            i.insert_text
-                .as_deref()
-                .map_or(false, |t| t.ends_with(": "))
-        })
+        .filter(|i| i.insert_text.as_deref().is_some_and(|t| t.ends_with(": ")))
         .collect();
 
     assert!(
@@ -557,11 +553,7 @@ async fn test_named_args_not_triggered_after_arrow() {
 
     let named_arg_items: Vec<_> = items
         .iter()
-        .filter(|i| {
-            i.insert_text
-                .as_deref()
-                .map_or(false, |t| t.ends_with(": "))
-        })
+        .filter(|i| i.insert_text.as_deref().is_some_and(|t| t.ends_with(": ")))
         .collect();
 
     assert!(
@@ -668,11 +660,7 @@ async fn test_named_args_no_params() {
 
     let named_arg_items: Vec<_> = items
         .iter()
-        .filter(|i| {
-            i.insert_text
-                .as_deref()
-                .map_or(false, |t| t.ends_with(": "))
-        })
+        .filter(|i| i.insert_text.as_deref().is_some_and(|t| t.ends_with(": ")))
         .collect();
 
     assert!(
@@ -703,11 +691,7 @@ async fn test_named_args_all_used() {
 
     let named_arg_items: Vec<_> = items
         .iter()
-        .filter(|i| {
-            i.insert_text
-                .as_deref()
-                .map_or(false, |t| t.ends_with(": "))
-        })
+        .filter(|i| i.insert_text.as_deref().is_some_and(|t| t.ends_with(": ")))
         .collect();
 
     assert!(
