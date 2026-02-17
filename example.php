@@ -850,3 +850,119 @@ class PropertyDemo extends UserRepository {
         $this->cached->getEmail();   // $cached has type T → User
     }
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Method-Level @template Support
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// PHPantomLSP resolves method-level @template parameters from call-site
+// arguments.  The canonical pattern:
+//
+//   @template T
+//   @param class-string<T> $class
+//   @return T
+//
+// When you call such a method with `SomeClass::class`, the return type
+// is resolved to `SomeClass` — enabling full completion on the result.
+
+// ── Service Locator / DI Container Pattern ──────────────────────────────────
+
+class ServiceLocator {
+    /**
+     * @template T
+     * @param class-string<T> $id
+     * @return T
+     */
+    public function get(string $id): object
+    {
+        // ...
+    }
+}
+
+$locator = new ServiceLocator();
+$locator->get(User::class)->getEmail();          // Resolved: User
+$locator->get(UserProfile::class)->setBio('hi'); // Resolved: UserProfile
+
+
+// ── Entity Manager / Repository Pattern ─────────────────────────────────────
+
+class EntityManager {
+    /**
+     * @template TEntity
+     * @param class-string<TEntity> $entityClass
+     * @return TEntity
+     */
+    public function find(string $entityClass): object
+    {
+        // ...
+    }
+
+    /**
+     * @template TEntity
+     * @param class-string<TEntity> $entityClass
+     * @return TEntity|null
+     */
+    public function findOrNull(string $entityClass): ?object
+    {
+        // ...
+    }
+}
+
+$em = new EntityManager();
+$em->find(User::class)->getName();               // Resolved: User
+$em->find(AdminUser::class)->grantPermission(''); // Resolved: AdminUser
+$em->findOrNull(Response::class)?->getBody();    // Resolved: ?Response
+
+// Inline chain (no intermediate variable):
+$em->find(UserProfile::class)->getDisplayName(); // Resolved: UserProfile
+
+
+// ── Static Method with @template ────────────────────────────────────────────
+
+class Factory {
+    /**
+     * @template T
+     * @param class-string<T> $class
+     * @return T
+     */
+    public static function create(string $class): object
+    {
+        return new $class();
+    }
+}
+
+Factory::create(User::class)->getEmail();        // Resolved: User
+
+
+// ── Standalone Function with @template ──────────────────────────────────────
+
+/**
+ * @template T
+ * @param class-string<T> $class
+ * @return T
+ */
+function resolve(string $class): object
+{
+    return new $class();
+}
+
+resolve(AdminUser::class)->grantPermission('x'); // Resolved: AdminUser
+$user = resolve(User::class);
+$user->getEmail();                               // Resolved: User
+
+
+// ── @template with $this-> context ──────────────────────────────────────────
+
+class AbstractRepository2 {
+    /**
+     * @template T
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function load(string $class): object { return new $class(); }
+
+    public function demo(): void {
+        $this->load(User::class)->getEmail();    // Resolved: User
+    }
+}

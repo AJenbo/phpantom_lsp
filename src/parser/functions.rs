@@ -54,6 +54,25 @@ impl Backend {
                             let conditional =
                                 docblock_text.and_then(docblock::extract_conditional_return_type);
 
+                            // If no explicit conditional return type was found,
+                            // try to synthesize one from function-level @template
+                            // annotations.  For example:
+                            //   @template T
+                            //   @param class-string<T> $class
+                            //   @return T
+                            // becomes a conditional that resolves T from the
+                            // call-site argument (e.g. resolve(User::class) → User).
+                            let conditional = conditional.or_else(|| {
+                                let doc = docblock_text?;
+                                let tpl_params = docblock::extract_template_params(doc);
+                                docblock::synthesize_template_conditional(
+                                    doc,
+                                    &tpl_params,
+                                    effective.as_deref(),
+                                    false,
+                                )
+                            });
+
                             let assertions = docblock_text
                                 .map(docblock::extract_type_assertions)
                                 .unwrap_or_default();

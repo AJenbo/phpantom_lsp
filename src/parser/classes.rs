@@ -389,6 +389,25 @@ impl Backend {
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
                                 .and_then(docblock::extract_conditional_return_type);
 
+                        // If no explicit conditional return type was found,
+                        // try to synthesize one from method-level @template
+                        // annotations.  For example:
+                        //   @template T
+                        //   @param class-string<T> $class
+                        //   @return T
+                        // becomes a conditional that resolves T from the
+                        // call-site argument (e.g. find(User::class) → User).
+                        let conditional = conditional.or_else(|| {
+                            let doc = docblock_text?;
+                            let tpl_params = docblock::extract_template_params(doc);
+                            docblock::synthesize_template_conditional(
+                                doc,
+                                &tpl_params,
+                                effective.as_deref(),
+                                false,
+                            )
+                        });
+
                         let deprecated = docblock_text.is_some_and(docblock::has_deprecated_tag);
 
                         (effective, conditional, deprecated)

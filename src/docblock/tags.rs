@@ -14,6 +14,8 @@ use mago_syntax::ast::*;
 
 use crate::types::{AssertionKind, MethodInfo, ParameterInfo, TypeAssertion, Visibility};
 
+use crate::types::{ConditionalReturnType, ParamCondition};
+
 use super::types::{clean_type, is_scalar, split_type_token, strip_nullable};
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -873,6 +875,137 @@ pub fn extract_generics_tag(docblock: &str, tag: &str) -> Vec<(String, Vec<Strin
     }
 
     results
+}
+
+/// Attempt to synthesize a `ConditionalReturnType` from method-level
+/// `@template` annotations.
+///
+/// When a method (or standalone function) declares `@template T`,
+/// `@param class-string<T> $class`, and `@return T`, this creates a
+/// conditional return type that resolves `T` from the call-site argument.
+///
+/// For example, given:
+/// ```text
+/// @template T
+/// @param class-string<T> $class
+/// @return T
+/// ```
+/// Calling `find(User::class)` will resolve the return type to `User`.
+///
+/// Returns `None` when:
+///   - No template params are provided
+///   - The return type does not reference a template param
+///   - No `@param class-string<T>` annotation is found for the template param
+///   - An existing conditional return type is already present (pass `true`
+///     for `has_existing_conditional` to skip synthesis)
+pub fn synthesize_template_conditional(
+    docblock: &str,
+    template_params: &[String],
+    return_type: Option<&str>,
+    has_existing_conditional: bool,
+) -> Option<ConditionalReturnType> {
+    // Don't override an existing conditional return type.
+    if has_existing_conditional {
+        return None;
+    }
+
+    if template_params.is_empty() {
+        return None;
+    }
+
+    let ret = return_type?;
+
+    // Strip nullable prefix so that `?T` matches template param `T`.
+    let stripped = ret.strip_prefix('?').unwrap_or(ret);
+
+    // Check if the (stripped) return type is one of the template params.
+    if !template_params.iter().any(|t| t == stripped) {
+        return None;
+    }
+
+    // Find a `@param class-string<T> $paramName` annotation for this
+    // template param, and extract the parameter name (without `$`).
+    let param_name = find_class_string_param_name(docblock, stripped)?;
+
+    Some(ConditionalReturnType::Conditional {
+        param_name,
+        condition: ParamCondition::ClassString,
+        // `then_type` is unused for ClassString — the resolver extracts
+        // the class name directly from the argument (e.g. `User::class`
+        // → `"User"`).
+        then_type: Box::new(ConditionalReturnType::Concrete("mixed".into())),
+        // `else_type` is used when the argument is not a `::class`
+        // literal — `mixed` will produce `None` from resolution, which
+        // lets the caller fall back to the plain return type.
+        else_type: Box::new(ConditionalReturnType::Concrete("mixed".into())),
+    })
+}
+
+/// Search a docblock for a `@param class-string<T> $paramName` annotation
+/// where `T` matches the given `template_name`.
+///
+/// Returns the parameter name **without** the `$` prefix, or `None` if no
+/// matching annotation is found.
+///
+/// Handles common type variants:
+///   - `class-string<T>`
+///   - `?class-string<T>` (nullable)
+///   - `class-string<T>|null` (union with null)
+fn find_class_string_param_name(docblock: &str, template_name: &str) -> Option<String> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let pattern = format!("class-string<{}>", template_name);
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = trimmed.strip_prefix("@param") {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the full type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+
+            // Check if the type token contains `class-string<T>`.
+            // We strip `?` prefix and check for the pattern.
+            let check = type_token.strip_prefix('?').unwrap_or(type_token);
+            // Also handle `class-string<T>|null` — split on `|` and
+            // check each part.
+            let matches = check.split('|').any(|part| part.trim() == pattern);
+
+            if !matches {
+                continue;
+            }
+
+            // The next token after the type should be `$paramName`.
+            // However, `split_type_token` splits at the closing `>`,
+            // so if the type is `class-string<T>|null`, the remainder
+            // will be `|null $class`.  Skip any union continuation
+            // (`|part`) before looking for the `$` variable name.
+            let mut search = remainder;
+            while let Some(rest) = search.strip_prefix('|') {
+                // Skip `|unionPart` — the next whitespace-delimited
+                // token is the union type, not the variable name.
+                let rest = rest.trim_start();
+                let (_, after) = split_type_token(rest);
+                search = after;
+            }
+            if let Some(var_name) = search.split_whitespace().next()
+                && let Some(name) = var_name.strip_prefix('$')
+            {
+                return Some(name.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Split a comma-separated generic argument list, respecting `<…>` and `(…)`

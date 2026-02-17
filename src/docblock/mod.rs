@@ -41,6 +41,7 @@ pub use tags::{
     extract_var_type, extract_var_type_with_name, find_inline_var_docblock,
     find_iterable_raw_type_in_source, find_var_raw_type_in_source, get_docblock_text_for_node,
     has_deprecated_tag, resolve_effective_type, should_override_type,
+    synthesize_template_conditional,
 };
 
 // Conditional return types
