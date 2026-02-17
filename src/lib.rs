@@ -131,7 +131,7 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             name: "PHPantomLSP".to_string(),
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),
             client: Some(client),
@@ -153,7 +153,7 @@ impl Backend {
     pub fn new_test() -> Self {
         Self {
             name: "PHPantomLSP".to_string(),
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),
             client: None,
@@ -178,7 +178,7 @@ impl Backend {
     pub fn new_test_with_stubs(stub_index: HashMap<&'static str, &'static str>) -> Self {
         Self {
             name: "PHPantomLSP".to_string(),
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),
             client: None,
@@ -208,7 +208,7 @@ impl Backend {
     ) -> Self {
         Self {
             name: "PHPantomLSP".to_string(),
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),
             client: None,
@@ -234,7 +234,7 @@ impl Backend {
     ) -> Self {
         Self {
             name: "PHPantomLSP".to_string(),
-            version: "0.1.0".to_string(),
+            version: "0.2.0".to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),
             client: None,

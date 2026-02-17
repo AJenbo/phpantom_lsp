@@ -12,7 +12,7 @@ async fn test_initialize_server_info() {
 
     let server_info = result.server_info.expect("server_info should be present");
     assert_eq!(server_info.name, "PHPantomLSP");
-    assert_eq!(server_info.version, Some("0.1.0".to_string()));
+    assert_eq!(server_info.version, Some("0.2.0".to_string()));
 }
 
 #[tokio::test]
