@@ -515,7 +515,7 @@ $p->getDisplayName();        // Profile resolves to Demo\UserProfile via alias
 // ── Variable Go-To-Definition ───────────────────────────────────────────────
 
 $typed = getUnknownValue();
-return $typed;               // go-to-def on $typed jumps to its assignment above
+echo $typed;               // go-to-def on $typed jumps to its assignment above
 
 
 // ── @var Docblock Type Override ─────────────────────────────────────────────
