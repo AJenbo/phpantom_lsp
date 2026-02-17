@@ -691,4 +691,116 @@ impl Backend {
 
         (items, is_incomplete)
     }
+
+    // ─── Function name completion ───────────────────────────────────
+
+    /// Build a label showing the full function signature.
+    ///
+    /// Example: `array_map(callable|null $callback, array $array, array ...$arrays): array`
+    pub(crate) fn build_function_label(func: &FunctionInfo) -> String {
+        let params: Vec<String> = func
+            .parameters
+            .iter()
+            .map(|p| {
+                let mut parts = Vec::new();
+                if let Some(ref th) = p.type_hint {
+                    parts.push(th.clone());
+                }
+                if p.is_reference {
+                    parts.push(format!("&{}", p.name));
+                } else if p.is_variadic {
+                    parts.push(format!("...{}", p.name));
+                } else {
+                    parts.push(p.name.clone());
+                }
+                let param_str = parts.join(" ");
+                if !p.is_required && !p.is_variadic {
+                    format!("{} = ...", param_str)
+                } else {
+                    param_str
+                }
+            })
+            .collect();
+
+        let ret = func
+            .return_type
+            .as_ref()
+            .map(|r| format!(": {}", r))
+            .unwrap_or_default();
+
+        format!("{}({}){}", func.name, params.join(", "), ret)
+    }
+
+    /// Build completion items for standalone functions from all known sources.
+    ///
+    /// Sources (in priority order):
+    ///   1. Functions discovered from parsed files (`global_functions`)
+    ///   2. Built-in PHP functions from embedded stubs (`stub_function_index`)
+    ///
+    /// For user-defined functions (source 1), the full signature is shown in
+    /// the label because we already have a parsed `FunctionInfo`.  For stub
+    /// functions (source 2), only the function name is shown to avoid the
+    /// cost of parsing every matching stub at completion time.
+    ///
+    /// Returns `(items, is_incomplete)`.  When the total number of
+    /// matching functions exceeds [`MAX_FUNCTION_COMPLETIONS`], the result
+    /// is truncated and `is_incomplete` is `true`.
+    const MAX_FUNCTION_COMPLETIONS: usize = 100;
+
+    pub(crate) fn build_function_completions(&self, prefix: &str) -> (Vec<CompletionItem>, bool) {
+        let prefix_lower = prefix.to_lowercase();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut items: Vec<CompletionItem> = Vec::new();
+
+        // ── 1. User-defined functions (from parsed files) ───────────
+        if let Ok(fmap) = self.global_functions.lock() {
+            for (name, (_uri, info)) in fmap.iter() {
+                if !name.to_lowercase().contains(&prefix_lower) {
+                    continue;
+                }
+                // Use the short name for deduplication — if a user-defined
+                // function shadows a built-in, the user version wins.
+                if !seen.insert(info.name.clone()) {
+                    continue;
+                }
+                let label = Self::build_function_label(info);
+                items.push(CompletionItem {
+                    label,
+                    kind: Some(CompletionItemKind::FUNCTION),
+                    detail: Some("function".to_string()),
+                    insert_text: Some(info.name.clone()),
+                    filter_text: Some(info.name.clone()),
+                    sort_text: Some(format!("4_{}", info.name.to_lowercase())),
+                    ..CompletionItem::default()
+                });
+            }
+        }
+
+        // ── 2. Built-in PHP functions from stubs ────────────────────
+        for &name in self.stub_function_index.keys() {
+            if !name.to_lowercase().contains(&prefix_lower) {
+                continue;
+            }
+            if !seen.insert(name.to_string()) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: name.to_string(),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: Some("PHP function".to_string()),
+                insert_text: Some(name.to_string()),
+                filter_text: Some(name.to_string()),
+                sort_text: Some(format!("5_{}", name.to_lowercase())),
+                ..CompletionItem::default()
+            });
+        }
+
+        let is_incomplete = items.len() > Self::MAX_FUNCTION_COMPLETIONS;
+        if is_incomplete {
+            items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
+            items.truncate(Self::MAX_FUNCTION_COMPLETIONS);
+        }
+
+        (items, is_incomplete)
+    }
 }

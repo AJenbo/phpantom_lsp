@@ -470,12 +470,13 @@ impl LanguageServer for Backend {
                 }
             }
 
-            // ── Class name + constant completion ────────────────────
+            // ── Class name + constant + function completion ─────────
             // When there is no `->` or `::` operator, check whether the
-            // user is typing a class name or constant and offer
-            // completions from all known sources (use-imports, same
-            // namespace, stubs, classmap, class_index, global_defines,
-            // stub_constant_index).
+            // user is typing a class name, constant, or function name
+            // and offer completions from all known sources (use-imports,
+            // same namespace, stubs, classmap, class_index,
+            // global_defines, stub_constant_index, global_functions,
+            // stub_function_index).
             if let Some(partial) = Self::extract_partial_class_name(&content, position) {
                 let (class_items, class_incomplete) = self.build_class_name_completions(
                     &file_use_map,
@@ -484,12 +485,17 @@ impl LanguageServer for Backend {
                     &content,
                 );
                 let (constant_items, const_incomplete) = self.build_constant_completions(&partial);
+                let (function_items, func_incomplete) = self.build_function_completions(&partial);
 
-                if !class_items.is_empty() || !constant_items.is_empty() {
+                if !class_items.is_empty()
+                    || !constant_items.is_empty()
+                    || !function_items.is_empty()
+                {
                     let mut items = class_items;
                     items.extend(constant_items);
+                    items.extend(function_items);
                     return Ok(Some(CompletionResponse::List(CompletionList {
-                        is_incomplete: class_incomplete || const_incomplete,
+                        is_incomplete: class_incomplete || const_incomplete || func_incomplete,
                         items,
                     })));
                 }

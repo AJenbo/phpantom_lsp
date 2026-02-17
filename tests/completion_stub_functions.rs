@@ -714,3 +714,429 @@ async fn test_completion_constants_alongside_classes() {
         "Should include constant completions matching the prefix"
     );
 }
+
+// ─── Function name completion tests ─────────────────────────────────────────
+
+/// Typing a partial function name should suggest matching SPL functions
+/// from the stub_function_index.
+#[tokio::test]
+async fn test_completion_stub_function_array_map() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///fn_test.php").unwrap();
+    let text = concat!("<?php\n", "array_m\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 7).await;
+
+    let function_items: Vec<_> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .collect();
+
+    let labels: Vec<&str> = function_items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("array_map")),
+        "Should suggest array_map from stub_function_index. Got: {:?}",
+        labels
+    );
+}
+
+/// Typing `str_c` should suggest `str_contains` from stub functions.
+#[tokio::test]
+async fn test_completion_stub_function_str_contains() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///fn_str.php").unwrap();
+    let text = concat!("<?php\n", "str_c\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 5).await;
+
+    let function_items: Vec<_> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .collect();
+
+    let labels: Vec<&str> = function_items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.contains("str_contains")),
+        "Should suggest str_contains from stub_function_index. Got: {:?}",
+        labels
+    );
+}
+
+/// Stub functions should have `detail` set to "PHP function".
+#[tokio::test]
+async fn test_completion_stub_function_detail() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///fn_detail.php").unwrap();
+    let text = concat!("<?php\n", "json_decode\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 11).await;
+
+    let json_decode = items.iter().find(|i| {
+        i.kind == Some(CompletionItemKind::FUNCTION)
+            && i.filter_text.as_deref() == Some("json_decode")
+    });
+    assert!(
+        json_decode.is_some(),
+        "Should find json_decode in completions"
+    );
+    assert_eq!(
+        json_decode.unwrap().detail.as_deref(),
+        Some("PHP function"),
+        "Stub functions should have 'PHP function' as detail"
+    );
+}
+
+/// Stub function completions should use CompletionItemKind::FUNCTION.
+#[tokio::test]
+async fn test_completion_stub_function_kind() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///fn_kind.php").unwrap();
+    let text = concat!("<?php\n", "substr\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+
+    let substr = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("substr"));
+    assert!(substr.is_some(), "Should find substr in completions");
+    assert_eq!(
+        substr.unwrap().kind,
+        Some(CompletionItemKind::FUNCTION),
+        "Function completions should use FUNCTION kind"
+    );
+}
+
+/// User-defined functions should appear in completions with a full signature label.
+#[tokio::test]
+async fn test_completion_user_defined_function() {
+    let backend = create_test_backend_with_function_stubs();
+
+    // Open a file that defines a function
+    let defs_uri = Url::parse("file:///helpers.php").unwrap();
+    let defs_text = concat!(
+        "<?php\n",
+        "function my_helper_func(string $name, int $count = 0): string {\n",
+        "    return str_repeat($name, $count);\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: defs_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: defs_text.to_string(),
+            },
+        })
+        .await;
+
+    // Now complete in another file
+    let uri = Url::parse("file:///use_fn.php").unwrap();
+    let text = concat!("<?php\n", "my_helper\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 9).await;
+
+    let function_items: Vec<_> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .collect();
+
+    assert!(
+        !function_items.is_empty(),
+        "Should suggest user-defined function matching the prefix"
+    );
+
+    let helper = function_items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("my_helper_func"));
+    assert!(
+        helper.is_some(),
+        "Should find my_helper_func in completions. Got: {:?}",
+        function_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+
+    // User-defined functions should have "function" as detail
+    assert_eq!(
+        helper.unwrap().detail.as_deref(),
+        Some("function"),
+        "User-defined functions should have 'function' as detail"
+    );
+
+    // The label should contain the full signature
+    let label = &helper.unwrap().label;
+    assert!(
+        label.contains("my_helper_func("),
+        "Label should contain function name with parens. Got: {}",
+        label
+    );
+    assert!(
+        label.contains("$name"),
+        "Label should contain parameter names. Got: {}",
+        label
+    );
+}
+
+/// User-defined function label should show full signature with types.
+#[tokio::test]
+async fn test_completion_user_function_label_signature() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///sig_test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function calculate_total(float $price, int $qty, bool $tax = true): float {\n",
+        "    return $price * $qty;\n",
+        "}\n",
+        "calc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 4).await;
+
+    let calc = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("calculate_total"));
+    assert!(calc.is_some(), "Should find calculate_total in completions");
+
+    let label = &calc.unwrap().label;
+    assert!(
+        label.contains("float $price"),
+        "Label should include typed parameters. Got: {}",
+        label
+    );
+    assert!(
+        label.contains(": float"),
+        "Label should include return type. Got: {}",
+        label
+    );
+}
+
+/// Functions should NOT appear when typing after `->` (member access).
+#[tokio::test]
+async fn test_completion_functions_not_after_arrow() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///arrow_fn_test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo { public function array_map() {} }\n",
+        "$f = new Foo();\n",
+        "$f->array\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 9).await;
+
+    // After `->`, we should NOT get standalone function completions
+    let standalone_fn_items: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            i.kind == Some(CompletionItemKind::FUNCTION)
+                && i.detail.as_deref() == Some("PHP function")
+        })
+        .collect();
+
+    assert!(
+        standalone_fn_items.is_empty(),
+        "Standalone functions should not appear after '->'. Got: {:?}",
+        standalone_fn_items
+            .iter()
+            .map(|i| &i.label)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Functions should NOT appear when typing after `$` (variable context).
+#[tokio::test]
+async fn test_completion_functions_not_for_variables() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///var_fn_test.php").unwrap();
+    let text = concat!("<?php\n", "$array_map\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 10).await;
+
+    let function_items: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            i.kind == Some(CompletionItemKind::FUNCTION)
+                && i.detail.as_deref() == Some("PHP function")
+        })
+        .collect();
+
+    assert!(
+        function_items.is_empty(),
+        "Standalone functions should not appear when typing a variable. Got: {:?}",
+        function_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Functions, classes, and constants should all appear together when prefix matches.
+#[tokio::test]
+async fn test_completion_functions_alongside_classes_and_constants() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///mixed_fn_test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "define('ARRAY_HELPER_FLAG', 1);\n",
+        "class ArrayHelper {}\n",
+        "array\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 5).await;
+
+    let has_class = items
+        .iter()
+        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+    let has_constant = items
+        .iter()
+        .any(|i| i.kind == Some(CompletionItemKind::CONSTANT));
+    let has_function = items
+        .iter()
+        .any(|i| i.kind == Some(CompletionItemKind::FUNCTION));
+
+    assert!(
+        has_class,
+        "Should include class completions matching the prefix"
+    );
+    assert!(
+        has_constant,
+        "Should include constant completions matching the prefix"
+    );
+    assert!(
+        has_function,
+        "Should include function completions matching the prefix. Got kinds: {:?}",
+        items.iter().map(|i| (&i.label, i.kind)).collect::<Vec<_>>()
+    );
+}
+
+/// Multiple matching stub functions should all appear (e.g. `array_` prefix).
+#[tokio::test]
+async fn test_completion_multiple_matching_stub_functions() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///multi_fn.php").unwrap();
+    let text = concat!("<?php\n", "array_\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+
+    let fn_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        fn_labels.contains(&"array_map"),
+        "Should suggest array_map. Got: {:?}",
+        fn_labels
+    );
+    assert!(
+        fn_labels.contains(&"array_pop"),
+        "Should suggest array_pop. Got: {:?}",
+        fn_labels
+    );
+    assert!(
+        fn_labels.contains(&"array_push"),
+        "Should suggest array_push. Got: {:?}",
+        fn_labels
+    );
+    assert!(
+        fn_labels.contains(&"array_key_exists"),
+        "Should suggest array_key_exists. Got: {:?}",
+        fn_labels
+    );
+}
+
+/// User-defined function should take precedence over stub function with
+/// the same name (user version appears, stub version is deduplicated away).
+#[tokio::test]
+async fn test_completion_user_function_shadows_stub() {
+    let backend = create_test_backend_with_function_stubs();
+
+    // Register a user-defined function with the same name as a stub
+    let uri = Url::parse("file:///shadow.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function str_contains(string $a, string $b): bool { return true; }\n",
+        "str_con\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 7).await;
+
+    let str_contains_items: Vec<_> = items
+        .iter()
+        .filter(|i| {
+            i.kind == Some(CompletionItemKind::FUNCTION)
+                && i.filter_text.as_deref() == Some("str_contains")
+        })
+        .collect();
+
+    assert_eq!(
+        str_contains_items.len(),
+        1,
+        "Should have exactly one str_contains completion (deduplicated). Got: {:?}",
+        str_contains_items
+            .iter()
+            .map(|i| (&i.label, &i.detail))
+            .collect::<Vec<_>>()
+    );
+
+    // The user-defined version should win (detail = "function", not "PHP function")
+    assert_eq!(
+        str_contains_items[0].detail.as_deref(),
+        Some("function"),
+        "User-defined function should take precedence over stub"
+    );
+}
+
+/// `insert_text` should be just the function name (no parens or snippet).
+#[tokio::test]
+async fn test_completion_function_insert_text() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///insert_test.php").unwrap();
+    let text = concat!("<?php\n", "json_d\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 6).await;
+
+    let json_decode = items.iter().find(|i| {
+        i.kind == Some(CompletionItemKind::FUNCTION)
+            && i.filter_text.as_deref() == Some("json_decode")
+    });
+    assert!(
+        json_decode.is_some(),
+        "Should find json_decode in completions"
+    );
+    assert_eq!(
+        json_decode.unwrap().insert_text.as_deref(),
+        Some("json_decode"),
+        "insert_text should be just the function name"
+    );
+}
+
+/// `preg_match` should appear when typing `preg`.
+#[tokio::test]
+async fn test_completion_stub_function_preg_match() {
+    let backend = create_test_backend_with_function_stubs();
+
+    let uri = Url::parse("file:///preg_test.php").unwrap();
+    let text = concat!("<?php\n", "preg\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 4).await;
+
+    let fn_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        fn_labels.contains(&"preg_match"),
+        "Should suggest preg_match. Got: {:?}",
+        fn_labels
+    );
+}
