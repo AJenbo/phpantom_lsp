@@ -10,6 +10,10 @@
 ///   - Conditional branches (if/else, try/catch, loops) — collects all
 ///     possible types when the variable is assigned differently in each
 ///     branch.
+///   - Foreach value variables: when iterating over a variable annotated
+///     with a generic iterable type (e.g. `@var list<User>`, `@param
+///     list<User>`, `User[]`), the foreach value variable is resolved to
+///     the element type.
 ///
 /// Type narrowing (instanceof, assert, custom type guards) is delegated
 /// to the [`super::type_narrowing`] module.  Closure/arrow-function scope
@@ -471,19 +475,33 @@ impl Backend {
                         }
                     }
                 },
-                Statement::Foreach(foreach) => match &foreach.body {
-                    ForeachBody::Statement(inner) => {
-                        Self::check_statement_for_assignments(inner, ctx, results, true);
+                Statement::Foreach(foreach) => {
+                    // ── Foreach value type from generic iterables ────
+                    // When the variable we're resolving is the foreach
+                    // *value* variable, try to infer its type from the
+                    // iterated expression's generic type annotation.
+                    //
+                    // Example:
+                    //   /** @var list<User> $users */
+                    //   foreach ($users as $user) { $user-> }
+                    //
+                    // Here `$user` is resolved to `User`.
+                    Self::try_resolve_foreach_value_type(foreach, ctx, results, conditional);
+
+                    match &foreach.body {
+                        ForeachBody::Statement(inner) => {
+                            Self::check_statement_for_assignments(inner, ctx, results, true);
+                        }
+                        ForeachBody::ColonDelimited(body) => {
+                            Self::walk_statements_for_assignments(
+                                body.statements.iter(),
+                                ctx,
+                                results,
+                                true,
+                            );
+                        }
                     }
-                    ForeachBody::ColonDelimited(body) => {
-                        Self::walk_statements_for_assignments(
-                            body.statements.iter(),
-                            ctx,
-                            results,
-                            true,
-                        );
-                    }
-                },
+                }
                 Statement::While(while_stmt) => match &while_stmt.body {
                     WhileBody::Statement(inner) => {
                         // ── instanceof narrowing for while-body ──
@@ -575,6 +593,85 @@ impl Backend {
     }
 
     /// Helper: treat a single statement as an iterator of one and recurse.
+    /// Try to resolve the foreach value variable's type from a generic
+    /// iterable annotation on the iterated expression.
+    ///
+    /// When the variable being resolved (`ctx.var_name`) matches the
+    /// foreach value variable and the iterated expression is a simple
+    /// `$variable` whose type is annotated as a generic iterable (via
+    /// `@var list<User> $var` or `@param list<User> $var`), this method
+    /// extracts the element type and pushes the resolved `ClassInfo` into
+    /// `results`.
+    fn try_resolve_foreach_value_type<'b>(
+        foreach: &'b Foreach<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
+    ) {
+        // Check if the foreach value variable is the one we're resolving.
+        let value_expr = foreach.target.value();
+        let value_var_name = match value_expr {
+            Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+            _ => return,
+        };
+        if value_var_name != ctx.var_name {
+            return;
+        }
+
+        // Extract the iterated expression's source text.
+        let expr_span = foreach.expression.span();
+        let expr_start = expr_span.start.offset as usize;
+        let expr_end = expr_span.end.offset as usize;
+        let expr_text = match ctx.content.get(expr_start..expr_end) {
+            Some(t) => t.trim(),
+            None => return,
+        };
+
+        // Currently we handle simple `$variable` expressions.
+        if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
+            return;
+        }
+
+        // Search backward from the foreach for @var or @param annotations
+        // on the iterated variable that include a generic type.
+        let foreach_offset = foreach.foreach.span().start.offset as usize;
+        let raw_type = match docblock::find_iterable_raw_type_in_source(
+            ctx.content,
+            foreach_offset,
+            expr_text,
+        ) {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Extract the generic element type (e.g. `list<User>` → `User`).
+        let element_type = match docblock::types::extract_generic_value_type(&raw_type) {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Resolve the element type to ClassInfo.
+        let resolved = Self::type_hint_to_classes(
+            &element_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+
+        if resolved.is_empty() {
+            return;
+        }
+
+        if !conditional {
+            results.clear();
+        }
+        for cls in resolved {
+            if !results.iter().any(|c| c.name == cls.name) {
+                results.push(cls);
+            }
+        }
+    }
+
     pub(super) fn check_statement_for_assignments<'b>(
         stmt: &'b Statement<'b>,
         ctx: &VarResolutionCtx<'_>,

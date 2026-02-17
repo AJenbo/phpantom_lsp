@@ -85,3 +85,74 @@ pub(crate) fn is_scalar(type_name: &str) -> bool {
     let lower = type_name.to_ascii_lowercase();
     SCALAR_TYPES.contains(&lower.as_str())
 }
+
+/// Extract the element (value) type from a generic iterable type annotation.
+///
+/// Handles the most common PHPDoc generic iterable patterns:
+///   - `list<User>`              → `Some("User")`
+///   - `array<User>`             → `Some("User")`
+///   - `array<int, User>`        → `Some("User")`
+///   - `iterable<User>`          → `Some("User")`
+///   - `iterable<int, User>`     → `Some("User")`
+///   - `User[]`                  → `Some("User")`
+///   - `Collection<int, User>`   → `Some("User")` (any generic class)
+///   - `?list<User>`             → `Some("User")` (nullable)
+///   - `\Foo\Bar[]`              → `Some("Bar")`
+///
+/// Returns `None` if the type is not a recognised generic iterable or the
+/// element type is a scalar (e.g. `list<int>`).
+pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
+    let s = raw_type.strip_prefix('\\').unwrap_or(raw_type);
+    let s = s.strip_prefix('?').unwrap_or(s);
+
+    // ── Handle `Type[]` shorthand ───────────────────────────────────────
+    if let Some(base) = s.strip_suffix("[]") {
+        let cleaned = clean_type(base);
+        if !cleaned.is_empty() && !is_scalar(&cleaned) {
+            return Some(cleaned);
+        }
+        // e.g. `int[]` — no class element type
+        return None;
+    }
+
+    // ── Handle `GenericType<…>` ─────────────────────────────────────────
+    let angle_pos = s.find('<')?;
+    let inner = s.get(angle_pos + 1..)?.strip_suffix('>')?.trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    // Split the generic parameters on `,` while respecting `<…>` nesting
+    // so that `array<int, Collection<string, User>>` splits correctly into
+    // `["int", "Collection<string, User>"]`.
+    let value_part = split_last_generic_param(inner);
+    let cleaned = clean_type(value_part.trim());
+
+    if cleaned.is_empty() || is_scalar(&cleaned) {
+        return None;
+    }
+    Some(cleaned)
+}
+
+/// Split a comma-separated generic parameter list and return the **last**
+/// parameter, respecting `<…>` nesting.
+///
+/// - `"User"`             → `"User"`
+/// - `"int, User"`        → `"User"`
+/// - `"int, list<User>"`  → `"list<User>"`
+fn split_last_generic_param(s: &str) -> &str {
+    let mut depth = 0i32;
+    let mut last_comma = None;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ',' if depth == 0 => last_comma = Some(i),
+            _ => {}
+        }
+    }
+    match last_comma {
+        Some(pos) => &s[pos + 1..],
+        None => s,
+    }
+}

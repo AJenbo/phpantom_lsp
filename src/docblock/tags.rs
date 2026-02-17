@@ -279,6 +279,163 @@ pub fn find_inline_var_docblock(
     extract_var_type_with_name(docblock)
 }
 
+/// Search backward through `content` (up to `before_offset`) for any
+/// `/** @var RawType $var_name */` annotation and return the **raw**
+/// (uncleaned) type string — including generic parameters like `<User>`.
+///
+/// This is used by foreach element-type resolution: when iterating over
+/// a variable annotated as `list<User>`, we need the raw `list<User>`
+/// string so that the generic value type (`User`) can be extracted.
+///
+/// Only matches annotations that explicitly name the variable
+/// (e.g. `/** @var list<User> $users */`).
+pub fn find_var_raw_type_in_source(
+    content: &str,
+    before_offset: usize,
+    var_name: &str,
+) -> Option<String> {
+    let search_area = content.get(..before_offset)?;
+
+    for line in search_area.lines().rev() {
+        let trimmed = line.trim();
+
+        // Quick reject: must mention both `@var` and the variable.
+        if !trimmed.contains("@var") || !trimmed.contains(var_name) {
+            continue;
+        }
+
+        // Strip docblock delimiters — handles single-line `/** @var … */`.
+        let inner = trimmed
+            .strip_prefix("/**")
+            .unwrap_or(trimmed)
+            .strip_suffix("*/")
+            .unwrap_or(trimmed);
+        let inner = inner.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = inner.strip_prefix("@var") {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the full type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+
+            // The next token must be our variable name.
+            if let Some(name) = remainder.split_whitespace().next()
+                && name == var_name
+            {
+                return Some(type_token.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract the raw (uncleaned) type from a `@param` tag for a specific
+/// parameter in a docblock string.
+///
+/// Given a docblock and a parameter name (with `$` prefix), returns the
+/// raw type string including generic parameters.
+///
+/// Example:
+///   docblock containing `@param list<User> $users` with var_name `"$users"`
+///   → `Some("list<User>")`
+pub fn extract_param_raw_type(docblock: &str, var_name: &str) -> Option<String> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = trimmed.strip_prefix("@param") {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the full type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+
+            // The next token should be the parameter name.
+            if let Some(name) = remainder.split_whitespace().next()
+                && name == var_name
+            {
+                return Some(type_token.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Search backward through `content` (up to `before_offset`) for any
+/// `@var` or `@param` annotation that assigns a raw (uncleaned) type to
+/// `$var_name`.
+///
+/// This combines the logic of [`find_var_raw_type_in_source`] (which looks
+/// for `@var Type $var`) and a backward scan for `@param Type $var` in
+/// method/function docblocks.
+///
+/// Returns the first matching raw type string (including generic parameters
+/// like `list<User>`), or `None` if no annotation is found.
+pub fn find_iterable_raw_type_in_source(
+    content: &str,
+    before_offset: usize,
+    var_name: &str,
+) -> Option<String> {
+    let search_area = content.get(..before_offset)?;
+
+    for line in search_area.lines().rev() {
+        let trimmed = line.trim();
+
+        // Quick reject: must mention the variable name.
+        if !trimmed.contains(var_name) {
+            continue;
+        }
+
+        // Strip docblock delimiters — handles single-line `/** @var … */`
+        // and multi-line `* @param …` lines.
+        let inner = trimmed
+            .strip_prefix("/**")
+            .unwrap_or(trimmed)
+            .strip_suffix("*/")
+            .unwrap_or(trimmed);
+        let inner = inner.trim().trim_start_matches('*').trim();
+
+        // Try @var first, then @param.
+        let rest = if let Some(r) = inner.strip_prefix("@var") {
+            Some(r)
+        } else {
+            inner.strip_prefix("@param")
+        };
+
+        if let Some(rest) = rest {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the full type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+
+            // The next token must be our variable name.
+            if let Some(name) = remainder.split_whitespace().next()
+                && name == var_name
+            {
+                return Some(type_token.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 /// Extract all `@property` tags from a class-level docblock.
 ///
 /// PHPDoc `@property` tags declare magic properties that are accessible via

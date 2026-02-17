@@ -648,3 +648,25 @@ if (!isAdmin($l)) {
 } else {
     $l->grantPermission('y');    // negated else → AdminUser
 }
+
+
+// ── Generics / Foreach Element Types ────────────────────────────────────────
+
+/** @var list<User> $users */
+$users = getUnknownValue();
+foreach ($users as $user) {
+    $user->getEmail();           // $user resolved to User via list<User>
+    $user->getName();
+}
+
+/** @var User[] $members */
+$members = getUnknownValue();
+foreach ($members as $member) {
+    $member->getStatus();        // $member resolved to User via User[]
+}
+
+/** @var array<int, AdminUser> $admins */
+$admins = getUnknownValue();
+foreach ($admins as $admin) {
+    $admin->grantPermission('x'); // $admin resolved to AdminUser via array<int, AdminUser>
+}

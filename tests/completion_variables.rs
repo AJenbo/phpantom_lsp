@@ -6995,3 +6995,552 @@ async fn test_completion_closure_param_in_method_argument() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Foreach generic iterable type resolution ───────────────────────────────
+
+#[tokio::test]
+async fn test_completion_foreach_list_generic_var_annotation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_list.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function index() {\n",
+        "        /** @var list<User> $users */\n",
+        "        $users = getUsers();\n",
+        "        foreach ($users as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$user->` on line 10
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $user from list<User>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_array_bracket_shorthand() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_bracket.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $title;\n",
+        "    public function getPrice(): float {}\n",
+        "}\n",
+        "class Shop {\n",
+        "    public function list() {\n",
+        "        /** @var Product[] $products */\n",
+        "        $products = fetchProducts();\n",
+        "        foreach ($products as $product) {\n",
+        "            $product->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $product from Product[]"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("title")),
+                "Should include title property from Product, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getPrice")),
+                "Should include getPrice method from Product, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_array_generic_two_params() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_array_kv.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public int $id;\n",
+        "    public function getTotal(): float {}\n",
+        "}\n",
+        "class Service {\n",
+        "    public function process() {\n",
+        "        /** @var array<int, Order> $orders */\n",
+        "        $orders = loadOrders();\n",
+        "        foreach ($orders as $key => $order) {\n",
+        "            $order->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $order from array<int, Order>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("id")),
+                "Should include id property from Order, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTotal")),
+                "Should include getTotal method from Order, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_param_annotation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Task {\n",
+        "    public string $title;\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "class Runner {\n",
+        "    /**\n",
+        "     * @param list<Task> $tasks\n",
+        "     */\n",
+        "    public function execute(array $tasks) {\n",
+        "        foreach ($tasks as $task) {\n",
+        "            $task->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$task->` on line 11
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $task from @param list<Task>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("title")),
+                "Should include title property from Task, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("run")),
+                "Should include run method from Task, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_top_level_list_generic() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Item {\n",
+        "    public string $label;\n",
+        "    public function getValue(): int {}\n",
+        "}\n",
+        "/** @var list<Item> $items */\n",
+        "$items = getItems();\n",
+        "foreach ($items as $item) {\n",
+        "    $item->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$item->` on line 8
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $item from top-level list<Item>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include label property from Item, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getValue")),
+                "Should include getValue method from Item, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_cross_file_list_generic() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Models/Customer.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\Models;\n",
+                "class Customer {\n",
+                "    public string $name;\n",
+                "    public function getAddress(): string {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///foreach_cross.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Models\\Customer;\n",
+        "/** @var list<Customer> $customers */\n",
+        "$customers = loadCustomers();\n",
+        "foreach ($customers as $customer) {\n",
+        "    $customer->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$customer->` on line 5
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $customer from cross-file list<Customer>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from Customer, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getAddress")),
+                "Should include getAddress method from Customer, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_array_generic_single_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_array_single.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Invoice {\n",
+        "    public int $number;\n",
+        "    public function send(): void {}\n",
+        "}\n",
+        "class Billing {\n",
+        "    public function process() {\n",
+        "        /** @var array<Invoice> $invoices */\n",
+        "        $invoices = getInvoices();\n",
+        "        foreach ($invoices as $invoice) {\n",
+        "            $invoice->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $invoice from array<Invoice>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("number")),
+                "Should include number property from Invoice, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("send")),
+                "Should include send method from Invoice, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_foreach_scalar_list_no_completion() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service {\n",
+        "    public function process() {\n",
+        "        /** @var list<int> $ids */\n",
+        "        $ids = getIds();\n",
+        "        foreach ($ids as $id) {\n",
+        "            $id->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // list<int> → int is a scalar, so no class completion should be offered.
+    // The result might be None or an empty array.
+    if let Some(CompletionResponse::Array(items)) = result {
+        let method_items: Vec<_> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .collect();
+        assert!(
+            method_items.is_empty(),
+            "Should not offer method completions for scalar element type (int), got: {:?}",
+            method_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+}

@@ -1075,3 +1075,106 @@ fn deprecated_tag_with_tab_separator() {
     let doc = concat!("/**\n", " * @deprecated\tUse foo() instead\n", " */",);
     assert!(has_deprecated_tag(doc));
 }
+
+// ─── extract_generic_value_type ─────────────────────────────────────
+
+#[test]
+fn generic_value_type_list() {
+    assert_eq!(
+        extract_generic_value_type("list<User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_array_single_param() {
+    assert_eq!(
+        extract_generic_value_type("array<User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_array_two_params() {
+    assert_eq!(
+        extract_generic_value_type("array<int, User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_bracket_shorthand() {
+    assert_eq!(
+        extract_generic_value_type("User[]"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_iterable() {
+    assert_eq!(
+        extract_generic_value_type("iterable<User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_iterable_two_params() {
+    assert_eq!(
+        extract_generic_value_type("iterable<int, User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_nullable() {
+    assert_eq!(
+        extract_generic_value_type("?list<User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_fqn_bracket() {
+    // clean_type strips the leading `\` but preserves namespace segments;
+    // type_hint_to_classes handles the FQN → short-name lookup separately.
+    assert_eq!(
+        extract_generic_value_type("\\App\\Models\\User[]"),
+        Some("App\\Models\\User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_fqn_inside_generic() {
+    assert_eq!(
+        extract_generic_value_type("list<\\App\\Models\\User>"),
+        Some("App\\Models\\User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_collection_class() {
+    assert_eq!(
+        extract_generic_value_type("Collection<int, User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_scalar_element_returns_none() {
+    assert_eq!(extract_generic_value_type("list<int>"), None);
+    assert_eq!(extract_generic_value_type("array<string>"), None);
+    assert_eq!(extract_generic_value_type("int[]"), None);
+    assert_eq!(extract_generic_value_type("array<int, string>"), None);
+}
+
+#[test]
+fn generic_value_type_plain_class_returns_none() {
+    assert_eq!(extract_generic_value_type("User"), None);
+    assert_eq!(extract_generic_value_type("string"), None);
+}
+
+#[test]
+fn generic_value_type_empty_angle_brackets_returns_none() {
+    assert_eq!(extract_generic_value_type("list<>"), None);
+}
