@@ -470,6 +470,22 @@ impl LanguageServer for Backend {
                 }
             }
 
+            // ── Variable name completion ────────────────────────────
+            // When the user is typing `$us`, `$_SE`, or just `$`,
+            // suggest variable names found in the current file plus
+            // PHP superglobals.
+            if let Some(partial) = Self::extract_partial_variable_name(&content, position) {
+                let (var_items, var_incomplete) =
+                    Self::build_variable_completions(&content, &partial, position);
+
+                if !var_items.is_empty() {
+                    return Ok(Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: var_incomplete,
+                        items: var_items,
+                    })));
+                }
+            }
+
             // ── Class name + constant + function completion ─────────
             // When there is no `->` or `::` operator, check whether the
             // user is typing a class name, constant, or function name
