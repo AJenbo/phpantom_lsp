@@ -652,8 +652,13 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
 pub fn should_override_type(docblock_type: &str, native_type: &str) -> bool {
     // If the docblock type is itself a scalar, there's no value in
     // overriding — it wouldn't help with class resolution anyway.
+    // However, a scalar base with generic parameters (e.g.
+    // `array<int, User>`, `iterable<string, Order>`) carries more
+    // type information than the bare native hint and should be kept
+    // so that downstream consumers (foreach element resolution, array
+    // destructuring, etc.) can extract the generic type arguments.
     let clean_doc = strip_nullable(docblock_type);
-    if is_scalar(clean_doc) {
+    if is_scalar(clean_doc) && !clean_doc.contains('<') {
         return false;
     }
 

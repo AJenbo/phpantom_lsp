@@ -19,6 +19,12 @@
 ///     with a generic iterable type (e.g. `@var list<User>`, `@param
 ///     list<User>`, `User[]`), the foreach value variable is resolved to
 ///     the element type.
+///   - Foreach key variables: when iterating over a two-parameter generic
+///     (e.g. `SplObjectStorage<Request, Response>`), the key variable is
+///     resolved to the first type parameter.
+///   - Array destructuring: `[$a, $b] = getUsers()` and `list($a, $b) = $var`
+///     infer element types from the RHS's generic iterable annotation
+///     (function return types, variable/property annotations, inline @var).
 ///
 /// Type narrowing (instanceof, assert, custom type guards) is delegated
 /// to the [`super::type_narrowing`] module.  Closure/arrow-function scope
@@ -793,6 +799,279 @@ impl Backend {
         Self::walk_statements_for_assignments(std::iter::once(stmt), ctx, results, conditional);
     }
 
+    /// Check whether the target variable appears inside an array/list
+    /// destructuring LHS and, if so, resolve its type from the RHS's
+    /// generic element type.
+    ///
+    /// Supported patterns:
+    ///   - `[$a, $b] = getUsers()`   — function call RHS
+    ///   - `list($a, $b) = $users`   — variable RHS with `@var`/`@param`
+    ///   - `[$a, $b] = $this->m()`   — method/static-method call RHS
+    ///
+    /// The element type is extracted from the raw return/annotation type
+    /// via `extract_generic_value_type`, so `array<int, User>`, `list<User>`,
+    /// `User[]`, etc. all work.
+    fn try_resolve_destructured_type<'b>(
+        assignment: &'b Assignment<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
+    ) {
+        // ── 1. Collect the elements from the LHS ────────────────────────
+        let elements = match assignment.lhs {
+            Expression::Array(arr) => &arr.elements,
+            Expression::List(list) => &list.elements,
+            _ => return,
+        };
+
+        // ── 2. Check if our target variable is among the elements ───────
+        let var_name = ctx.var_name;
+        let found = elements.iter().any(|elem| {
+            let value_expr = match elem {
+                ArrayElement::Value(val) => Some(val.value),
+                ArrayElement::KeyValue(kv) => Some(kv.value),
+                _ => None,
+            };
+            if let Some(Expression::Variable(Variable::Direct(dv))) = value_expr {
+                dv.name == var_name
+            } else {
+                false
+            }
+        });
+        if !found {
+            return;
+        }
+
+        let current_class_name: &str = &ctx.current_class.name;
+        let all_classes = ctx.all_classes;
+        let content = ctx.content;
+        let class_loader = ctx.class_loader;
+
+        // ── 3. Try inline `/** @var … */` annotation ────────────────────
+        // Handles both:
+        //   `/** @var list<User> */`             (no variable name)
+        //   `/** @var array<int, User> $result */` (with variable name — rare)
+        let stmt_offset = assignment.span().start.offset as usize;
+        if let Some((var_type, _var_name_opt)) =
+            docblock::find_inline_var_docblock(content, stmt_offset)
+            && let Some(element_type) = docblock::types::extract_generic_value_type(&var_type)
+        {
+            let resolved = Self::type_hint_to_classes(
+                &element_type,
+                current_class_name,
+                all_classes,
+                class_loader,
+            );
+            if !resolved.is_empty() {
+                if !conditional {
+                    results.clear();
+                }
+                for cls in resolved {
+                    if !results.iter().any(|c| c.name == cls.name) {
+                        results.push(cls);
+                    }
+                }
+                return;
+            }
+        }
+
+        // ── 4. Try to extract the raw iterable type from the RHS ────────
+        let raw_type: Option<String> = Self::extract_rhs_iterable_raw_type(assignment.rhs, ctx);
+
+        if let Some(ref raw) = raw_type
+            && let Some(element_type) = docblock::types::extract_generic_value_type(raw)
+        {
+            let resolved = Self::type_hint_to_classes(
+                &element_type,
+                current_class_name,
+                all_classes,
+                class_loader,
+            );
+            if !resolved.is_empty() {
+                if !conditional {
+                    results.clear();
+                }
+                for cls in resolved {
+                    if !results.iter().any(|c| c.name == cls.name) {
+                        results.push(cls);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract the raw iterable type string from an RHS expression.
+    ///
+    /// Returns the type annotation string (e.g. `"array<int, User>"`,
+    /// `"list<User>"`) without resolving it to `ClassInfo`.  The caller
+    /// can then use `extract_generic_value_type` to get the element type.
+    fn extract_rhs_iterable_raw_type<'b>(
+        rhs: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Option<String> {
+        let current_class_name: &str = &ctx.current_class.name;
+        let all_classes = ctx.all_classes;
+        let content = ctx.content;
+        let class_loader = ctx.class_loader;
+        let function_loader = ctx.function_loader;
+
+        // ── Variable RHS: `[$a, $b] = $users` ──────────────────────────
+        if let Expression::Variable(Variable::Direct(dv)) = rhs {
+            let var_text = dv.name.to_string();
+            let offset = rhs.span().start.offset as usize;
+            return docblock::find_iterable_raw_type_in_source(content, offset, &var_text);
+        }
+
+        // ── Function call RHS: `[$a, $b] = getUsers()` ─────────────────
+        if let Expression::Call(Call::Function(func_call)) = rhs {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => Some(ident.value().to_string()),
+                _ => None,
+            };
+            if let Some(name) = func_name
+                && let Some(fl) = function_loader
+                && let Some(func_info) = fl(&name)
+                && let Some(ref ret) = func_info.return_type
+            {
+                return Some(ret.clone());
+            }
+        }
+
+        // ── Method call RHS: `[$a, $b] = $this->getUsers()` ────────────
+        if let Expression::Call(Call::Method(method_call)) = rhs {
+            if let Expression::Variable(Variable::Direct(dv)) = method_call.object
+                && dv.name == "$this"
+                && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
+            {
+                let method_name = ident.value.to_string();
+                if let Some(owner) = all_classes.iter().find(|c| c.name == current_class_name) {
+                    let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+                    if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
+                        return method.return_type.clone();
+                    }
+                }
+            } else {
+                // General case: resolve the object, then look up the method.
+                let rhs_span = rhs.span();
+                let start = rhs_span.start.offset as usize;
+                let end = rhs_span.end.offset as usize;
+                if end <= content.len() {
+                    let rhs_text = content[start..end].trim();
+                    if rhs_text.ends_with(')')
+                        && let Some((call_body, _args_text)) = split_call_subject(rhs_text)
+                    {
+                        // Split at the last `->` to get the object and method name.
+                        if let Some(arrow_pos) = call_body.rfind("->") {
+                            let obj_text = &call_body[..arrow_pos];
+                            let method_name = &call_body[arrow_pos + 2..];
+                            let current_class =
+                                all_classes.iter().find(|c| c.name == current_class_name);
+                            let obj_classes = Self::resolve_target_classes(
+                                obj_text,
+                                crate::types::AccessKind::Arrow,
+                                current_class,
+                                all_classes,
+                                content,
+                                ctx.cursor_offset,
+                                class_loader,
+                                function_loader,
+                            );
+                            for cls in &obj_classes {
+                                let merged =
+                                    Self::resolve_class_with_inheritance(cls, class_loader);
+                                if let Some(method) =
+                                    merged.methods.iter().find(|m| m.name == method_name)
+                                {
+                                    return method.return_type.clone();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Static method call RHS: `[$a, $b] = MyClass::getUsers()` ───
+        if let Expression::Call(Call::StaticMethod(static_call)) = rhs {
+            let class_name = match static_call.class {
+                Expression::Self_(_) => Some(current_class_name.to_string()),
+                Expression::Static(_) => Some(current_class_name.to_string()),
+                Expression::Identifier(ident) => Some(ident.value().to_string()),
+                _ => None,
+            };
+            if let Some(cls_name) = class_name
+                && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
+            {
+                let method_name = ident.value.to_string();
+                let owner = all_classes
+                    .iter()
+                    .find(|c| c.name == cls_name)
+                    .cloned()
+                    .or_else(|| class_loader(&cls_name));
+                if let Some(ref owner) = owner {
+                    let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+                    if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
+                        return method.return_type.clone();
+                    }
+                }
+            }
+        }
+
+        // ── Property access RHS: `[$a, $b] = $this->items` ─────────────
+        if let Expression::Access(access) = rhs {
+            let (object_expr, prop_selector) = match access {
+                Access::Property(pa) => (Some(pa.object), Some(&pa.property)),
+                Access::NullSafeProperty(pa) => (Some(pa.object), Some(&pa.property)),
+                _ => (None, None),
+            };
+            if let Some(obj) = object_expr
+                && let Some(sel) = prop_selector
+            {
+                let prop_name = match sel {
+                    ClassLikeMemberSelector::Identifier(ident) => Some(ident.value.to_string()),
+                    _ => None,
+                };
+                if let Some(prop_name) = prop_name {
+                    let owner_classes: Vec<ClassInfo> =
+                        if let Expression::Variable(Variable::Direct(dv)) = obj
+                            && dv.name == "$this"
+                        {
+                            all_classes
+                                .iter()
+                                .find(|c| c.name == current_class_name)
+                                .cloned()
+                                .into_iter()
+                                .collect()
+                        } else if let Expression::Variable(Variable::Direct(dv)) = obj {
+                            let var = dv.name.to_string();
+                            Self::resolve_target_classes(
+                                &var,
+                                crate::types::AccessKind::Arrow,
+                                Some(ctx.current_class),
+                                ctx.all_classes,
+                                ctx.content,
+                                ctx.cursor_offset,
+                                ctx.class_loader,
+                                ctx.function_loader,
+                            )
+                        } else {
+                            vec![]
+                        };
+                    for owner in &owner_classes {
+                        let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+                        if let Some(prop) = merged.properties.iter().find(|p| p.name == prop_name)
+                            && let Some(ref hint) = prop.type_hint
+                        {
+                            return Some(hint.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Try to resolve a variable's type from an inline `/** @var … */`
     /// docblock that immediately precedes the assignment statement.
     ///
@@ -1020,6 +1299,16 @@ impl Backend {
             if !assignment.operator.is_assign() {
                 return;
             }
+
+            // ── Array destructuring: `[$a, $b] = …` / `list($a, $b) = …` ──
+            // When the LHS is an Array or List expression, check whether
+            // our target variable appears among its elements.  If so,
+            // resolve the RHS's iterable element type.
+            if matches!(assignment.lhs, Expression::Array(_) | Expression::List(_)) {
+                Self::try_resolve_destructured_type(assignment, ctx, results, conditional);
+                return;
+            }
+
             // Check LHS is our variable
             let lhs_name = match assignment.lhs {
                 Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),

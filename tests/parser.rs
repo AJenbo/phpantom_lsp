@@ -964,13 +964,14 @@ class OrderService {
         "@param Collection<int, Order> should override native `object`"
     );
 
-    // array<string, mixed> — the base is `array` which is scalar,
-    // so resolve_effective_type keeps the native `array`.
+    // array<string, mixed> — although the base is `array` (scalar), the
+    // generic parameters carry useful type info for destructuring and
+    // foreach, so resolve_effective_type now keeps the docblock type.
     let config = cls.properties.iter().find(|p| p.name == "config").unwrap();
     assert_eq!(
         config.type_hint.as_deref(),
-        Some("array"),
-        "Native `array` should not be overridden by scalar-base @param"
+        Some("array<string, mixed>"),
+        "Docblock `array<string, mixed>` should override native `array` (generic params preserved)"
     );
 }
 

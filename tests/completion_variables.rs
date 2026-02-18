@@ -8481,3 +8481,689 @@ async fn test_completion_foreach_value_still_works_without_key() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Array destructuring type resolution ────────────────────────────────────
+
+/// `[$a, $b] = getUsers()` where `getUsers` returns `list<User>` should
+/// resolve `$a` to `User`.
+#[tokio::test]
+async fn test_completion_destructuring_short_syntax_function_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_short_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "/**\n",
+        " * @return list<User>\n",
+        " */\n",
+        "function getUsers(): array { return []; }\n",
+        "[$first, $second] = getUsers();\n",
+        "$first->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$first->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $first from list<User>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `list($a, $b) = getUsers()` where `getUsers` returns `array<int, User>`
+/// should resolve `$a` to `User`.
+#[tokio::test]
+async fn test_completion_destructuring_list_syntax_function_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_list_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public int $id;\n",
+        "    public function getTotal(): float {}\n",
+        "}\n",
+        "/**\n",
+        " * @return array<int, Order>\n",
+        " */\n",
+        "function loadOrders(): array { return []; }\n",
+        "list($first, $second) = loadOrders();\n",
+        "$first->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$first->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $first from array<int, Order>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("id")),
+                "Should include id property from Order, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTotal")),
+                "Should include getTotal method from Order, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `[$a, $b] = $users` where `$users` is annotated as `list<User>` should
+/// resolve `$a` to `User`.
+#[tokio::test]
+async fn test_completion_destructuring_variable_rhs() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Task {\n",
+        "    public string $title;\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "/** @var list<Task> $tasks */\n",
+        "$tasks = [];\n",
+        "[$first, $second] = $tasks;\n",
+        "$first->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 8: `$first->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $first from list<Task>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("title")),
+                "Should include title property from Task, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("run")),
+                "Should include run method from Task, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `[$a, $b] = $this->getItems()` where `getItems` returns `User[]`
+/// should resolve `$a` to `User`.
+#[tokio::test]
+async fn test_completion_destructuring_method_call_rhs() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $sku;\n",
+        "    public function getPrice(): float {}\n",
+        "}\n",
+        "class Warehouse {\n",
+        "    /** @return Product[] */\n",
+        "    public function getProducts(): array { return []; }\n",
+        "    public function demo() {\n",
+        "        [$a, $b] = $this->getProducts();\n",
+        "        $a->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `        $a->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $a from Product[]"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("sku")),
+                "Should include sku property from Product, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getPrice")),
+                "Should include getPrice method from Product, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `[$a, $b] = MyClass::getItems()` where `getItems` returns `list<User>`
+/// should resolve `$a` to `User`.
+#[tokio::test]
+async fn test_completion_destructuring_static_method_call_rhs() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Animal {\n",
+        "    public string $species;\n",
+        "    public function speak(): string {}\n",
+        "}\n",
+        "class Zoo {\n",
+        "    /** @return list<Animal> */\n",
+        "    public static function getAnimals(): array { return []; }\n",
+        "}\n",
+        "[$first, $second] = Zoo::getAnimals();\n",
+        "$first->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$first->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $first from list<Animal>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("species")),
+                "Should include species property from Animal, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("speak")),
+                "Should include speak method from Animal, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Inline `/** @var list<User> */` annotation before a destructuring
+/// assignment should resolve the element type.
+#[tokio::test]
+async fn test_completion_destructuring_inline_var_annotation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_inline_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public string $email;\n",
+        "    public function getBilling(): string {}\n",
+        "}\n",
+        "/** @var list<Customer> */\n",
+        "[$a, $b] = unknownFunction();\n",
+        "$a->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 7: `$a->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 4,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $a from inline @var list<Customer>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("email")),
+                "Should include email property from Customer, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getBilling")),
+                "Should include getBilling method from Customer, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Destructuring with `$this->property` on the RHS should resolve
+/// the property's generic type annotation.
+#[tokio::test]
+async fn test_completion_destructuring_property_rhs() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public string $label;\n",
+        "    public function render(): string {}\n",
+        "}\n",
+        "class Dashboard {\n",
+        "    /** @var list<Widget> */\n",
+        "    public array $widgets;\n",
+        "    public function demo() {\n",
+        "        [$first, $second] = $this->widgets;\n",
+        "        $first->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `        $first->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $first from list<Widget>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include label property from Widget, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("render")),
+                "Should include render method from Widget, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// A variable NOT in the destructured list should not be resolved by
+/// the destructuring logic — regression guard.
+#[tokio::test]
+async fn test_completion_destructuring_unrelated_variable_not_affected() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_unrelated.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Gadget { public string $code; }\n",
+        "/**\n",
+        " * @return list<Gadget>\n",
+        " */\n",
+        "function loadGadgets(): array { return []; }\n",
+        "[$a, $b] = loadGadgets();\n",
+        "$unrelated->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 7: `$unrelated->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // $unrelated is not in the destructured list, so it should NOT
+    // get Gadget completions.
+    if let Some(response) = result {
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        let gadget_items: Vec<_> = items
+            .iter()
+            .filter(|i| i.label.starts_with("code"))
+            .collect();
+        assert!(
+            gadget_items.is_empty(),
+            "$unrelated should NOT get Gadget completions, got: {:?}",
+            gadget_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// The second variable in a destructuring should also resolve.
+/// `[$first, $second] = getUsers()` → `$second` is also `User`.
+#[tokio::test]
+async fn test_completion_destructuring_second_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_second.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Fruit {\n",
+        "    public string $color;\n",
+        "    public function peel(): void {}\n",
+        "}\n",
+        "/**\n",
+        " * @return list<Fruit>\n",
+        " */\n",
+        "function getFruits(): array { return []; }\n",
+        "[$first, $second] = getFruits();\n",
+        "$second->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$second->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $second from list<Fruit>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("color")),
+                "Should include color property from Fruit, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("peel")),
+                "Should include peel method from Fruit, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Destructuring inside a class method should work with `@param` annotation.
+#[tokio::test]
+async fn test_completion_destructuring_from_param_annotation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Ticket {\n",
+        "    public string $seat;\n",
+        "    public function validate(): bool {}\n",
+        "}\n",
+        "class Booking {\n",
+        "    /**\n",
+        "     * @param list<Ticket> $tickets\n",
+        "     */\n",
+        "    public function process(array $tickets) {\n",
+        "        [$first, $second] = $tickets;\n",
+        "        $first->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 11: `        $first->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $first from list<Ticket>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("seat")),
+                "Should include seat property from Ticket, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("validate")),
+                "Should include validate method from Ticket, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

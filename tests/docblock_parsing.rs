@@ -529,9 +529,19 @@ fn override_nullable_array_with_class() {
 
 #[test]
 fn no_override_array_with_scalar_docblock() {
-    // If the docblock type is itself scalar-based (e.g. `array<string, mixed>`),
-    // there's no value in overriding — it wouldn't help with class resolution.
-    assert!(!should_override_type("array<string, mixed>", "array"));
+    // A plain scalar docblock (no generics) should not override.
+    assert!(!should_override_type("array", "array"));
+    assert!(!should_override_type("string", "string"));
+}
+
+#[test]
+fn override_array_with_generic_scalar_docblock() {
+    // A scalar-based docblock WITH generic parameters (e.g. `array<string, mixed>`)
+    // should override, because the generic arguments carry type information
+    // useful for destructuring and foreach element type extraction.
+    assert!(should_override_type("array<string, mixed>", "array"));
+    assert!(should_override_type("array<int, User>", "array"));
+    assert!(should_override_type("iterable<string, Order>", "iterable"));
 }
 
 #[test]

@@ -1427,3 +1427,62 @@ class ForeachKeyDemo {
         }
     }
 }
+
+// ─── Array Destructuring ────────────────────────────────────────────
+//
+// When the LHS of an assignment is `[$a, $b]` (short syntax) or
+// `list($a, $b)` (legacy syntax), the element type is inferred from
+// the RHS's generic iterable annotation.
+//
+// Supported RHS patterns:
+//   - Function calls with @return annotations
+//   - Method / static method calls
+//   - Variables with @var / @param annotations
+//   - Property access with generic type hints
+//   - Inline /** @var */ annotations before the destructuring
+
+class DestructuringDemo {
+    /** @var list<User> */
+    public array $users;
+
+    /** @return list<User> */
+    public function getUsers(): array { return []; }
+
+    /** @return array<int, Order> */
+    public static function loadOrders(): array { return []; }
+
+    public function fromMethodCall(): void {
+        // Both $a and $b resolve to User
+        [$a, $b] = $this->getUsers();
+        $a->getEmail();     // Resolved: User::getEmail()
+        $b->getEmail();     // Resolved: User::getEmail()
+    }
+
+    public function fromStaticCall(): void {
+        // list() syntax works the same way
+        list($first, $second) = self::loadOrders();
+        $first->getId();    // Resolved: Order (via Model)::getId()
+    }
+
+    public function fromProperty(): void {
+        // Destructuring from a typed property
+        [$one, $two] = $this->users;
+        $one->getEmail();   // Resolved: User::getEmail()
+    }
+
+    /**
+     * @param list<User> $users
+     */
+    public function fromParam(array $users): void {
+        // Destructuring from a @param-annotated parameter
+        [$first, $second] = $users;
+        $first->getEmail(); // Resolved: User::getEmail()
+    }
+
+    public function withInlineVar(): void {
+        // Inline @var annotation on the destructuring itself
+        /** @var list<User> */
+        [$x, $y] = unknownSource();
+        $x->getEmail();     // Resolved: User::getEmail()
+    }
+}
