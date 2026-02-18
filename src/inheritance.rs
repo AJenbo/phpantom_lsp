@@ -703,6 +703,48 @@ fn split_generic_args_at_depth_0(s: &str) -> Vec<&str> {
     parts
 }
 
+/// Apply explicit generic type arguments to a class's members.
+///
+/// When a type hint includes generic parameters (e.g. `Collection<int, User>`),
+/// this function maps them to the class's `@template` parameters and rewrites
+/// all method return types, method parameter types, and property type hints
+/// with the concrete types.
+///
+/// If the class has no `template_params` or no `type_args` are provided,
+/// returns a clone of the class unchanged.
+///
+/// # Example
+///
+/// Given a `Collection` class with `@template TKey` and `@template TValue`,
+/// calling `apply_generic_args(&collection_class, &["int", "User"])` will
+/// substitute every occurrence of `TKey` with `int` and `TValue` with `User`
+/// in the class's methods and properties.
+pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[&str]) -> ClassInfo {
+    if class.template_params.is_empty() || type_args.is_empty() {
+        return class.clone();
+    }
+
+    let mut subs = HashMap::new();
+    for (i, param_name) in class.template_params.iter().enumerate() {
+        if let Some(arg) = type_args.get(i) {
+            subs.insert(param_name.clone(), (*arg).to_string());
+        }
+    }
+
+    if subs.is_empty() {
+        return class.clone();
+    }
+
+    let mut result = class.clone();
+    for method in &mut result.methods {
+        apply_substitution_to_method(method, &subs);
+    }
+    for property in &mut result.properties {
+        apply_substitution_to_property(property, &subs);
+    }
+    result
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

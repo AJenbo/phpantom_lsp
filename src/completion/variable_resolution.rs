@@ -1107,6 +1107,69 @@ impl Backend {
                     _ => {}
                 }
             }
+
+            // Check RHS is a property access: `$var = $this->prop`
+            // Resolve the property's type on the owning class so that
+            // `$box = $this->giftBox` where `@var Box<Gift> $giftBox`
+            // gives `$box` the type `Box<Gift>`.
+            if let Expression::Access(access) = assignment.rhs {
+                let (object_expr, prop_selector) = match access {
+                    Access::Property(pa) => (Some(pa.object), Some(&pa.property)),
+                    Access::NullSafeProperty(pa) => (Some(pa.object), Some(&pa.property)),
+                    _ => (None, None),
+                };
+                if let Some(obj) = object_expr
+                    && let Some(sel) = prop_selector
+                {
+                    // Extract the property name from the selector.
+                    let prop_name = match sel {
+                        ClassLikeMemberSelector::Identifier(ident) => Some(ident.value.to_string()),
+                        _ => None,
+                    };
+                    if let Some(prop_name) = prop_name {
+                        // Determine the owning class.
+                        let owner_classes: Vec<ClassInfo> =
+                            if let Expression::Variable(Variable::Direct(dv)) = obj
+                                && dv.name == "$this"
+                            {
+                                all_classes
+                                    .iter()
+                                    .find(|c| c.name == current_class_name)
+                                    .cloned()
+                                    .into_iter()
+                                    .collect()
+                            } else if let Expression::Variable(Variable::Direct(dv)) = obj {
+                                // Non-$this variable: resolve its type first.
+                                let var = dv.name.to_string();
+                                Self::resolve_target_classes(
+                                    &var,
+                                    crate::types::AccessKind::Arrow,
+                                    Some(ctx.current_class),
+                                    ctx.all_classes,
+                                    ctx.content,
+                                    ctx.cursor_offset,
+                                    ctx.class_loader,
+                                    ctx.function_loader,
+                                )
+                            } else {
+                                vec![]
+                            };
+
+                        for owner in &owner_classes {
+                            let resolved = Self::resolve_property_types(
+                                &prop_name,
+                                owner,
+                                all_classes,
+                                class_loader,
+                            );
+                            if !resolved.is_empty() {
+                                push_results(results, resolved, conditional);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

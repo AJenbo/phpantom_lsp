@@ -246,9 +246,10 @@ pub(crate) fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String 
 
     // Check whether this identifier is preceded by another `->` (chained access)
     if i >= 2 && chars[i - 2] == '-' && chars[i - 1] == '>' {
-        // We have something like  `expr->ident->` — extract inner subject
+        // We have something like  `expr->ident->` — recursively extract
+        // the full chain so that `$this->a->b->` produces `$this->a->b`.
         let inner_arrow = i - 2;
-        let inner_subject = extract_simple_variable(chars, inner_arrow);
+        let inner_subject = extract_arrow_subject(chars, inner_arrow);
         if !inner_subject.is_empty() {
             let prop: String = chars[ident_start..ident_end].iter().collect();
             return format!("{}->{}", inner_subject, prop);
@@ -348,7 +349,10 @@ pub(crate) fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<S
         {
             return Some(format!("{}->{}", inner_call, rhs));
         }
-        let inner_subject = extract_simple_variable(chars, i - 2);
+        // Use `extract_arrow_subject` instead of `extract_simple_variable`
+        // so that property chains like `$this->users->first()` are fully
+        // captured as `$this->users->first()` rather than `users->first()`.
+        let inner_subject = extract_arrow_subject(chars, arrow_pos);
         if !inner_subject.is_empty() {
             return Some(format!("{}->{}", inner_subject, rhs));
         }

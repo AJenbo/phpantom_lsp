@@ -51,7 +51,10 @@ fn method_tag_no_return_type() {
     );
     assert!(methods[0].parameters[0].is_required);
     assert_eq!(methods[0].parameters[1].name, "$data");
-    assert_eq!(methods[0].parameters[1].type_hint.as_deref(), Some("array"));
+    assert_eq!(
+        methods[0].parameters[1].type_hint.as_deref(),
+        Some("array<string, mixed>")
+    );
     assert!(methods[0].parameters[1].is_required);
     assert_eq!(methods[0].parameters[2].name, "$connection");
     assert_eq!(
@@ -237,10 +240,13 @@ fn property_tag_no_type() {
 }
 
 #[test]
-fn property_tag_generic_stripped() {
+fn property_tag_generic_preserved() {
     let doc = "/** @property Collection<int, Model> $items */";
     let props = extract_property_tags(doc);
-    assert_eq!(props, vec![("items".to_string(), "Collection".to_string())]);
+    assert_eq!(
+        props,
+        vec![("items".to_string(), "Collection<int, Model>".to_string())]
+    );
 }
 
 #[test]
@@ -320,9 +326,12 @@ fn return_type_nullable_union() {
 }
 
 #[test]
-fn return_type_generic_stripped() {
+fn return_type_generic_preserved() {
     let doc = "/** @return Collection<int, Model> */";
-    assert_eq!(extract_return_type(doc), Some("Collection".into()));
+    assert_eq!(
+        extract_return_type(doc),
+        Some("Collection<int, Model>".into())
+    );
 }
 
 // ── extract_var_type ────────────────────────────────────────────────
@@ -391,11 +400,11 @@ fn var_type_with_name_description_not_var() {
 }
 
 #[test]
-fn var_type_with_name_generic_stripped() {
+fn var_type_with_name_generic_preserved() {
     let doc = "/** @var Collection<int, User> $items */";
     assert_eq!(
         extract_var_type_with_name(doc),
-        Some(("Collection".into(), Some("$items".into())))
+        Some(("Collection<int, User>".into(), Some("$items".into())))
     );
 }
 
@@ -582,8 +591,52 @@ fn clean_leading_backslash() {
 }
 
 #[test]
-fn clean_generic() {
-    assert_eq!(clean_type("Collection<int, Model>"), "Collection");
+fn clean_generic_preserved() {
+    // clean_type now preserves generic parameters for downstream resolution.
+    assert_eq!(
+        clean_type("Collection<int, Model>"),
+        "Collection<int, Model>"
+    );
+}
+
+#[test]
+fn base_class_name_strips_generics() {
+    // base_class_name strips generics for plain class-name lookups.
+    assert_eq!(base_class_name("Collection<int, Model>"), "Collection");
+}
+
+#[test]
+fn base_class_name_fqn_with_generics() {
+    assert_eq!(
+        base_class_name("\\App\\Models\\Collection<int, User>"),
+        "App\\Models\\Collection"
+    );
+}
+
+#[test]
+fn clean_type_nested_generic() {
+    assert_eq!(
+        clean_type("array<int, Collection<string, User>>"),
+        "array<int, Collection<string, User>>"
+    );
+}
+
+#[test]
+fn clean_type_generic_with_nullable_union() {
+    // `Collection<int, User>|null` → strip null, keep generics
+    assert_eq!(
+        clean_type("Collection<int, User>|null"),
+        "Collection<int, User>"
+    );
+}
+
+#[test]
+fn clean_type_generic_union_inside_angle_brackets() {
+    // `|` inside `<…>` must not be treated as a union separator
+    assert_eq!(
+        clean_type("Collection<int|string, User>|null"),
+        "Collection<int|string, User>"
+    );
 }
 
 #[test]

@@ -37,42 +37,188 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
     (s, "")
 }
 
-/// Clean a raw type string from a docblock:
-///   - Strip leading `\` (PHP fully-qualified prefix)
-///   - Handle `TypeName|null` → `?TypeName` normalisation is intentionally
-///     NOT done here so that downstream code (which already strips `?`) can
-///     handle it uniformly.
+/// Split a type string on `|` at nesting depth 0, respecting `<…>` and
+/// `(…)` nesting.
+///
+/// Returns a `Vec` with at least one element.  If there is no `|` at
+/// depth 0, the returned vector contains the entire input as a single
+/// element.
+///
+/// # Examples
+///
+/// - `"Foo|null"` → `["Foo", "null"]`
+/// - `"Collection<int|string, User>|null"` → `["Collection<int|string, User>", "null"]`
+/// - `"Foo"` → `["Foo"]`
+pub(crate) fn split_union_depth0(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut start = 0;
+
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '|' if depth_angle == 0 && depth_paren == 0 => {
+                parts.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+/// Clean a raw type string from a docblock, **preserving** generic
+/// parameters so that downstream resolution can apply generic
+/// substitution.
+///
+/// Specifically this function:
+///   - Strips leading `\` (PHP fully-qualified prefix)
+///   - Strips trailing punctuation (`.`, `,`) that could leak from
+///     docblock descriptions
+///   - Handles `TypeName|null` → `TypeName` (using depth-0 splitting so
+///     that `Collection<int|string, User>|null` is handled correctly)
+///
+/// Generic parameters like `<int, User>` are **not** stripped.  Use
+/// [`base_class_name`] when you need just the unparameterised class name.
 pub fn clean_type(raw: &str) -> String {
     let s = raw.strip_prefix('\\').unwrap_or(raw);
 
-    // Strip generic parameters like `Collection<int, Model>` → `Collection`
-    // Our type resolution only works with simple class names.
-    let s = if let Some(idx) = s.find('<') {
-        &s[..idx]
-    } else {
-        s
-    };
-
-    // Also strip trailing punctuation that could leak from docblocks
+    // Strip trailing punctuation that could leak from docblocks
     // (e.g. trailing `.` or `,` in descriptions).
+    // Be careful not to strip `,` or `.` that is inside `<…>`.
     let s = s.trim_end_matches(['.', ',']);
 
-    // Handle `TypeName|null` → extract the non-null part
-    if s.contains('|') {
-        let parts: Vec<&str> = s
-            .split('|')
+    // Handle `TypeName|null` → extract the non-null part, using depth-0
+    // splitting so that `|` inside `<…>` is not mistaken for a union
+    // separator.
+    let parts = split_union_depth0(s);
+    if parts.len() > 1 {
+        let non_null: Vec<&str> = parts
+            .into_iter()
             .map(|p| p.trim())
             .filter(|p| !p.eq_ignore_ascii_case("null"))
             .collect();
 
-        if parts.len() == 1 {
-            return parts[0].to_string();
+        if non_null.len() == 1 {
+            return non_null[0].to_string();
         }
         // Multiple non-null parts → keep as union
-        return parts.join("|");
+        if non_null.len() > 1 {
+            return non_null.join("|");
+        }
     }
 
     s.to_string()
+}
+
+/// Extract the base (unparameterised) class name from a type string,
+/// stripping any generic parameters.
+///
+/// This is the function to use when you need a plain class name for
+/// lookups (e.g. mixin resolution, type assertion matching) and do
+/// **not** want to carry generic arguments forward.
+///
+/// # Examples
+///
+/// - `"Collection<int, User>"` → `"Collection"`
+/// - `"\\App\\Models\\User"` → `"App\\Models\\User"`
+/// - `"?Foo"` → `"Foo"`
+/// - `"Foo|null"` → `"Foo"`
+pub fn base_class_name(raw: &str) -> String {
+    let cleaned = clean_type(raw);
+    strip_generics(&cleaned)
+}
+
+/// Strip generic parameters from a (already cleaned) type string.
+///
+/// `"Collection<int, User>"` → `"Collection"`
+/// `"Foo"` → `"Foo"`
+pub(crate) fn strip_generics(s: &str) -> String {
+    if let Some(idx) = s.find('<') {
+        s[..idx].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+/// Parse a type string into its base class name and generic arguments.
+///
+/// Returns `(base_name, args)` where `args` is empty if the type has no
+/// generic parameters.
+///
+/// # Examples
+///
+/// - `"Collection<int, User>"` → `("Collection", ["int", "User"])`
+/// - `"array<int, list<User>>"` → `("array", ["int", "list<User>"])`
+/// - `"Foo"` → `("Foo", [])`
+pub(crate) fn parse_generic_args(type_str: &str) -> (&str, Vec<&str>) {
+    let angle_pos = match type_str.find('<') {
+        Some(pos) => pos,
+        None => return (type_str, vec![]),
+    };
+
+    let base = &type_str[..angle_pos];
+
+    // Find the matching closing `>`
+    let rest = &type_str[angle_pos + 1..];
+    let close_pos = find_matching_close(rest);
+    let inner = &rest[..close_pos];
+
+    let args = split_generic_params(inner);
+    (base, args)
+}
+
+/// Find the position of the matching `>` for an opening `<` that has
+/// already been consumed.  `s` starts right after the `<`.
+fn find_matching_close(s: &str) -> usize {
+    let mut depth = 1i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+    }
+    // Fallback: end of string (malformed type).
+    s.len()
+}
+
+/// Split generic arguments on commas at depth 0, respecting `<…>` and
+/// `(…)` nesting.
+fn split_generic_params(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            ',' if depth_angle == 0 && depth_paren == 0 => {
+                parts.push(s[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let last = s[start..].trim();
+    if !last.is_empty() {
+        parts.push(last);
+    }
+    parts
 }
 
 /// Strip the nullable `?` prefix from a type string.
@@ -82,7 +228,14 @@ pub(crate) fn strip_nullable(type_str: &str) -> &str {
 
 /// Check whether a type name is a built-in scalar (i.e. can never be an object).
 pub(crate) fn is_scalar(type_name: &str) -> bool {
-    let lower = type_name.to_ascii_lowercase();
+    // Strip generic parameters before checking so that `array<int, User>`
+    // is still recognised as a scalar base type.
+    let base = if let Some(idx) = type_name.find('<') {
+        &type_name[..idx]
+    } else {
+        type_name
+    };
+    let lower = base.to_ascii_lowercase();
     SCALAR_TYPES.contains(&lower.as_str())
 }
 
@@ -108,7 +261,8 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
     // ── Handle `Type[]` shorthand ───────────────────────────────────────
     if let Some(base) = s.strip_suffix("[]") {
         let cleaned = clean_type(base);
-        if !cleaned.is_empty() && !is_scalar(&cleaned) {
+        let base_name = strip_generics(&cleaned);
+        if !base_name.is_empty() && !is_scalar(&base_name) {
             return Some(cleaned);
         }
         // e.g. `int[]` — no class element type
@@ -127,8 +281,9 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
     // `["int", "Collection<string, User>"]`.
     let value_part = split_last_generic_param(inner);
     let cleaned = clean_type(value_part.trim());
+    let base_name = strip_generics(&cleaned);
 
-    if cleaned.is_empty() || is_scalar(&cleaned) {
+    if base_name.is_empty() || is_scalar(&base_name) {
         return None;
     }
     Some(cleaned)

@@ -16,7 +16,7 @@ use crate::types::{AssertionKind, MethodInfo, ParameterInfo, TypeAssertion, Visi
 
 use crate::types::{ConditionalReturnType, ParamCondition};
 
-use super::types::{clean_type, is_scalar, split_type_token, strip_nullable};
+use super::types::{base_class_name, clean_type, is_scalar, split_type_token, strip_nullable};
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ pub fn extract_mixin_tags(docblock: &str) -> Vec<String> {
             None => continue,
         };
 
-        let cleaned = clean_type(class_name);
+        let cleaned = base_class_name(class_name);
         if !cleaned.is_empty() {
             results.push(cleaned);
         }
@@ -483,33 +483,30 @@ pub fn extract_property_tags(docblock: &str) -> Vec<(String, String)> {
 
         // The type may be a compound like `null|int`, `?Foo`, or a generic
         // like `Collection<int, Model>` that spans multiple whitespace-
-        // delimited tokens.  We take the first token as the type (for
-        // `clean_type` purposes) and then scan forward until we find a
-        // token starting with `$`.
+        // delimited tokens.  We use `split_type_token` to extract the full
+        // type (respecting `<…>` nesting) and then scan the remainder for
+        // the `$name`.
         //
         // Format: @property Type $name  (or)  @property $name
-        let mut parts = rest.split_whitespace();
-        let first = match parts.next() {
-            Some(t) => t,
-            None => continue,
-        };
-
-        let (type_str, prop_name) = if first.starts_with('$') {
+        if rest.starts_with('$') {
             // No explicit type: `@property $name`
-            (None, first)
-        } else {
-            // Type is the first token; scan forward to find the `$name`.
-            let mut found_name = None;
-            for token in parts {
-                if token.starts_with('$') {
-                    found_name = Some(token);
-                    break;
-                }
+            let prop_name = rest.split_whitespace().next().unwrap_or(rest);
+            let name = prop_name.strip_prefix('$').unwrap_or(prop_name);
+            if name.is_empty() {
+                continue;
             }
-            match found_name {
-                Some(name) => (Some(first), name),
-                None => continue,
-            }
+            results.push((name.to_string(), String::new()));
+            continue;
+        }
+
+        // Extract the type token, respecting `<…>` nesting so that
+        // generics like `Collection<int, Model>` are treated as one unit.
+        let (type_token, remainder) = split_type_token(rest);
+
+        // Find the `$name` in the remainder.
+        let prop_name = match remainder.split_whitespace().find(|t| t.starts_with('$')) {
+            Some(name) => name,
+            None => continue,
         };
 
         let name = prop_name.strip_prefix('$').unwrap_or(prop_name);
@@ -517,8 +514,8 @@ pub fn extract_property_tags(docblock: &str) -> Vec<(String, String)> {
             continue;
         }
 
-        let cleaned = type_str.map(clean_type);
-        results.push((name.to_string(), cleaned.unwrap_or_default()));
+        let cleaned = clean_type(type_token);
+        results.push((name.to_string(), cleaned));
     }
 
     results
@@ -1109,8 +1106,9 @@ fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
                 return None;
             }
 
-            // The type is the first whitespace-delimited token.
-            let type_str = rest.split_whitespace().next()?;
+            // Extract the type token, respecting `<…>` nesting so that
+            // generics like `Collection<int, User>` are treated as one unit.
+            let (type_str, _remainder) = split_type_token(rest);
 
             return Some(clean_type(type_str));
         }

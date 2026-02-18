@@ -2217,3 +2217,899 @@ async fn test_method_template_different_param_name() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Generic context preservation through clean_type ────────────────────────
+//
+// These tests verify that when a property or method return type carries
+// generic parameters (e.g. `Collection<int, User>`), the generic context
+// is preserved and applied so that further chaining resolves correctly.
+// This was previously broken because `clean_type` stripped `<…>` generics.
+
+/// Test: a property typed as `Collection<int, User>` via `@var` docblock
+/// should resolve to `Collection` with `TValue → User`, so chaining
+/// `->first()->` offers `User`'s methods.
+#[tokio::test]
+async fn test_generic_property_type_preserves_context() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_property_context.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue */\n",
+        "    public function first() {}\n",
+        "    /** @return TValue[] */\n",
+        "    public function all() {}\n",
+        "}\n",
+        "\n",
+        "class User {\n",
+        "    public function getName(): string {}\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "\n",
+        "class UserRepository {\n",
+        "    /** @var Collection<int, User> */\n",
+        "    public $users;\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->users->first()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 22,
+                character: 37,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve Collection<int, User>::first() → User and show 'getName', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should resolve Collection<int, User>::first() → User and show 'getEmail', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: a method with `@return Collection<int, User>` preserves the
+/// generic context so that chaining through the return type works.
+#[tokio::test]
+async fn test_generic_return_type_preserves_context() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_return_context.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue */\n",
+        "    public function first() {}\n",
+        "}\n",
+        "\n",
+        "class Product {\n",
+        "    public function getPrice(): float {}\n",
+        "    public function getSku(): string {}\n",
+        "}\n",
+        "\n",
+        "class Catalog {\n",
+        "    /** @return Collection<int, Product> */\n",
+        "    public function getProducts() {}\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->getProducts()->first()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 20,
+                character: 45,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getPrice"),
+                "Should resolve Collection<int, Product>::first() → Product and show 'getPrice', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getSku"),
+                "Should resolve Collection<int, Product>::first() → Product and show 'getSku', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: a variable assigned from a method returning a generic type
+/// preserves generic context for further chaining.
+#[tokio::test]
+async fn test_generic_context_through_variable_assignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_var_assign.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "class Box {\n",
+        "    /** @return T */\n",
+        "    public function unwrap() {}\n",
+        "}\n",
+        "\n",
+        "class Gift {\n",
+        "    public function open(): string {}\n",
+        "}\n",
+        "\n",
+        "class Store {\n",
+        "    /** @return Box<Gift> */\n",
+        "    public function getGiftBox() {}\n",
+        "\n",
+        "    function test() {\n",
+        "        $box = $this->getGiftBox();\n",
+        "        $box->unwrap()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 19,
+                character: 28,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"open"),
+                "Should resolve Box<Gift>::unwrap() → Gift and show 'open', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: generic property type via `@var` with a single template param
+/// resolves correctly.
+#[tokio::test]
+async fn test_generic_property_single_template_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_prop_single.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "class Container {\n",
+        "    /** @return T */\n",
+        "    public function get() {}\n",
+        "}\n",
+        "\n",
+        "class Config {\n",
+        "    public function has(string $key): bool {}\n",
+        "    public function all(): array {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    /** @var Container<Config> */\n",
+        "    public $config;\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->config->get()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 19,
+                character: 34,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"has"),
+                "Should resolve Container<Config>::get() → Config and show 'has', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"all"),
+                "Should resolve Container<Config>::get() → Config and show 'all', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: generic context preserved across PSR-4 file boundaries.
+#[tokio::test]
+async fn test_generic_property_context_cross_file_psr4() {
+    let composer_json = r#"{
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        }
+    }"#;
+
+    let collection_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue */\n",
+        "    public function first() {}\n",
+        "    /** @return static */\n",
+        "    public function filter(callable $fn) {}\n",
+        "}\n",
+    );
+
+    let user_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class User {\n",
+        "    public function getName(): string {}\n",
+        "    public function getAge(): int {}\n",
+        "}\n",
+    );
+
+    let service_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class UserService {\n",
+        "    /** @var Collection<int, User> */\n",
+        "    public $users;\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->users->first()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            ("src/Collection.php", collection_php),
+            ("src/User.php", user_php),
+            ("src/UserService.php", service_php),
+        ],
+    );
+
+    let uri = Url::parse("file:///src/UserService.php").unwrap();
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: service_php.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 37,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Cross-file: should resolve Collection<int, User>::first() → User, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getAge"),
+                "Cross-file: should resolve Collection<int, User>::first() → User, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: generic type with nullable union in `@var` (e.g. `Collection<int, User>|null`)
+/// preserves generic context after stripping `|null`.
+#[tokio::test]
+async fn test_generic_nullable_union_preserves_context() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_nullable_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "class Optional {\n",
+        "    /** @return T */\n",
+        "    public function get() {}\n",
+        "}\n",
+        "\n",
+        "class Session {\n",
+        "    public function getId(): string {}\n",
+        "}\n",
+        "\n",
+        "class Handler {\n",
+        "    /** @var Optional<Session>|null */\n",
+        "    public $session;\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->session->get()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 18,
+                character: 35,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getId"),
+                "Should resolve Optional<Session>::get() → Session through nullable union, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: generic context works when the type has no template params
+/// (plain class name in `@return` still works as before).
+#[tokio::test]
+async fn test_non_generic_return_type_still_works() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///non_generic_still_works.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(string $msg): void {}\n",
+        "    public function error(string $msg): void {}\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    /** @return Logger */\n",
+        "    public function getLogger() {}\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->getLogger()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"info"),
+                "Plain @return Logger should still work, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"error"),
+                "Plain @return Logger should still work, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: generic context is preserved when `@extends` and inline generic
+/// `@var` are both in play — they should not conflict.
+#[tokio::test]
+async fn test_generic_extends_and_inline_var_coexist() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_extends_and_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "class BaseRepo {\n",
+        "    /** @return T */\n",
+        "    public function find(int $id) {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue */\n",
+        "    public function first() {}\n",
+        "}\n",
+        "\n",
+        "class Order {\n",
+        "    public function getTotal(): float {}\n",
+        "}\n",
+        "\n",
+        "class Item {\n",
+        "    public function getQuantity(): int {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @extends BaseRepo<Order>\n",
+        " */\n",
+        "class OrderRepo extends BaseRepo {\n",
+        "    /** @var Collection<int, Item> */\n",
+        "    public $lineItems;\n",
+        "\n",
+        "    function testFind() {\n",
+        "        $this->find(1)->\n",
+        "    }\n",
+        "\n",
+        "    function testLineItems() {\n",
+        "        $this->lineItems->first()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Test 1: @extends substitution still works (find() → Order)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 34,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for find()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getTotal"),
+                "@extends BaseRepo<Order>: find() should return Order, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+
+    // Test 2: inline @var generic also works (lineItems->first() → Item)
+    let completion_params2 = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 38,
+                character: 42,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result2 = backend.completion(completion_params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Completion should return results for lineItems->first()"
+    );
+
+    match result2.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getQuantity"),
+                "@var Collection<int, Item>: first() should return Item, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: directly accessing members on a property typed as a generic class
+/// (e.g. `$this->collection->`) still offers the collection's own methods.
+#[tokio::test]
+async fn test_generic_property_own_methods_still_visible() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_prop_own_methods.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue */\n",
+        "    public function first() {}\n",
+        "    public function count(): int {}\n",
+        "    public function isEmpty(): bool {}\n",
+        "}\n",
+        "\n",
+        "class Tag {\n",
+        "    public function getLabel(): string {}\n",
+        "}\n",
+        "\n",
+        "class Article {\n",
+        "    /** @var Collection<int, Tag> */\n",
+        "    public $tags;\n",
+        "\n",
+        "    function test() {\n",
+        "        $this->tags->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 21,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"first"),
+                "Collection's own 'first' method should be visible, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"count"),
+                "Collection's own 'count' method should be visible, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"isEmpty"),
+                "Collection's own 'isEmpty' method should be visible, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test: `$box = $this->giftBox` where the property has `@var Box<Gift>`
+/// should resolve `$box` to `Box<Gift>`, so `$box->unwrap()->` offers
+/// `Gift`'s methods.
+#[tokio::test]
+async fn test_generic_property_assignment_to_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///generic_prop_assign.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "class Box {\n",
+        "    /** @return T */\n",
+        "    public function unwrap() {}\n",
+        "}\n",
+        "\n",
+        "class Gift {\n",
+        "    public function open(): string {}\n",
+        "    public function getTag(): string {}\n",
+        "}\n",
+        "\n",
+        "class GiftShop {\n",
+        "    /** @var Box<Gift> */\n",
+        "    public $giftBox;\n",
+        "\n",
+        "    function test() {\n",
+        "        $box = $this->giftBox;\n",
+        "        $box->unwrap()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 20,
+                character: 28,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"open"),
+                "Should resolve $box = $this->giftBox (Box<Gift>), unwrap() → Gift, show 'open', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getTag"),
+                "Should resolve $box = $this->giftBox (Box<Gift>), unwrap() → Gift, show 'getTag', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

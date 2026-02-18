@@ -19,6 +19,8 @@
 ///   resolution at call sites.
 use crate::Backend;
 use crate::docblock;
+use crate::docblock::types::{parse_generic_args, split_union_depth0, strip_generics};
+use crate::inheritance::apply_generic_args;
 use crate::types::*;
 
 use super::conditional_resolution::{
@@ -547,7 +549,10 @@ impl Backend {
     /// Handles:
     ///   - Nullable types: `?Foo` → strips `?`, resolves `Foo`
     ///   - Union types: `A|B|C` → resolves each part independently
+    ///     (respects `<…>` nesting so `Collection<int|string>` is not split)
     ///   - Intersection types: `A&B` → resolves each part independently
+    ///   - Generic types: `Collection<int, User>` → resolves `Collection`,
+    ///     then applies generic substitution (`TKey→int`, `TValue→User`)
     ///   - `self` / `static` / `$this` → owning class
     ///   - Scalar/built-in types (`int`, `string`, `bool`, `float`, `array`,
     ///     `void`, `null`, `mixed`, `never`, `object`, `callable`, `iterable`,
@@ -568,10 +573,11 @@ impl Backend {
             .and_then(|h| h.strip_suffix(')'))
             .unwrap_or(hint);
 
-        // ── Union type: split on `|` and resolve each part ──
-        if hint.contains('|') {
+        // ── Union type: split on `|` at depth 0, respecting `<…>` nesting ──
+        let union_parts = split_union_depth0(hint);
+        if union_parts.len() > 1 {
             let mut results = Vec::new();
-            for part in hint.split('|') {
+            for part in union_parts {
                 let part = part.trim();
                 if part.is_empty() {
                     continue;
@@ -625,13 +631,34 @@ impl Backend {
                 .collect();
         }
 
-        // Try local (current-file) lookup by last segment
-        let lookup = hint.rsplit('\\').next().unwrap_or(hint);
-        if let Some(cls) = all_classes.iter().find(|c| c.name == lookup) {
-            return vec![cls.clone()];
-        }
+        // ── Parse generic arguments (if any) ──
+        // `Collection<int, User>` → base_hint = `Collection`, generic_args = ["int", "User"]
+        // `Foo`                   → base_hint = `Foo`,        generic_args = []
+        let (base_hint, generic_args) = parse_generic_args(hint);
 
-        // Fallback: cross-file / PSR-4 with the full hint string
-        class_loader(hint).into_iter().collect()
+        // For class lookup, strip any remaining generics from the base
+        // (should already be clean, but defensive) and use the short name.
+        let base_clean = strip_generics(base_hint.strip_prefix('\\').unwrap_or(base_hint));
+        let lookup = base_clean.rsplit('\\').next().unwrap_or(&base_clean);
+
+        // Try local (current-file) lookup by last segment
+        let found = all_classes
+            .iter()
+            .find(|c| c.name == lookup)
+            .cloned()
+            .or_else(|| class_loader(base_hint));
+
+        match found {
+            Some(cls) => {
+                // Apply generic substitution if the type hint carried
+                // generic arguments and the class has template parameters.
+                if !generic_args.is_empty() && !cls.template_params.is_empty() {
+                    vec![apply_generic_args(&cls, &generic_args)]
+                } else {
+                    vec![cls]
+                }
+            }
+            None => vec![],
+        }
     }
 }

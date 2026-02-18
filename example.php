@@ -966,3 +966,63 @@ class AbstractRepository2 {
         $this->load(User::class)->getEmail();    // Resolved: User
     }
 }
+
+// ─── Generic Context Preservation ───────────────────────────────────────────
+//
+// When a property or method return type carries generic parameters
+// (e.g. `Collection<int, User>`), the generic context is preserved so
+// that template parameters are substituted on the resolved class.
+// This enables full type inference through chained access.
+
+/**
+ * A generic wrapper with a single template parameter.
+ *
+ * @template T
+ */
+class Box
+{
+    /** @var T */
+    public $value;
+
+    /** @return T */
+    public function unwrap() { return $this->value; }
+}
+
+class Gift
+{
+    public function open(): string { return 'surprise!'; }
+    public function getTag(): string { return 'birthday'; }
+}
+
+class GiftShop
+{
+    /** @var Box<Gift> */
+    public $giftBox;
+
+    /** @return TypedCollection<int, Gift> */
+    public function getGifts(): TypedCollection { return new TypedCollection(); }
+
+    public function demo(): void {
+        // ── Property with generic @var ──
+        // $this->giftBox is Box<Gift>, so unwrap() returns Gift.
+        $this->giftBox->unwrap()->open();        // Resolved: Gift::open()
+        $this->giftBox->unwrap()->getTag();       // Resolved: Gift::getTag()
+
+        // ── Method with generic @return ──
+        // getGifts() returns TypedCollection<int, Gift>, so first() returns Gift.
+        $this->getGifts()->first()->open();       // Resolved: Gift::open()
+        $this->getGifts()->first()->getTag();     // Resolved: Gift::getTag()
+
+        // ── Property chain: $this->prop->method() ──
+        // The subject extraction now captures the full chain so that
+        // $this->giftBox->unwrap() correctly resolves through the property.
+        $box = $this->giftBox;
+        $box->unwrap()->open();                   // Resolved: Gift::open()
+
+        // ── Nullable union with generics ──
+        // `Box<Gift>|null` strips |null but preserves <Gift>.
+        /** @var Box<Gift>|null $maybeBox */
+        $maybeBox = null;
+        $maybeBox->unwrap()->getTag();            // Resolved: Gift::getTag()
+    }
+}

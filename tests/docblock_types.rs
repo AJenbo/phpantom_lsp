@@ -1328,8 +1328,8 @@ async fn test_docblock_return_generic_type_stripped() {
     assert_eq!(functions.len(), 1);
     assert_eq!(
         functions[0].return_type.as_deref(),
-        Some("Collection"),
-        "@return Collection<int, Model> should resolve to Collection"
+        Some("Collection<int, Model>"),
+        "@return Collection<int, Model> should preserve generic parameters"
     );
 }
 
