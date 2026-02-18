@@ -1234,3 +1234,62 @@ class PropertyChainDemo {
 $myOrder = new Order(new Customer('hello@world.com', new Address()), 42.0);
 $myOrder->customer->address->city;    // Resolved: Address::$city
 $myOrder->customer->address->format(); // Resolved: Address::format()
+
+// ═══════════════════════════════════════════════════════════════════════
+// §15  Constructor @param → Promoted Property Override
+// ═══════════════════════════════════════════════════════════════════════
+// Promoted constructor properties now check `@param` docblock annotations
+// for a more specific type than the native hint.  For example,
+// `@param list<User> $users` overrides native `array $users`.
+
+class Ingredient {
+    public string $name;
+    public float $quantity;
+
+    public function format(): string {
+        return "{$this->quantity}x {$this->name}";
+    }
+}
+
+class Recipe {
+    /**
+     * @param list<Ingredient> $ingredients
+     * @param Collection<int, string> $tags
+     */
+    public function __construct(
+        public array $ingredients,     // Overridden to list<Ingredient>
+        public object $tags,           // Overridden to Collection<int, string>
+        public string $title,          // No override — scalar stays scalar
+    ) {}
+
+    public function demo(): void {
+        // $this->ingredients has type `list<Ingredient>` from @param,
+        // not just `array` from the native hint.
+        // This means foreach + property chain works:
+        foreach ($this->ingredients as $ingredient) {
+            $ingredient->name;      // Resolved: Ingredient::$name
+            $ingredient->format();  // Resolved: Ingredient::format()
+        }
+    }
+}
+
+class Kitchen {
+    /**
+     * @param Recipe $recipe
+     */
+    public function __construct(
+        public object $recipe,  // Overridden to Recipe via @param
+    ) {}
+
+    public function cook(): void {
+        // $this->recipe is Recipe (not object) thanks to @param override.
+        $this->recipe->title;           // Resolved: Recipe::$title
+        $this->recipe->ingredients;     // Resolved: Recipe::$ingredients
+    }
+}
+
+// Property chains on non-$this variables also benefit:
+function prepareKitchen(): void {
+    $kitchen = new Kitchen(new Recipe([], new \stdClass(), 'Pasta'));
+    $kitchen->recipe->title;  // Resolved: Recipe::$title via @param override + $var chain
+}

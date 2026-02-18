@@ -784,6 +784,196 @@ class User {
     assert_eq!(id.type_hint.as_deref(), Some("int"));
 }
 
+// ─── Promoted Property @param Override Tests ────────────────────────────────
+
+/// When a constructor docblock has `@param list<User> $users` and the native
+/// hint is `array`, the promoted property should get `list<User>` as its type.
+#[tokio::test]
+async fn test_parse_promoted_property_param_docblock_override() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class UserService {
+    /**
+     * @param list<User> $users
+     * @param string $name
+     */
+    public function __construct(
+        public array $users,
+        public string $name,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    let users = cls.properties.iter().find(|p| p.name == "users").unwrap();
+    assert_eq!(
+        users.type_hint.as_deref(),
+        Some("list<User>"),
+        "@param list<User> should override native `array` for promoted property"
+    );
+
+    // `string` is a scalar — @param string should NOT override to a class name.
+    // Both native and docblock agree, so the result stays `string`.
+    let name = cls.properties.iter().find(|p| p.name == "name").unwrap();
+    assert_eq!(
+        name.type_hint.as_deref(),
+        Some("string"),
+        "Scalar @param string should keep native `string`"
+    );
+}
+
+/// When the docblock provides a class type but the native hint is also a class,
+/// the docblock should win (more specific).
+#[tokio::test]
+async fn test_parse_promoted_property_param_class_override() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Repository {
+    /**
+     * @param UserCollection $items
+     */
+    public function __construct(
+        public object $items,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    let items = cls.properties.iter().find(|p| p.name == "items").unwrap();
+    assert_eq!(
+        items.type_hint.as_deref(),
+        Some("UserCollection"),
+        "@param UserCollection should override native `object` for promoted property"
+    );
+}
+
+/// Without a docblock, promoted property should keep its native type as before.
+#[tokio::test]
+async fn test_parse_promoted_property_no_docblock_unchanged() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Service {
+    public function __construct(
+        public array $items,
+        private string $name,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    let items = cls.properties.iter().find(|p| p.name == "items").unwrap();
+    assert_eq!(items.type_hint.as_deref(), Some("array"));
+
+    let name = cls.properties.iter().find(|p| p.name == "name").unwrap();
+    assert_eq!(name.type_hint.as_deref(), Some("string"));
+}
+
+/// When the docblock has a `@param` for a non-promoted parameter, it should
+/// not affect promoted properties that don't have their own `@param`.
+#[tokio::test]
+async fn test_parse_promoted_property_param_only_matching() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Service {
+    /**
+     * @param LoggerInterface $logger
+     */
+    public function __construct(
+        public LoggerInterface $logger,
+        public array $data,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    // $logger has matching @param — both agree on LoggerInterface
+    let logger = cls.properties.iter().find(|p| p.name == "logger").unwrap();
+    assert_eq!(logger.type_hint.as_deref(), Some("LoggerInterface"));
+
+    // $data has no @param — should keep native `array`
+    let data = cls.properties.iter().find(|p| p.name == "data").unwrap();
+    assert_eq!(data.type_hint.as_deref(), Some("array"));
+}
+
+/// When a native hint is `int` (scalar) and @param says `UserId` (class),
+/// `resolve_effective_type` should keep the native `int` because scalar
+/// should not be overridden by a class name.
+#[tokio::test]
+async fn test_parse_promoted_property_param_scalar_not_overridden_by_class() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class Service {
+    /**
+     * @param UserId $id
+     */
+    public function __construct(
+        public int $id,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    let id = cls.properties.iter().find(|p| p.name == "id").unwrap();
+    assert_eq!(
+        id.type_hint.as_deref(),
+        Some("int"),
+        "Native scalar `int` should not be overridden by docblock class `UserId`"
+    );
+}
+
+/// Generic Collection type in @param should override a plain `object` native hint.
+#[tokio::test]
+async fn test_parse_promoted_property_param_generic_override() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class OrderService {
+    /**
+     * @param Collection<int, Order> $orders
+     * @param array<string, mixed> $config
+     */
+    public function __construct(
+        public object $orders,
+        public array $config,
+    ) {}
+}
+"#;
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let cls = &classes[0];
+    let orders = cls.properties.iter().find(|p| p.name == "orders").unwrap();
+    assert_eq!(
+        orders.type_hint.as_deref(),
+        Some("Collection<int, Order>"),
+        "@param Collection<int, Order> should override native `object`"
+    );
+
+    // array<string, mixed> — the base is `array` which is scalar,
+    // so resolve_effective_type keeps the native `array`.
+    let config = cls.properties.iter().find(|p| p.name == "config").unwrap();
+    assert_eq!(
+        config.type_hint.as_deref(),
+        Some("array"),
+        "Native `array` should not be overridden by scalar-base @param"
+    );
+}
+
 // ─── Standalone Function Parsing Tests ──────────────────────────────────────
 
 #[tokio::test]

@@ -660,6 +660,15 @@ pub fn should_override_type(docblock_type: &str, native_type: &str) -> bool {
     // Strip nullable wrapper from the native hint for analysis.
     let clean_native = strip_nullable(native_type);
 
+    // `array` and `iterable` are broad container types that docblocks
+    // commonly refine (e.g. `array` → `list<User>`, `iterable` →
+    // `Collection<int, Order>`).  Allow override for these even though
+    // they appear in SCALAR_TYPES.
+    let native_lower = clean_native.to_ascii_lowercase();
+    if native_lower == "array" || native_lower == "iterable" {
+        return true;
+    }
+
     // If the native type is a union or intersection, check each component.
     if clean_native.contains('|') || clean_native.contains('&') {
         let parts: Vec<&str> = clean_native

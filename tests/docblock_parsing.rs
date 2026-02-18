@@ -498,8 +498,40 @@ fn no_override_bool_with_class() {
 }
 
 #[test]
-fn no_override_array_with_class() {
-    assert!(!should_override_type("Session", "array"));
+fn override_array_with_class() {
+    // `array` is a broad container type that docblocks commonly refine
+    // (e.g. `@param list<User> $users` with native `array`).
+    // Non-scalar docblock types should be allowed to override it.
+    assert!(should_override_type("Session", "array"));
+}
+
+#[test]
+fn override_array_with_generic_list() {
+    // `list<User>` is the most common refinement of native `array`.
+    assert!(should_override_type("list<User>", "array"));
+}
+
+#[test]
+fn override_array_with_generic_collection() {
+    assert!(should_override_type("Collection<int, Order>", "array"));
+}
+
+#[test]
+fn override_iterable_with_class() {
+    // `iterable` is another broad container type that docblocks refine.
+    assert!(should_override_type("Collection<int, User>", "iterable"));
+}
+
+#[test]
+fn override_nullable_array_with_class() {
+    assert!(should_override_type("list<User>", "?array"));
+}
+
+#[test]
+fn no_override_array_with_scalar_docblock() {
+    // If the docblock type is itself scalar-based (e.g. `array<string, mixed>`),
+    // there's no value in overriding — it wouldn't help with class resolution.
+    assert!(!should_override_type("array<string, mixed>", "array"));
 }
 
 #[test]

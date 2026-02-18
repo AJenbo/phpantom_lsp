@@ -418,16 +418,39 @@ impl Backend {
                     // Extract promoted properties from constructor parameters.
                     // A promoted property is a constructor parameter with a
                     // visibility modifier (e.g. `public`, `private`, `protected`).
+                    //
+                    // When the constructor has a docblock, `@param` annotations
+                    // can provide a more specific type than the native hint
+                    // (e.g. `@param list<User> $users` vs native `array $users`).
+                    // We apply `resolve_effective_type()` to pick the winner.
                     if name == "__construct" {
+                        // Fetch the constructor docblock once for all promoted params.
+                        let constructor_docblock = doc_ctx.and_then(|ctx| {
+                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
+                        });
+
                         for param in method.parameter_list.parameters.iter() {
                             if param.is_promoted_property() {
                                 let raw_name = param.variable.name.to_string();
                                 let prop_name =
                                     raw_name.strip_prefix('$').unwrap_or(&raw_name).to_string();
-                                let type_hint =
+                                let native_hint =
                                     param.hint.as_ref().map(|h| Self::extract_hint_string(h));
                                 let prop_visibility =
                                     Self::extract_visibility(param.modifiers.iter());
+
+                                // Check for a `@param` docblock annotation
+                                // that overrides the native type hint.
+                                let type_hint = if let Some(doc) = constructor_docblock {
+                                    let param_doc_type =
+                                        docblock::extract_param_raw_type(doc, &raw_name);
+                                    docblock::resolve_effective_type(
+                                        native_hint.as_deref(),
+                                        param_doc_type.as_deref(),
+                                    )
+                                } else {
+                                    native_hint
+                                };
 
                                 properties.push(PropertyInfo {
                                     name: prop_name,

@@ -1034,3 +1034,389 @@ async fn test_completion_promoted_property_type_resolves_for_chaining() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── @param Docblock Override on Promoted Properties ────────────────────────
+
+/// When a promoted property has native type `array` but the constructor
+/// docblock has `@param list<User> $users`, the promoted property should
+/// get the more specific `list<User>` type, enabling property chain
+/// completion on the element type.
+#[tokio::test]
+async fn test_completion_promoted_property_param_override_basic() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted_param_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public int $id;\n",
+        "    public string $email;\n",
+        "}\n",
+        "class UserService {\n",
+        "    /**\n",
+        "     * @param list<User> $users\n",
+        "     */\n",
+        "    public function __construct(\n",
+        "        public array $users,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function demo() {\n",
+        "        $this->users\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Verify that the promoted property exists — complete on `$this->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 14,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $this->users"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("users")),
+                "Should include promoted property 'users'. Got: {:?}",
+                labels
+            );
+        }
+        CompletionResponse::List(_) => panic!("Expected Array response"),
+    }
+}
+
+/// When a promoted property has `@param Collection<int, Order> $orders`
+/// overriding native `object`, completion on `$this->orders->` should
+/// show Collection members (once the type is resolved).
+#[tokio::test]
+async fn test_completion_promoted_property_param_override_generic_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted_generic_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public int $id;\n",
+        "}\n",
+        "class Collection {\n",
+        "    public function first(): mixed {}\n",
+        "    public function count(): int {}\n",
+        "}\n",
+        "class OrderService {\n",
+        "    /**\n",
+        "     * @param Collection<int, Order> $orders\n",
+        "     */\n",
+        "    public function __construct(\n",
+        "        public object $orders,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function demo() {\n",
+        "        $this->orders->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 17,
+                character: 23,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for @param overridden $this->orders->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("first")),
+                "Should include 'first' from Collection via @param override. Got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("count")),
+                "Should include 'count' from Collection via @param override. Got: {:?}",
+                labels
+            );
+        }
+        CompletionResponse::List(_) => panic!("Expected Array response"),
+    }
+}
+
+/// When native type is `int` (concrete scalar) and @param says `UserId`,
+/// the native scalar should win — no override.
+#[tokio::test]
+async fn test_completion_promoted_property_param_scalar_not_overridden() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted_scalar_no_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class UserId {\n",
+        "    public function getValue(): int {}\n",
+        "}\n",
+        "class Service {\n",
+        "    /**\n",
+        "     * @param UserId $id\n",
+        "     */\n",
+        "    public function __construct(\n",
+        "        public int $id,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function demo() {\n",
+        "        $this->id->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // Scalar `int` should not be overridden — no class members to complete.
+    match result {
+        None => {} // acceptable
+        Some(CompletionResponse::Array(items)) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            let meaningful: Vec<&&str> = labels
+                .iter()
+                .filter(|l| !l.contains("PHPantomLSP"))
+                .collect();
+            assert!(
+                meaningful.is_empty(),
+                "Scalar promoted property should not resolve to class. Got: {:?}",
+                labels
+            );
+        }
+        Some(CompletionResponse::List(_)) => panic!("Expected Array response"),
+    }
+}
+
+/// Property chain on non-$this variable with promoted property @param override.
+/// Exercises the combination of both features: $var->prop-> where prop type
+/// comes from a @param docblock override.
+#[tokio::test]
+async fn test_completion_promoted_property_param_override_with_var_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted_var_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(string $msg): void {}\n",
+        "    public function error(string $msg): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    /**\n",
+        "     * @param Logger $logger\n",
+        "     */\n",
+        "    public function __construct(\n",
+        "        public object $logger,\n",
+        "    ) {}\n",
+        "}\n",
+        "function demo() {\n",
+        "    $app = new App(new Logger());\n",
+        "    $app->logger->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 15,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $app->logger-> via @param override"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("info")),
+                "Should include 'info' from Logger via @param override + property chain. Got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("error")),
+                "Should include 'error' from Logger via @param override + property chain. Got: {:?}",
+                labels
+            );
+        }
+        CompletionResponse::List(_) => panic!("Expected Array response"),
+    }
+}
+
+/// Cross-file PSR-4: promoted property with @param override where the
+/// docblock type is in another file.
+#[tokio::test]
+async fn test_completion_promoted_property_param_override_cross_file() {
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+
+    let cache_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class Cache {\n",
+        "    public function get(string $key): mixed {}\n",
+        "    public function set(string $key, mixed $val): void {}\n",
+        "}\n",
+    );
+
+    let service_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class Service {\n",
+        "    /**\n",
+        "     * @param Cache $cache\n",
+        "     */\n",
+        "    public function __construct(\n",
+        "        public object $cache,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function demo() {\n",
+        "        $this->cache->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Cache.php", cache_php),
+            ("src/Service.php", service_php),
+        ],
+    );
+
+    let uri = Url::parse("file:///src/Service.php").unwrap();
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: service_php.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for cross-file @param promoted $this->cache->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("get")),
+                "Should include 'get' from cross-file Cache via @param override. Got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("set")),
+                "Should include 'set' from cross-file Cache via @param override. Got: {:?}",
+                labels
+            );
+        }
+        CompletionResponse::List(_) => panic!("Expected Array response"),
+    }
+}
