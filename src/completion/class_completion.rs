@@ -306,7 +306,7 @@ impl Backend {
         (items, is_incomplete)
     }
 
-    // ─── Catch clause fallback completion ───────────────────────────
+    // ─── Catch clause / throw-new fallback completion ───────────────
 
     /// Check whether a class is a confirmed `\Throwable` descendant using
     /// only already-loaded data from the `ast_map`.
@@ -374,6 +374,43 @@ impl Backend {
         }
     }
 
+    /// Check whether the class identified by `class_name` is a concrete,
+    /// non-abstract `class` (i.e. `ClassLikeKind::Class` and not
+    /// `is_abstract`) in the `ast_map`.
+    ///
+    /// Returns `false` for interfaces, traits, enums, abstract classes,
+    /// and classes that are not currently loaded.  This never triggers
+    /// disk I/O.
+    fn is_concrete_class_in_ast_map(&self, class_name: &str) -> bool {
+        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
+        let last_segment = normalized.rsplit('\\').next().unwrap_or(normalized);
+        let expected_ns: Option<&str> = if normalized.contains('\\') {
+            Some(&normalized[..normalized.len() - last_segment.len() - 1])
+        } else {
+            None
+        };
+
+        let Some(map) = self.ast_map.lock().ok() else {
+            return false;
+        };
+        let nmap = self.namespace_map.lock().ok();
+        for (uri, classes) in map.iter() {
+            if let Some(c) = classes.iter().find(|c| c.name == last_segment) {
+                if let Some(exp_ns) = expected_ns {
+                    let file_ns = nmap
+                        .as_ref()
+                        .and_then(|nm| nm.get(uri))
+                        .and_then(|opt| opt.as_deref());
+                    if file_ns != Some(exp_ns) {
+                        continue;
+                    }
+                }
+                return c.kind == ClassLikeKind::Class && !c.is_abstract;
+            }
+        }
+        false
+    }
+
     /// Collect the FQN of every class that is currently loaded in the
     /// `ast_map`.  Used by `build_catch_class_name_completions` so that
     /// classmap / stub sources can skip classes we already evaluated.
@@ -402,16 +439,21 @@ impl Backend {
 
     /// Build completion items for class names, filtered for Throwable
     /// descendants.  Used as the catch clause fallback when no specific
-    /// `@throws` types were discovered in the try block.
+    /// `@throws` types were discovered in the try block, and for
+    /// `throw new` completion.
     ///
     /// The logic follows this priority:
     ///
-    /// 1. **Loaded classes** (use-imports, same-namespace, class_index):
-    ///    only classes whose parent chain is fully walkable to
-    ///    `\Throwable` / `\Exception` / `\Error` (`must_extend`).
-    /// 2. **Classmap / stubs** (not yet parsed): included *unless* the
-    ///    FQN is already in the loaded set — this prevents non-exception
-    ///    loaded classes from sneaking back in through these sources.
+    /// 1. **Loaded concrete classes** (use-imports, same-namespace,
+    ///    class_index): only classes (not interfaces/traits/enums) whose
+    ///    parent chain is fully walkable to `\Throwable` / `\Exception`
+    ///    / `\Error`.
+    /// 2. **Classmap** entries (not yet parsed) whose short name ends
+    ///    with `Exception` — filtered to exclude already-loaded FQNs.
+    /// 3. **Stub** entries whose short name ends with `Exception` —
+    ///    filtered to exclude already-loaded FQNs.
+    /// 4. **Classmap** entries that do *not* end with `Exception`.
+    /// 5. **Stub** entries that do *not* end with `Exception`.
     pub(crate) fn build_catch_class_name_completions(
         &self,
         file_use_map: &HashMap<String, String>,
@@ -429,12 +471,16 @@ impl Backend {
         // classmap / stub sources can exclude already-evaluated classes.
         let loaded_fqns = self.collect_loaded_fqns();
 
-        // ── 1. Use-imported classes (must_extend Throwable) ─────────
+        // ── 1a. Use-imported classes (must be concrete + Throwable) ─
         for (short_name, fqn) in file_use_map {
             if !short_name.to_lowercase().contains(&prefix_lower) {
                 continue;
             }
             if !seen_fqns.insert(fqn.clone()) {
+                continue;
+            }
+            // Only concrete classes (not interfaces/traits/enums)
+            if !self.is_concrete_class_in_ast_map(fqn) {
                 continue;
             }
             // Strict check: only include if confirmed Throwable descendant
@@ -452,7 +498,7 @@ impl Backend {
             });
         }
 
-        // ── 2. Same-namespace classes (must_extend Throwable) ───────
+        // ── 1b. Same-namespace classes (must be concrete + Throwable)
         // Collect candidates while holding the lock, then drop the lock
         // before calling `is_throwable_descendant` (which re-locks
         // `ast_map` internally — Rust's Mutex is not re-entrant).
@@ -472,12 +518,15 @@ impl Backend {
             drop(nmap);
 
             // Phase 1: collect candidate (name, fqn, is_deprecated)
-            // tuples under the ast_map lock.
+            // tuples under the ast_map lock — only concrete classes.
             let mut candidates: Vec<(String, String, bool)> = Vec::new();
             if let Ok(amap) = self.ast_map.lock() {
                 for uri in &same_ns_uris {
                     if let Some(classes) = amap.get(uri) {
                         for cls in classes {
+                            if cls.kind != ClassLikeKind::Class || cls.is_abstract {
+                                continue;
+                            }
                             if !cls.name.to_lowercase().contains(&prefix_lower) {
                                 continue;
                             }
@@ -508,7 +557,7 @@ impl Backend {
             }
         }
 
-        // ── 3. class_index (must_extend Throwable) ──────────────────
+        // ── 1c. class_index (must be concrete + Throwable) ──────────
         if let Ok(idx) = self.class_index.lock() {
             for fqn in idx.keys() {
                 let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
@@ -516,6 +565,9 @@ impl Backend {
                     continue;
                 }
                 if !seen_fqns.insert(fqn.clone()) {
+                    continue;
+                }
+                if !self.is_concrete_class_in_ast_map(fqn) {
                     continue;
                 }
                 if !self.is_throwable_descendant(fqn, 0) {
@@ -534,10 +586,13 @@ impl Backend {
             }
         }
 
-        // ── 4. Composer classmap (filter out already-loaded) ────────
+        // ── 2. Classmap — names ending with "Exception" ─────────────
+        // ── 4. Classmap — names NOT ending with "Exception" ─────────
+        // We collect both buckets in a single pass over the classmap and
+        // assign different sort_text prefixes so "Exception" entries
+        // appear first.
         if let Ok(cmap) = self.classmap.lock() {
             for fqn in cmap.keys() {
-                // Skip classes we already evaluated in the loaded sources
                 if loaded_fqns.contains(fqn) {
                     continue;
                 }
@@ -548,22 +603,27 @@ impl Backend {
                 if !seen_fqns.insert(fqn.clone()) {
                     continue;
                 }
+                let prefix_num = if short_name.ends_with("Exception") {
+                    "3"
+                } else {
+                    "5"
+                };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(fqn.clone()),
                     insert_text: Some(short_name.to_string()),
                     filter_text: Some(short_name.to_string()),
-                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
+                    sort_text: Some(format!("{}_{}", prefix_num, short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
                     ..CompletionItem::default()
                 });
             }
         }
 
-        // ── 5. Built-in PHP classes from stubs (filter out loaded) ──
+        // ── 3. Stubs — names ending with "Exception" ────────────────
+        // ── 5. Stubs — names NOT ending with "Exception" ────────────
         for &name in self.stub_index.keys() {
-            // Skip classes we already evaluated in the loaded sources
             if loaded_fqns.contains(name) {
                 continue;
             }
@@ -574,13 +634,18 @@ impl Backend {
             if !seen_fqns.insert(name.to_string()) {
                 continue;
             }
+            let prefix_num = if short_name.ends_with("Exception") {
+                "4"
+            } else {
+                "6"
+            };
             items.push(CompletionItem {
                 label: short_name.to_string(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(name.to_string()),
                 insert_text: Some(short_name.to_string()),
                 filter_text: Some(short_name.to_string()),
-                sort_text: Some(format!("4_{}", short_name.to_lowercase())),
+                sort_text: Some(format!("{}_{}", prefix_num, short_name.to_lowercase())),
                 additional_text_edits: build_use_edit(name, use_insert_pos, file_namespace),
                 ..CompletionItem::default()
             });

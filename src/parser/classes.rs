@@ -1,5 +1,9 @@
 /// Class, interface, trait, and enum extraction.
 ///
+/// Each class-like declaration is tagged with a [`ClassLikeKind`] so that
+/// downstream consumers (e.g. `throw new` completion) can distinguish
+/// concrete classes from interfaces, traits, and enums.
+///
 /// This module handles extracting `ClassInfo` from the PHP AST for all
 /// class-like declarations: `class`, `interface`, `trait`, and `enum`.
 /// It also extracts class-like members (methods, properties, constants,
@@ -86,8 +90,10 @@ impl Backend {
                     let end_offset = class.right_brace.end.offset;
 
                     let is_final = class.modifiers.contains_final();
+                    let is_abstract = class.modifiers.contains_abstract();
 
                     classes.push(ClassInfo {
+                        kind: ClassLikeKind::Class,
                         name: class_name,
                         methods,
                         properties,
@@ -98,6 +104,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final,
+                        is_abstract,
                         is_deprecated: class_deprecated,
                         template_params,
                         extends_generics,
@@ -167,6 +174,7 @@ impl Backend {
                     let end_offset = iface.right_brace.end.offset;
 
                     classes.push(ClassInfo {
+                        kind: ClassLikeKind::Interface,
                         name: iface_name,
                         methods,
                         properties,
@@ -177,6 +185,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final: false,
+                        is_abstract: false,
                         is_deprecated: iface_deprecated,
                         template_params,
                         extends_generics,
@@ -234,6 +243,7 @@ impl Backend {
                     let end_offset = trait_def.right_brace.end.offset;
 
                     classes.push(ClassInfo {
+                        kind: ClassLikeKind::Trait,
                         name: trait_name,
                         methods,
                         properties,
@@ -244,6 +254,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final: false,
+                        is_abstract: false,
                         is_deprecated: trait_deprecated,
                         template_params,
                         extends_generics: vec![],
@@ -313,6 +324,7 @@ impl Backend {
 
                     // Enums are implicitly final — they cannot be extended.
                     classes.push(ClassInfo {
+                        kind: ClassLikeKind::Enum,
                         name: enum_name,
                         methods,
                         properties,
@@ -323,6 +335,7 @@ impl Backend {
                         used_traits,
                         mixins,
                         is_final: true,
+                        is_abstract: false,
                         is_deprecated: enum_deprecated,
                         template_params: vec![],
                         extends_generics: vec![],

@@ -273,10 +273,31 @@ pub enum ParamCondition {
     IsType(String),
 }
 
+/// The syntactic kind of a class-like declaration.
+///
+/// PHP has four class-like constructs that share the same `ClassInfo`
+/// representation.  This enum lets callers distinguish them when the
+/// difference matters (e.g. `throw new` completion should only offer
+/// concrete classes, not interfaces or traits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClassLikeKind {
+    /// A regular `class` declaration (the default).
+    #[default]
+    Class,
+    /// An `interface` declaration.
+    Interface,
+    /// A `trait` declaration.
+    Trait,
+    /// An `enum` declaration.
+    Enum,
+}
+
 /// Stores extracted class information from a parsed PHP file.
 /// All data is owned so we don't depend on the parser's arena lifetime.
 #[derive(Debug, Clone, Default)]
 pub struct ClassInfo {
+    /// The syntactic kind of this class-like declaration.
+    pub kind: ClassLikeKind,
     /// The name of the class (e.g. "User").
     pub name: String,
     /// The methods defined directly in this class.
@@ -305,6 +326,12 @@ pub struct ClassInfo {
     /// Final classes cannot be extended, so `static::` is equivalent to
     /// `self::` and need not be offered as a separate completion subject.
     pub is_final: bool,
+    /// Whether the class is declared `abstract`.
+    ///
+    /// Abstract classes cannot be instantiated directly, so they should
+    /// be excluded from contexts like `throw new` or `new` completion
+    /// where only concrete classes are valid.
+    pub is_abstract: bool,
     /// Whether this class is marked `@deprecated` in its PHPDoc.
     pub is_deprecated: bool,
     /// Template parameter names declared via `@template` / `@template-covariant`
