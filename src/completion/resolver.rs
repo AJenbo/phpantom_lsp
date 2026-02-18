@@ -19,7 +19,9 @@
 ///   resolution at call sites.
 use crate::Backend;
 use crate::docblock;
-use crate::docblock::types::{parse_generic_args, split_union_depth0, strip_generics};
+use crate::docblock::types::{
+    parse_generic_args, split_intersection_depth0, split_union_depth0, strip_generics,
+};
 use crate::inheritance::apply_generic_args;
 use crate::types::*;
 
@@ -992,12 +994,15 @@ impl Backend {
             return results;
         }
 
-        // ── Intersection type: split on `&` and resolve each part ──
+        // ── Intersection type: split on `&` at depth 0 and resolve each part ──
         // `User&JsonSerializable` means the value satisfies *all* listed
         // types, so completions should include members from every part.
-        if hint.contains('&') {
+        // Uses depth-aware splitting so that `&` inside `{…}` or `<…>`
+        // (e.g. `object{foo: A&B}`) is not treated as a top-level split.
+        let intersection_parts = split_intersection_depth0(hint);
+        if intersection_parts.len() > 1 {
             let mut results = Vec::new();
-            for part in hint.split('&') {
+            for part in intersection_parts {
                 let part = part.trim();
                 if part.is_empty() {
                     continue;
@@ -1011,6 +1016,44 @@ impl Backend {
                 }
             }
             return results;
+        }
+
+        // ── Object shape: `object{foo: int, bar: string}` ──────────────
+        // Synthesise a ClassInfo with public properties from the shape
+        // entries so that `$var->foo` resolves through normal property
+        // resolution.  Object shape properties are read-only.
+        if docblock::types::is_object_shape(hint)
+            && let Some(entries) = docblock::parse_object_shape(hint)
+        {
+            let properties = entries
+                .into_iter()
+                .map(|e| PropertyInfo {
+                    name: e.key,
+                    type_hint: Some(e.value_type),
+                    is_static: false,
+                    visibility: Visibility::Public,
+                    is_deprecated: false,
+                })
+                .collect();
+
+            let synthetic = ClassInfo {
+                name: "__object_shape".to_string(),
+                methods: vec![],
+                properties,
+                constants: vec![],
+                start_offset: 0,
+                end_offset: 0,
+                parent_class: None,
+                used_traits: vec![],
+                mixins: vec![],
+                is_final: false,
+                is_deprecated: false,
+                template_params: vec![],
+                extends_generics: vec![],
+                implements_generics: vec![],
+                use_generics: vec![],
+            };
+            return vec![synthetic];
         }
 
         // self / static / $this always refer to the owning class.

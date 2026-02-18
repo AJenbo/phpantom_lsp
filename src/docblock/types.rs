@@ -116,6 +116,44 @@ pub(crate) fn split_union_depth0(s: &str) -> Vec<&str> {
     parts
 }
 
+/// Split a type string on `&` (intersection) at depth 0, respecting
+/// `<…>`, `(…)`, and `{…}` nesting.
+///
+/// This is necessary so that intersection operators inside generic
+/// parameters or object/array shapes (e.g. `object{foo: A&B}`) are not
+/// mistaken for top-level intersection splits.
+///
+/// # Examples
+///
+/// - `"User&JsonSerializable"` → `["User", "JsonSerializable"]`
+/// - `"object{foo: int}&\stdClass"` → `["object{foo: int}", "\stdClass"]`
+/// - `"object{foo: A&B}"` → `["object{foo: A&B}"]` (no split — `&` is nested)
+pub fn split_intersection_depth0(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
+    let mut start = 0;
+
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            '&' if depth_angle == 0 && depth_paren == 0 && depth_brace == 0 => {
+                parts.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
 /// Clean a raw type string from a docblock, **preserving** generic
 /// parameters so that downstream resolution can apply generic
 /// substitution.
@@ -716,5 +754,110 @@ pub fn extract_array_shape_value_type(type_str: &str, key: &str) -> Option<Strin
     entries
         .into_iter()
         .find(|e| e.key == key)
+        .map(|e| e.value_type)
+}
+
+// ─── Object Shape Parsing ───────────────────────────────────────────────────
+
+/// Parse a PHPStan object shape type string into its constituent entries.
+///
+/// Object shapes describe an anonymous object with typed properties:
+///
+/// # Examples
+///
+/// - `"object{foo: int, bar: string}"` → two entries
+/// - `"object{foo: int, bar?: string}"` → "bar" is optional
+/// - `"object{'foo': int, \"bar\": string}"` → quoted property names
+/// - `"object{foo: int, bar: string}&\stdClass"` → intersection ignored here
+///
+/// The returned entries reuse [`ArrayShapeEntry`] since the structure is
+/// identical (key name, value type, optional flag).
+///
+/// Returns `None` if the type is not an object shape.
+pub fn parse_object_shape(type_str: &str) -> Option<Vec<ArrayShapeEntry>> {
+    let s = type_str.strip_prefix('\\').unwrap_or(type_str);
+    let s = s.strip_prefix('?').unwrap_or(s);
+
+    // Must start with `object{` (case-insensitive base).
+    let brace_pos = s.find('{')?;
+    let base = &s[..brace_pos];
+    if !base.eq_ignore_ascii_case("object") {
+        return None;
+    }
+
+    // Extract the content between `{` and the matching `}`.
+    let rest = &s[brace_pos + 1..];
+    let close_pos = find_matching_brace_close(rest);
+    let inner = rest[..close_pos].trim();
+
+    if inner.is_empty() {
+        return Some(vec![]);
+    }
+
+    // Reuse the same splitting and key-value parsing as array shapes —
+    // the syntax is identical (`key: Type`, `key?: Type`, quoted keys).
+    let raw_entries = split_shape_entries(inner);
+    let mut entries = Vec::with_capacity(raw_entries.len());
+
+    for raw in raw_entries {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+
+        if let Some((key_part, value_part)) = split_shape_key_value(raw) {
+            let key_trimmed = key_part.trim();
+            let value_trimmed = value_part.trim();
+
+            let (key, optional) = if let Some(k) = key_trimmed.strip_suffix('?') {
+                (k.to_string(), true)
+            } else {
+                (key_trimmed.to_string(), false)
+            };
+
+            let key = strip_shape_key_quotes(&key);
+
+            entries.push(ArrayShapeEntry {
+                key,
+                value_type: value_trimmed.to_string(),
+                optional,
+            });
+        }
+        // Object shapes don't have positional entries — skip anything
+        // without an explicit key.
+    }
+
+    Some(entries)
+}
+
+/// Check whether a type string is an object shape (`object{…}`).
+///
+/// Returns `true` for `"object{foo: int}"`, `"?object{bar: string}"`,
+/// and `"\object{baz: bool}"`.  Returns `false` for bare `"object"`.
+pub fn is_object_shape(type_str: &str) -> bool {
+    let s = type_str.strip_prefix('\\').unwrap_or(type_str);
+    let s = s.strip_prefix('?').unwrap_or(s);
+    // Check for `object{` case-insensitively, but only when `{` immediately
+    // follows the word `object` (no intervening whitespace).
+    if let Some(brace_pos) = s.find('{') {
+        let base = &s[..brace_pos];
+        base.eq_ignore_ascii_case("object")
+    } else {
+        false
+    }
+}
+
+/// Look up the value type for a specific property in an object shape.
+///
+/// Given a type like `"object{name: string, user: User}"` and key `"user"`,
+/// returns `Some("User")`.
+///
+/// Returns `None` if the type is not an object shape or the property
+/// is not found.
+pub fn extract_object_shape_property_type(type_str: &str, prop: &str) -> Option<String> {
+    let entries = parse_object_shape(type_str)?;
+    entries
+        .into_iter()
+        .find(|e| e.key == prop)
         .map(|e| e.value_type)
 }

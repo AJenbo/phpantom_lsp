@@ -181,19 +181,50 @@ impl Backend {
                 let mut param_results: Vec<ClassInfo> = Vec::new();
                 for param in method.parameter_list.parameters.iter() {
                     let pname = param.variable.name.to_string();
-                    if pname == ctx.var_name
-                        && let Some(hint) = &param.hint
-                    {
-                        let type_str = Self::extract_hint_string(hint);
-                        let resolved = Self::type_hint_to_classes(
-                            &type_str,
-                            &ctx.current_class.name,
-                            ctx.all_classes,
-                            ctx.class_loader,
-                        );
-                        if !resolved.is_empty() {
-                            param_results = resolved;
+                    if pname == ctx.var_name {
+                        // Try the native AST type hint first.
+                        let native_type_str =
+                            param.hint.as_ref().map(|h| Self::extract_hint_string(h));
+
+                        let resolved_from_native = native_type_str
+                            .as_deref()
+                            .map(|ts| {
+                                Self::type_hint_to_classes(
+                                    ts,
+                                    &ctx.current_class.name,
+                                    ctx.all_classes,
+                                    ctx.class_loader,
+                                )
+                            })
+                            .unwrap_or_default();
+
+                        if !resolved_from_native.is_empty() {
+                            param_results = resolved_from_native;
                             break;
+                        }
+
+                        // Native hint didn't resolve (e.g. `object`, `mixed`).
+                        // Fall back to the `@param` docblock annotation which
+                        // may carry a more specific type such as
+                        // `object{foo: int, bar: string}`.
+                        let method_start = method.span().start.offset as usize;
+                        if let Some(raw_docblock_type) =
+                            crate::docblock::find_iterable_raw_type_in_source(
+                                ctx.content,
+                                method_start,
+                                ctx.var_name,
+                            )
+                        {
+                            let resolved = Self::type_hint_to_classes(
+                                &raw_docblock_type,
+                                &ctx.current_class.name,
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                            if !resolved.is_empty() {
+                                param_results = resolved;
+                                break;
+                            }
                         }
                     }
                 }

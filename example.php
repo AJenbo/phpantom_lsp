@@ -1681,3 +1681,75 @@ $_SERVER['SERVER_PORT'];     // Detail: "string — Server port"
 //                  → selecting 'host' produces $config['host']
 //   $config['']  — cursor between quotes, '] is auto-inserted
 //                  → selecting 'host' produces $config['host']
+
+// ─── Object Shape Completion ────────────────────────────────────────────────
+//
+// PHPStan object shapes describe anonymous objects with typed properties:
+//
+//   object{foo: int, bar: string}
+//   object{foo: int, bar?: string}        — bar is optional
+//   object{'foo': int, "bar": string}     — quoted property names
+//   object{foo: int}&\stdClass            — intersected with stdClass
+//
+// PHPantomLSP resolves object shapes from @return, @param, and @var
+// annotations and offers property completions via `->`.
+
+class ObjectShapeDemo {
+    /**
+     * @return object{name: string, age: int, active: bool}
+     */
+    public function getProfile(): object {
+        return (object) [];
+    }
+
+    /**
+     * @return object{user: User, meta: object{page: int, total: int}}
+     */
+    public function getResult(): object {
+        return (object) [];
+    }
+
+    /**
+     * @param object{host: string, port: int, ssl: bool} $config
+     */
+    public function connect(object $config): void {
+        $config->host;    // Resolved: string
+        $config->port;    // Resolved: int
+        $config->ssl;     // Resolved: bool
+    }
+
+    public function demo(): void {
+        // Basic object shape — property completions
+        $profile = $this->getProfile();
+        $profile->name;    // Resolved: string
+        $profile->age;     // Resolved: int
+        $profile->active;  // Resolved: bool
+
+        // Chained access — object shape value type resolves to a class
+        $result = $this->getResult();
+        $result->user->getEmail();   // Resolved: User::getEmail()
+        $result->user->getName();    // Resolved: User::getName()
+
+        // Nested object shapes — chain through inner object shape
+        $result->meta->page;    // Resolved: int
+        $result->meta->total;   // Resolved: int
+    }
+}
+
+// Object shapes work with @var annotations too
+/** @var object{title: string, score: float} $item */
+$item = getUnknownValue();
+$item->title;   // Resolved: string
+$item->score;   // Resolved: float
+
+// Nullable object shapes work in union types
+/** @var object{status: string, code: int}|null $response */
+$response = getUnknownValue();
+$response->status;  // Resolved: string
+$response->code;    // Resolved: int
+
+// Intersection with \stdClass (makes properties writable)
+/** @var object{name: string, value: int}&\stdClass $obj */
+$obj = getUnknownValue();
+$obj->name;   // Resolved: string
+$obj->value;  // Resolved: int
