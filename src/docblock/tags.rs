@@ -393,8 +393,34 @@ pub fn find_iterable_raw_type_in_source(
 ) -> Option<String> {
     let search_area = content.get(..before_offset)?;
 
+    // Track brace depth so that annotations inside class/function bodies
+    // are not visible from an outer scope.  When scanning backward:
+    //   `}` → entering a block above us → depth increases
+    //   `{` → leaving that block        → depth decreases
+    // Annotations found while `brace_depth > 0` belong to an inner
+    // scope and must be skipped.
+    let mut brace_depth = 0i32;
+
     for line in search_area.lines().rev() {
         let trimmed = line.trim();
+
+        // Count braces on non-docblock lines to track scope depth.
+        // Docblock lines are skipped because they may contain `{` / `}`
+        // in array shape type annotations (e.g. `array{key: string}`).
+        let is_comment_line =
+            trimmed.starts_with('*') || trimmed.starts_with("/*") || trimmed.starts_with("//");
+
+        if !is_comment_line {
+            let (opens, closes) = count_braces_on_line(trimmed);
+            // Going backward: `}` means entering a block, `{` means leaving.
+            brace_depth += closes;
+            brace_depth -= opens;
+        }
+
+        // Skip annotations that belong to a deeper (inner) scope.
+        if brace_depth > 0 {
+            continue;
+        }
 
         // Quick reject: must mention the variable name.
         if !trimmed.contains(var_name) {
@@ -436,6 +462,43 @@ pub fn find_iterable_raw_type_in_source(
     }
 
     None
+}
+
+/// Count `{` and `}` characters on a line, skipping those inside string
+/// literals.  Returns `(open_count, close_count)`.
+fn count_braces_on_line(line: &str) -> (i32, i32) {
+    let mut opens = 0i32;
+    let mut closes = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev = '\0';
+
+    for ch in line.chars() {
+        if in_single_quote {
+            if ch == '\'' && prev != '\\' {
+                in_single_quote = false;
+            }
+            prev = ch;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev != '\\' {
+                in_double_quote = false;
+            }
+            prev = ch;
+            continue;
+        }
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '{' => opens += 1,
+            '}' => closes += 1,
+            _ => {}
+        }
+        prev = ch;
+    }
+
+    (opens, closes)
 }
 
 /// Extract all `@property` tags from a class-level docblock.

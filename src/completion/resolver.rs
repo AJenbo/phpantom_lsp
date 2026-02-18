@@ -439,6 +439,40 @@ impl Backend {
         let semi_pos = Self::find_semicolon_balanced(remaining)?;
         let rhs_text = remaining[..semi_pos].trim();
 
+        // ── Array literal — `[…]` or `array(…)` ────────────────────
+        // Check this BEFORE the function-call case because `array(…)`
+        // ends with `)` and would otherwise be mistaken for a call.
+        // Also scan for incremental `$var['key'] = expr;` assignments.
+        let base_entries = super::array_shape::parse_array_literal_entries(rhs_text);
+
+        let after_assign = rhs_start + semi_pos + 1; // past the `;`
+        let incremental = super::array_shape::collect_incremental_key_assignments(
+            base_var,
+            content,
+            after_assign,
+            cursor_offset,
+        );
+
+        if base_entries.is_some() || !incremental.is_empty() {
+            let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();
+            // Merge incremental assignments — later assignments for the
+            // same key override earlier ones.
+            for (k, v) in incremental {
+                if let Some(existing) = entries.iter_mut().find(|(ek, _)| *ek == k) {
+                    existing.1 = v;
+                } else {
+                    entries.push((k, v));
+                }
+            }
+            if !entries.is_empty() {
+                let shape_parts: Vec<String> = entries
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                return Some(format!("array{{{}}}", shape_parts.join(", ")));
+            }
+        }
+
         // RHS is a call expression — extract the return type.
         if rhs_text.ends_with(')') {
             let paren_pos = Self::find_top_level_open_paren(rhs_text)?;

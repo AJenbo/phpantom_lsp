@@ -2717,3 +2717,1114 @@ async fn test_method_return_key_with_preceding_class() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Array Shape Inference from Literal Arrays ──────────────────────────────
+
+#[tokio::test]
+async fn test_array_shape_inferred_from_literal_array() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_literal.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$var = ['key1' => 1, 'key2' => 'hello'];\n",
+        "$var['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from literal array"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"key1"),
+                "Should suggest 'key1', got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"key2"),
+                "Should suggest 'key2', got {:?}",
+                labels
+            );
+            assert_eq!(labels.len(), 2, "Should have exactly 2 key suggestions");
+
+            // Verify inferred types in detail
+            let k1 = items.iter().find(|i| i.label == "key1").unwrap();
+            assert_eq!(k1.detail.as_deref(), Some("key1: int"));
+            let k2 = items.iter().find(|i| i.label == "key2").unwrap();
+            assert_eq!(k2.detail.as_deref(), Some("key2: string"));
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_inferred_from_literal_with_various_types() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_literal_types.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {}\n",
+        "$var = [\n",
+        "    'name' => 'Alice',\n",
+        "    'age' => 42,\n",
+        "    'score' => 3.14,\n",
+        "    'active' => true,\n",
+        "    'deleted' => null,\n",
+        "    'user' => new User(),\n",
+        "    'tags' => ['a', 'b'],\n",
+        "];\n",
+        "$var['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from multi-type literal array"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert_eq!(labels.len(), 7, "Should have 7 keys, got {:?}", labels);
+
+            let find = |name: &str| -> String {
+                items
+                    .iter()
+                    .find(|i| i.label == name)
+                    .and_then(|i| i.detail.clone())
+                    .unwrap_or_default()
+            };
+            assert_eq!(find("name"), "name: string");
+            assert_eq!(find("age"), "age: int");
+            assert_eq!(find("score"), "score: float");
+            assert_eq!(find("active"), "active: bool");
+            assert_eq!(find("deleted"), "deleted: null");
+            assert_eq!(find("user"), "user: User");
+            assert_eq!(find("tags"), "tags: array");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_incremental_key_assignments() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_incremental.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$var = ['key1' => 1];\n",
+        "$var['key2'] = 'hello';\n",
+        "$var['key3'] = true;\n",
+        "$var['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from incremental assignments"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"key1"),
+                "Should suggest 'key1' from initial literal, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"key2"),
+                "Should suggest 'key2' from incremental assignment, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"key3"),
+                "Should suggest 'key3' from incremental assignment, got {:?}",
+                labels
+            );
+            assert_eq!(labels.len(), 3, "Should have exactly 3 keys");
+
+            let find = |name: &str| -> String {
+                items
+                    .iter()
+                    .find(|i| i.label == name)
+                    .and_then(|i| i.detail.clone())
+                    .unwrap_or_default()
+            };
+            assert_eq!(find("key1"), "key1: int");
+            assert_eq!(find("key2"), "key2: string");
+            assert_eq!(find("key3"), "key3: bool");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_empty_array_with_incremental_assignments() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_empty_incr.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$bar = [];\n",
+        "$bar['name'] = 'Alice';\n",
+        "$bar['age'] = 30;\n",
+        "$bar['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from empty array + incremental assignments"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"name"),
+                "Should suggest 'name', got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"age"),
+                "Should suggest 'age', got {:?}",
+                labels
+            );
+            assert_eq!(labels.len(), 2, "Should have exactly 2 keys");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_incremental_override_type() {
+    // When the same key is assigned twice, the later type wins.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$var = ['status' => 'pending'];\n",
+        "$var['status'] = 42;\n",
+        "$var['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 3,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert_eq!(labels.len(), 1);
+            assert_eq!(labels[0], "status");
+            // The incremental assignment overrides the initial type
+            let detail = items[0].detail.as_deref().unwrap();
+            assert_eq!(detail, "status: int");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_literal_array_syntax() {
+    // Test `array(…)` syntax (older PHP style)
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_old_syntax.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$var = array('host' => 'localhost', 'port' => 3306);\n",
+        "$var['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from array() syntax"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(labels.contains(&"host"), "got {:?}", labels);
+            assert!(labels.contains(&"port"), "got {:?}", labels);
+            assert_eq!(labels.len(), 2);
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_literal_inside_class_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_literal_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public function build(): void {\n",
+        "        $opts = ['driver' => 'mysql', 'port' => 3306];\n",
+        "        $opts['charset'] = 'utf8';\n",
+        "        $opts['\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from literal + incremental inside a method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(labels.contains(&"driver"), "got {:?}", labels);
+            assert!(labels.contains(&"port"), "got {:?}", labels);
+            assert!(labels.contains(&"charset"), "got {:?}", labels);
+            assert_eq!(labels.len(), 3);
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_literal_double_quoted_keys() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_literal_dq.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$cfg = [\"host\" => 'localhost', \"port\" => 8080];\n",
+        "$cfg['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(labels.contains(&"host"), "got {:?}", labels);
+            assert!(labels.contains(&"port"), "got {:?}", labels);
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_annotation_takes_priority_over_literal() {
+    // When both a @var annotation and a literal exist, the annotation wins.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_annotation_priority.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** @var array{x: int, y: int} $point */\n",
+        "$point = ['x' => 1, 'y' => 2, 'z' => 3];\n",
+        "$point['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 3,
+                character: 8,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some());
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            // @var annotation says only x and y — z from the literal
+            // should NOT appear because the annotation takes priority.
+            assert_eq!(
+                labels.len(),
+                2,
+                "Annotation should take priority, got {:?}",
+                labels
+            );
+            assert!(labels.contains(&"x"));
+            assert!(labels.contains(&"y"));
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_incremental_with_new_object() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_incr_object.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {}\n",
+        "class Address {}\n",
+        "$data = [];\n",
+        "$data['user'] = new User();\n",
+        "$data['address'] = new Address();\n",
+        "$data['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from incremental new-object assignments"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(labels.contains(&"user"), "got {:?}", labels);
+            assert!(labels.contains(&"address"), "got {:?}", labels);
+            assert_eq!(labels.len(), 2);
+
+            let find = |name: &str| -> String {
+                items
+                    .iter()
+                    .find(|i| i.label == name)
+                    .and_then(|i| i.detail.clone())
+                    .unwrap_or_default()
+            };
+            assert_eq!(find("user"), "user: User");
+            assert_eq!(find("address"), "address: Address");
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Scope-Aware Annotation Tests ───────────────────────────────────────────
+
+/// When a class method has `@param array{…} $config` and file-scope code
+/// also uses `$config`, the annotation from inside the class must NOT
+/// leak to the outer scope.  Completions at file scope should come from
+/// the literal array assignment, not the method parameter.
+#[tokio::test]
+async fn test_array_shape_key_completion_does_not_leak_from_class_scope() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_scope.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class ArrayShapeDemo {\n",
+        "    /**\n",
+        "     * @param array{host: string, port: int, credentials: string} $config\n",
+        "     */\n",
+        "    public function connect(array $config): void {\n",
+        "        $config['host'];\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "$config = ['host' => 'localhost', 'port' => 3306, 'ssl' => true, 'author' => 'me'];\n",
+        "$config['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor at $config[' on the last line (line 11, char 9)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for file-scope $config"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // Should have keys from the literal array, NOT from the @param annotation
+            assert!(
+                labels.contains(&"ssl"),
+                "Should suggest 'ssl' from literal array, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"author"),
+                "Should suggest 'author' from literal array, got {:?}",
+                labels
+            );
+            // 'host' and 'port' appear in both, so they should be present
+            assert!(
+                labels.contains(&"host"),
+                "Should suggest 'host', got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"port"),
+                "Should suggest 'port', got {:?}",
+                labels
+            );
+            // 'credentials' is ONLY in the @param — it must NOT appear
+            assert!(
+                !labels.contains(&"credentials"),
+                "Must NOT suggest 'credentials' from inner-scope @param, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// The @param annotation inside a class should still work when the cursor
+/// is inside that class method — scope-aware filtering must not break
+/// the normal case.
+#[tokio::test]
+async fn test_array_shape_key_completion_inside_class_still_works() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_shape_scope_inner.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Demo {\n",
+        "    /**\n",
+        "     * @param array{host: string, port: int, ssl: bool} $options\n",
+        "     */\n",
+        "    public function connect(array $options): void {\n",
+        "        $options['\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor at $options[' inside the method (line 6, char 18)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for @param inside method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.contains(&"host"),
+                "Should suggest 'host', got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"port"),
+                "Should suggest 'port', got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"ssl"),
+                "Should suggest 'ssl', got {:?}",
+                labels
+            );
+            assert_eq!(
+                labels.len(),
+                3,
+                "Should have exactly 3 keys, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Literal Array Value Type → Member Access Tests ─────────────────────────
+
+/// When a variable is assigned from a literal array and then a key is
+/// accessed with `->`, the value type should resolve to the correct class.
+/// e.g. `$result['user'] = new User(); $result['user']->` should complete
+/// with User members.
+#[tokio::test]
+async fn test_array_shape_literal_value_type_member_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_literal_member.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "\n",
+        "$result = ['status' => 'ok'];\n",
+        "$result['user'] = new User();\n",
+        "$result['user']->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$result['user']->`  (line 8, char 18)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $result['user']->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should suggest User::getEmail(), got {:?}",
+                method_names
+            );
+            let prop_labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                prop_labels.contains(&"name"),
+                "Should suggest User::$name property, got {:?}",
+                prop_labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Member access on a value type from an inline literal array (not
+/// incremental assignment).
+/// e.g. `$data = ['user' => new User()]; $data['user']->` should complete.
+#[tokio::test]
+async fn test_array_shape_inline_literal_value_type_member_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_inline_member.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $title;\n",
+        "    public float $price;\n",
+        "    public function getDescription(): string {}\n",
+        "}\n",
+        "\n",
+        "$data = ['item' => new Product(), 'qty' => 5];\n",
+        "$data['item']->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$data['item']->`  (line 8, char 15)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $data['item']->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"getDescription"),
+                "Should suggest Product::getDescription(), got {:?}",
+                method_names
+            );
+            let prop_labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                prop_labels.contains(&"title"),
+                "Should suggest Product::$title, got {:?}",
+                prop_labels
+            );
+            assert!(
+                prop_labels.contains(&"price"),
+                "Should suggest Product::$price, got {:?}",
+                prop_labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Scalar value types from literal arrays should NOT produce member
+/// access completions (e.g. `$data['count']->` where count is int).
+#[tokio::test]
+async fn test_array_shape_literal_scalar_value_no_member_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_literal_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$data = ['count' => 42, 'name' => 'hello'];\n",
+        "$data['count']->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$data['count']->`  (line 2, char 17)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // Should return no class members (int has no methods/properties).
+    // The result may be None or contain only the fallback item.
+    if let Some(CompletionResponse::Array(items)) = result {
+        let class_members: Vec<&str> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    || i.kind == Some(CompletionItemKind::PROPERTY)
+            })
+            .map(|i| i.label.as_str())
+            .collect();
+        assert!(
+            class_members.is_empty(),
+            "Scalar types should not produce member completions, got {:?}",
+            class_members
+        );
+    }
+}
+
+/// Member access on a value type from an array inside a class method
+/// using `$this->` return type.
+#[tokio::test]
+async fn test_array_shape_literal_value_type_inside_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///array_literal_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(): void {}\n",
+        "    public function error(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        $services = ['logger' => new Logger()];\n",
+        "        $services['logger']->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$services['logger']->`  (line 8, char 29)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $services['logger']->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"info"),
+                "Should suggest Logger::info(), got {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"error"),
+                "Should suggest Logger::error(), got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

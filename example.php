@@ -1581,6 +1581,62 @@ class ArrayShapeDemo {
     }
 }
 
+// ─── Array Shape Inference from Literal Arrays ─────────────────────────────
+//
+// PHPantomLSP can infer array shapes from literal array construction
+// and incremental key assignments — no @var annotation needed.
+
+// Literal array with string keys:
+$config = ['host' => 'localhost', 'port' => 3306, 'ssl' => true, 'author' => new User()];
+$config[''];  // Key completion suggests: host, port, ssl, author
+              // Details: host: string, port: int, ssl: bool, author: User
+
+// Incremental key assignments are merged into the shape:
+$result = ['status' => 'ok'];
+$result['code'] = 200;
+$result['user'] = new User();
+$result[''];  // Key completion suggests: status, code, user
+              // Details: status: string, code: int, user: User
+
+// ─── Literal Array Value Type → Member Access ──────────────────────────────
+//
+// When the value type of an array shape key is a class, member access
+// through `$var['key']->` resolves to that class and offers completions.
+// This works for both inline literal arrays and incremental assignments.
+
+$result['user']->getEmail();  // Resolved: User::getEmail()
+$result['user']->getName();   // Resolved: User::getName() (inherited from Model)
+
+$services = ['logger' => new User(), 'count' => 42];
+$services['logger']->getEmail();  // Resolved: User::getEmail()
+// $services['count']->  // No member completions — int is scalar
+
+// ─── Scope-Aware Annotation Resolution ─────────────────────────────────────
+//
+// Annotations inside class methods do NOT leak to file-scope code.
+// If a class has `@param array{host: string, credentials: User} $config`
+// and file-scope code also uses `$config`, completions at file scope
+// come from the literal assignment, NOT the method parameter.
+//
+// Example: the ArrayShapeDemo::connect() method above has
+//   @param array{host: string, port: int, credentials: User} $config
+// but the file-scope $config below gets its own keys from the literal:
+$outerConfig = ['host' => 'localhost', 'port' => 3306, 'ssl' => true];
+$outerConfig[''];  // Suggests: host, port, ssl (NOT credentials from the class)
+
+// Works with empty initial array too:
+$data = [];
+$data['name'] = 'Alice';
+$data['age'] = 30;
+$data[''];  // Key completion suggests: name, age
+
+// Old-style array() syntax is also supported:
+$opts = array('driver' => 'mysql', 'charset' => 'utf8');
+$opts[''];  // Key completion suggests: driver, charset
+
+// Note: @var annotations take priority over literal inference.
+// If both exist, only the annotation keys are offered.
+
 /**
  * Top-level array shape usage.
  *

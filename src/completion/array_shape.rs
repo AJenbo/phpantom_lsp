@@ -533,6 +533,9 @@ impl Backend {
     /// - `$var = $this->methodName(…);` → return type of `methodName` on current class
     /// - `$var = ClassName::methodName(…);` → return type of static method
     /// - `$var = $this->propertyName;` → `@var` type of property
+    /// - `$var = ['key' => value, …];` → synthesised `array{key: type, …}`
+    /// - Incremental `$var['key'] = expr;` assignments after the initial
+    ///   assignment are merged into the shape.
     fn resolve_raw_type_from_assignment(
         &self,
         var_name: &str,
@@ -555,9 +558,43 @@ impl Backend {
         let semi_pos = find_balanced_semicolon(remaining)?;
         let rhs_text = remaining[..semi_pos].trim();
 
-        // Case 1: RHS is a function call — `functionName(…)`
-        // Case 2: RHS is a method call — `$this->methodName(…)` or `$obj->method(…)`
-        // Case 3: RHS is a static call — `ClassName::methodName(…)`
+        // Case 1: RHS is an array literal — `[…]` or `array(…)`.
+        // Check this BEFORE the function-call case because `array(…)`
+        // ends with `)` and would otherwise be mistaken for a call.
+        // Also scan for incremental `$var['key'] = expr;` assignments.
+        // Parse the keys from the literal and also scan for incremental
+        // `$var['key'] = expr;` assignments between the initial
+        // assignment and the cursor.
+        let base_entries = parse_array_literal_entries(rhs_text);
+
+        // Scan for incremental `$var['key'] = expr;` assignments.
+        let after_assign = assign_pos + assign_pattern.len() + semi_pos + 1; // past the `;`
+        let incremental =
+            collect_incremental_key_assignments(var_name, content, after_assign, cursor_offset);
+
+        if base_entries.is_some() || !incremental.is_empty() {
+            let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();
+            // Merge incremental assignments — later assignments for the
+            // same key override earlier ones.
+            for (k, v) in incremental {
+                if let Some(existing) = entries.iter_mut().find(|(ek, _)| *ek == k) {
+                    existing.1 = v;
+                } else {
+                    entries.push((k, v));
+                }
+            }
+            if !entries.is_empty() {
+                let shape_parts: Vec<String> = entries
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                return Some(format!("array{{{}}}", shape_parts.join(", ")));
+            }
+        }
+
+        // Case 2: RHS is a function call — `functionName(…)`
+        // Case 3: RHS is a method call — `$this->methodName(…)` or `$obj->method(…)`
+        // Case 4: RHS is a static call — `ClassName::methodName(…)`
         if rhs_text.ends_with(')') {
             return self.resolve_call_raw_return_type(
                 rhs_text,
@@ -569,7 +606,7 @@ impl Backend {
             );
         }
 
-        // Case 4: RHS is a property access — `$this->propertyName`
+        // Case 5: RHS is a property access — `$this->propertyName`
         if let Some(prop) = rhs_text.strip_prefix("$this->")
             && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
         {
@@ -833,6 +870,345 @@ fn find_balanced_semicolon(s: &str) -> Option<usize> {
 ///
 /// Respects `<…>` nesting for generic types but is careful not to
 /// treat `>` in `->` (arrow operator) as a closing angle bracket.
+/// Parse an array literal expression into a list of `(key, value_type)` pairs.
+///
+/// Handles both `[…]` and `array(…)` syntax.  Only entries with explicit
+/// string keys (`'key' => value` or `"key" => value`) are included;
+/// positional entries are skipped since they don't produce useful key
+/// completions.
+///
+/// The value type is inferred from the literal expression using simple
+/// pattern matching (see [`infer_literal_type`]).
+///
+/// Returns `None` if the expression is not an array literal.
+pub(super) fn parse_array_literal_entries(rhs: &str) -> Option<Vec<(String, String)>> {
+    let inner = if rhs.starts_with('[') && rhs.ends_with(']') {
+        &rhs[1..rhs.len() - 1]
+    } else {
+        // Handle `array(…)` syntax.
+        let lower = rhs.to_ascii_lowercase();
+        if lower.starts_with("array(") && rhs.ends_with(')') {
+            &rhs[6..rhs.len() - 1]
+        } else {
+            return None;
+        }
+    };
+
+    let inner = inner.trim();
+    if inner.is_empty() {
+        return Some(vec![]);
+    }
+
+    let parts = split_array_literal_elements(inner);
+    let mut entries = Vec::new();
+
+    for part in &parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        // Look for `=>` at depth 0 to split key from value.
+        if let Some((key_part, value_part)) = split_on_fat_arrow(part) {
+            let key_trimmed = key_part.trim();
+            let value_trimmed = value_part.trim();
+
+            // Only string-keyed entries produce useful completions.
+            if let Some(key) = extract_string_literal(key_trimmed) {
+                let value_type = infer_literal_type(value_trimmed);
+                entries.push((key, value_type));
+            }
+        }
+        // Positional entries (no `=>`) are skipped — numeric keys
+        // are rarely useful for key completion.
+    }
+
+    Some(entries)
+}
+
+/// Split array literal elements on commas at depth 0, respecting
+/// `(…)`, `[…]`, `{…}`, `<…>` nesting and quoted strings.
+fn split_array_literal_elements(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_paren = 0i32;
+    let mut depth_bracket = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        if in_single_quote {
+            if ch == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '(' | '[' => {
+                if ch == '(' {
+                    depth_paren += 1;
+                } else {
+                    depth_bracket += 1;
+                }
+            }
+            ')' => depth_paren -= 1,
+            ']' => depth_bracket -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ',' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        prev_char = ch;
+    }
+    let last = &s[start..];
+    if !last.trim().is_empty() {
+        parts.push(last);
+    }
+    parts
+}
+
+/// Split a single array element on `=>` at depth 0, respecting nesting
+/// and quoted strings.
+fn split_on_fat_arrow(s: &str) -> Option<(&str, &str)> {
+    let mut depth_paren = 0i32;
+    let mut depth_bracket = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+    let bytes = s.as_bytes();
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+
+        if in_single_quote {
+            if ch == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = ch;
+            i += 1;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = ch;
+            i += 1;
+            continue;
+        }
+
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '[' => depth_bracket += 1,
+            ']' => depth_bracket -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            '=' if depth_paren == 0
+                && depth_bracket == 0
+                && depth_brace == 0
+                && i + 1 < bytes.len()
+                && bytes[i + 1] == b'>' =>
+            {
+                return Some((&s[..i], &s[i + 2..]));
+            }
+            _ => {}
+        }
+        prev_char = ch;
+        i += 1;
+    }
+    None
+}
+
+/// Extract the string content from a quoted literal (`'foo'` → `foo`,
+/// `"bar"` → `bar`).  Returns `None` if the expression is not a simple
+/// string literal.
+fn extract_string_literal(s: &str) -> Option<String> {
+    if ((s.starts_with('\'') && s.ends_with('\'')) || (s.starts_with('"') && s.ends_with('"')))
+        && s.len() >= 2
+    {
+        return Some(s[1..s.len() - 1].to_string());
+    }
+    None
+}
+
+/// Infer a PHPStan-style type string from a literal PHP expression.
+///
+/// Uses simple pattern matching:
+/// - `'…'` / `"…"` → `string`
+/// - Integer literals → `int`
+/// - Float literals → `float`
+/// - `true` / `false` → `bool`
+/// - `null` → `null`
+/// - `new ClassName(…)` → `ClassName`
+/// - `[…]` → `array`
+/// - Anything else → `mixed`
+fn infer_literal_type(expr: &str) -> String {
+    let trimmed = expr.trim();
+
+    if trimmed.is_empty() {
+        return "mixed".to_string();
+    }
+
+    // String literals
+    if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    {
+        return "string".to_string();
+    }
+
+    // Boolean
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "true" || lower == "false" {
+        return "bool".to_string();
+    }
+
+    // Null
+    if lower == "null" {
+        return "null".to_string();
+    }
+
+    // `new ClassName(…)` — extract the class name.
+    if let Some(rest) = trimmed.strip_prefix("new ") {
+        let rest = rest.trim_start();
+        // Class name ends at `(` or whitespace.
+        let end = rest
+            .find(|c: char| c == '(' || c.is_whitespace())
+            .unwrap_or(rest.len());
+        let class_name = &rest[..end];
+        if !class_name.is_empty() {
+            return class_name.trim_start_matches('\\').to_string();
+        }
+    }
+
+    // Array literal
+    if (trimmed.starts_with('[') && trimmed.ends_with(']'))
+        || (lower.starts_with("array(") && trimmed.ends_with(')'))
+    {
+        return "array".to_string();
+    }
+
+    // Integer literal (possibly negative)
+    let num_str = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    if !num_str.is_empty() && num_str.chars().all(|c| c.is_ascii_digit()) {
+        return "int".to_string();
+    }
+
+    // Float literal (e.g. `1.5`, `-3.14`)
+    if !num_str.is_empty() {
+        let dot_parts: Vec<&str> = num_str.splitn(2, '.').collect();
+        if dot_parts.len() == 2
+            && !dot_parts[0].is_empty()
+            && !dot_parts[1].is_empty()
+            && dot_parts[0].chars().all(|c| c.is_ascii_digit())
+            && dot_parts[1].chars().all(|c| c.is_ascii_digit())
+        {
+            return "float".to_string();
+        }
+    }
+
+    "mixed".to_string()
+}
+
+/// Scan for incremental `$var['key'] = expr;` assignments in the content
+/// between `start_offset` and `end_offset`.
+///
+/// Returns a list of `(key, inferred_type)` pairs.  Only string-keyed
+/// assignments are collected; `$var[] = expr;` push-style assignments
+/// are skipped since they produce numeric keys.
+pub(super) fn collect_incremental_key_assignments(
+    var_name: &str,
+    content: &str,
+    start_offset: usize,
+    end_offset: usize,
+) -> Vec<(String, String)> {
+    let search_area = match content.get(start_offset..end_offset) {
+        Some(s) => s,
+        None => return vec![],
+    };
+
+    let mut entries = Vec::new();
+    // Pattern: `$var['key'] = ` or `$var["key"] = `
+    let prefix = format!("{}[", var_name);
+
+    let mut pos = 0;
+    while let Some(found) = search_area[pos..].find(&prefix) {
+        let abs = pos + found;
+        let after_bracket = abs + prefix.len();
+
+        // Expect a quote character next.
+        let rest = &search_area[after_bracket..];
+        let quote_char = rest.chars().next();
+        if !matches!(quote_char, Some('\'' | '"')) {
+            pos = after_bracket;
+            continue;
+        }
+        let q = quote_char.unwrap();
+
+        // Find the closing quote.
+        let after_quote = 1; // skip the opening quote
+        let key_rest = &rest[after_quote..];
+        let close_quote_pos = match key_rest.find(q) {
+            Some(p) => p,
+            None => {
+                pos = after_bracket;
+                continue;
+            }
+        };
+        let key = &key_rest[..close_quote_pos];
+
+        // After the closing quote, expect `] = `.
+        let after_key = after_quote + close_quote_pos + 1; // past closing quote
+        let remainder = &rest[after_key..];
+        let remainder_trimmed = remainder.trim_start();
+        if !remainder_trimmed.starts_with("] =") && !remainder_trimmed.starts_with("]=") {
+            pos = after_bracket;
+            continue;
+        }
+
+        // Find the `=` and extract the RHS up to `;`.
+        let eq_offset_in_remainder = match remainder_trimmed.find('=') {
+            Some(p) => p,
+            None => {
+                pos = after_bracket;
+                continue;
+            }
+        };
+        let rhs_start_in_remainder = eq_offset_in_remainder + 1;
+        let rhs_and_rest = &remainder_trimmed[rhs_start_in_remainder..];
+
+        // Find `;` respecting nesting.
+        if let Some(semi) = find_balanced_semicolon(rhs_and_rest) {
+            let value_expr = rhs_and_rest[..semi].trim();
+            let inferred = infer_literal_type(value_expr);
+            entries.push((key.to_string(), inferred));
+        }
+
+        pos = after_bracket;
+    }
+
+    entries
+}
+
 fn find_top_level_paren(s: &str) -> Option<usize> {
     let mut depth_angle = 0i32;
     let bytes = s.as_bytes();
@@ -1013,5 +1389,194 @@ mod tests {
         assert_eq!(ctx.partial_key, "");
         assert_eq!(ctx.quote_char, Some('\''));
         assert_eq!(ctx.key_start_col, 9);
+    }
+
+    // ── parse_array_literal_entries ──────────────────────────────────
+
+    #[test]
+    fn test_parse_literal_simple() {
+        let entries = parse_array_literal_entries("['name' => 'Alice', 'age' => 42]").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("name".to_string(), "string".to_string()));
+        assert_eq!(entries[1], ("age".to_string(), "int".to_string()));
+    }
+
+    #[test]
+    fn test_parse_literal_double_quoted_keys() {
+        let entries =
+            parse_array_literal_entries(r#"["host" => 'localhost', "port" => 8080]"#).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "host");
+        assert_eq!(entries[1].0, "port");
+    }
+
+    #[test]
+    fn test_parse_literal_array_syntax() {
+        let entries =
+            parse_array_literal_entries("array('driver' => 'mysql', 'port' => 3306)").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("driver".to_string(), "string".to_string()));
+        assert_eq!(entries[1], ("port".to_string(), "int".to_string()));
+    }
+
+    #[test]
+    fn test_parse_literal_empty_array() {
+        let entries = parse_array_literal_entries("[]").unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_literal_positional_entries_skipped() {
+        // Positional entries (no =>) should be skipped
+        let entries = parse_array_literal_entries("['key' => 1, 'value', 42]").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "key");
+    }
+
+    #[test]
+    fn test_parse_literal_not_an_array() {
+        assert!(parse_array_literal_entries("$this->getConfig()").is_none());
+        assert!(parse_array_literal_entries("someFunction()").is_none());
+        assert!(parse_array_literal_entries("'hello'").is_none());
+    }
+
+    #[test]
+    fn test_parse_literal_nested_arrays() {
+        let entries =
+            parse_array_literal_entries("['db' => ['host' => 'x'], 'debug' => true]").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("db".to_string(), "array".to_string()));
+        assert_eq!(entries[1], ("debug".to_string(), "bool".to_string()));
+    }
+
+    #[test]
+    fn test_parse_literal_new_object_value() {
+        let entries =
+            parse_array_literal_entries("['user' => new User(), 'addr' => new Address()]").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("user".to_string(), "User".to_string()));
+        assert_eq!(entries[1], ("addr".to_string(), "Address".to_string()));
+    }
+
+    #[test]
+    fn test_parse_literal_value_with_commas_in_strings() {
+        // Comma inside a string value should not split entries
+        let entries =
+            parse_array_literal_entries("['msg' => 'hello, world', 'code' => 200]").unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "msg");
+        assert_eq!(entries[0].1, "string");
+        assert_eq!(entries[1].0, "code");
+    }
+
+    // ── infer_literal_type ──────────────────────────────────────────
+
+    #[test]
+    fn test_infer_string() {
+        assert_eq!(infer_literal_type("'hello'"), "string");
+        assert_eq!(infer_literal_type("\"world\""), "string");
+    }
+
+    #[test]
+    fn test_infer_int() {
+        assert_eq!(infer_literal_type("42"), "int");
+        assert_eq!(infer_literal_type("0"), "int");
+        assert_eq!(infer_literal_type("-1"), "int");
+    }
+
+    #[test]
+    fn test_infer_float() {
+        assert_eq!(infer_literal_type("3.14"), "float");
+        assert_eq!(infer_literal_type("-0.5"), "float");
+    }
+
+    #[test]
+    fn test_infer_bool() {
+        assert_eq!(infer_literal_type("true"), "bool");
+        assert_eq!(infer_literal_type("false"), "bool");
+        assert_eq!(infer_literal_type("TRUE"), "bool");
+    }
+
+    #[test]
+    fn test_infer_null() {
+        assert_eq!(infer_literal_type("null"), "null");
+        assert_eq!(infer_literal_type("NULL"), "null");
+    }
+
+    #[test]
+    fn test_infer_new_object() {
+        assert_eq!(infer_literal_type("new User()"), "User");
+        assert_eq!(infer_literal_type("new \\App\\User()"), "App\\User");
+        assert_eq!(infer_literal_type("new User"), "User");
+    }
+
+    #[test]
+    fn test_infer_array() {
+        assert_eq!(infer_literal_type("[]"), "array");
+        assert_eq!(infer_literal_type("['a', 'b']"), "array");
+        assert_eq!(infer_literal_type("array()"), "array");
+    }
+
+    #[test]
+    fn test_infer_mixed() {
+        assert_eq!(infer_literal_type("someFunction()"), "mixed");
+        assert_eq!(infer_literal_type("$other"), "mixed");
+        assert_eq!(infer_literal_type("self::VALUE"), "mixed");
+    }
+
+    // ── collect_incremental_key_assignments ──────────────────────────
+
+    #[test]
+    fn test_collect_incremental_basic() {
+        let content = "$var = [];\n$var['name'] = 'Alice';\n$var['age'] = 30;\n$var['";
+        // start after the first `;` (offset 10), end before cursor
+        let entries = collect_incremental_key_assignments("$var", content, 10, content.len());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("name".to_string(), "string".to_string()));
+        assert_eq!(entries[1], ("age".to_string(), "int".to_string()));
+    }
+
+    #[test]
+    fn test_collect_incremental_double_quoted_keys() {
+        let content = "$x = [];\n$x[\"host\"] = 'localhost';\n$x[\"port\"] = 80;\n";
+        let entries = collect_incremental_key_assignments("$x", content, 8, content.len());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, "host");
+        assert_eq!(entries[1].0, "port");
+    }
+
+    #[test]
+    fn test_collect_incremental_override() {
+        let content = "$v = [];\n$v['k'] = 'hello';\n$v['k'] = 42;\n";
+        let entries = collect_incremental_key_assignments("$v", content, 8, content.len());
+        // Both assignments are collected; merging happens in the caller.
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("k".to_string(), "string".to_string()));
+        assert_eq!(entries[1], ("k".to_string(), "int".to_string()));
+    }
+
+    #[test]
+    fn test_collect_incremental_push_ignored() {
+        // $var[] = expr should be ignored (no string key)
+        let content = "$v = [];\n$v[] = new User();\n$v['name'] = 'x';\n";
+        let entries = collect_incremental_key_assignments("$v", content, 8, content.len());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "name");
+    }
+
+    #[test]
+    fn test_collect_incremental_new_objects() {
+        let content = "$d = [];\n$d['user'] = new User();\n$d['addr'] = new Address();\n";
+        let entries = collect_incremental_key_assignments("$d", content, 8, content.len());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("user".to_string(), "User".to_string()));
+        assert_eq!(entries[1], ("addr".to_string(), "Address".to_string()));
+    }
+
+    #[test]
+    fn test_collect_incremental_empty_range() {
+        let content = "$v = [];";
+        let entries = collect_incremental_key_assignments("$v", content, 8, 8);
+        assert!(entries.is_empty());
     }
 }
