@@ -275,7 +275,7 @@ pub enum ParamCondition {
 
 /// Stores extracted class information from a parsed PHP file.
 /// All data is owned so we don't depend on the parser's arena lifetime.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ClassInfo {
     /// The name of the class (e.g. "User").
     pub name: String,
@@ -336,4 +336,25 @@ pub struct ClassInfo {
     /// is substituted with `ConcreteType` in all inherited methods and
     /// properties.
     pub use_generics: Vec<(String, Vec<String>)>,
+}
+
+// ─── ClassInfo helpers ──────────────────────────────────────────────────────
+
+impl ClassInfo {
+    /// Push a `ClassInfo` into `results` only if no existing entry shares
+    /// the same class name.  This is the single place where completion /
+    /// resolution code deduplicates candidate classes.
+    pub fn push_unique(results: &mut Vec<ClassInfo>, cls: ClassInfo) {
+        if !results.iter().any(|c| c.name == cls.name) {
+            results.push(cls);
+        }
+    }
+
+    /// Extend `results` with entries from `new_classes`, skipping any whose
+    /// name already appears in `results`.
+    pub fn extend_unique(results: &mut Vec<ClassInfo>, new_classes: Vec<ClassInfo>) {
+        for cls in new_classes {
+            Self::push_unique(results, cls);
+        }
+    }
 }

@@ -335,11 +335,7 @@ impl Backend {
             for cls in &base_classes {
                 let resolved =
                     Self::resolve_property_types(prop_name, cls, all_classes, class_loader);
-                for r in resolved {
-                    if !results.iter().any(|c: &ClassInfo| c.name == r.name) {
-                        results.push(r);
-                    }
-                }
+                ClassInfo::extend_unique(&mut results, resolved);
             }
             if !results.is_empty() {
                 return results;
@@ -382,23 +378,7 @@ impl Backend {
             let effective_class = match current_class {
                 Some(cc) => cc,
                 None => {
-                    dummy_class = ClassInfo {
-                        name: String::new(),
-                        methods: vec![],
-                        properties: vec![],
-                        constants: vec![],
-                        start_offset: 0,
-                        end_offset: 0,
-                        parent_class: None,
-                        used_traits: vec![],
-                        mixins: vec![],
-                        is_final: false,
-                        is_deprecated: false,
-                        template_params: vec![],
-                        extends_generics: vec![],
-                        implements_generics: vec![],
-                        use_generics: vec![],
-                    };
+                    dummy_class = ClassInfo::default();
                     &dummy_class
                 }
             };
@@ -1001,11 +981,7 @@ impl Backend {
                 // intersection components, etc.)
                 let resolved =
                     Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
-                for cls in resolved {
-                    if !results.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                        results.push(cls);
-                    }
-                }
+                ClassInfo::extend_unique(&mut results, resolved);
             }
             return results;
         }
@@ -1025,11 +1001,7 @@ impl Backend {
                 }
                 let resolved =
                     Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
-                for cls in resolved {
-                    if !results.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                        results.push(cls);
-                    }
-                }
+                ClassInfo::extend_unique(&mut results, resolved);
             }
             return results;
         }
@@ -1054,20 +1026,8 @@ impl Backend {
 
             let synthetic = ClassInfo {
                 name: "__object_shape".to_string(),
-                methods: vec![],
                 properties,
-                constants: vec![],
-                start_offset: 0,
-                end_offset: 0,
-                parent_class: None,
-                used_traits: vec![],
-                mixins: vec![],
-                is_final: false,
-                is_deprecated: false,
-                template_params: vec![],
-                extends_generics: vec![],
-                implements_generics: vec![],
-                use_generics: vec![],
+                ..ClassInfo::default()
             };
             return vec![synthetic];
         }

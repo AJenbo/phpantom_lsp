@@ -1294,11 +1294,7 @@ impl Backend {
         conditional: bool,
     ) {
         let var_name = ctx.var_name;
-        let current_class_name: &str = &ctx.current_class.name;
-        let all_classes = ctx.all_classes;
-        let content = ctx.content;
-        let class_loader = ctx.class_loader;
-        let function_loader = ctx.function_loader;
+
         /// Push one or more resolved classes into `results`.
         ///
         /// * `conditional == false` → unconditional assignment: **clear**
@@ -1319,11 +1315,7 @@ impl Backend {
             if !conditional {
                 results.clear();
             }
-            for cls in new_classes {
-                if !results.iter().any(|c| c.name == cls.name) {
-                    results.push(cls);
-                }
-            }
+            ClassInfo::extend_unique(results, new_classes);
         }
 
         if let Expression::Assignment(assignment) = expr {
@@ -1348,311 +1340,30 @@ impl Backend {
             if lhs_name != var_name {
                 return;
             }
-            // Check RHS is a `new …`
-            if let Expression::Instantiation(inst) = assignment.rhs {
-                let class_name = match inst.class {
-                    Expression::Self_(_) => Some("self"),
-                    Expression::Static(_) => Some("static"),
-                    Expression::Identifier(ident) => Some(ident.value()),
-                    _ => None,
-                };
-                if let Some(name) = class_name {
-                    let resolved = Self::type_hint_to_classes(
-                        name,
-                        current_class_name,
-                        all_classes,
-                        class_loader,
-                    );
-                    push_results(results, resolved, conditional);
-                }
-                return;
-            }
-            // Check RHS is an array access: `$var = $arr[0]` or `$var = $arr[$key]`
-            // Resolve the base array's generic/iterable type and extract
-            // the element type.
-            if let Expression::ArrayAccess(array_access) = assignment.rhs {
-                // The base expression must be a simple variable (e.g. `$admins`).
-                if let Expression::Variable(Variable::Direct(base_dv)) = array_access.array {
-                    let base_var = base_dv.name.to_string();
-                    // Search backward from this assignment for a @var/@param
-                    // annotation on the base variable with a generic type.
-                    let assign_offset = assignment.span().start.offset as usize;
-                    if let Some(raw_type) = docblock::find_iterable_raw_type_in_source(
-                        content,
-                        assign_offset,
-                        &base_var,
-                    ) && let Some(element_type) =
-                        docblock::types::extract_generic_value_type(&raw_type)
-                    {
-                        let resolved = Self::type_hint_to_classes(
-                            &element_type,
-                            current_class_name,
-                            all_classes,
-                            class_loader,
-                        );
-                        push_results(results, resolved, conditional);
-                    }
-                }
-                return;
-            }
-            // Check RHS is a function call: `$var = someFunction(…)`
-            // Look up the function's return type and resolve to a class.
-            if let Expression::Call(call) = assignment.rhs {
-                match call {
-                    Call::Function(func_call) => {
-                        // Extract the function name from the call target
-                        let func_name = match func_call.function {
-                            Expression::Identifier(ident) => Some(ident.value().to_string()),
-                            _ => None,
-                        };
-                        if let Some(name) = func_name
-                            && let Some(fl) = function_loader
-                            && let Some(func_info) = fl(&name)
-                        {
-                            // Try conditional return type first (PHPStan syntax)
-                            let mut handled = false;
-                            if let Some(ref cond) = func_info.conditional_return {
-                                let resolved_type = resolve_conditional_with_args(
-                                    cond,
-                                    &func_info.parameters,
-                                    &func_call.argument_list,
-                                );
-                                if let Some(ref ty) = resolved_type {
-                                    let resolved = Self::type_hint_to_classes(
-                                        ty,
-                                        current_class_name,
-                                        all_classes,
-                                        class_loader,
-                                    );
-                                    if !resolved.is_empty() {
-                                        push_results(results, resolved, conditional);
-                                        handled = true;
-                                    }
-                                }
-                            }
-                            if !handled && let Some(ref ret) = func_info.return_type {
-                                let resolved = Self::type_hint_to_classes(
-                                    ret,
-                                    current_class_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                                push_results(results, resolved, conditional);
-                            }
-                        }
-                    }
-                    Call::Method(method_call) => {
-                        // `$var = $obj->method()` — resolve the object, find the
-                        // method, and use its return type.
-                        //
-                        // We handle the common `$this->method()` case via the
-                        // AST, and for everything else (chained calls like
-                        // `app()->make(...)`, `$factory->create()`, etc.) we
-                        // fall back to text-based resolution which already
-                        // handles arbitrary nesting.
-                        if let Expression::Variable(Variable::Direct(dv)) = method_call.object
-                            && dv.name == "$this"
-                            && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
-                        {
-                            let method_name = ident.value.to_string();
-                            if let Some(owner) =
-                                all_classes.iter().find(|c| c.name == current_class_name)
-                            {
-                                let resolved = Self::resolve_method_return_types(
-                                    owner,
-                                    &method_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                                push_results(results, resolved, conditional);
-                            }
-                        } else {
-                            // General case: extract the RHS call expression text
-                            // from the source and delegate to the text-based
-                            // resolver that already handles chains like
-                            // `app()->make(Foo::class)`, `$obj->method()`, etc.
-                            let rhs_span = assignment.rhs.span();
-                            let start = rhs_span.start.offset as usize;
-                            let end = rhs_span.end.offset as usize;
-                            if end <= content.len() {
-                                let rhs_text = content[start..end].trim();
-                                if rhs_text.ends_with(')')
-                                    && let Some((call_body, args_text)) =
-                                        split_call_subject(rhs_text)
-                                {
-                                    let current_class =
-                                        all_classes.iter().find(|c| c.name == current_class_name);
-                                    let call_ctx = CallResolutionCtx {
-                                        current_class,
-                                        all_classes,
-                                        content,
-                                        cursor_offset: ctx.cursor_offset,
-                                        class_loader,
-                                        function_loader,
-                                    };
-                                    let resolved = Self::resolve_call_return_types(
-                                        call_body, args_text, &call_ctx,
-                                    );
-                                    push_results(results, resolved, conditional);
-                                }
-                            }
-                        }
-                    }
-                    Call::StaticMethod(static_call) => {
-                        // `$var = ClassName::method()` — resolve the class, find the
-                        // method, and use its return type.
-                        let class_name = match static_call.class {
-                            Expression::Self_(_) => Some(current_class_name.to_string()),
-                            Expression::Static(_) => Some(current_class_name.to_string()),
-                            Expression::Identifier(ident) => Some(ident.value().to_string()),
-                            _ => None,
-                        };
-                        if let Some(cls_name) = class_name
-                            && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
-                        {
-                            let method_name = ident.value.to_string();
-                            let owner = all_classes
-                                .iter()
-                                .find(|c| c.name == cls_name)
-                                .cloned()
-                                .or_else(|| class_loader(&cls_name));
-                            if let Some(ref owner) = owner {
-                                let resolved = Self::resolve_method_return_types(
-                                    owner,
-                                    &method_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                                push_results(results, resolved, conditional);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
 
-            // Check RHS is a property access: `$var = $this->prop`
-            // Resolve the property's type on the owning class so that
-            // `$box = $this->giftBox` where `@var Box<Gift> $giftBox`
-            // gives `$box` the type `Box<Gift>`.
-            if let Expression::Access(access) = assignment.rhs {
-                let (object_expr, prop_selector) = match access {
-                    Access::Property(pa) => (Some(pa.object), Some(&pa.property)),
-                    Access::NullSafeProperty(pa) => (Some(pa.object), Some(&pa.property)),
-                    _ => (None, None),
-                };
-                if let Some(obj) = object_expr
-                    && let Some(sel) = prop_selector
-                {
-                    // Extract the property name from the selector.
-                    let prop_name = match sel {
-                        ClassLikeMemberSelector::Identifier(ident) => Some(ident.value.to_string()),
-                        _ => None,
-                    };
-                    if let Some(prop_name) = prop_name {
-                        // Determine the owning class.
-                        let owner_classes: Vec<ClassInfo> =
-                            if let Expression::Variable(Variable::Direct(dv)) = obj
-                                && dv.name == "$this"
-                            {
-                                all_classes
-                                    .iter()
-                                    .find(|c| c.name == current_class_name)
-                                    .cloned()
-                                    .into_iter()
-                                    .collect()
-                            } else if let Expression::Variable(Variable::Direct(dv)) = obj {
-                                // Non-$this variable: resolve its type first.
-                                let var = dv.name.to_string();
-                                Self::resolve_target_classes(
-                                    &var,
-                                    crate::types::AccessKind::Arrow,
-                                    Some(ctx.current_class),
-                                    ctx.all_classes,
-                                    ctx.content,
-                                    ctx.cursor_offset,
-                                    ctx.class_loader,
-                                    ctx.function_loader,
-                                )
-                            } else {
-                                vec![]
-                            };
-
-                        for owner in &owner_classes {
-                            let resolved = Self::resolve_property_types(
-                                &prop_name,
-                                owner,
-                                all_classes,
-                                class_loader,
-                            );
-                            if !resolved.is_empty() {
-                                push_results(results, resolved, conditional);
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Match expression RHS ──
-            // `$var = match(…) { 'a' => new Foo(), 'b' => new Bar(), … }`
-            // Each arm contributes a possible type, so we treat every arm
-            // as a conditional assignment.
-            if let Expression::Match(match_expr) = assignment.rhs {
-                for arm in match_expr.arms.iter() {
-                    let arm_expr = arm.expression();
-                    let arm_results = Self::resolve_rhs_expression(arm_expr, ctx);
-                    // Each arm is effectively a conditional branch — append
-                    // without clearing previous candidates.
-                    push_results(results, arm_results, true);
-                }
-            }
-
-            // ── Ternary expression RHS ──
-            // `$var = $cond ? new Foo() : new Bar()`
-            //   → both branches contribute possible types.
-            // `$var = $a ?: new Bar()` (short ternary, `then` is None)
-            //   → the condition itself and the else branch both contribute.
-            if let Expression::Conditional(cond_expr) = assignment.rhs {
-                // "then" branch (or the condition itself for short ternary)
-                let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
-                let then_results = Self::resolve_rhs_expression(then_expr, ctx);
-                push_results(results, then_results, true);
-
-                // "else" branch
-                let else_results = Self::resolve_rhs_expression(cond_expr.r#else, ctx);
-                push_results(results, else_results, true);
-            }
-
-            // ── Null-coalescing expression RHS ──
-            // `$var = $a ?? new Foo()`
-            //   → both sides contribute possible types.
-            if let Expression::Binary(binary) = assignment.rhs
-                && binary.operator.is_null_coalesce()
-            {
-                let lhs_results = Self::resolve_rhs_expression(binary.lhs, ctx);
-                push_results(results, lhs_results, true);
-
-                let rhs_results = Self::resolve_rhs_expression(binary.rhs, ctx);
-                push_results(results, rhs_results, true);
-            }
+            // Delegate all RHS resolution to the shared helper.
+            let resolved = Self::resolve_rhs_expression(assignment.rhs, ctx);
+            push_results(results, resolved, conditional);
         }
     }
 
     /// Resolve a right-hand-side expression to zero or more `ClassInfo`
     /// values.
     ///
-    /// This is a lightweight expression-type resolver used to infer the
-    /// type that an expression evaluates to.  It handles:
+    /// This is the single place where an arbitrary PHP expression is
+    /// resolved to class types.  It handles:
     ///
     ///   - `new ClassName(…)` → the instantiated class
+    ///   - Array access: `$arr[0]`, `$arr[$key]` → generic element type
     ///   - Function calls: `someFunc()` → return type
     ///   - Method calls: `$this->method()`, `$obj->method()` → return type
     ///   - Static calls: `ClassName::method()` → return type
     ///   - Property access: `$this->prop`, `$obj->prop` → property type
+    ///   - Match expressions: union of all arm types
+    ///   - Ternary / null-coalescing: union of both branches
     ///
-    /// It is used by the match-expression handler (and potentially other
-    /// multi-branch constructs) to resolve each branch body independently.
+    /// Used by `check_expression_for_assignment` (for `$var = <expr>`)
+    /// and recursively by multi-branch constructs (match, ternary, `??`).
     fn resolve_rhs_expression<'b>(
         expr: &'b Expression<'b>,
         ctx: &VarResolutionCtx<'_>,
@@ -1678,6 +1389,29 @@ impl Backend {
                     all_classes,
                     class_loader,
                 );
+            }
+            return vec![];
+        }
+
+        // ── Array access: `$arr[0]` or `$arr[$key]` ──
+        // Resolve the base array's generic/iterable type and extract
+        // the element type.
+        if let Expression::ArrayAccess(array_access) = expr {
+            if let Expression::Variable(Variable::Direct(base_dv)) = array_access.array {
+                let base_var = base_dv.name.to_string();
+                let access_offset = expr.span().start.offset as usize;
+                if let Some(raw_type) =
+                    docblock::find_iterable_raw_type_in_source(content, access_offset, &base_var)
+                    && let Some(element_type) =
+                        docblock::types::extract_generic_value_type(&raw_type)
+                {
+                    return Self::type_hint_to_classes(
+                        &element_type,
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    );
+                }
             }
             return vec![];
         }
@@ -1854,52 +1588,35 @@ impl Backend {
             }
         }
 
-        // ── Nested match expression ──
+        // ── Match expression ──
         if let Expression::Match(match_expr) = expr {
             let mut combined = Vec::new();
             for arm in match_expr.arms.iter() {
                 let arm_results = Self::resolve_rhs_expression(arm.expression(), ctx);
-                for cls in arm_results {
-                    if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                        combined.push(cls);
-                    }
-                }
+                ClassInfo::extend_unique(&mut combined, arm_results);
             }
             return combined;
         }
 
-        // ── Nested ternary expression ──
+        // ── Ternary expression ──
         if let Expression::Conditional(cond_expr) = expr {
             let mut combined = Vec::new();
             let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
-            for cls in Self::resolve_rhs_expression(then_expr, ctx) {
-                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                    combined.push(cls);
-                }
-            }
-            for cls in Self::resolve_rhs_expression(cond_expr.r#else, ctx) {
-                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                    combined.push(cls);
-                }
-            }
+            ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(then_expr, ctx));
+            ClassInfo::extend_unique(
+                &mut combined,
+                Self::resolve_rhs_expression(cond_expr.r#else, ctx),
+            );
             return combined;
         }
 
-        // ── Nested null-coalescing expression ──
+        // ── Null-coalescing expression ──
         if let Expression::Binary(binary) = expr
             && binary.operator.is_null_coalesce()
         {
             let mut combined = Vec::new();
-            for cls in Self::resolve_rhs_expression(binary.lhs, ctx) {
-                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                    combined.push(cls);
-                }
-            }
-            for cls in Self::resolve_rhs_expression(binary.rhs, ctx) {
-                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
-                    combined.push(cls);
-                }
-            }
+            ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(binary.lhs, ctx));
+            ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(binary.rhs, ctx));
             return combined;
         }
 

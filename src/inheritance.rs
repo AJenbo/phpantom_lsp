@@ -942,41 +942,19 @@ mod tests {
     fn test_build_substitution_map_basic() {
         let child = ClassInfo {
             name: "LanguageCollection".to_string(),
-            methods: vec![],
-            properties: vec![],
-            constants: vec![],
-            start_offset: 0,
-            end_offset: 0,
             parent_class: Some("Collection".to_string()),
-            used_traits: vec![],
-            mixins: vec![],
             is_final: true,
-            is_deprecated: false,
-            template_params: vec![],
             extends_generics: vec![(
                 "Collection".to_string(),
                 vec!["int".to_string(), "Language".to_string()],
             )],
-            implements_generics: vec![],
-            use_generics: vec![],
+            ..ClassInfo::default()
         };
 
         let parent = ClassInfo {
             name: "Collection".to_string(),
-            methods: vec![],
-            properties: vec![],
-            constants: vec![],
-            start_offset: 0,
-            end_offset: 0,
-            parent_class: None,
-            used_traits: vec![],
-            mixins: vec![],
-            is_final: false,
-            is_deprecated: false,
             template_params: vec!["TKey".to_string(), "TValue".to_string()],
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
+            ..ClassInfo::default()
         };
 
         let subs = build_substitution_map(&child, &parent, &HashMap::new());
@@ -992,38 +970,16 @@ mod tests {
 
         let current_b = ClassInfo {
             name: "B".to_string(),
-            methods: vec![],
-            properties: vec![],
-            constants: vec![],
-            start_offset: 0,
-            end_offset: 0,
             parent_class: Some("A".to_string()),
-            used_traits: vec![],
-            mixins: vec![],
-            is_final: false,
-            is_deprecated: false,
             template_params: vec!["T".to_string()],
             extends_generics: vec![("A".to_string(), vec!["T".to_string()])],
-            implements_generics: vec![],
-            use_generics: vec![],
+            ..ClassInfo::default()
         };
 
         let parent_a = ClassInfo {
             name: "A".to_string(),
-            methods: vec![],
-            properties: vec![],
-            constants: vec![],
-            start_offset: 0,
-            end_offset: 0,
-            parent_class: None,
-            used_traits: vec![],
-            mixins: vec![],
-            is_final: false,
-            is_deprecated: false,
             template_params: vec!["U".to_string()],
-            extends_generics: vec![],
-            implements_generics: vec![],
-            use_generics: vec![],
+            ..ClassInfo::default()
         };
 
         let mut active = HashMap::new();
