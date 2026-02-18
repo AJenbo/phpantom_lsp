@@ -160,6 +160,90 @@ impl Backend {
             return Some(location);
         }
 
+        // 8. Try standalone constant lookup (define() constants).
+        if let Some(location) = self.resolve_constant_definition(&func_candidates) {
+            return Some(location);
+        }
+
+        None
+    }
+
+    // ─── Constant Definition Resolution ─────────────────────────────────────
+
+    /// Resolve a standalone constant to its `define('NAME', …)` call site.
+    ///
+    /// Checks `global_defines` (user-defined constants discovered from parsed
+    /// files) for a matching constant name, reads the source file, and returns
+    /// a `Location` pointing at the `define(` call.  Built-in constants from
+    /// `stub_constant_index` are not navigable (they have no real file).
+    fn resolve_constant_definition(&self, candidates: &[String]) -> Option<Location> {
+        // Look up the constant in global_defines.
+        let file_uri = {
+            let dmap = self.global_defines.lock().ok()?;
+            let mut result = None;
+            for candidate in candidates {
+                if let Some(uri) = dmap.get(candidate.as_str()) {
+                    result = Some((candidate.clone(), uri.clone()));
+                    break;
+                }
+            }
+            result
+        };
+
+        let (const_name, file_uri) = file_uri?;
+
+        // Read the file content (try open files first, then disk).
+        let file_content = self
+            .open_files
+            .lock()
+            .ok()
+            .and_then(|files| files.get(&file_uri).cloned())
+            .or_else(|| {
+                let path = Url::parse(&file_uri).ok()?.to_file_path().ok()?;
+                std::fs::read_to_string(path).ok()
+            })?;
+
+        let position = Self::find_define_position(&file_content, &const_name)?;
+        let parsed_uri = Url::parse(&file_uri).ok()?;
+
+        Some(Location {
+            uri: parsed_uri,
+            range: Range {
+                start: position,
+                end: position,
+            },
+        })
+    }
+
+    /// Find the position of a `define('NAME'` or `define("NAME"` call in
+    /// file content.
+    ///
+    /// Searches each line for a `define(` keyword followed (possibly with
+    /// whitespace) by a string literal containing the constant name.
+    /// Returns the position of the `define` keyword on the matching line.
+    fn find_define_position(content: &str, constant_name: &str) -> Option<Position> {
+        // Patterns: `'NAME'` and `"NAME"` — we search for these after
+        // the `define(` token, allowing optional whitespace.
+        let single_q = format!("'{}'", constant_name);
+        let double_q = format!("\"{}\"", constant_name);
+
+        for (line_idx, line) in content.lines().enumerate() {
+            // Find `define(` anywhere on the line.
+            let Some(def_pos) = line.find("define(") else {
+                continue;
+            };
+
+            // Extract the text after `define(` and trim leading whitespace
+            // to allow `define( 'NAME'` with spaces.
+            let after_paren = line[def_pos + 7..].trim_start();
+            if after_paren.starts_with(&single_q) || after_paren.starts_with(&double_q) {
+                return Some(Position {
+                    line: line_idx as u32,
+                    character: def_pos as u32,
+                });
+            }
+        }
+
         None
     }
 

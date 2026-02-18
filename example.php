@@ -2195,3 +2195,29 @@ class CloneDemo
         $result->getEmail(); // Resolved: string (both User and AdminUser have it)
     }
 }
+
+// ─── Standalone Constant Go-to-Definition ───────────────────────────────────
+//
+// Go-to-definition now works for standalone constants defined via `define()`.
+// Clicking on a constant name jumps to the `define('NAME', ...)` call site,
+// whether it's in the same file or a different file.
+
+define('APP_VERSION', '1.0.0');
+define('MAX_RETRIES', 3);
+define('DEFAULT_TIMEOUT', 30);
+
+// Ctrl+Click / Go-to-definition on any of these constant names jumps to
+// the corresponding define() call above:
+echo APP_VERSION;       // → jumps to define('APP_VERSION', ...)
+$retries = MAX_RETRIES; // → jumps to define('MAX_RETRIES', ...)
+
+function getTimeout(): int
+{
+    // Works inside function bodies too
+    return DEFAULT_TIMEOUT; // → jumps to define('DEFAULT_TIMEOUT', ...)
+}
+
+// Constants used in expressions, comparisons, and array indices:
+if (MAX_RETRIES > 0) {  // → jumps to define('MAX_RETRIES', ...)
+    echo APP_VERSION;   // → jumps to define('APP_VERSION', ...)
+}
