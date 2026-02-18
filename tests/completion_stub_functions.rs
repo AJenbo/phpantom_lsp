@@ -1094,7 +1094,8 @@ async fn test_completion_user_function_shadows_stub() {
     );
 }
 
-/// `insert_text` should be just the function name (no parens or snippet).
+/// Stub functions should get `name()$0` as a snippet — we know they're
+/// callable but don't have parameter info loaded.
 #[tokio::test]
 async fn test_completion_function_insert_text() {
     let backend = create_test_backend_with_function_stubs();
@@ -1112,10 +1113,16 @@ async fn test_completion_function_insert_text() {
         json_decode.is_some(),
         "Should find json_decode in completions"
     );
+    let json_decode = json_decode.unwrap();
     assert_eq!(
-        json_decode.unwrap().insert_text.as_deref(),
-        Some("json_decode"),
-        "insert_text should be just the function name"
+        json_decode.insert_text.as_deref(),
+        Some("json_decode()$0"),
+        "insert_text should be the function name with empty parens snippet"
+    );
+    assert_eq!(
+        json_decode.insert_text_format,
+        Some(InsertTextFormat::SNIPPET),
+        "insert_text_format should be Snippet for stub functions"
     );
 }
 

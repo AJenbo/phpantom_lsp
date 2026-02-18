@@ -12,6 +12,43 @@ use crate::Backend;
 use crate::types::Visibility;
 use crate::types::*;
 
+/// Build an LSP snippet string for a callable (function, method, or constructor).
+///
+/// Required parameters are included as numbered tab stops with their
+/// PHP variable name as placeholder text.  Optional and variadic
+/// parameters are omitted — they can be filled in via signature help.
+///
+/// The returned string uses LSP snippet syntax and **must** be paired
+/// with `InsertTextFormat::SNIPPET` on the `CompletionItem`.
+///
+/// # Examples
+///
+/// | call                                       | result                              |
+/// |--------------------------------------------|-------------------------------------|
+/// | `("reset", &[])`                           | `"reset()$0"`                       |
+/// | `("makeText", &[req($text), opt($long)])`  | `"makeText(${1:\\$text})$0"`        |
+/// | `("add", &[req($a), req($b)])`             | `"add(${1:\\$a}, ${2:\\$b})$0"`     |
+pub(crate) fn build_callable_snippet(name: &str, params: &[ParameterInfo]) -> String {
+    let required: Vec<&ParameterInfo> = params.iter().filter(|p| p.is_required).collect();
+
+    if required.is_empty() {
+        format!("{name}()$0")
+    } else {
+        let placeholders: Vec<String> = required
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                // Escape `$` in parameter names so it is treated as a
+                // literal character rather than a snippet tab-stop /
+                // variable reference.
+                let escaped_name = p.name.replace('$', "\\$");
+                format!("${{{}:{}}}", i + 1, escaped_name)
+            })
+            .collect();
+        format!("{name}({})$0", placeholders.join(", "))
+    }
+}
+
 // Re-export use-statement helpers so existing `use crate::completion::builder::{…}`
 // imports continue to work.
 pub(crate) use super::use_edit::{build_use_edit, find_use_insert_position};
@@ -169,7 +206,8 @@ impl Backend {
                 label,
                 kind: Some(CompletionItemKind::METHOD),
                 detail: Some(format!("Class: {}", target_class.name)),
-                insert_text: Some(method.name.clone()),
+                insert_text: Some(build_callable_snippet(&method.name, &method.parameters)),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
                 filter_text: Some(method.name.clone()),
                 deprecated: if method.is_deprecated {
                     Some(true)

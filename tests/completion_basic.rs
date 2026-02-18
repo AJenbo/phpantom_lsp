@@ -253,11 +253,21 @@ async fn test_completion_inside_class_returns_methods() {
                 );
             }
 
-            // Check insert_text is just the method name
+            // Check insert_text is a snippet with parens (no required params here)
             for item in &method_items {
                 let insert = item.insert_text.as_deref().unwrap();
                 let filter = item.filter_text.as_deref().unwrap();
-                assert_eq!(insert, filter, "insert_text should be just the method name");
+                assert!(
+                    insert.starts_with(filter) && insert.contains("()"),
+                    "insert_text '{}' should be a snippet starting with '{}' and containing parens",
+                    insert,
+                    filter
+                );
+                assert_eq!(
+                    item.insert_text_format,
+                    Some(InsertTextFormat::SNIPPET),
+                    "insert_text_format should be Snippet"
+                );
             }
         }
         _ => panic!("Expected CompletionResponse::Array"),

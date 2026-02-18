@@ -945,8 +945,13 @@ async fn test_class_name_completion_insert_text_is_short_name() {
     let my_class = classes.iter().find(|i| i.label == "MyClass").unwrap();
     assert_eq!(
         my_class.insert_text.as_deref(),
-        Some("MyClass"),
-        "insert_text should be the short class name"
+        Some("MyClass()$0"),
+        "insert_text should be the short class name with parens in `new` context"
+    );
+    assert_eq!(
+        my_class.insert_text_format,
+        Some(InsertTextFormat::SNIPPET),
+        "insert_text_format should be Snippet in `new` context"
     );
     assert_eq!(
         my_class.detail.as_deref(),

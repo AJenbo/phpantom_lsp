@@ -326,6 +326,7 @@ impl Backend {
                     &file_namespace,
                     &partial,
                     &content,
+                    false,
                 );
                 let mut all_items = items; // Throwable item (if matched)
                 for ci in class_items {
@@ -352,6 +353,7 @@ impl Backend {
                     &file_namespace,
                     &partial,
                     &content,
+                    true,
                 );
                 if !class_items.is_empty() {
                     return Ok(Some(CompletionResponse::List(CompletionList {
@@ -369,11 +371,13 @@ impl Backend {
             // global_defines, stub_constant_index, global_functions,
             // stub_function_index).
             if let Some(partial) = Self::extract_partial_class_name(&content, position) {
+                let is_new = Self::is_new_context(&content, position);
                 let (class_items, class_incomplete) = self.build_class_name_completions(
                     &file_use_map,
                     &file_namespace,
                     &partial,
                     &content,
+                    is_new,
                 );
                 let (constant_items, const_incomplete) = self.build_constant_completions(&partial);
                 let (function_items, func_incomplete) = self.build_function_completions(&partial);

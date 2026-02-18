@@ -2221,3 +2221,58 @@ function getTimeout(): int
 if (MAX_RETRIES > 0) {  // → jumps to define('MAX_RETRIES', ...)
     echo APP_VERSION;   // → jumps to define('APP_VERSION', ...)
 }
+
+// ─── Callable Snippet Insertion ─────────────────────────────────────────────
+//
+// When completing methods, functions, or `new ClassName`, the LSP inserts
+// a snippet with parentheses and tab-stops for each **required** parameter.
+// Optional and variadic parameters are omitted — use signature help to
+// fill those in.
+//
+// Method examples:
+//   $user->setName(|)         — setName(string $name) → snippet: setName(${1:\$name})
+//   $user->toArray()          — toArray() has no params → snippet: toArray()
+//   $user->addRoles(|)        — addRoles(string ...$roles) variadic → snippet: addRoles()
+//
+// Function examples:
+//   createUser(|)             — createUser(string $name, …) → snippet: createUser(${1:\$name})
+//   Built-in stubs like json_decode get empty parens: json_decode()
+//
+// `new ClassName` examples (same-namespace classes get full constructor params):
+//   new User(|,|)             — __construct(string $name, string $email) → User(${1:\$name}, ${2:\$email})
+//   new Response(|)           — __construct(int $statusCode, …) → Response(${1:\$statusCode})
+//   Classes from classmap/stubs just get empty parens: new DateTime()
+
+class CallableSnippetDemo
+{
+    public function methodSnippets(User $user, Response $response): void
+    {
+        // Try completing after `->` — each inserts a snippet with required params:
+        $user->setName($name);   // Inserted: setName(${1:$name})        — 1 required param
+        $user->toArray();        // Inserted: toArray()                  — no params
+        $user->addRoles();       // Inserted: addRoles()                 — variadic only
+        $response->getBody();    // Inserted: getBody()                  — no params
+    }
+
+    public function staticSnippets(): void
+    {
+        // Static method calls also get snippets:
+        User::findByEmail($email);    // Inserted: findByEmail(${1:$email})   — 1 required param
+        Model::find($id);             // Inserted: find(${1:$id})             — 1 required param
+    }
+
+    public function newSnippets(): void
+    {
+        // `new` inserts class name + constructor params as snippet:
+        $u = new User($name, $email)          // Inserted: User(${1:$name}, ${2:$email}) — 2 required
+        $r = new Response($statusCode);       // Inserted: Response(${1:$statusCode})    — 1 required
+        $a = new AdminUser($name, $email);    // Inserted: AdminUser(${1:$name}, ${2:$email}, ${3:$role})
+    }
+
+    public function parentConstructorSnippet(): void
+    {
+        // parent::__construct also gets snippets when inside a subclass.
+        // See AdminUser::__construct for an example:
+        //   parent::__construct(${1:$name}, ${2:$email})
+    }
+}

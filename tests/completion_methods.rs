@@ -57,8 +57,18 @@ async fn test_completion_method_insert_text_no_params() {
             for item in &method_items {
                 let insert = item.insert_text.as_deref().unwrap();
                 let filter = item.filter_text.as_deref().unwrap();
-                // insert_text should be just the method name
-                assert_eq!(insert, filter);
+                // insert_text should be a snippet: methodName()$0 (no required params)
+                let expected = format!("{}()$0", filter);
+                assert_eq!(
+                    insert, expected,
+                    "insert_text should be a snippet with parens for '{}'",
+                    filter
+                );
+                assert_eq!(
+                    item.insert_text_format,
+                    Some(InsertTextFormat::SNIPPET),
+                    "insert_text_format should be Snippet"
+                );
                 // label should be the full signature, e.g. "render()"
                 assert!(
                     item.label.starts_with(filter),
@@ -128,35 +138,47 @@ async fn test_completion_method_insert_text_with_required_params() {
             );
 
             // Find specific methods by filter_text (method name)
+            // updateText(string $text, $frogs = false) — one required param
             let update_text = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("updateText"))
                 .expect("Should have updateText");
             assert_eq!(
                 update_text.insert_text.as_deref(),
-                Some("updateText"),
-                "insert_text should be just the method name"
+                Some("updateText(${1:\\$text})$0"),
+                "insert_text should be a snippet with required param $text"
+            );
+            assert_eq!(
+                update_text.insert_text_format,
+                Some(InsertTextFormat::SNIPPET),
             );
 
+            // setTitle(string $title) — one required param
             let set_title = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("setTitle"))
                 .expect("Should have setTitle");
             assert_eq!(
                 set_title.insert_text.as_deref(),
-                Some("setTitle"),
-                "insert_text should be just the method name"
+                Some("setTitle(${1:\\$title})$0"),
+                "insert_text should be a snippet with required param $title"
+            );
+            assert_eq!(
+                set_title.insert_text_format,
+                Some(InsertTextFormat::SNIPPET),
             );
 
+            // reset() — no params
             let reset = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("reset"))
                 .expect("Should have reset");
             assert_eq!(
                 reset.insert_text.as_deref(),
-                Some("reset"),
-                "insert_text should be just the method name"
+                Some("reset()$0"),
+                "insert_text should be a snippet with empty parens"
             );
+            assert_eq!(reset.insert_text_format, Some(InsertTextFormat::SNIPPET),);
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -211,24 +233,31 @@ async fn test_completion_method_insert_text_multiple_required_params() {
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
 
+            // add(int $a, int $b) — two required params
             let add = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("add"))
                 .expect("Should have add");
             assert_eq!(
                 add.insert_text.as_deref(),
-                Some("add"),
-                "insert_text should be just the method name"
+                Some("add(${1:\\$a}, ${2:\\$b})$0"),
+                "insert_text should be a snippet with two required params"
             );
+            assert_eq!(add.insert_text_format, Some(InsertTextFormat::SNIPPET),);
 
+            // addWithLabel(int $a, int $b, string $label = 'sum') — two required, one optional
             let add_with_label = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("addWithLabel"))
                 .expect("Should have addWithLabel");
             assert_eq!(
                 add_with_label.insert_text.as_deref(),
-                Some("addWithLabel"),
-                "insert_text should be just the method name"
+                Some("addWithLabel(${1:\\$a}, ${2:\\$b})$0"),
+                "insert_text should include only the two required params"
+            );
+            assert_eq!(
+                add_with_label.insert_text_format,
+                Some(InsertTextFormat::SNIPPET),
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),
@@ -284,25 +313,29 @@ async fn test_completion_method_insert_text_variadic_param() {
                 .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
                 .collect();
 
+            // log(string $message, ...$context) — one required, one variadic
             let log = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("log"))
                 .expect("Should have log");
             assert_eq!(
                 log.insert_text.as_deref(),
-                Some("log"),
-                "insert_text should be just the method name"
+                Some("log(${1:\\$message})$0"),
+                "insert_text should include the required param but not the variadic"
             );
+            assert_eq!(log.insert_text_format, Some(InsertTextFormat::SNIPPET),);
 
+            // logAll(...$messages) — only variadic, no required
             let log_all = method_items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("logAll"))
                 .expect("Should have logAll");
             assert_eq!(
                 log_all.insert_text.as_deref(),
-                Some("logAll"),
-                "insert_text should be just the method name"
+                Some("logAll()$0"),
+                "insert_text should be empty parens (variadic is not required)"
             );
+            assert_eq!(log_all.insert_text_format, Some(InsertTextFormat::SNIPPET),);
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -351,15 +384,17 @@ async fn test_completion_method_all_optional_params() {
     let result = backend.completion(completion_params).await.unwrap();
     match result.unwrap() {
         CompletionResponse::Array(items) => {
+            // setup($debug = false, $verbose = false) — all optional
             let setup = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("setup"))
                 .expect("Should have setup");
             assert_eq!(
                 setup.insert_text.as_deref(),
-                Some("setup"),
-                "insert_text should be just the method name"
+                Some("setup()$0"),
+                "insert_text should be empty parens (all params are optional)"
             );
+            assert_eq!(setup.insert_text_format, Some(InsertTextFormat::SNIPPET),);
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -427,12 +462,13 @@ async fn test_completion_method_detail_shows_signature() {
                 detail
             );
 
-            // insert_text should be just the method name
+            // insert_text should be a snippet with the required param
             assert_eq!(
                 update.insert_text.as_deref(),
-                Some("updateText"),
-                "insert_text should be just the method name"
+                Some("updateText(${1:\\$text})$0"),
+                "insert_text should be a snippet with required param $text"
             );
+            assert_eq!(update.insert_text_format, Some(InsertTextFormat::SNIPPET),);
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }

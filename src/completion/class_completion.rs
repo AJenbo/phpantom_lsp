@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::types::*;
 
-use super::builder::{build_use_edit, find_use_insert_position};
+use super::builder::{build_callable_snippet, build_use_edit, find_use_insert_position};
 
 impl Backend {
     /// Extract the partial identifier (class name fragment) that the user
@@ -129,6 +129,63 @@ impl Backend {
         false
     }
 
+    /// Return `true` when the cursor sits in a `new ClassName` context —
+    /// i.e. the partial identifier is immediately preceded by the `new`
+    /// keyword (with optional whitespace).  This is used to enrich class
+    /// name completions with constructor parameter snippets.
+    pub fn is_new_context(content: &str, position: Position) -> bool {
+        let lines: Vec<&str> = content.lines().collect();
+        if position.line as usize >= lines.len() {
+            return false;
+        }
+
+        let line = lines[position.line as usize];
+        let chars: Vec<char> = line.chars().collect();
+        let col = (position.character as usize).min(chars.len());
+
+        // Walk backward past the partial identifier.
+        let mut i = col;
+        while i > 0
+            && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '\\')
+        {
+            i -= 1;
+        }
+
+        // Skip whitespace before the identifier.
+        let mut j = i;
+        while j > 0 && chars[j - 1] == ' ' {
+            j -= 1;
+        }
+
+        // Check for the `new` keyword, ensuring it isn't part of a
+        // longer identifier (e.g. `renew`).
+        j >= 3
+            && chars[j - 3] == 'n'
+            && chars[j - 2] == 'e'
+            && chars[j - 1] == 'w'
+            && (j < 4 || !chars[j - 4].is_alphanumeric())
+    }
+
+    /// Build `(insert_text, insert_text_format)` for a class in `new` context.
+    ///
+    /// When `ctor_params` is `Some`, those constructor parameters are used
+    /// to build a snippet with tab-stops for each required argument.
+    /// When `None`, a plain `Name()$0` snippet is returned so the user
+    /// still gets parentheses inserted automatically.
+    fn build_new_insert(
+        short_name: &str,
+        ctor_params: Option<&[ParameterInfo]>,
+    ) -> (String, Option<InsertTextFormat>) {
+        let snippet = if let Some(p) = ctor_params {
+            build_callable_snippet(short_name, p)
+        } else {
+            // No constructor info available — insert empty parens.
+            format!("{short_name}()$0")
+        };
+
+        (snippet, Some(InsertTextFormat::SNIPPET))
+    }
+
     /// Build completion items for class names from all known sources.
     ///
     /// Sources (in priority order):
@@ -153,6 +210,7 @@ impl Backend {
         file_namespace: &Option<String>,
         prefix: &str,
         content: &str,
+        is_new: bool,
     ) -> (Vec<CompletionItem>, bool) {
         let prefix_lower = prefix.strip_prefix('\\').unwrap_or(prefix).to_lowercase();
         let mut seen_fqns: HashSet<String> = HashSet::new();
@@ -171,11 +229,17 @@ impl Backend {
             if !seen_fqns.insert(fqn.clone()) {
                 continue;
             }
+            let (insert_text, insert_text_format) = if is_new {
+                Self::build_new_insert(short_name, None)
+            } else {
+                (short_name.clone(), None)
+            };
             items.push(CompletionItem {
                 label: short_name.clone(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(fqn.clone()),
-                insert_text: Some(short_name.clone()),
+                insert_text: Some(insert_text),
+                insert_text_format,
                 filter_text: Some(short_name.clone()),
                 sort_text: Some(format!("0_{}", short_name.to_lowercase())),
                 ..CompletionItem::default()
@@ -210,11 +274,24 @@ impl Backend {
                             if !seen_fqns.insert(fqn.clone()) {
                                 continue;
                             }
+                            let (insert_text, insert_text_format) = if is_new {
+                                // We already have the ClassInfo — check
+                                // for __construct directly.
+                                let ctor_params: Option<Vec<ParameterInfo>> = cls
+                                    .methods
+                                    .iter()
+                                    .find(|m| m.name.eq_ignore_ascii_case("__construct"))
+                                    .map(|m| m.parameters.clone());
+                                Self::build_new_insert(&cls.name, ctor_params.as_deref())
+                            } else {
+                                (cls.name.clone(), None)
+                            };
                             items.push(CompletionItem {
                                 label: cls.name.clone(),
                                 kind: Some(CompletionItemKind::CLASS),
                                 detail: Some(fqn),
-                                insert_text: Some(cls.name.clone()),
+                                insert_text: Some(insert_text),
+                                insert_text_format,
                                 filter_text: Some(cls.name.clone()),
                                 sort_text: Some(format!("1_{}", cls.name.to_lowercase())),
                                 deprecated: if cls.is_deprecated { Some(true) } else { None },
@@ -236,11 +313,19 @@ impl Backend {
                 if !seen_fqns.insert(fqn.clone()) {
                     continue;
                 }
+                let (insert_text, insert_text_format) = if is_new {
+                    // class_index is a FQN → URI map; the class may or
+                    // may not be fully loaded — just insert empty parens.
+                    (format!("{short_name}()$0"), Some(InsertTextFormat::SNIPPET))
+                } else {
+                    (short_name.to_string(), None)
+                };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(fqn.clone()),
-                    insert_text: Some(short_name.to_string()),
+                    insert_text: Some(insert_text),
+                    insert_text_format,
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("2_{}", short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
@@ -259,11 +344,17 @@ impl Backend {
                 if !seen_fqns.insert(fqn.clone()) {
                     continue;
                 }
+                let (insert_text, insert_text_format) = if is_new {
+                    Self::build_new_insert(short_name, None)
+                } else {
+                    (short_name.to_string(), None)
+                };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(fqn.clone()),
-                    insert_text: Some(short_name.to_string()),
+                    insert_text: Some(insert_text),
+                    insert_text_format,
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("3_{}", short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
@@ -281,11 +372,19 @@ impl Backend {
             if !seen_fqns.insert(name.to_string()) {
                 continue;
             }
+            let (insert_text, insert_text_format) = if is_new {
+                // Stub classes are not parsed yet — just insert empty
+                // parens without attempting a lookup.
+                (format!("{short_name}()$0"), Some(InsertTextFormat::SNIPPET))
+            } else {
+                (short_name.to_string(), None)
+            };
             items.push(CompletionItem {
                 label: short_name.to_string(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(name.to_string()),
-                insert_text: Some(short_name.to_string()),
+                insert_text: Some(insert_text),
+                insert_text_format,
                 filter_text: Some(short_name.to_string()),
                 sort_text: Some(format!("4_{}", short_name.to_lowercase())),
                 additional_text_edits: build_use_edit(name, use_insert_pos, file_namespace),
@@ -460,6 +559,7 @@ impl Backend {
         file_namespace: &Option<String>,
         prefix: &str,
         content: &str,
+        is_new: bool,
     ) -> (Vec<CompletionItem>, bool) {
         let prefix_lower = prefix.strip_prefix('\\').unwrap_or(prefix).to_lowercase();
         let mut seen_fqns: HashSet<String> = HashSet::new();
@@ -487,11 +587,17 @@ impl Backend {
             if !self.is_throwable_descendant(fqn, 0) {
                 continue;
             }
+            let (insert_text, insert_text_format) = if is_new {
+                Self::build_new_insert(short_name, None)
+            } else {
+                (short_name.clone(), None)
+            };
             items.push(CompletionItem {
                 label: short_name.clone(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(fqn.clone()),
-                insert_text: Some(short_name.clone()),
+                insert_text: Some(insert_text),
+                insert_text_format,
                 filter_text: Some(short_name.clone()),
                 sort_text: Some(format!("0_{}", short_name.to_lowercase())),
                 ..CompletionItem::default()
@@ -544,11 +650,19 @@ impl Backend {
                 if !self.is_throwable_descendant(&fqn, 0) {
                     continue;
                 }
+                let (insert_text, insert_text_format) = if is_new {
+                    // Same-namespace classes are collected without
+                    // ClassInfo, so we cannot check __construct here.
+                    Self::build_new_insert(&name, None)
+                } else {
+                    (name.clone(), None)
+                };
                 items.push(CompletionItem {
                     label: name.clone(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(fqn),
-                    insert_text: Some(name.clone()),
+                    insert_text: Some(insert_text),
+                    insert_text_format,
                     filter_text: Some(name.clone()),
                     sort_text: Some(format!("1_{}", name.to_lowercase())),
                     deprecated: if is_deprecated { Some(true) } else { None },
@@ -573,11 +687,17 @@ impl Backend {
                 if !self.is_throwable_descendant(fqn, 0) {
                     continue;
                 }
+                let (insert_text, insert_text_format) = if is_new {
+                    (format!("{short_name}()$0"), Some(InsertTextFormat::SNIPPET))
+                } else {
+                    (short_name.to_string(), None)
+                };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(fqn.clone()),
-                    insert_text: Some(short_name.to_string()),
+                    insert_text: Some(insert_text),
+                    insert_text_format,
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("2_{}", short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
@@ -608,11 +728,17 @@ impl Backend {
                 } else {
                     "5"
                 };
+                let (insert_text, insert_text_format) = if is_new {
+                    (format!("{short_name}()$0"), Some(InsertTextFormat::SNIPPET))
+                } else {
+                    (short_name.to_string(), None)
+                };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
                     detail: Some(fqn.clone()),
-                    insert_text: Some(short_name.to_string()),
+                    insert_text: Some(insert_text),
+                    insert_text_format,
                     filter_text: Some(short_name.to_string()),
                     sort_text: Some(format!("{}_{}", prefix_num, short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
@@ -639,11 +765,17 @@ impl Backend {
             } else {
                 "6"
             };
+            let (insert_text, insert_text_format) = if is_new {
+                (format!("{short_name}()$0"), Some(InsertTextFormat::SNIPPET))
+            } else {
+                (short_name.to_string(), None)
+            };
             items.push(CompletionItem {
                 label: short_name.to_string(),
                 kind: Some(CompletionItemKind::CLASS),
                 detail: Some(name.to_string()),
-                insert_text: Some(short_name.to_string()),
+                insert_text: Some(insert_text),
+                insert_text_format,
                 filter_text: Some(short_name.to_string()),
                 sort_text: Some(format!("{}_{}", prefix_num, short_name.to_lowercase())),
                 additional_text_edits: build_use_edit(name, use_insert_pos, file_namespace),
@@ -807,7 +939,8 @@ impl Backend {
                     label,
                     kind: Some(CompletionItemKind::FUNCTION),
                     detail: Some("function".to_string()),
-                    insert_text: Some(info.name.clone()),
+                    insert_text: Some(build_callable_snippet(&info.name, &info.parameters)),
+                    insert_text_format: Some(InsertTextFormat::SNIPPET),
                     filter_text: Some(info.name.clone()),
                     sort_text: Some(format!("4_{}", info.name.to_lowercase())),
                     deprecated: if info.is_deprecated { Some(true) } else { None },
@@ -828,7 +961,8 @@ impl Backend {
                 label: name.to_string(),
                 kind: Some(CompletionItemKind::FUNCTION),
                 detail: Some("PHP function".to_string()),
-                insert_text: Some(name.to_string()),
+                insert_text: Some(format!("{name}()$0")),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
                 filter_text: Some(name.to_string()),
                 sort_text: Some(format!("5_{}", name.to_lowercase())),
                 ..CompletionItem::default()
