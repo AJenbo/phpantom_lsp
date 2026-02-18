@@ -1598,6 +1598,22 @@ $result['user'] = new User();
 $result[''];  // Key completion suggests: status, code, user
               // Details: status: string, code: int, user: User
 
+// ─── Push-Style List Type Inference ────────────────────────────────────────
+//
+// PHPantomLSP infers list<Type> from push-style array construction:
+//   $arr = [];
+//   $arr[] = new User();        // Infers list<User>
+//   $arr[] = new AdminUser();   // Infers list<User|AdminUser>
+//
+// Element access resolves through the inferred generic type:
+//   $arr[0]->  offers members from User and AdminUser
+
+$users = [];
+$users[] = new User();
+$users[] = new AdminUser();
+$users[0]->getName();           // Resolved: User::getName() and AdminUser members
+$users[0]->grantPermission(''); // Resolved: AdminUser::grantPermission()
+
 // ─── Literal Array Value Type → Member Access ──────────────────────────────
 //
 // When the value type of an array shape key is a class, member access

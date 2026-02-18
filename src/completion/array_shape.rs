@@ -536,6 +536,7 @@ impl Backend {
     /// - `$var = ['key' => value, …];` → synthesised `array{key: type, …}`
     /// - Incremental `$var['key'] = expr;` assignments after the initial
     ///   assignment are merged into the shape.
+    /// - `$var[] = expr;` push-style assignments → synthesised `list<Type>`
     fn resolve_raw_type_from_assignment(
         &self,
         var_name: &str,
@@ -561,10 +562,8 @@ impl Backend {
         // Case 1: RHS is an array literal — `[…]` or `array(…)`.
         // Check this BEFORE the function-call case because `array(…)`
         // ends with `)` and would otherwise be mistaken for a call.
-        // Also scan for incremental `$var['key'] = expr;` assignments.
-        // Parse the keys from the literal and also scan for incremental
-        // `$var['key'] = expr;` assignments between the initial
-        // assignment and the cursor.
+        // Also scan for incremental `$var['key'] = expr;` assignments
+        // and push-style `$var[] = expr;` assignments.
         let base_entries = parse_array_literal_entries(rhs_text);
 
         // Scan for incremental `$var['key'] = expr;` assignments.
@@ -572,7 +571,10 @@ impl Backend {
         let incremental =
             collect_incremental_key_assignments(var_name, content, after_assign, cursor_offset);
 
-        if base_entries.is_some() || !incremental.is_empty() {
+        // Scan for push-style `$var[] = expr;` assignments.
+        let push_types = collect_push_assignments(var_name, content, after_assign, cursor_offset);
+
+        if base_entries.is_some() || !incremental.is_empty() || !push_types.is_empty() {
             let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();
             // Merge incremental assignments — later assignments for the
             // same key override earlier ones.
@@ -583,12 +585,17 @@ impl Backend {
                     entries.push((k, v));
                 }
             }
+            // If there are string-keyed entries, prefer the array shape.
             if !entries.is_empty() {
                 let shape_parts: Vec<String> = entries
                     .iter()
                     .map(|(k, v)| format!("{}: {}", k, v))
                     .collect();
                 return Some(format!("array{{{}}}", shape_parts.join(", ")));
+            }
+            // No string-keyed entries — try push-style list inference.
+            if let Some(list_type) = build_list_type_from_push_types(&push_types) {
+                return Some(list_type);
             }
         }
 
@@ -1134,7 +1141,7 @@ fn infer_literal_type(expr: &str) -> String {
 ///
 /// Returns a list of `(key, inferred_type)` pairs.  Only string-keyed
 /// assignments are collected; `$var[] = expr;` push-style assignments
-/// are skipped since they produce numeric keys.
+/// are handled separately by [`collect_push_assignments`].
 pub(super) fn collect_incremental_key_assignments(
     var_name: &str,
     content: &str,
@@ -1207,6 +1214,103 @@ pub(super) fn collect_incremental_key_assignments(
     }
 
     entries
+}
+
+/// Scan for push-style `$var[] = expr;` assignments in the content
+/// between `start_offset` and `end_offset`.
+///
+/// Returns a list of inferred type strings (one per push assignment).
+/// Duplicate types are preserved so callers can deduplicate as needed.
+///
+/// # Example
+///
+/// ```php
+/// $arr = [];
+/// $arr[] = new User();       // → "User"
+/// $arr[] = new AdminUser();  // → "AdminUser"
+/// ```
+///
+/// The caller can combine these into `list<User|AdminUser>`.
+pub(super) fn collect_push_assignments(
+    var_name: &str,
+    content: &str,
+    start_offset: usize,
+    end_offset: usize,
+) -> Vec<String> {
+    let search_area = match content.get(start_offset..end_offset) {
+        Some(s) => s,
+        None => return vec![],
+    };
+
+    let mut types = Vec::new();
+    // Pattern: `$var[] = `
+    let prefix = format!("{}[]", var_name);
+
+    let mut pos = 0;
+    while let Some(found) = search_area[pos..].find(&prefix) {
+        let abs = pos + found;
+        let after_brackets = abs + prefix.len();
+
+        let rest = match search_area.get(after_brackets..) {
+            Some(r) => r,
+            None => break,
+        };
+
+        // After `$var[]`, expect ` = ` (with optional whitespace).
+        let trimmed = rest.trim_start();
+        if !trimmed.starts_with('=') {
+            pos = after_brackets;
+            continue;
+        }
+
+        // Make sure it's `=` and not `==` or `===`.
+        let after_eq = &trimmed[1..];
+        if after_eq.starts_with('=') {
+            pos = after_brackets;
+            continue;
+        }
+
+        let rhs_and_rest = after_eq;
+
+        // Find `;` respecting nesting.
+        if let Some(semi) = find_balanced_semicolon(rhs_and_rest) {
+            let value_expr = rhs_and_rest[..semi].trim();
+            let inferred = infer_literal_type(value_expr);
+            types.push(inferred);
+        }
+
+        pos = after_brackets;
+    }
+
+    types
+}
+
+/// Build a `list<Type>` type string from a collection of push-assignment
+/// value types.
+///
+/// Deduplicates types and joins them with `|` inside the generic parameter.
+/// Returns `None` if the input is empty or all types are `mixed`.
+pub(super) fn build_list_type_from_push_types(types: &[String]) -> Option<String> {
+    if types.is_empty() {
+        return None;
+    }
+
+    // Deduplicate while preserving first-seen order.
+    let mut seen = Vec::new();
+    for t in types {
+        if !seen.contains(t) {
+            seen.push(t.clone());
+        }
+    }
+
+    // If all types are `mixed`, don't synthesize a list type — it's not
+    // useful for completion.
+    if seen.iter().all(|t| t == "mixed") {
+        return None;
+    }
+
+    let inner = seen.join("|");
+    Some(format!("list<{}>", inner))
 }
 
 fn find_top_level_paren(s: &str) -> Option<usize> {
@@ -1557,11 +1661,95 @@ mod tests {
 
     #[test]
     fn test_collect_incremental_push_ignored() {
-        // $var[] = expr should be ignored (no string key)
+        // $var[] = expr should be ignored by string-key collector
         let content = "$v = [];\n$v[] = new User();\n$v['name'] = 'x';\n";
         let entries = collect_incremental_key_assignments("$v", content, 8, content.len());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "name");
+    }
+
+    #[test]
+    fn test_collect_push_basic() {
+        let content = "$v = [];\n$v[] = new User();\n$v[] = new AdminUser();\n";
+        let types = collect_push_assignments("$v", content, 8, content.len());
+        assert_eq!(types.len(), 2);
+        assert_eq!(types[0], "User");
+        assert_eq!(types[1], "AdminUser");
+    }
+
+    #[test]
+    fn test_collect_push_string_literals() {
+        let content = "$v = [];\n$v[] = 'hello';\n$v[] = 'world';\n";
+        let types = collect_push_assignments("$v", content, 8, content.len());
+        assert_eq!(types.len(), 2);
+        assert_eq!(types[0], "string");
+        assert_eq!(types[1], "string");
+    }
+
+    #[test]
+    fn test_collect_push_skips_keyed() {
+        // $var['key'] = expr should NOT be collected by push scanner
+        let content = "$v = [];\n$v['name'] = 'x';\n$v[] = new User();\n";
+        let types = collect_push_assignments("$v", content, 8, content.len());
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0], "User");
+    }
+
+    #[test]
+    fn test_collect_push_empty_range() {
+        let types = collect_push_assignments("$v", "", 0, 0);
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn test_collect_push_no_double_equals() {
+        // $var[] == expr should NOT be collected (comparison, not assignment)
+        let content = "$v = [];\n$v[] == new User();\n";
+        let types = collect_push_assignments("$v", content, 8, content.len());
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn test_build_list_type_single() {
+        let types = vec!["User".to_string()];
+        assert_eq!(
+            build_list_type_from_push_types(&types),
+            Some("list<User>".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_list_type_union() {
+        let types = vec!["User".to_string(), "AdminUser".to_string()];
+        assert_eq!(
+            build_list_type_from_push_types(&types),
+            Some("list<User|AdminUser>".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_list_type_deduplicates() {
+        let types = vec![
+            "User".to_string(),
+            "User".to_string(),
+            "AdminUser".to_string(),
+        ];
+        assert_eq!(
+            build_list_type_from_push_types(&types),
+            Some("list<User|AdminUser>".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_list_type_empty() {
+        let types: Vec<String> = vec![];
+        assert_eq!(build_list_type_from_push_types(&types), None);
+    }
+
+    #[test]
+    fn test_build_list_type_all_mixed() {
+        let types = vec!["mixed".to_string(), "mixed".to_string()];
+        assert_eq!(build_list_type_from_push_types(&types), None);
     }
 
     #[test]

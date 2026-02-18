@@ -3828,3 +3828,489 @@ async fn test_array_shape_literal_value_type_inside_class() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Push-Style List Type Inference Tests ────────────────────────────────────
+
+/// `$arr = []; $arr[] = new User(); $arr[0]->` should resolve User members.
+#[tokio::test]
+async fn test_push_style_single_type_member_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_single.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "$arr = [];\n",
+        "$arr[] = new User();\n",
+        "$arr[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $arr[0]-> with push-style inference"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should suggest User::getEmail(), got {:?}",
+                method_names
+            );
+            let prop_labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                prop_labels.contains(&"name"),
+                "Should suggest User::$name, got {:?}",
+                prop_labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `$arr = []; $arr[] = new User(); $arr[] = new AdminUser(); $arr[0]->`
+/// should resolve to members from both User and AdminUser.
+#[tokio::test]
+async fn test_push_style_union_type_member_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class AdminUser {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "    public function grantPermission(string $perm): void {}\n",
+        "}\n",
+        "$arr = [];\n",
+        "$arr[] = new User();\n",
+        "$arr[] = new AdminUser();\n",
+        "$arr[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for union push-style list"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should suggest getEmail() from both classes, got {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"grantPermission"),
+                "Should suggest AdminUser::grantPermission(), got {:?}",
+                method_names
+            );
+            let prop_labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                prop_labels.contains(&"name"),
+                "Should suggest $name property, got {:?}",
+                prop_labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Duplicate push types should be deduplicated: `$arr[] = new User();`
+/// repeated twice still resolves to `list<User>`, not `list<User|User>`.
+#[tokio::test]
+async fn test_push_style_deduplicates_types() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_dedup.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "$arr = [];\n",
+        "$arr[] = new User();\n",
+        "$arr[] = new User();\n",
+        "$arr[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for deduplicated push-style list"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should suggest User::getEmail(), got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Scalar push types should NOT produce member access completions.
+/// `$arr[] = 'hello'; $arr[0]->` → no class members.
+#[tokio::test]
+async fn test_push_style_scalar_no_member_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "$arr = [];\n",
+        "$arr[] = 'hello';\n",
+        "$arr[] = 'world';\n",
+        "$arr[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    if let Some(CompletionResponse::Array(items)) = result {
+        let class_members: Vec<&str> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    || i.kind == Some(CompletionItemKind::PROPERTY)
+            })
+            .map(|i| i.label.as_str())
+            .collect();
+        assert!(
+            class_members.is_empty(),
+            "Scalar push types should not produce member completions, got {:?}",
+            class_members
+        );
+    }
+}
+
+/// When string-keyed assignments exist alongside push assignments,
+/// the string-keyed shape takes priority for key completion.
+#[tokio::test]
+async fn test_push_style_mixed_with_keyed_prefers_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_mixed.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {}\n",
+        "$data = [];\n",
+        "$data['name'] = 'Alice';\n",
+        "$data[] = new User();\n",
+        "$data['\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return key completions from string-keyed assignments"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+                .map(|i| i.label.as_str())
+                .collect();
+            assert!(
+                labels.contains(&"name"),
+                "Should suggest 'name' key, got {:?}",
+                labels
+            );
+            // Push entries don't produce string keys, so only 'name' should appear.
+            assert_eq!(labels.len(), 1, "Should have only 1 key, got {:?}", labels);
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Push-style inside a class method should work.
+#[tokio::test]
+async fn test_push_style_inside_class_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function info(): void {}\n",
+        "    public function error(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        $loggers = [];\n",
+        "        $loggers[] = new Logger();\n",
+        "        $loggers[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for push-style list inside class method"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"info"),
+                "Should suggest Logger::info(), got {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"error"),
+                "Should suggest Logger::error(), got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Push with initial non-empty array: `$arr = [new User()]; $arr[] = new AdminUser();`
+/// String-keyed literal entries are absent, but the initial array has positional
+/// entries. Push inference should still work since positional entries don't
+/// produce string keys.
+#[tokio::test]
+async fn test_push_style_with_initial_positional_array() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///push_initial.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class AdminUser {\n",
+        "    public function grantPermission(string $perm): void {}\n",
+        "}\n",
+        "$arr = [new User()];\n",
+        "$arr[] = new AdminUser();\n",
+        "$arr[0]->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions from push assignments on initially positional array"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+            assert!(
+                method_names.contains(&"grantPermission"),
+                "Should suggest AdminUser::grantPermission() from push, got {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

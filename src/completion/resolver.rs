@@ -444,7 +444,8 @@ impl Backend {
         // ── Array literal — `[…]` or `array(…)` ────────────────────
         // Check this BEFORE the function-call case because `array(…)`
         // ends with `)` and would otherwise be mistaken for a call.
-        // Also scan for incremental `$var['key'] = expr;` assignments.
+        // Also scan for incremental `$var['key'] = expr;` assignments
+        // and push-style `$var[] = expr;` assignments.
         let base_entries = super::array_shape::parse_array_literal_entries(rhs_text);
 
         let after_assign = rhs_start + semi_pos + 1; // past the `;`
@@ -455,7 +456,15 @@ impl Backend {
             cursor_offset,
         );
 
-        if base_entries.is_some() || !incremental.is_empty() {
+        // Scan for push-style `$var[] = expr;` assignments.
+        let push_types = super::array_shape::collect_push_assignments(
+            base_var,
+            content,
+            after_assign,
+            cursor_offset,
+        );
+
+        if base_entries.is_some() || !incremental.is_empty() || !push_types.is_empty() {
             let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();
             // Merge incremental assignments — later assignments for the
             // same key override earlier ones.
@@ -466,12 +475,19 @@ impl Backend {
                     entries.push((k, v));
                 }
             }
+            // If there are string-keyed entries, prefer the array shape.
             if !entries.is_empty() {
                 let shape_parts: Vec<String> = entries
                     .iter()
                     .map(|(k, v)| format!("{}: {}", k, v))
                     .collect();
                 return Some(format!("array{{{}}}", shape_parts.join(", ")));
+            }
+            // No string-keyed entries — try push-style list inference.
+            if let Some(list_type) =
+                super::array_shape::build_list_type_from_push_types(&push_types)
+            {
+                return Some(list_type);
             }
         }
 
