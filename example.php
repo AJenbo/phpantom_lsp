@@ -1081,3 +1081,51 @@ class MatchExpressionDemo {
         $model->getEmail();  // Resolved: User::getEmail()
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 19. Ternary and null-coalescing type resolution
+// ═══════════════════════════════════════════════════════════════════
+// When a variable is assigned from a ternary (`?:`) or null-coalescing
+// (`??`) expression, PHPantomLSP collects types from both branches.
+// Short ternary (`$a ?: $b`) and chained coalescing (`$a ?? $b ?? $c`)
+// are also supported.  These compose with match expressions too.
+
+class TernaryDemo {
+    /** @var Response */
+    private Response $response;
+    /** @var Container|null */
+    private ?Container $container;
+
+    public function ternaryWithInstantiations(bool $useReal): void {
+        // ── Ternary with new instantiations ──
+        // $mailer resolves to ElasticProductReviewIndexService | ElasticBrandIndexService
+        $mailer = $useReal
+            ? new ElasticProductReviewIndexService()
+            : new ElasticBrandIndexService();
+        $mailer->index();       // Resolved: shows index() from both classes
+        $mailer->reindex();     // Resolved: ElasticProductReviewIndexService::reindex()
+        $mailer->bulkDelete();  // Resolved: ElasticBrandIndexService::bulkDelete()
+    }
+
+    public function nullCoalescingWithFallback(): void {
+        // ── Null-coalescing with property and fallback ──
+        // $svc resolves to Container | Response
+        $svc = $this->container ?? $this->response;
+        $svc->make();           // Resolved: Container::make()
+        $svc->getStatusCode();  // Resolved: Response::getStatusCode()
+    }
+
+    public function mixedTernaryAndMatch(bool $simple, int $mode): void {
+        // ── Ternary with match in else branch ──
+        // All branch types accumulate: Response + Container + ElasticBrandIndexService
+        $handler = $simple
+            ? $this->response
+            : match ($mode) {
+                1 => $this->container ?? new ElasticBrandIndexService(),
+                2 => new ElasticProductReviewIndexService(),
+            };
+        $handler->getStatusCode();  // Resolved: Response::getStatusCode()
+        $handler->make();           // Resolved: Container::make()
+        $handler->reindex();        // Resolved: ElasticProductReviewIndexService::reindex()
+    }
+}

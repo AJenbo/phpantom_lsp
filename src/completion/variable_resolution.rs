@@ -12,6 +12,9 @@
 ///     branch.
 ///   - Match expressions: `$var = match(…) { … => new A(), … => new B() }`
 ///     collects all possible types from all arms.
+///   - Ternary expressions: `$var = $cond ? new A() : new B()` collects
+///     types from both branches.  Short ternary `$a ?: new B()` and
+///     null-coalescing `$a ?? new B()` are also supported.
 ///   - Foreach value variables: when iterating over a variable annotated
 ///     with a generic iterable type (e.g. `@var list<User>`, `@param
 ///     list<User>`, `User[]`), the foreach value variable is resolved to
@@ -1186,6 +1189,35 @@ impl Backend {
                     push_results(results, arm_results, true);
                 }
             }
+
+            // ── Ternary expression RHS ──
+            // `$var = $cond ? new Foo() : new Bar()`
+            //   → both branches contribute possible types.
+            // `$var = $a ?: new Bar()` (short ternary, `then` is None)
+            //   → the condition itself and the else branch both contribute.
+            if let Expression::Conditional(cond_expr) = assignment.rhs {
+                // "then" branch (or the condition itself for short ternary)
+                let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
+                let then_results = Self::resolve_rhs_expression(then_expr, ctx);
+                push_results(results, then_results, true);
+
+                // "else" branch
+                let else_results = Self::resolve_rhs_expression(cond_expr.r#else, ctx);
+                push_results(results, else_results, true);
+            }
+
+            // ── Null-coalescing expression RHS ──
+            // `$var = $a ?? new Foo()`
+            //   → both sides contribute possible types.
+            if let Expression::Binary(binary) = assignment.rhs
+                && binary.operator.is_null_coalesce()
+            {
+                let lhs_results = Self::resolve_rhs_expression(binary.lhs, ctx);
+                push_results(results, lhs_results, true);
+
+                let rhs_results = Self::resolve_rhs_expression(binary.rhs, ctx);
+                push_results(results, rhs_results, true);
+            }
         }
     }
 
@@ -1413,6 +1445,41 @@ impl Backend {
                     if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
                         combined.push(cls);
                     }
+                }
+            }
+            return combined;
+        }
+
+        // ── Nested ternary expression ──
+        if let Expression::Conditional(cond_expr) = expr {
+            let mut combined = Vec::new();
+            let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
+            for cls in Self::resolve_rhs_expression(then_expr, ctx) {
+                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
+                    combined.push(cls);
+                }
+            }
+            for cls in Self::resolve_rhs_expression(cond_expr.r#else, ctx) {
+                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
+                    combined.push(cls);
+                }
+            }
+            return combined;
+        }
+
+        // ── Nested null-coalescing expression ──
+        if let Expression::Binary(binary) = expr
+            && binary.operator.is_null_coalesce()
+        {
+            let mut combined = Vec::new();
+            for cls in Self::resolve_rhs_expression(binary.lhs, ctx) {
+                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
+                    combined.push(cls);
+                }
+            }
+            for cls in Self::resolve_rhs_expression(binary.rhs, ctx) {
+                if !combined.iter().any(|c: &ClassInfo| c.name == cls.name) {
+                    combined.push(cls);
                 }
             }
             return combined;
