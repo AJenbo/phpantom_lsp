@@ -1026,3 +1026,58 @@ class GiftShop
         $maybeBox->unwrap()->getTag();            // Resolved: Gift::getTag()
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 18. Match expression type resolution
+// ═══════════════════════════════════════════════════════════════════
+// When a variable is assigned from a `match` expression, PHPantomLSP
+// collects the types from ALL arms, producing a union of possible types.
+// The `default => null` arm (or any scalar arm) is gracefully skipped.
+
+class ElasticProductReviewIndexService {
+    public function index(array $markets = []): void {}
+    public function reindex(): void {}
+}
+
+class ElasticBrandIndexService {
+    public function index(array $markets = []): void {}
+    public function bulkDelete(array $ids): void {}
+}
+
+class MatchExpressionDemo {
+    private Response $response;
+    private Container $container;
+
+    public function matchWithInstantiations(string $indexName): void {
+        // ── Match with new instantiations ──
+        // $service resolves to ElasticProductReviewIndexService | ElasticBrandIndexService
+        $service = match ($indexName) {
+            'product-reviews' => new ElasticProductReviewIndexService(),
+            'brands'          => new ElasticBrandIndexService(),
+            default           => null,
+        };
+        $service->index();       // Resolved: shows index() from both classes
+        $service->reindex();     // Resolved: ElasticProductReviewIndexService::reindex()
+        $service->bulkDelete();  // Resolved: ElasticBrandIndexService::bulkDelete()
+    }
+
+    public function matchWithMethodCalls(string $type): void {
+        // ── Match with $this->method() calls ──
+        // Each arm's return type contributes to the union.
+        $result = match ($type) {
+            'response'  => $this->response,
+            'container' => $this->container,
+        };
+        $result->getStatusCode();  // Resolved: Response::getStatusCode()
+        $result->make();           // Resolved: Container::make()
+    }
+
+    public function matchWithStaticCalls(string $source): void {
+        // ── Match with static method calls ──
+        $model = match ($source) {
+            'find' => User::find(1),
+            'make' => User::make('test'),
+        };
+        $model->getEmail();  // Resolved: User::getEmail()
+    }
+}
