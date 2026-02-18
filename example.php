@@ -1903,6 +1903,155 @@ class ThrowsCompletionDemo
     private function lookup(int $id): ?array { return null; }
     private function checkPermissions(): void {}
     private function isAuthorized(): bool { return true; }
+
+    // ── @return void smart completion ────────────────────────────────
+
+    /**
+     * Typing `@` here suggests `@return void` because the function
+     * is declared `: void` and has no return statements.
+     *
+     * @return void
+     */
+    public function fireAndForget(): void
+    {
+        $this->checkPermissions();
+    }
+
+    /**
+     * Typing `@` here does NOT suggest `@return void` because the
+     * body contains `return $value;` — the void hint is likely wrong.
+     * (In real code the type hint would not be void, but the LSP
+     * detects this mismatch and withholds the `@return void` suggestion.)
+     */
+    public function fetchData(): ?array
+    {
+        return $this->lookup(1);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// §  Catch Variable Type Resolution
+// ═══════════════════════════════════════════════════════════════════
+// The catch clause's type hint(s) are used to resolve the variable's
+// type, so `$e->` offers completions from the caught exception class.
+
+class CatchVariableDemo
+{
+    /**
+     * Single catch type: `$e` resolves to `ValidationException`.
+     * Typing `$e->` suggests getMessage(), getField(), etc.
+     */
+    public function singleCatch(): void
+    {
+        try {
+            $this->riskyOperation();
+        } catch (ValidationException $e) {
+            // $e-> completes with ValidationException members
+            $e->getMessage(); // → string (inherited from RuntimeException)
+        }
+    }
+
+    /**
+     * Multi-catch (union): `$e` resolves to both NotFoundException
+     * and AuthorizationException.  Typing `$e->` suggests members
+     * from both classes.
+     */
+    public function multiCatch(): void
+    {
+        try {
+            $this->riskyOperation();
+        } catch (NotFoundException | AuthorizationException $e) {
+            // $e-> completes with members from both exception types
+            $e->getMessage(); // → string (common to both)
+        }
+    }
+
+    private function riskyOperation(): void {}
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// §  @throws Completion — Propagated Throws with Catch Filtering
+// ═══════════════════════════════════════════════════════════════════
+// When a called method declares `@throws`, those exceptions propagate
+// to the caller.  If the call is inside a try/catch, only exceptions
+// NOT handled by the catch clause appear as `@throws` suggestions.
+//
+// Catch filtering uses these rules:
+//   - Exact match: catch(RuntimeException) catches RuntimeException
+//   - Broader catch: catch(Exception) catches RuntimeException
+//   - catch(Throwable) catches everything
+//   - Narrower catch does NOT catch parent: catch(RuntimeException)
+//     does NOT catch Exception
+
+class PropagatedThrowsDemo
+{
+    /**
+     * Typing `@` here suggests `@throws \Exception` because
+     * the catch only handles RuntimeException (a subclass of
+     * Exception), so the broader Exception escapes uncaught.
+     *
+     * @throws \Exception
+     */
+    public function narrowCatchLetsParentEscape(): void
+    {
+        try {
+            $this->throwsException();
+        } catch (\RuntimeException $e) {
+            // Only catches RuntimeException, not Exception
+        }
+    }
+
+    /**
+     * No `@throws` suggested here — catch(Exception) is broad
+     * enough to handle the propagated RuntimeException.
+     */
+    public function broadCatchHandlesChild(): void
+    {
+        try {
+            $this->throwsRuntimeException();
+        } catch (\Exception $e) {
+            // Exception catches RuntimeException (child class)
+        }
+    }
+
+    /**
+     * Mixed: riskyA() throws RuntimeException (caught),
+     * riskyB() throws \Exception (uncaught).
+     * Only `@throws \Exception` is suggested.
+     *
+     * @throws \Exception
+     */
+    public function partialCatch(): void
+    {
+        try {
+            $this->throwsRuntimeException();
+            $this->throwsException();
+        } catch (\RuntimeException $e) {
+            // Catches RuntimeException but not Exception
+        }
+    }
+
+    /**
+     * Call outside try/catch — propagated throws always appear.
+     *
+     * @throws \Exception
+     */
+    public function outsideTryBlock(): void
+    {
+        $this->throwsException();
+    }
+
+    /** @throws \Exception */
+    private function throwsException(): void
+    {
+        throw new \Exception('error');
+    }
+
+    /** @throws \RuntimeException */
+    private function throwsRuntimeException(): void
+    {
+        throw new \RuntimeException('runtime error');
+    }
 }
 
 // Intersection with \stdClass (makes properties writable)

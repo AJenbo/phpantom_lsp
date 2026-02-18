@@ -168,6 +168,119 @@ fn test_extract_partial_class_name_type_hint_context() {
     assert_eq!(result, Some("Str".to_string()));
 }
 
+#[test]
+fn test_extract_partial_class_name_with_leading_backslash() {
+    let content = "<?php\nnew \\Run\n";
+    let result = Backend::extract_partial_class_name(
+        content,
+        Position {
+            line: 1,
+            character: 8,
+        },
+    );
+    assert_eq!(
+        result,
+        Some("\\Run".to_string()),
+        "Leading backslash should be included in the partial"
+    );
+}
+
+// ─── Backslash-prefixed completion matching ─────────────────────────────────
+
+/// When the user types `\Unit`, the leading `\` should be stripped for
+/// matching so that stub class `UnitEnum` is still found.
+#[tokio::test]
+async fn test_class_name_completion_with_leading_backslash() {
+    let backend = create_test_backend_with_stubs();
+    let uri = Url::parse("file:///backslash.php").unwrap();
+    let text = concat!("<?php\n", "new \\Unit\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 9).await;
+    let classes = class_items(&items);
+    let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        class_labels.contains(&"UnitEnum"),
+        "Typing '\\Unit' should match 'UnitEnum', got: {:?}",
+        class_labels
+    );
+}
+
+/// When the user types `\Backed`, the leading `\` should be stripped for
+/// matching so that stub class `BackedEnum` is still found.
+#[tokio::test]
+async fn test_class_name_completion_backslash_backed() {
+    let backend = create_test_backend_with_stubs();
+    let uri = Url::parse("file:///backslash2.php").unwrap();
+    let text = concat!("<?php\n", "new \\Backed\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 11).await;
+    let classes = class_items(&items);
+    let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        class_labels.contains(&"BackedEnum"),
+        "Typing '\\Backed' should match 'BackedEnum', got: {:?}",
+        class_labels
+    );
+}
+
+/// FQN prefix like `\App\Models\Us` should still match via the
+/// namespace portion — the leading `\` must not break matching.
+#[tokio::test]
+async fn test_class_name_completion_fqn_prefix() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/Models/User.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\Models;\n",
+                "class User {\n",
+                "    public function getName(): string { return ''; }\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///fqn_test.php").unwrap();
+    let text = concat!("<?php\n", "new \\Us\n",);
+
+    // Open the User file so it's in ast_map
+    let user_uri = Url::parse(&format!(
+        "file://{}",
+        _dir.path().join("src/Models/User.php").display()
+    ))
+    .unwrap();
+    let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: user_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: user_content,
+            },
+        })
+        .await;
+
+    let items = complete_at(&backend, &uri, text, 1, 7).await;
+    let classes = class_items(&items);
+    let class_labels: Vec<&str> = classes.iter().map(|i| i.label.as_str()).collect();
+
+    assert!(
+        class_labels.contains(&"User"),
+        "Typing '\\Us' should match 'User', got: {:?}",
+        class_labels
+    );
+}
+
 // ─── Stub class name completion tests ───────────────────────────────────────
 
 #[tokio::test]

@@ -255,9 +255,14 @@ impl Backend {
         use_map: &HashMap<String, String>,
         namespace: &Option<String>,
     ) -> String {
-        // 1. Already fully-qualified
-        if let Some(stripped) = name.strip_prefix('\\') {
-            return stripped.to_string();
+        // 1. Already fully-qualified — keep the leading `\` so that
+        // downstream `resolve_class_name` recognises the name as a
+        // root-namespace FQN and does NOT prepend the current file's
+        // namespace.  For example `\RuntimeException` stays as
+        // `\RuntimeException`; `resolve_class_name` will strip the
+        // prefix itself and look up `RuntimeException` globally.
+        if name.starts_with('\\') {
+            return name.to_string();
         }
 
         // 2/3. Check if the (first segment of the) name is in the use_map
@@ -275,11 +280,16 @@ impl Backend {
             }
         }
 
-        // 4. Prepend current namespace if available
+        // 4. Prepend current namespace if available.
+        //    When there is NO namespace the name lives in the global scope,
+        //    so prefix it with `\` so that downstream `resolve_class_name`
+        //    recognises it as a root-namespace FQN and does NOT try to
+        //    prepend the caller's file namespace (e.g. avoids resolving
+        //    `Exception` as `Demo\Exception` when loading a stub parent).
         if let Some(ns) = namespace {
             format!("{}\\{}", ns, name)
         } else {
-            name.to_string()
+            format!("\\{}", name)
         }
     }
 }

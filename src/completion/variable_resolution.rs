@@ -633,6 +633,23 @@ impl Backend {
                         true,
                     );
                     for catch in try_stmt.catch_clauses.iter() {
+                        // Seed the catch variable's type from the catch
+                        // clause's type hint(s) before recursing into the
+                        // block.  Handles single types like
+                        // `catch (ValidationException $e)` and multi-catch
+                        // like `catch (TypeA | TypeB $e)`.
+                        if let Some(ref var) = catch.variable
+                            && var.name == ctx.var_name
+                        {
+                            let hint_str = Self::extract_hint_string(&catch.hint);
+                            let resolved = Self::type_hint_to_classes(
+                                &hint_str,
+                                &ctx.current_class.name,
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                            ClassInfo::extend_unique(results, resolved);
+                        }
                         Self::walk_statements_for_assignments(
                             catch.block.statements.iter(),
                             ctx,

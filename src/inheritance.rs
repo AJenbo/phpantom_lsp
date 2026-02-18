@@ -661,6 +661,15 @@ fn apply_substitution(type_str: &str, subs: &HashMap<String, String>) -> String 
         return replacement.clone();
     }
 
+    // Template parameter names resolved in a no-namespace context get a
+    // leading `\` prefix (e.g. `T` → `\T`), but the substitution map
+    // keys are bare names.  Try again without the prefix.
+    if let Some(stripped) = s.strip_prefix('\\')
+        && let Some(replacement) = subs.get(stripped)
+    {
+        return replacement.clone();
+    }
+
     // No match — return as-is.
     s.to_string()
 }

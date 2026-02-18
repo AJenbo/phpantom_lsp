@@ -66,6 +66,10 @@ impl Backend {
             // ── PHPDoc tag completion ────────────────────────────────
             // When the user types `@` inside a `/** … */` docblock,
             // offer context-aware PHPDoc / PHPStan tag suggestions.
+            //
+            // We always return early here — even when `items` is empty —
+            // so that a partial tag like `@potato` never falls through
+            // to class / constant / function completion.
             if let Some(prefix) =
                 crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
             {
@@ -78,9 +82,7 @@ impl Backend {
                     &file_use_map,
                     &file_namespace,
                 );
-                if !items.is_empty() {
-                    return Ok(Some(CompletionResponse::Array(items)));
-                }
+                return Ok(Some(CompletionResponse::Array(items)));
             }
 
             // ── Named argument completion ───────────────────────────
@@ -233,7 +235,8 @@ impl Backend {
                                     if depth > 20 {
                                         break;
                                     }
-                                    if *name == target_class.name {
+                                    let normalized = name.strip_prefix('\\').unwrap_or(name);
+                                    if normalized == target_class.name {
                                         found = true;
                                         break;
                                     }
@@ -279,6 +282,81 @@ impl Backend {
                     return Ok(Some(CompletionResponse::List(CompletionList {
                         is_incomplete: var_incomplete,
                         items: var_items,
+                    })));
+                }
+            }
+
+            // ── Smart catch clause completion ───────────────────────
+            // When the cursor is inside `catch (…)`, analyse the
+            // corresponding try block and suggest only the exception
+            // types that are thrown or documented there.
+            //
+            // When no specific thrown types are found (e.g. the try
+            // block has no `throw` statements or `@throws` tags), fall
+            // back to class-only completion so the developer can still
+            // pick an exception class without being stuck.
+            if let Some(catch_ctx) =
+                crate::completion::catch_completion::detect_catch_context(&content, position)
+            {
+                let items =
+                    crate::completion::catch_completion::build_catch_completions(&catch_ctx);
+                if catch_ctx.has_specific_types && !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+
+                // No specific throws discovered — fall back to
+                // Throwable-filtered class completion.  Already-parsed
+                // classes are only offered when their parent chain
+                // reaches \Throwable / \Exception / \Error.  Classmap
+                // and stub classes are included unfiltered because
+                // checking their ancestry would require on-demand parsing.
+                //
+                // Use the partial from the catch context rather than
+                // `extract_partial_class_name` — the latter returns
+                // `None` when the cursor sits right after `(` with
+                // nothing typed, but the catch context already
+                // captured the (possibly empty) partial correctly.
+                let partial = if catch_ctx.partial.is_empty() {
+                    Self::extract_partial_class_name(&content, position).unwrap_or_default()
+                } else {
+                    catch_ctx.partial.clone()
+                };
+                let (class_items, class_incomplete) = self.build_catch_class_name_completions(
+                    &file_use_map,
+                    &file_namespace,
+                    &partial,
+                    &content,
+                );
+                let mut all_items = items; // Throwable item (if matched)
+                for ci in class_items {
+                    if !all_items.iter().any(|existing| existing.label == ci.label) {
+                        all_items.push(ci);
+                    }
+                }
+                if !all_items.is_empty() {
+                    return Ok(Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: class_incomplete,
+                        items: all_items,
+                    })));
+                }
+            }
+
+            // ── `throw new` completion ──────────────────────────────
+            // When the cursor follows `throw new`, restrict to
+            // Throwable descendants only — no constants or functions.
+            if let Some(partial) = Self::extract_partial_class_name(&content, position)
+                && Self::is_throw_new_context(&content, position)
+            {
+                let (class_items, class_incomplete) = self.build_catch_class_name_completions(
+                    &file_use_map,
+                    &file_namespace,
+                    &partial,
+                    &content,
+                );
+                if !class_items.is_empty() {
+                    return Ok(Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: class_incomplete,
+                        items: class_items,
                     })));
                 }
             }

@@ -1324,7 +1324,8 @@ async fn test_phpdoc_smart_return_prefilled() {
     assert_eq!(r.insert_text.as_deref(), Some("return string"));
 }
 
-/// @return with void return type should fall back to generic label.
+/// @return with void return type and no return statements should suggest
+/// `@return void` as a smart completion.
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_generic() {
     let backend = create_test_backend();
@@ -1342,12 +1343,80 @@ async fn test_phpdoc_smart_return_void_generic() {
     let return_item = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@return"));
-    // void return → @return is filtered out entirely
+    // void return with no return statements → suggest @return void
+    assert!(
+        return_item.is_some(),
+        "Should suggest @return void for void functions with no return statements"
+    );
+    assert_eq!(
+        return_item.unwrap().label,
+        "@return void",
+        "Label should be @return void"
+    );
+    assert_eq!(
+        return_item.unwrap().insert_text.as_deref(),
+        Some("return void"),
+        "Insert text should be 'return void'"
+    );
+}
+
+/// @return void should NOT be suggested when the void function contains
+/// return statements with values (the void hint is likely wrong).
+#[tokio::test]
+async fn test_phpdoc_smart_return_void_with_return_value() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_void_returns.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function doStuff(): void {\n",
+        "    return $this->something();\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 4).await;
+
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
     assert!(
         return_item.is_none(),
-        "Should NOT suggest @return for void functions. Got: {:?}",
+        "Should NOT suggest @return void when body has return with value. Got: {:?}",
         return_item.map(|i| &i.label)
     );
+}
+
+/// @return void SHOULD be suggested when the void function only has bare
+/// `return;` statements (early returns with no value).
+#[tokio::test]
+async fn test_phpdoc_smart_return_void_with_bare_return() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_void_bare.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function doStuff(): void {\n",
+        "    if (true) {\n",
+        "        return;\n",
+        "    }\n",
+        "    echo 'done';\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 4).await;
+
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
+    assert!(
+        return_item.is_some(),
+        "Should suggest @return void when body only has bare return;"
+    );
+    assert_eq!(return_item.unwrap().label, "@return void");
 }
 
 /// @var should be pre-filled with the property type hint.
@@ -1533,4 +1602,253 @@ async fn test_phpdoc_smart_all_params_documented() {
         "Should NOT suggest @param when all params are documented. Got: {:?}",
         param_items.iter().map(|i| &i.label).collect::<Vec<_>>()
     );
+}
+
+// ─── Docblock @ prefix isolation ────────────────────────────────────────────
+// When the cursor is inside a docblock on a word starting with `@`, ONLY
+// PHPDoc tag suggestions should appear — never class names, constants, or
+// functions that happen to match the text after `@`.
+
+/// Typing `@potato` in a docblock should return an empty list, not class
+/// names or constants that contain "potato".
+#[tokio::test]
+async fn test_phpdoc_no_class_completion_for_unknown_tag() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_potato.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class PotatoFactory {}\n",
+        "define('WORLD_POTATO_CONSUMPTION', 42);\n",
+        "/**\n",
+        " * @potato\n",
+        " */\n",
+        "function cook(): void {}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 11).await;
+
+    // No PHPDoc tags start with `@potato`, so the list should be empty.
+    // Crucially, PotatoFactory and WORLD_POTATO_CONSUMPTION must NOT appear.
+    assert!(
+        items.is_empty(),
+        "Typing @potato in a docblock should yield no completions, got: {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Typing `@throw` should suggest `@throws` (the matching PHPDoc tag),
+/// not class names containing "throw".
+#[tokio::test]
+async fn test_phpdoc_partial_tag_suggests_matching_tags() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_throw.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @throw\n",
+        " */\n",
+        "function risky(): void {}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 10).await;
+
+    // Should contain the generic @throws fallback
+    let throws_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@throws"));
+    assert!(
+        throws_item.is_some(),
+        "Typing @throw should suggest @throws tag, got: {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+
+    // Should NOT contain class items
+    let class_items: Vec<_> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .collect();
+    assert!(
+        class_items.is_empty(),
+        "No class items should appear in docblock @tag context, got: {:?}",
+        class_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Typing `@re` should suggest `@return` (and other matching tags) but
+/// never class names or constants.
+#[tokio::test]
+async fn test_phpdoc_partial_re_suggests_return_not_classes() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_re.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Renderer {}\n",
+        "/**\n",
+        " * @re\n",
+        " */\n",
+        "function render(): string { return ''; }\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 7).await;
+
+    // Should contain @return
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
+    assert!(
+        return_item.is_some(),
+        "Typing @re should suggest @return, got: {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+
+    // Should NOT contain Renderer or any class
+    let class_items: Vec<_> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .collect();
+    assert!(
+        class_items.is_empty(),
+        "Class items like Renderer must not appear in docblock, got: {:?}",
+        class_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Typing just `@` should show all applicable PHPDoc tags, not classes.
+#[tokio::test]
+async fn test_phpdoc_at_sign_only_shows_tags() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_at.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SomeClass {}\n",
+        "/**\n",
+        " * @\n",
+        " */\n",
+        "function demo(): void {}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 4).await;
+
+    // Should have PHPDoc tags
+    assert!(
+        !items.is_empty(),
+        "Typing @ in docblock should suggest PHPDoc tags"
+    );
+
+    // Every item should be a KEYWORD (PHPDoc tag), not a CLASS or CONSTANT
+    for item in &items {
+        assert_eq!(
+            item.kind,
+            Some(CompletionItemKind::KEYWORD),
+            "All items in docblock @ context should be KEYWORD, got {:?} for '{}'",
+            item.kind,
+            item.label
+        );
+    }
+}
+
+// ─── @return void with no type hint ─────────────────────────────────────────
+
+/// When a function has no return type hint and an empty body, `@return void`
+/// should be suggested (not the generic `@return Type`).
+#[tokio::test]
+async fn test_phpdoc_return_void_no_type_hint_empty_body() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_void_no_hint.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Demo {\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function singleCatch() { }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 8).await;
+
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
+    assert!(
+        return_item.is_some(),
+        "Should suggest @return void when no type hint and empty body"
+    );
+    assert_eq!(
+        return_item.unwrap().label,
+        "@return void",
+        "Label should be @return void, not the generic fallback"
+    );
+    assert_eq!(
+        return_item.unwrap().insert_text.as_deref(),
+        Some("return void"),
+    );
+}
+
+/// When a function has no return type hint but DOES return a value,
+/// the generic `@return Type` fallback should appear instead of `@return void`.
+#[tokio::test]
+async fn test_phpdoc_return_no_type_hint_with_return_value() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_no_hint_ret.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Demo {\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function getData() {\n",
+        "        return ['key' => 'value'];\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 8).await;
+
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
+    // Body has `return $value;` so it's not void — show generic fallback
+    assert!(
+        return_item.is_some(),
+        "Should suggest @return when body has return with value"
+    );
+    assert_eq!(
+        return_item.unwrap().label,
+        "@return Type",
+        "Should show generic @return Type, not @return void"
+    );
+}
+
+/// When a function has no return type hint and only bare `return;` statements,
+/// `@return void` should still be suggested.
+#[tokio::test]
+async fn test_phpdoc_return_void_no_hint_bare_return() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///phpdoc_no_hint_bare.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Demo {\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function process() {\n",
+        "        if (true) {\n",
+        "            return;\n",
+        "        }\n",
+        "        echo 'done';\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 8).await;
+
+    let return_item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("@return"));
+    assert!(
+        return_item.is_some(),
+        "Should suggest @return void when body only has bare return;"
+    );
+    assert_eq!(return_item.unwrap().label, "@return void");
 }

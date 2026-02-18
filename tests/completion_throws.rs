@@ -634,12 +634,12 @@ async fn test_throws_abstract_method_no_suggestions() {
         smart.iter().map(|i| &i.label).collect::<Vec<_>>()
     );
 
-    // Generic @throws is no longer shown (no body = no throws to document)
+    // Generic @throws IS shown for abstract methods — they commonly
+    // declare @throws to document what exceptions implementations may throw.
     let generic = generic_throws_item(&items);
     assert!(
-        generic.is_none(),
-        "Generic @throws should NOT appear for abstract methods. Got: {:?}",
-        generic.map(|i| &i.label)
+        generic.is_some(),
+        "Generic @throws should appear for abstract methods (contract documentation)"
     );
 }
 
@@ -1050,12 +1050,13 @@ async fn test_throws_no_throws_generic_fallback() {
         smart.iter().map(|i| &i.label).collect::<Vec<_>>()
     );
 
-    // Generic fallback is no longer shown when there are no throws
+    // Generic fallback IS shown when no throws are detected — the user
+    // may want to manually document exceptions the detection missed
+    // (e.g. from external calls or library methods).
     let generic = generic_throws_item(&items);
     assert!(
-        generic.is_none(),
-        "Generic @throws should NOT appear when there are no throw statements. Got: {:?}",
-        generic.map(|i| &i.label)
+        generic.is_some(),
+        "Generic @throws should appear when no throw statements are detected (manual documentation)"
     );
 }
 
@@ -1621,4 +1622,246 @@ async fn test_throws_combined_all_sources() {
     assert!(labels.contains(&"@throws InvalidArgumentException"));
     assert!(labels.contains(&"@throws LogicException"));
     assert!(labels.contains(&"@throws RuntimeException"));
+}
+
+// ─── Propagated throws inside try/catch ─────────────────────────────────────
+
+/// When a called method's `@throws` exception is NOT caught by the surrounding
+/// catch clause, the propagated throw should still appear as uncaught.
+///
+/// In this scenario `riskyOperation()` declares `@throws Exception`, but the
+/// catch only handles `RuntimeException` — which is a *subclass* of Exception,
+/// so it does NOT catch the broader `Exception`.
+#[tokio::test]
+async fn test_throws_propagated_not_caught_by_narrower_catch() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///throws_prop_uncaught.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "\n",
+        "use RuntimeException;\n",
+        "use Exception;\n",
+        "\n",
+        "class CatchVariableDemo\n",
+        "{\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function singleCatch(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "            return;\n",
+        "        } catch (RuntimeException $e) {\n",
+        "        }\n",
+        "    }\n",
+        "\n",
+        "    /** @throws Exception */\n",
+        "    public function riskyOperation(): void {}\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 9, 8).await;
+    let smart = throws_items(&items);
+
+    assert_eq!(
+        smart.len(),
+        1,
+        "Propagated Exception should not be considered caught by RuntimeException. Got: {:?}",
+        smart.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(smart[0].label, "@throws Exception");
+}
+
+/// When a called method's `@throws` exception IS caught by the surrounding
+/// catch clause (exact match), the propagated throw should NOT appear.
+#[tokio::test]
+async fn test_throws_propagated_caught_by_exact_catch() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///throws_prop_caught.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service\n",
+        "{\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function caller(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "        } catch (RuntimeException $e) {\n",
+        "        }\n",
+        "    }\n",
+        "\n",
+        "    /** @throws RuntimeException */\n",
+        "    public function riskyOperation(): void {}\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let smart = throws_items(&items);
+
+    assert!(
+        smart.is_empty(),
+        "Propagated RuntimeException should be caught by catch(RuntimeException). Got: {:?}",
+        smart.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// When a called method's `@throws` exception IS caught by a broader catch
+/// (e.g. `catch (Exception ...)` catches `RuntimeException`), the propagated
+/// throw should NOT appear.
+#[tokio::test]
+async fn test_throws_propagated_caught_by_broader_catch() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///throws_prop_broad.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service\n",
+        "{\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function caller(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "        } catch (Exception $e) {\n",
+        "        }\n",
+        "    }\n",
+        "\n",
+        "    /** @throws RuntimeException */\n",
+        "    public function riskyOperation(): void {}\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let smart = throws_items(&items);
+
+    assert!(
+        smart.is_empty(),
+        "Propagated RuntimeException should be caught by catch(Exception). Got: {:?}",
+        smart.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// When a called method's `@throws` exception IS caught by `catch (Throwable)`,
+/// the propagated throw should NOT appear.
+#[tokio::test]
+async fn test_throws_propagated_caught_by_throwable() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///throws_prop_throwable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service\n",
+        "{\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function caller(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "        } catch (\\Throwable $e) {\n",
+        "        }\n",
+        "    }\n",
+        "\n",
+        "    /** @throws RuntimeException */\n",
+        "    public function riskyOperation(): void {}\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let smart = throws_items(&items);
+
+    assert!(
+        smart.is_empty(),
+        "Propagated RuntimeException should be caught by catch(Throwable). Got: {:?}",
+        smart.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// Mixed: one propagated throw caught, another not caught.
+#[tokio::test]
+async fn test_throws_propagated_partial_catch() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///throws_prop_partial.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service\n",
+        "{\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function caller(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyA();\n",
+        "            $this->riskyB();\n",
+        "        } catch (RuntimeException $e) {\n",
+        "        }\n",
+        "    }\n",
+        "\n",
+        "    /** @throws RuntimeException */\n",
+        "    public function riskyA(): void {}\n",
+        "\n",
+        "    /** @throws InvalidArgumentException */\n",
+        "    public function riskyB(): void {}\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let smart = throws_items(&items);
+
+    assert_eq!(
+        smart.len(),
+        1,
+        "Only InvalidArgumentException should remain uncaught. Got: {:?}",
+        smart.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(smart[0].label, "@throws InvalidArgumentException");
+}
+
+/// Propagated throws from a method called OUTSIDE a try block should always
+/// appear as uncaught, regardless of any other try/catch in the function.
+#[tokio::test]
+async fn test_throws_propagated_outside_try_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///throws_prop_outside.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Service\n",
+        "{\n",
+        "    /**\n",
+        "     * @\n",
+        "     */\n",
+        "    public function caller(): void\n",
+        "    {\n",
+        "        $this->riskyA();\n",
+        "        try {\n",
+        "            $this->riskyB();\n",
+        "        } catch (RuntimeException $e) {\n",
+        "        }\n",
+        "    }\n",
+        "\n",
+        "    /** @throws Exception */\n",
+        "    public function riskyA(): void {}\n",
+        "\n",
+        "    /** @throws RuntimeException */\n",
+        "    public function riskyB(): void {}\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let smart = throws_items(&items);
+
+    assert_eq!(
+        smart.len(),
+        1,
+        "riskyA() is outside try — Exception should be uncaught. riskyB() is caught. Got: {:?}",
+        smart.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(smart[0].label, "@throws Exception");
 }

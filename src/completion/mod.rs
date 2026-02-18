@@ -11,6 +11,7 @@
 /// - **named_args**: Named argument completion inside function/method call parens
 /// - **array_shape**: Array shape key completion (`$arr['` → suggest known keys)
 ///   and raw variable type resolution for array shape value chaining
+/// - **catch_completion**: Smart exception type completion inside `catch()` clauses
 /// - **conditional_resolution**: PHPStan conditional return type resolution at call sites
 /// - **type_narrowing**: instanceof / assert / custom type guard narrowing
 /// - **variable_resolution**: Variable type resolution via assignment scanning
@@ -21,6 +22,7 @@
 /// used by completion, definition, and future features (hover, references).
 pub(crate) mod array_shape;
 pub mod builder;
+pub(crate) mod catch_completion;
 pub mod class_completion;
 pub mod closure_resolution;
 pub mod conditional_resolution;

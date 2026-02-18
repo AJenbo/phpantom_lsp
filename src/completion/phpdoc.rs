@@ -40,6 +40,12 @@ pub enum DocblockContext {
     Property,
     /// The docblock precedes a constant declaration.
     Constant,
+    /// The docblock is inline inside code (not before a declaration).
+    ///
+    /// Only a small set of tags makes sense here: `@var` (type narrowing),
+    /// `@throws` (exception hinting), and general tags like `@todo`,
+    /// `@see`, `@example`, `@link`.
+    Inline,
     /// Context could not be determined (file-level, or symbol not recognized).
     Unknown,
 }
@@ -338,12 +344,12 @@ fn extract_function_body(content: &str, position: Position) -> Option<String> {
 
 /// Information about a `throw new Type(…)` statement in a function body.
 #[derive(Debug)]
-struct ThrowInfo {
+pub(crate) struct ThrowInfo {
     /// The exception type name as written in source (e.g. `"InvalidArgumentException"`,
     /// `"\\RuntimeException"`, `"Exceptions\\Custom"`).
-    type_name: String,
+    pub(crate) type_name: String,
     /// Byte offset of this throw statement relative to the function body start.
-    offset: usize,
+    pub(crate) offset: usize,
 }
 
 /// Information about a `catch (Type $var)` clause in a function body.
@@ -358,7 +364,7 @@ struct CatchInfo {
 }
 
 /// Find all `throw new Type(…)` statements in the given function body text.
-fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
+pub(crate) fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
     let bytes = body.as_bytes();
     let len = bytes.len();
@@ -568,7 +574,7 @@ fn find_catch_blocks(body: &str) -> Vec<CatchInfo> {
 }
 
 /// Find the position of the `}` that matches the `{` at `open_pos`.
-fn find_matching_brace(text: &str, open_pos: usize) -> Option<usize> {
+pub(crate) fn find_matching_brace(text: &str, open_pos: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let len = bytes.len();
     if open_pos >= len || bytes[open_pos] != b'{' {
@@ -678,6 +684,21 @@ pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<Strin
     let mut uncaught: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
+    /// Check whether a throw at `offset` in the function body is caught
+    /// by one of the `catches`, given the short exception type name.
+    fn is_caught_by(catches: &[CatchInfo], offset: usize, short_name: &str) -> bool {
+        catches.iter().any(|c| {
+            offset > c.try_start
+                && offset < c.try_end
+                && c.type_names.iter().any(|ct| {
+                    let ct_short = ct.rsplit('\\').next().unwrap_or(ct);
+                    ct_short.eq_ignore_ascii_case(short_name)
+                        || ct_short == "Throwable"
+                        || ct_short == "Exception"
+                })
+        })
+    }
+
     // 1. Direct `throw new Type(…)` statements
     for throw in &throws {
         let short_name = throw
@@ -687,20 +708,8 @@ pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<Strin
             .next()
             .unwrap_or(&throw.type_name);
 
-        // Check if this throw is inside a try block whose catch handles
-        // the same exception type.
-        let is_caught = catches.iter().any(|c| {
-            throw.offset > c.try_start
-                && throw.offset < c.try_end
-                && c.type_names.iter().any(|ct| {
-                    let ct_short = ct.rsplit('\\').next().unwrap_or(ct);
-                    ct_short.eq_ignore_ascii_case(short_name)
-                        || ct_short == "Throwable"
-                        || ct_short == "Exception"
-                })
-        });
-
-        if !is_caught && seen.insert(short_name.to_string()) {
+        if !is_caught_by(&catches, throw.offset, short_name) && seen.insert(short_name.to_string())
+        {
             uncaught.push(short_name.to_string());
         }
     }
@@ -708,11 +717,15 @@ pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<Strin
     // 2. `throw $this->method()` — return type of method is the thrown type
     for te in &throw_expr_types {
         let short_name = te
+            .type_name
             .trim_start_matches('\\')
             .rsplit('\\')
             .next()
-            .unwrap_or(te);
-        if !short_name.is_empty() && seen.insert(short_name.to_string()) {
+            .unwrap_or(&te.type_name);
+        if !short_name.is_empty()
+            && !is_caught_by(&catches, te.offset, short_name)
+            && seen.insert(short_name.to_string())
+        {
             uncaught.push(short_name.to_string());
         }
     }
@@ -720,11 +733,15 @@ pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<Strin
     // 3. Propagated @throws from called methods
     for prop in &propagated {
         let short_name = prop
+            .type_name
             .trim_start_matches('\\')
             .rsplit('\\')
             .next()
-            .unwrap_or(prop);
-        if !short_name.is_empty() && seen.insert(short_name.to_string()) {
+            .unwrap_or(&prop.type_name);
+        if !short_name.is_empty()
+            && !is_caught_by(&catches, prop.offset, short_name)
+            && seen.insert(short_name.to_string())
+        {
             uncaught.push(short_name.to_string());
         }
     }
@@ -738,7 +755,7 @@ pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<Strin
 ///
 /// Returns a list of exception type names (the return types of the
 /// called methods).
-fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<String> {
+fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
 
     // Patterns: throw $this->method(  /  throw self::method(  /  throw static::method(
@@ -808,7 +825,10 @@ fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<String> {
                                 if let Some(ret_type) =
                                     find_method_return_type(file_content, method_name)
                                 {
-                                    results.push(ret_type);
+                                    results.push(ThrowInfo {
+                                        type_name: ret_type,
+                                        offset: pos,
+                                    });
                                 }
                             }
                             break;
@@ -831,7 +851,7 @@ fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<String> {
 /// This propagates `@throws` declarations: if method A calls method B
 /// and B declares `@throws SomeException`, then A should also document
 /// (or is aware of) that exception.
-fn find_propagated_throws(body: &str, file_content: &str) -> Vec<String> {
+fn find_propagated_throws(body: &str, file_content: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
     let mut seen_methods = std::collections::HashSet::new();
 
@@ -902,9 +922,16 @@ fn find_propagated_throws(body: &str, file_content: &str) -> Vec<String> {
                     && after_name.starts_with('(')
                     && seen_methods.insert(method_name.to_string())
                 {
-                    // Look up @throws in the method's docblock
+                    // Look up @throws in the method's docblock.
+                    // Each propagated throw gets the call-site offset so
+                    // that catch-block filtering works correctly.
                     let throws = find_method_throws_tags(file_content, method_name);
-                    results.extend(throws);
+                    for t in throws {
+                        results.push(ThrowInfo {
+                            type_name: t,
+                            offset: pos,
+                        });
+                    }
                 }
                 break;
             }
@@ -1020,11 +1047,18 @@ fn find_method_throws_tags(file_content: &str, method_name: &str) -> Vec<String>
                         let docblock = &doc_region[doc_start..];
                         let mut throws = Vec::new();
                         for line in docblock.lines() {
-                            let trimmed = line.trim().trim_start_matches('*').trim();
+                            let trimmed = line
+                                .trim()
+                                .trim_start_matches('/')
+                                .trim_start_matches('*')
+                                .trim();
                             if let Some(rest) = trimmed.strip_prefix("@throws") {
                                 let rest = rest.trim();
                                 if let Some(type_str) = rest.split_whitespace().next() {
-                                    let clean = type_str.trim_start_matches('\\');
+                                    let clean = type_str
+                                        .trim_end_matches('/')
+                                        .trim_end_matches('*')
+                                        .trim_start_matches('\\');
                                     let short = clean.rsplit('\\').next().unwrap_or(clean);
                                     if !short.is_empty() {
                                         throws.push(short.to_string());
@@ -1163,6 +1197,7 @@ fn classify_from_tokens(text: &str) -> DocblockContext {
         return DocblockContext::Unknown;
     }
 
+    let mut saw_modifier = false;
     for token in &tokens {
         let t = token.as_str();
         match t {
@@ -1170,11 +1205,20 @@ fn classify_from_tokens(text: &str) -> DocblockContext {
             "class" | "interface" | "trait" | "enum" => return DocblockContext::ClassLike,
             "const" => return DocblockContext::Constant,
             "public" | "protected" | "private" | "static" | "readonly" | "abstract" | "final" => {
+                saw_modifier = true;
                 continue;
             }
             _ => {
                 if t.starts_with('$') {
-                    return DocblockContext::Property;
+                    // A `$variable` preceded by an access modifier like
+                    // `public` is a property declaration.  Without a
+                    // modifier it is an inline statement (e.g.
+                    // `/** @var User $u */ $u = getUser();`).
+                    return if saw_modifier {
+                        DocblockContext::Property
+                    } else {
+                        DocblockContext::Inline
+                    };
                 }
                 if t.starts_with('?')
                     || t.starts_with('\\')
@@ -1582,6 +1626,44 @@ const GENERAL_TAGS: &[TagDef] = &[
     },
 ];
 
+// ── Inline tags (inside code, not before a declaration) ─────────────────────
+// Only tags that make sense as inline annotations: @var for type
+// narrowing, @throws for exception hinting, plus a handful of general
+// documentation tags.
+
+const INLINE_TAGS: &[TagDef] = &[
+    TagDef {
+        tag: "@var",
+        detail: "Narrow the variable type",
+        label: Some("@var Type"),
+    },
+    TagDef {
+        tag: "@throws",
+        detail: "Hint at an exception thrown by the next statement",
+        label: Some("@throws ExceptionType"),
+    },
+    TagDef {
+        tag: "@see",
+        detail: "Reference to related element",
+        label: Some("@see ClassName::method()"),
+    },
+    TagDef {
+        tag: "@example",
+        detail: "Reference to an example file",
+        label: None,
+    },
+    TagDef {
+        tag: "@link",
+        detail: "URL to external documentation",
+        label: Some("@link https://"),
+    },
+    TagDef {
+        tag: "@todo",
+        detail: "Document a to-do item",
+        label: None,
+    },
+];
+
 // ── PHPStan tags ────────────────────────────────────────────────────────────
 
 const PHPSTAN_FUNCTION_TAGS: &[TagDef] = &[
@@ -1689,6 +1771,7 @@ pub fn build_phpdoc_completions(
         DocblockContext::ClassLike => vec![CLASS_TAGS, GENERAL_TAGS, PHPSTAN_CLASS_TAGS],
         DocblockContext::Property => vec![PROPERTY_TAGS, GENERAL_TAGS, PHPSTAN_PROPERTY_TAGS],
         DocblockContext::Constant => vec![CONSTANT_TAGS, GENERAL_TAGS],
+        DocblockContext::Inline => vec![INLINE_TAGS],
         DocblockContext::Unknown => vec![
             FUNCTION_TAGS,
             CLASS_TAGS,
@@ -1756,11 +1839,19 @@ pub fn build_phpdoc_completions(
                             ..CompletionItem::default()
                         });
                     }
+                    // Smart items emitted — skip the generic fallback.
+                    continue;
                 }
-                // Always skip the generic fallback — either we emitted
-                // smart items above, or all thrown exceptions are already
-                // documented / there are none.
-                continue;
+
+                if !uncaught.is_empty() {
+                    // Uncaught exceptions exist but all are already
+                    // documented — nothing more to add, skip generic.
+                    continue;
+                }
+                // No uncaught exceptions detected at all — fall through
+                // to the generic `@throws ExceptionType` fallback so the
+                // user can manually document exceptions the detection
+                // missed (e.g. from external calls or abstract methods).
             }
 
             // ── Smart items for @param ──────────────────────────────
@@ -1827,11 +1918,65 @@ pub fn build_phpdoc_completions(
                         sort_text: Some(format!("0a_{}", def.tag.to_lowercase())),
                         ..CompletionItem::default()
                     });
+                    // Smart item emitted — skip the generic fallback.
+                    continue;
                 }
-                // Always skip the generic fallback — either we emitted
-                // a smart item above, or the return type is void / not
-                // detectable, or @return is already documented.
-                continue;
+                if sym.return_type.as_deref() == Some("void") {
+                    // Explicit `: void` type hint — the hint speaks for
+                    // itself, no need to suggest @return in PHPDoc.
+                    continue;
+                }
+                if sym.return_type.is_none() {
+                    // No return type hint — offer `@return void` when the
+                    // function body contains no return-with-value statements.
+                    // When `: void` is already declared, the type hint
+                    // speaks for itself and we skip the suggestion.
+                    let body = extract_function_body(content, position);
+                    let has_return = body.as_deref().is_some_and(|b| {
+                        // Quick scan for a `return` keyword followed by a
+                        // non-identifier char (avoid matching inside
+                        // strings would be ideal, but a simple word-boundary
+                        // check is good enough for this heuristic).
+                        let bytes = b.as_bytes();
+                        let len = bytes.len();
+                        let mut pos = 0;
+                        let mut found = false;
+                        while pos + 6 <= len {
+                            if &b[pos..pos + 6] == "return" {
+                                let before_ok = pos == 0
+                                    || !bytes[pos - 1].is_ascii_alphanumeric()
+                                        && bytes[pos - 1] != b'_';
+                                let after_ok = pos + 6 >= len
+                                    || !bytes[pos + 6].is_ascii_alphanumeric()
+                                        && bytes[pos + 6] != b'_';
+                                if before_ok && after_ok {
+                                    // Check it's not just `return;` (no value)
+                                    let after = b[pos + 6..].trim_start();
+                                    if !after.starts_with(';') {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            pos += 1;
+                        }
+                        found
+                    });
+                    if !has_return {
+                        items.push(CompletionItem {
+                            label: "@return void".to_string(),
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some(def.detail.to_string()),
+                            insert_text: Some("return void".to_string()),
+                            filter_text: Some(def.tag.to_string()),
+                            sort_text: Some(format!("0a_{}", def.tag.to_lowercase())),
+                            ..CompletionItem::default()
+                        });
+                    }
+                    continue;
+                }
+                // Return type not detected — fall through to the generic
+                // `@return Type` fallback so the user can type it manually.
             }
 
             // ── Smart item for @var on properties / constants ───────

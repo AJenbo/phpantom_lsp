@@ -9167,3 +9167,504 @@ async fn test_completion_destructuring_from_param_annotation() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_completion_catch_variable_single_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///catch_single.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class ValidationException {\n",
+        "    public function getErrors(): array { return []; }\n",
+        "    public function getField(): string { return ''; }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        try {\n",
+        "            // something\n",
+        "        } catch (ValidationException $e) {\n",
+        "            $e->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for catch variable"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getErrors")),
+                "Should include getErrors from ValidationException, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getField")),
+                "Should include getField from ValidationException, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_catch_variable_multi_catch_union() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///catch_multi.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class HttpException {\n",
+        "    public function getStatusCode(): int { return 500; }\n",
+        "}\n",
+        "class TimeoutException {\n",
+        "    public function getTimeout(): int { return 30; }\n",
+        "}\n",
+        "class Handler {\n",
+        "    public function handle(): void {\n",
+        "        try {\n",
+        "            // something\n",
+        "        } catch (HttpException | TimeoutException $e) {\n",
+        "            $e->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for multi-catch variable"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getStatusCode")),
+                "Should include getStatusCode from HttpException, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTimeout")),
+                "Should include getTimeout from TimeoutException, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_catch_variable_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/DatabaseException.php",
+            concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "class DatabaseException {\n",
+                "    public function getQuery(): string { return ''; }\n",
+                "    public function getErrorCode(): int { return 0; }\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///catch_cross.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Handler {\n",
+        "    public function run(): void {\n",
+        "        try {\n",
+        "            // something\n",
+        "        } catch (DatabaseException $e) {\n",
+        "            $e->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for cross-file catch variable"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getQuery")),
+                "Should include getQuery from DatabaseException, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getErrorCode")),
+                "Should include getErrorCode from DatabaseException, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_catch_variable_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///catch_top.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class RuntimeError {\n",
+        "    public function getMessage(): string { return ''; }\n",
+        "}\n",
+        "try {\n",
+        "    // something\n",
+        "} catch (RuntimeError $err) {\n",
+        "    $err->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for top-level catch variable"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getMessage")),
+                "Should include getMessage from RuntimeError, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_catch_variable_no_own_methods_no_namespace() {
+    // Same as the namespace test but WITHOUT a namespace — verifies
+    // whether the bug is namespace-specific or inheritance-specific.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///catch_bare_no_ns.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "class ValidationException extends \\RuntimeException {}\n",
+        "\n",
+        "class CatchVariableDemo\n",
+        "{\n",
+        "    public function singleCatch(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "        } catch (ValidationException $e) {\n",
+        "            $e->\n",
+        "        }\n",
+        "    }\n",
+        "    private function riskyOperation(): void {}\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$e->` on line 11
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for catch variable with no own methods (no namespace)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                !labels.contains(&"PHPantomLSP"),
+                "Should not fall back to PHPantomLSP placeholder (no namespace), got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getMessage")),
+                "Should include getMessage from RuntimeException (no namespace), got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_catch_variable_namespace_no_own_methods() {
+    // Reproduces: namespace + exception class with NO own methods (only
+    // inherits from \RuntimeException) → catch variable should still
+    // resolve via inheritance.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///catch_ns_bare.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "namespace Demo;\n",
+        "\n",
+        "class ValidationException extends \\RuntimeException {}\n",
+        "\n",
+        "class CatchVariableDemo\n",
+        "{\n",
+        "    public function singleCatch(): void\n",
+        "    {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "        } catch (ValidationException $e) {\n",
+        "            $e->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$e->` on line 13
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for catch variable in namespace with no own methods"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            // ValidationException extends \RuntimeException which has
+            // getMessage(), getCode(), etc. — these should appear via
+            // inheritance even though the class has no own members.
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                !labels.contains(&"PHPantomLSP"),
+                "Should not fall back to PHPantomLSP placeholder, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getMessage")),
+                "Should include getMessage from RuntimeException via inheritance, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getCode")),
+                "Should include getCode from RuntimeException via inheritance, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_catch_variable_with_namespace() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///catch_ns.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "class ValidationException extends \\RuntimeException {\n",
+        "    public function getErrors(): array { return []; }\n",
+        "}\n",
+        "class CatchVariableDemo {\n",
+        "    public function singleCatch(): void {\n",
+        "        try {\n",
+        "            $this->riskyOperation();\n",
+        "        } catch (ValidationException $e) {\n",
+        "            $e->\n",
+        "        }\n",
+        "    }\n",
+        "    private function riskyOperation(): void {}\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for catch variable in namespaced file"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getErrors")),
+                "Should include getErrors from ValidationException in namespaced file, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
