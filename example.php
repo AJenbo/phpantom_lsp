@@ -1391,18 +1391,10 @@ class HttpResponse {
 
 class ForeachKeyDemo {
     /**
-     * Object keys: SplObjectStorage<Request, HttpResponse>
-     *
-     * @param \SplObjectStorage<Request, HttpResponse> $storage
+     * @
      */
     public function objectKeys(\SplObjectStorage $storage): void {
-        // $req resolves to Request, $res resolves to HttpResponse
-        foreach ($storage as $req => $res) {
-            $req->getUri();     // Resolved: Request::getUri()
-            $req->method;       // Resolved: Request::$method
-            $res->statusCode;   // Resolved: HttpResponse::$statusCode
-            $res->getBody();    // Resolved: HttpResponse::getBody()
-        }
+        throw new MyCoolExceptionThatsInTheFunction();
     }
 
     public function weakMapKeys(): void {
@@ -1763,6 +1755,155 @@ $item->score;   // Resolved: float
 $response = getUnknownValue();
 $response->status;  // Resolved: string
 $response->code;    // Resolved: int
+
+// ─── Smart @throws Completion ───────────────────────────────────────────────
+//
+// When typing `@` inside a docblock for a function/method, PHPantomLSP
+// analyses the function body for `throw new ExceptionType(…)` statements
+// that are NOT caught by an enclosing try/catch block.  It then suggests:
+//
+//   @throws ExceptionType
+//
+// for each uncaught exception, filtering out types already documented.
+// If the exception class isn't imported, an auto-import `use` statement
+// is added as an additional edit.
+
+class NotFoundException extends \RuntimeException {}
+class ValidationException extends \RuntimeException {}
+class AuthorizationException extends \RuntimeException {}
+
+class ThrowsCompletionDemo
+{
+    /**
+     * Smart @throws: both exceptions are uncaught, so both are suggested.
+     * But only if they are not already hinted.
+     *
+     * @param int $id
+     * @return array
+     * @throws NotFoundException
+     * @throws ValidationException
+     */
+    public function findOrFail(int $id): array
+    {
+        if ($id < 0) {
+            throw new ValidationException('ID must be positive');
+        }
+        $result = $this->lookup($id);
+        if ($result === null) {
+            throw new NotFoundException('Record not found');
+        }
+        return $result;
+    }
+
+    /**
+     * Caught exceptions are excluded: RuntimeException is caught,
+     * so only AuthorizationException is suggested.
+     *
+     * @throws AuthorizationException
+     */
+    public function safeOperation(): void
+    {
+        $this->checkPermissions(); // may throw AuthorizationException
+
+        try {
+            throw new \RuntimeException('transient error');
+        } catch (\RuntimeException $e) {
+            // handled — not suggested in @throws
+        }
+
+        if (!$this->isAuthorized()) {
+            throw new AuthorizationException('Forbidden');
+        }
+    }
+
+    /**
+     * Multi-catch: both InvalidArgumentException and RuntimeException
+     * are caught, so only LogicException is suggested.
+     *
+     * @throws \LogicException
+     */
+    public function multiCatchDemo(): void
+    {
+        try {
+            throw new \InvalidArgumentException('bad');
+            throw new \RuntimeException('runtime');
+        } catch (\InvalidArgumentException | \RuntimeException $e) {
+            // both caught
+        }
+
+        throw new \LogicException('uncaught');
+    }
+
+    // ── Propagated @throws from called methods ──────────────────────
+
+    /**
+     * Calling $this->safeOperation() propagates its @throws tag.
+     * Typing `@` here suggests:
+     *
+     * @throws AuthorizationException
+     */
+    public function delegatedWork(): void
+    {
+        $this->safeOperation();
+    }
+
+    /**
+     * Multiple called methods propagate their @throws independently.
+     *
+     * @throws AuthorizationException (propagated from lookup via findOrFail's body)
+     * @throws NotFoundException      (propagated from safeOperation)
+     */
+    public function fullProcess(int $id): void
+    {
+        $this->safeOperation();
+        $result = $this->lookup($id);
+        if ($result === null) {
+            throw new NotFoundException('not found');
+        }
+    }
+
+    // ── throw $this->method() — return type detection ───────────────
+
+    /**
+     * `throw $this->makeException()` detects the return type of the
+     * called method and suggests it as @throws.
+     *
+     * @throws ValidationException
+     */
+    public function throwExpression(): void
+    {
+        throw $this->makeException();
+    }
+
+    /**
+     * @return ValidationException
+     */
+    private function makeException(): ValidationException
+    {
+        return new ValidationException('factory-produced error');
+    }
+
+    /**
+     * `throw self::createError()` also works with static calls.
+     * Typing `@` here suggests:
+     *   @throws AuthorizationException   (return type of createError)
+     *
+     * @throws AuthorizationException
+     */
+    public function throwStaticExpression(): void
+    {
+        throw self::createError();
+    }
+
+    private static function createError(): AuthorizationException
+    {
+        return new AuthorizationException('static factory');
+    }
+
+    private function lookup(int $id): ?array { return null; }
+    private function checkPermissions(): void {}
+    private function isAuthorized(): bool { return true; }
+}
 
 // Intersection with \stdClass (makes properties writable)
 /** @var object{name: string, value: int}&\stdClass $obj */

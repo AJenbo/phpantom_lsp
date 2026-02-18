@@ -65,14 +65,16 @@ async fn test_phpdoc_bare_at_triggers_completion() {
     let items = complete_at(&backend, &uri, text, 2, 4).await;
     let tags = filter_texts(&items);
 
+    // foo() has no params, void return, and no throws — smart tags are
+    // filtered out.  General tags like @deprecated should still appear.
     assert!(
-        tags.contains(&"@param"),
-        "Should suggest @param. Got: {:?}",
+        tags.contains(&"@deprecated"),
+        "Should suggest @deprecated. Got: {:?}",
         tags
     );
     assert!(
-        tags.contains(&"@return"),
-        "Should suggest @return. Got: {:?}",
+        tags.contains(&"@inheritdoc"),
+        "Should suggest @inheritdoc. Got: {:?}",
         tags
     );
 }
@@ -87,7 +89,7 @@ async fn test_phpdoc_partial_prefix_filters() {
         "/**\n",
         " * @par\n",
         " */\n",
-        "function foo(): void {}\n",
+        "function greet(string $name): string {}\n",
     );
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -169,6 +171,7 @@ async fn test_phpdoc_function_context_tags() {
         " * @\n",
         " */\n",
         "function greet(string $name): string {\n",
+        "    throw new InvalidArgumentException('bad');\n",
         "    return 'Hello ' . $name;\n",
         "}\n",
     );
@@ -176,7 +179,7 @@ async fn test_phpdoc_function_context_tags() {
     let items = complete_at(&backend, &uri, text, 2, 4).await;
     let tags = filter_texts(&items);
 
-    // Function-specific tags
+    // Function-specific smart tags (function has a param, non-void return, and a throw)
     assert!(tags.contains(&"@param"), "Should suggest @param");
     assert!(tags.contains(&"@return"), "Should suggest @return");
     assert!(tags.contains(&"@throws"), "Should suggest @throws");
@@ -218,6 +221,7 @@ async fn test_phpdoc_method_context_tags() {
         "     * @\n",
         "     */\n",
         "    public function handle(Request $request): Response {\n",
+        "        throw new RuntimeException('fail');\n",
         "        return new Response();\n",
         "    }\n",
         "}\n",
@@ -243,7 +247,7 @@ async fn test_phpdoc_static_method_context_tags() {
         "    /**\n",
         "     * @\n",
         "     */\n",
-        "    public static function create(): self {\n",
+        "    public static function create(string $type): self {\n",
         "        return new self();\n",
         "    }\n",
         "}\n",
@@ -715,13 +719,14 @@ async fn test_phpdoc_unknown_context_suggests_all() {
     let items = complete_at(&backend, &uri, text, 2, 4).await;
     let tags = filter_texts(&items);
 
-    // Should include both function and class tags
-    assert!(tags.contains(&"@param"), "Should suggest @param");
-    assert!(tags.contains(&"@return"), "Should suggest @return");
+    // Unknown context: class tags and general tags should appear.
+    // @param, @return, @throws are filtered because no function body
+    // can be detected (no params, no return, no throws).
     assert!(tags.contains(&"@property"), "Should suggest @property");
     assert!(tags.contains(&"@method"), "Should suggest @method");
     assert!(tags.contains(&"@var"), "Should suggest @var");
     assert!(tags.contains(&"@deprecated"), "Should suggest @deprecated");
+    assert!(tags.contains(&"@inheritdoc"), "Should suggest @inheritdoc");
 }
 
 // ─── Completion item details ────────────────────────────────────────────────
@@ -817,7 +822,11 @@ async fn test_phpdoc_open_docblock() {
         "Should suggest tags even in an unclosed docblock. Got: {:?}",
         tags
     );
-    assert!(tags.contains(&"@param"), "Should suggest @param");
+    assert!(
+        tags.contains(&"@deprecated"),
+        "Should suggest @deprecated. Got: {:?}",
+        tags
+    );
 }
 
 // ─── Multiple docblocks ─────────────────────────────────────────────────────
@@ -871,7 +880,7 @@ async fn test_phpdoc_case_insensitive_prefix() {
         "/**\n",
         " * @PAR\n",
         " */\n",
-        "function foo(): void {}\n",
+        "function greet(string $name): void {}\n",
     );
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -898,6 +907,7 @@ async fn test_phpdoc_second_tag_in_docblock() {
         " * @\n",
         " */\n",
         "function greet(string $name): string {\n",
+        "    throw new RuntimeException('fail');\n",
         "    return 'Hello ' . $name;\n",
         "}\n",
     );
@@ -1036,13 +1046,13 @@ async fn test_phpdoc_template_context_awareness() {
 
 // ─── @var availability ──────────────────────────────────────────────────────
 
-/// @var should be available in function, property, and constant contexts
-/// but not in class context.
+/// @var should be available in property and constant contexts
+/// but not in function/method or class contexts.
 #[tokio::test]
 async fn test_phpdoc_var_context_awareness() {
     let backend = create_test_backend();
 
-    // Function context
+    // Function context — should NOT have @var (use @param / @return instead)
     let uri_func = Url::parse("file:///phpdoc_var_func.php").unwrap();
     let text_func = concat!(
         "<?php\n",
@@ -1053,10 +1063,10 @@ async fn test_phpdoc_var_context_awareness() {
     );
     let items_func = complete_at(&backend, &uri_func, text_func, 2, 6).await;
     assert!(
-        items_func
+        !items_func
             .iter()
             .any(|i| i.filter_text.as_deref() == Some("@var")),
-        "Should suggest @var in function context"
+        "Should NOT suggest @var in function/method context"
     );
 
     // Property context
@@ -1332,11 +1342,12 @@ async fn test_phpdoc_smart_return_void_generic() {
     let return_item = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@return"));
-    assert!(return_item.is_some(), "Should have @return item");
-    let r = return_item.unwrap();
-    // void return → generic label
-    assert_eq!(r.label, "@return Type");
-    assert_eq!(r.insert_text.as_deref(), Some("return"));
+    // void return → @return is filtered out entirely
+    assert!(
+        return_item.is_none(),
+        "Should NOT suggest @return for void functions. Got: {:?}",
+        return_item.map(|i| &i.label)
+    );
 }
 
 /// @var should be pre-filled with the property type hint.
@@ -1516,8 +1527,10 @@ async fn test_phpdoc_smart_all_params_documented() {
         .filter(|i| i.filter_text.as_deref() == Some("@param"))
         .collect();
 
-    // All params documented → falls back to generic @param
-    assert_eq!(param_items.len(), 1);
-    assert_eq!(param_items[0].label, "@param Type $name");
-    assert_eq!(param_items[0].insert_text.as_deref(), Some("param"));
+    // All params documented → @param is filtered out entirely
+    assert!(
+        param_items.is_empty(),
+        "Should NOT suggest @param when all params are documented. Got: {:?}",
+        param_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
 }

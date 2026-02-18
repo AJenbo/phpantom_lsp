@@ -13,8 +13,19 @@
 //! When the symbol following the docblock can be parsed, completions are
 //! pre-filled with concrete type and parameter information extracted from
 //! the declaration (e.g. `@param string $name` instead of bare `@param`).
+//!
+//! Smart `@throws` completion analyses the function/method body for
+//! `throw new ExceptionType(…)` statements that are not caught by a
+//! `try/catch` block enclosing them, and suggests documenting each
+//! uncaught exception type.  When the exception class is not yet imported
+//! via a `use` statement, an `additional_text_edits` entry is added to
+//! insert the import automatically.
+
+use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
+
+use crate::completion::use_edit::{build_use_edit, find_use_insert_position};
 
 // ─── Context Detection ─────────────────────────────────────────────────────
 
@@ -185,6 +196,917 @@ fn has_existing_return_tag(content: &str, position: Position) -> bool {
         let trimmed = line.trim().trim_start_matches('*').trim();
         trimmed.starts_with("@return")
     })
+}
+
+/// Collect exception type names already documented with `@throws` tags
+/// in the current docblock above the cursor.
+///
+/// Returns short type names as written in the docblock (e.g.
+/// `"InvalidArgumentException"`, `"\\RuntimeException"`).
+pub fn find_existing_throws_tags(content: &str, position: Position) -> Vec<String> {
+    let byte_offset = position_to_byte_offset(content, position);
+    let before_cursor = &content[..byte_offset.min(content.len())];
+
+    let open_pos = match before_cursor.rfind("/**") {
+        Some(pos) => pos,
+        None => return Vec::new(),
+    };
+
+    // Also look at the docblock text AFTER the cursor (the user may have
+    // already documented some throws below the cursor line).
+    let close_pos = content[open_pos..].find("*/").map(|p| open_pos + p + 2);
+    let docblock = if let Some(end) = close_pos {
+        &content[open_pos..end]
+    } else {
+        &content[open_pos..byte_offset.min(content.len())]
+    };
+
+    let mut existing = Vec::new();
+    for line in docblock.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+        if let Some(rest) = trimmed.strip_prefix("@throws") {
+            let rest = rest.trim();
+            if let Some(type_name) = rest.split_whitespace().next() {
+                let clean = type_name.trim_start_matches('\\');
+                if !clean.is_empty() {
+                    existing.push(clean.to_string());
+                }
+            }
+        }
+    }
+
+    existing
+}
+
+/// Extract the function/method body text that follows the docblock at
+/// the cursor position.
+///
+/// Returns the text between the opening `{` and matching closing `}` of
+/// the function/method declaration.  Returns `None` if the body cannot
+/// be located (e.g. abstract method, or the docblock is not followed by
+/// a function).
+fn extract_function_body(content: &str, position: Position) -> Option<String> {
+    let after_docblock = get_text_after_docblock(content, position);
+
+    // Find the `function` keyword to confirm this is a function/method.
+    let func_idx = {
+        let lower = after_docblock.to_lowercase();
+        let mut start = 0;
+        let mut found = None;
+        while let Some(pos) = lower[start..].find("function") {
+            let abs = start + pos;
+            let before_ok = abs == 0 || !after_docblock.as_bytes()[abs - 1].is_ascii_alphanumeric();
+            let after_pos = abs + 8; // "function".len()
+            let after_ok = after_pos >= after_docblock.len()
+                || !after_docblock.as_bytes()[after_pos].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                found = Some(abs);
+                break;
+            }
+            start = abs + 8;
+        }
+        found?
+    };
+
+    let after_func = &after_docblock[func_idx..];
+
+    // Find the opening brace of the function body.
+    let open_brace = after_func.find('{')?;
+    let body_start = open_brace + 1;
+
+    // Walk forward to find the matching closing brace.
+    let mut depth = 1u32;
+    let mut pos = body_start;
+    let bytes = after_func.as_bytes();
+    // Track whether we are inside a string literal to avoid counting
+    // braces inside strings.
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    while pos < bytes.len() && depth > 0 {
+        let b = bytes[pos];
+        if in_single_quote {
+            if b == b'\\' {
+                pos += 1; // skip escaped char
+            } else if b == b'\'' {
+                in_single_quote = false;
+            }
+        } else if in_double_quote {
+            if b == b'\\' {
+                pos += 1; // skip escaped char
+            } else if b == b'"' {
+                in_double_quote = false;
+            }
+        } else {
+            match b {
+                b'\'' => in_single_quote = true,
+                b'"' => in_double_quote = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(after_func[body_start..pos].to_string());
+                    }
+                }
+                b'/' if pos + 1 < bytes.len() => {
+                    // Skip line comments
+                    if bytes[pos + 1] == b'/' {
+                        while pos < bytes.len() && bytes[pos] != b'\n' {
+                            pos += 1;
+                        }
+                        continue;
+                    }
+                    // Skip block comments
+                    if bytes[pos + 1] == b'*' {
+                        pos += 2;
+                        while pos + 1 < bytes.len() {
+                            if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                                pos += 1;
+                                break;
+                            }
+                            pos += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        pos += 1;
+    }
+
+    None
+}
+
+/// Information about a `throw new Type(…)` statement in a function body.
+#[derive(Debug)]
+struct ThrowInfo {
+    /// The exception type name as written in source (e.g. `"InvalidArgumentException"`,
+    /// `"\\RuntimeException"`, `"Exceptions\\Custom"`).
+    type_name: String,
+    /// Byte offset of this throw statement relative to the function body start.
+    offset: usize,
+}
+
+/// Information about a `catch (Type $var)` clause in a function body.
+#[derive(Debug)]
+struct CatchInfo {
+    /// The caught exception type names (multi-catch produces multiple).
+    type_names: Vec<String>,
+    /// Byte offset of the start of the `try` block this catch belongs to.
+    try_start: usize,
+    /// Byte offset of the end of the `try` block (the matching `}`).
+    try_end: usize,
+}
+
+/// Find all `throw new Type(…)` statements in the given function body text.
+fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
+    let mut results = Vec::new();
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip string literals
+        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
+            let quote = bytes[pos];
+            pos += 1;
+            while pos < len {
+                if bytes[pos] == b'\\' {
+                    pos += 1; // skip escaped char
+                } else if bytes[pos] == quote {
+                    break;
+                }
+                pos += 1;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Skip line comments
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
+            while pos < len && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Skip block comments
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
+            pos += 2;
+            while pos + 1 < len {
+                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                    pos += 2;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Look for `throw`
+        if pos + 5 <= len && &body[pos..pos + 5] == "throw" {
+            // Make sure it's a whole word
+            let before_ok = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
+            let after_ok =
+                pos + 5 >= len || !bytes[pos + 5].is_ascii_alphanumeric() && bytes[pos + 5] != b'_';
+            if before_ok && after_ok {
+                // Look for `new` after `throw`
+                let after_throw = &body[pos + 5..];
+                let trimmed = after_throw.trim_start();
+                if trimmed.starts_with("new ")
+                    || trimmed.starts_with("new\t")
+                    || trimmed.starts_with("new\n")
+                {
+                    let after_new = trimmed[3..].trim_start();
+                    // Extract the class name (may include namespace separators)
+                    let type_end = after_new
+                        .find(|c: char| !c.is_alphanumeric() && c != '\\' && c != '_')
+                        .unwrap_or(after_new.len());
+                    let type_name = &after_new[..type_end];
+                    if !type_name.is_empty() {
+                        results.push(ThrowInfo {
+                            type_name: type_name.to_string(),
+                            offset: pos,
+                        });
+                    }
+                }
+            }
+        }
+
+        pos += 1;
+    }
+
+    results
+}
+
+/// Find all `try { … } catch (…)` blocks and their caught types.
+fn find_catch_blocks(body: &str) -> Vec<CatchInfo> {
+    let mut results = Vec::new();
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip string literals
+        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
+            let quote = bytes[pos];
+            pos += 1;
+            while pos < len {
+                if bytes[pos] == b'\\' {
+                    pos += 1;
+                } else if bytes[pos] == quote {
+                    break;
+                }
+                pos += 1;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Skip line comments
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
+            while pos < len && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Skip block comments
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
+            pos += 2;
+            while pos + 1 < len {
+                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                    pos += 2;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Look for `try`
+        if pos + 3 <= len && &body[pos..pos + 3] == "try" {
+            let before_ok = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
+            let after_ok = pos + 3 >= len
+                || (!bytes[pos + 3].is_ascii_alphanumeric() && bytes[pos + 3] != b'_');
+            if before_ok && after_ok {
+                // Find the opening brace of the try block
+                let after_try = &body[pos + 3..];
+                if let Some(brace_offset) = after_try.find('{') {
+                    let try_body_start = pos + 3 + brace_offset;
+                    // Find the matching closing brace
+                    if let Some(try_body_end) = find_matching_brace(body, try_body_start) {
+                        // Now look for `catch` after the try block's `}`
+                        let mut catch_search = try_body_end + 1;
+                        while catch_search < len {
+                            let remaining = body[catch_search..].trim_start();
+                            let remaining_start = len - remaining.len();
+                            if let Some(after_catch) = remaining.strip_prefix("catch") {
+                                // Ensure `catch` is a whole word
+                                if after_catch
+                                    .bytes()
+                                    .next()
+                                    .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+                                {
+                                    break;
+                                }
+                                let catch_keyword_len = "catch".len();
+                                // Extract caught types from `catch (Type1 | Type2 $var)`
+                                if let Some(open_p) = after_catch.find('(') {
+                                    let paren_content_start = catch_keyword_len + open_p + 1;
+                                    if let Some(close_p) =
+                                        remaining[paren_content_start..].find(')')
+                                    {
+                                        let paren_content = &remaining
+                                            [paren_content_start..paren_content_start + close_p];
+                                        let type_names = parse_catch_types(paren_content);
+                                        if !type_names.is_empty() {
+                                            results.push(CatchInfo {
+                                                type_names,
+                                                try_start: try_body_start,
+                                                try_end: try_body_end,
+                                            });
+                                        }
+
+                                        // Skip past the catch block body
+                                        let after_close_paren =
+                                            remaining_start + paren_content_start + close_p + 1;
+                                        if let Some(cb) = body[after_close_paren..].find('{') {
+                                            let catch_body_start = after_close_paren + cb;
+                                            if let Some(catch_body_end) =
+                                                find_matching_brace(body, catch_body_start)
+                                            {
+                                                catch_search = catch_body_end + 1;
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+                            } else if remaining.starts_with("finally") {
+                                // Skip finally block, no more catches
+                                break;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // Continue scanning INSIDE the try body so that
+                        // nested try-catch blocks are discovered.  We
+                        // advance past the opening `{` to avoid
+                        // re-matching the outer `try` keyword.
+                        pos = try_body_start + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        pos += 1;
+    }
+
+    results
+}
+
+/// Find the position of the `}` that matches the `{` at `open_pos`.
+fn find_matching_brace(text: &str, open_pos: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    if open_pos >= len || bytes[open_pos] != b'{' {
+        return None;
+    }
+    let mut depth = 1u32;
+    let mut pos = open_pos + 1;
+    let mut in_single = false;
+    let mut in_double = false;
+    while pos < len && depth > 0 {
+        let b = bytes[pos];
+        if in_single {
+            if b == b'\\' {
+                pos += 1;
+            } else if b == b'\'' {
+                in_single = false;
+            }
+        } else if in_double {
+            if b == b'\\' {
+                pos += 1;
+            } else if b == b'"' {
+                in_double = false;
+            }
+        } else {
+            match b {
+                b'\'' => in_single = true,
+                b'"' => in_double = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(pos);
+                    }
+                }
+                b'/' if pos + 1 < len => {
+                    if bytes[pos + 1] == b'/' {
+                        while pos < len && bytes[pos] != b'\n' {
+                            pos += 1;
+                        }
+                        continue;
+                    }
+                    if bytes[pos + 1] == b'*' {
+                        pos += 2;
+                        while pos + 1 < len {
+                            if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                                pos += 1;
+                                break;
+                            }
+                            pos += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        pos += 1;
+    }
+    None
+}
+
+/// Parse the content inside `catch ( … )` into individual type names.
+///
+/// Handles multi-catch: `ExceptionA | ExceptionB $e` → `["ExceptionA", "ExceptionB"]`.
+fn parse_catch_types(paren_content: &str) -> Vec<String> {
+    let mut types = Vec::new();
+    // Remove the variable name (starts with `$`)
+    let without_var = if let Some(dollar) = paren_content.rfind('$') {
+        &paren_content[..dollar]
+    } else {
+        paren_content
+    };
+
+    for part in without_var.split('|') {
+        let t = part.trim().trim_start_matches('\\');
+        if !t.is_empty() {
+            // Take only the short name (last segment after `\`)
+            let short = t.rsplit('\\').next().unwrap_or(t);
+            types.push(short.to_string());
+        }
+    }
+
+    types
+}
+
+/// Determine which exception types in a function body are **not** caught
+/// by an enclosing `try/catch` block.
+///
+/// Detects three patterns:
+/// 1. `throw new ExceptionType(…)` — direct instantiation
+/// 2. `throw $this->method()` / `throw self::method()` / `throw static::method()`
+///    — the method's return type is the thrown exception type
+/// 3. `$this->method()` / `self::method()` calls where the called method's
+///    docblock declares `@throws ExceptionType` — propagated throws
+///
+/// Returns a deduplicated list of short exception type names.
+pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<String> {
+    let body = match extract_function_body(content, position) {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    let throws = find_throw_statements(&body);
+    let throw_expr_types = find_throw_expression_types(&body, content);
+    let propagated = find_propagated_throws(&body, content);
+    let catches = find_catch_blocks(&body);
+
+    let mut uncaught: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. Direct `throw new Type(…)` statements
+    for throw in &throws {
+        let short_name = throw
+            .type_name
+            .trim_start_matches('\\')
+            .rsplit('\\')
+            .next()
+            .unwrap_or(&throw.type_name);
+
+        // Check if this throw is inside a try block whose catch handles
+        // the same exception type.
+        let is_caught = catches.iter().any(|c| {
+            throw.offset > c.try_start
+                && throw.offset < c.try_end
+                && c.type_names.iter().any(|ct| {
+                    let ct_short = ct.rsplit('\\').next().unwrap_or(ct);
+                    ct_short.eq_ignore_ascii_case(short_name)
+                        || ct_short == "Throwable"
+                        || ct_short == "Exception"
+                })
+        });
+
+        if !is_caught && seen.insert(short_name.to_string()) {
+            uncaught.push(short_name.to_string());
+        }
+    }
+
+    // 2. `throw $this->method()` — return type of method is the thrown type
+    for te in &throw_expr_types {
+        let short_name = te
+            .trim_start_matches('\\')
+            .rsplit('\\')
+            .next()
+            .unwrap_or(te);
+        if !short_name.is_empty() && seen.insert(short_name.to_string()) {
+            uncaught.push(short_name.to_string());
+        }
+    }
+
+    // 3. Propagated @throws from called methods
+    for prop in &propagated {
+        let short_name = prop
+            .trim_start_matches('\\')
+            .rsplit('\\')
+            .next()
+            .unwrap_or(prop);
+        if !short_name.is_empty() && seen.insert(short_name.to_string()) {
+            uncaught.push(short_name.to_string());
+        }
+    }
+
+    uncaught
+}
+
+/// Find `throw $this->method(…)` / `throw self::method(…)` /
+/// `throw static::method(…)` patterns and resolve the called method's
+/// return type from its declaration or docblock in the same file.
+///
+/// Returns a list of exception type names (the return types of the
+/// called methods).
+fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<String> {
+    let mut results = Vec::new();
+
+    // Patterns: throw $this->method(  /  throw self::method(  /  throw static::method(
+    let patterns: &[&str] = &["$this->", "self::", "static::"];
+
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip strings
+        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
+            let quote = bytes[pos];
+            pos += 1;
+            while pos < len {
+                if bytes[pos] == b'\\' {
+                    pos += 1;
+                } else if bytes[pos] == quote {
+                    break;
+                }
+                pos += 1;
+            }
+            pos += 1;
+            continue;
+        }
+        // Skip comments
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
+            while pos < len && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            continue;
+        }
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
+            pos += 2;
+            while pos + 1 < len {
+                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                    pos += 2;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Look for `throw` keyword
+        if pos + 5 <= len && &body[pos..pos + 5] == "throw" {
+            let before_ok = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
+            let after_ok = pos + 5 >= len
+                || (!bytes[pos + 5].is_ascii_alphanumeric() && bytes[pos + 5] != b'_');
+            if before_ok && after_ok {
+                let after_throw = body[pos + 5..].trim_start();
+                // Check if this is NOT `throw new` (handled separately)
+                if !after_throw.starts_with("new ")
+                    && !after_throw.starts_with("new\t")
+                    && !after_throw.starts_with("new\n")
+                {
+                    // Check for $this->, self::, static::
+                    for pat in patterns {
+                        if let Some(rest) = after_throw.strip_prefix(pat) {
+                            // Extract method name
+                            let name_end = rest
+                                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                                .unwrap_or(rest.len());
+                            let method_name = &rest[..name_end];
+                            if !method_name.is_empty() {
+                                // Look up the method's return type in the file
+                                if let Some(ret_type) =
+                                    find_method_return_type(file_content, method_name)
+                                {
+                                    results.push(ret_type);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        pos += 1;
+    }
+
+    results
+}
+
+/// Find all method calls (`$this->method(…)`, `self::method(…)`,
+/// `static::method(…)`) in the function body and collect `@throws`
+/// annotations from those methods' docblocks in the same file.
+///
+/// This propagates `@throws` declarations: if method A calls method B
+/// and B declares `@throws SomeException`, then A should also document
+/// (or is aware of) that exception.
+fn find_propagated_throws(body: &str, file_content: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut seen_methods = std::collections::HashSet::new();
+
+    let patterns: &[&str] = &["$this->", "self::", "static::"];
+
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip strings
+        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
+            let quote = bytes[pos];
+            pos += 1;
+            while pos < len {
+                if bytes[pos] == b'\\' {
+                    pos += 1;
+                } else if bytes[pos] == quote {
+                    break;
+                }
+                pos += 1;
+            }
+            pos += 1;
+            continue;
+        }
+        // Skip comments
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
+            while pos < len && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            continue;
+        }
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
+            pos += 2;
+            while pos + 1 < len {
+                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                    pos += 2;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Look for $this->, self::, static::
+        for pat in patterns {
+            if pos + pat.len() <= len && &body[pos..pos + pat.len()] == *pat {
+                // Verify word boundary before the pattern
+                let before_ok = if *pat == "$this->" {
+                    // $ is its own boundary
+                    true
+                } else {
+                    pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric() && bytes[pos - 1] != b'_'
+                };
+                if !before_ok {
+                    break;
+                }
+
+                let after_pat = &body[pos + pat.len()..];
+                let name_end = after_pat
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(after_pat.len());
+                let method_name = &after_pat[..name_end];
+
+                // Must be followed by `(` to be a method call
+                let after_name = after_pat[name_end..].trim_start();
+                if !method_name.is_empty()
+                    && after_name.starts_with('(')
+                    && seen_methods.insert(method_name.to_string())
+                {
+                    // Look up @throws in the method's docblock
+                    let throws = find_method_throws_tags(file_content, method_name);
+                    results.extend(throws);
+                }
+                break;
+            }
+        }
+
+        pos += 1;
+    }
+
+    results
+}
+
+/// Find the return type of a method by scanning the file for its
+/// declaration and docblock.
+///
+/// Looks for `function methodName(…): ReturnType` in the file content
+/// and also checks `@return Type` in the preceding docblock.
+fn find_method_return_type(file_content: &str, method_name: &str) -> Option<String> {
+    // Find `function methodName(` in the file
+    let search = format!("function {}", method_name);
+    let mut search_start = 0;
+    while let Some(func_pos) = file_content[search_start..].find(&search) {
+        let abs_pos = search_start + func_pos;
+        let after = abs_pos + search.len();
+
+        // Ensure it's a whole word and followed by `(`
+        let before_ok =
+            abs_pos == 0 || !file_content.as_bytes()[abs_pos - 1].is_ascii_alphanumeric();
+        let after_trimmed = file_content[after..].trim_start();
+        if before_ok && after_trimmed.starts_with('(') {
+            // Try native return type: find `)` then `: Type`
+            if let Some(paren_close) = after_trimmed.find(')') {
+                let after_paren = after_trimmed[paren_close + 1..].trim_start();
+                if let Some(rest) = after_paren.strip_prefix(':') {
+                    let rest = rest.trim_start();
+                    let type_end = rest
+                        .find(|c: char| !c.is_alphanumeric() && c != '\\' && c != '_' && c != '?')
+                        .unwrap_or(rest.len());
+                    let ret_type = rest[..type_end].trim();
+                    if !ret_type.is_empty() && ret_type != "void" && ret_type != "mixed" {
+                        let clean = ret_type.trim_start_matches('?').trim_start_matches('\\');
+                        let short = clean.rsplit('\\').next().unwrap_or(clean);
+                        return Some(short.to_string());
+                    }
+                }
+            }
+
+            // Try docblock @return
+            let before_func = &file_content[..abs_pos];
+            if let Some(doc_end) = before_func.rfind("*/") {
+                let doc_region = &before_func[..doc_end + 2];
+                if let Some(doc_start) = doc_region.rfind("/**") {
+                    let between = file_content[doc_end + 2..abs_pos].trim();
+                    // Ensure the docblock is immediately before the function
+                    // (only visibility/static/abstract modifiers between)
+                    let is_adjacent =
+                        between.is_empty() || between.split_whitespace().all(is_modifier_keyword);
+                    if is_adjacent {
+                        let docblock = &doc_region[doc_start..];
+                        for line in docblock.lines() {
+                            let trimmed = line.trim().trim_start_matches('*').trim();
+                            if let Some(rest) = trimmed.strip_prefix("@return") {
+                                let rest = rest.trim();
+                                if let Some(type_str) = rest.split_whitespace().next() {
+                                    let clean =
+                                        type_str.trim_start_matches('?').trim_start_matches('\\');
+                                    let short = clean.rsplit('\\').next().unwrap_or(clean);
+                                    if !short.is_empty()
+                                        && short != "void"
+                                        && short != "mixed"
+                                        && short != "self"
+                                        && short != "static"
+                                    {
+                                        return Some(short.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return None;
+        }
+        search_start = abs_pos + search.len();
+    }
+    None
+}
+
+/// Find `@throws` tags in a method's docblock by scanning the file.
+///
+/// Returns the list of exception type short names declared via `@throws`
+/// in the docblock preceding `function methodName(…)`.
+fn find_method_throws_tags(file_content: &str, method_name: &str) -> Vec<String> {
+    let search = format!("function {}", method_name);
+    let mut search_start = 0;
+    while let Some(func_pos) = file_content[search_start..].find(&search) {
+        let abs_pos = search_start + func_pos;
+        let after = abs_pos + search.len();
+
+        let before_ok =
+            abs_pos == 0 || !file_content.as_bytes()[abs_pos - 1].is_ascii_alphanumeric();
+        let after_trimmed = file_content[after..].trim_start();
+        if before_ok && after_trimmed.starts_with('(') {
+            // Find the preceding docblock
+            let before_func = &file_content[..abs_pos];
+            if let Some(doc_end) = before_func.rfind("*/") {
+                let doc_region = &before_func[..doc_end + 2];
+                if let Some(doc_start) = doc_region.rfind("/**") {
+                    let between = file_content[doc_end + 2..abs_pos].trim();
+                    let is_adjacent =
+                        between.is_empty() || between.split_whitespace().all(is_modifier_keyword);
+                    if is_adjacent {
+                        let docblock = &doc_region[doc_start..];
+                        let mut throws = Vec::new();
+                        for line in docblock.lines() {
+                            let trimmed = line.trim().trim_start_matches('*').trim();
+                            if let Some(rest) = trimmed.strip_prefix("@throws") {
+                                let rest = rest.trim();
+                                if let Some(type_str) = rest.split_whitespace().next() {
+                                    let clean = type_str.trim_start_matches('\\');
+                                    let short = clean.rsplit('\\').next().unwrap_or(clean);
+                                    if !short.is_empty() {
+                                        throws.push(short.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        return throws;
+                    }
+                }
+            }
+            return Vec::new();
+        }
+        search_start = abs_pos + search.len();
+    }
+    Vec::new()
+}
+
+/// Check whether a token is a PHP visibility / modifier keyword that can
+/// appear between a docblock and a function declaration.
+fn is_modifier_keyword(word: &str) -> bool {
+    matches!(
+        word.to_lowercase().as_str(),
+        "public" | "protected" | "private" | "static" | "abstract" | "final"
+    )
+}
+
+/// Resolve a short exception type name to its fully-qualified name using
+/// the file's `use` map and namespace.
+///
+/// Returns the FQN (without leading `\`) if found, or `None` if the type
+/// is already unqualified and in the global namespace.
+fn resolve_exception_fqn(
+    short_name: &str,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> Option<String> {
+    // Check the use map first
+    if let Some(fqn) = use_map.get(short_name) {
+        return Some(fqn.clone());
+    }
+
+    // If there's a namespace, the type might be in the current namespace
+    if let Some(ns) = file_namespace {
+        return Some(format!("{}\\{}", ns, short_name));
+    }
+
+    // Global namespace, no FQN to resolve to
+    None
+}
+
+/// Check whether a `use` statement for the given FQN already exists in
+/// the file content.
+fn has_use_import(content: &str, fqn: &str) -> bool {
+    let target = format!("use {};", fqn);
+    let target_with_alias = format!("use {} as", fqn); // alias import
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == target || trimmed.starts_with(&target_with_alias) {
+            return true;
+        }
+        // Handle group imports: `use Foo\{Bar, Baz};`
+        // Check if the FQN's namespace prefix is used in a group import
+        // that includes the short name.
+        if let Some(ns_sep) = fqn.rfind('\\') {
+            let ns_prefix = &fqn[..ns_sep];
+            let short = &fqn[ns_sep + 1..];
+            let group_prefix = format!("use {}\\{{", ns_prefix);
+            if trimmed.starts_with(&group_prefix) {
+                // Check if short name is in the brace list
+                if let Some(brace_start) = trimmed.find('{')
+                    && let Some(brace_end) = trimmed.find('}')
+                {
+                    let names = &trimmed[brace_start + 1..brace_end];
+                    if names.split(',').any(|n| n.trim() == short) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -558,11 +1480,6 @@ const FUNCTION_TAGS: &[TagDef] = &[
         label: Some("@throws ExceptionType"),
     },
     TagDef {
-        tag: "@var",
-        detail: "Document a variable type",
-        label: Some("@var Type"),
-    },
-    TagDef {
         tag: "@inheritdoc",
         detail: "Inherit documentation from parent",
         label: None,
@@ -745,6 +1662,8 @@ const PHPSTAN_PROPERTY_TAGS: &[TagDef] = &[];
 /// `context` indicates what PHP symbol follows the docblock.
 /// `position` is the cursor position (used to scan the docblock and the
 /// following declaration).
+/// `use_map` maps short class names to FQNs from `use` statements.
+/// `file_namespace` is the file's declared namespace (if any).
 ///
 /// Returns the list of matching `CompletionItem`s.
 pub fn build_phpdoc_completions(
@@ -752,6 +1671,8 @@ pub fn build_phpdoc_completions(
     prefix: &str,
     context: DocblockContext,
     position: Position,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> Vec<CompletionItem> {
     let prefix_lower = prefix.to_lowercase();
     let mut seen = std::collections::HashSet::new();
@@ -788,44 +1709,105 @@ pub fn build_phpdoc_completions(
                 continue;
             }
 
-            // ── Smart items for @param ──────────────────────────────
-            if def.tag == "@param" && !sym.params.is_empty() {
-                let existing = find_existing_param_tags(content, position);
-                let mut param_idx = 0u32;
+            // ── Smart items for @throws ─────────────────────────────
+            if def.tag == "@throws"
+                && matches!(
+                    context,
+                    DocblockContext::FunctionOrMethod | DocblockContext::Unknown
+                )
+            {
+                let uncaught = find_uncaught_throw_types(content, position);
+                let existing_throws = find_existing_throws_tags(content, position);
 
-                for (type_hint, name) in &sym.params {
-                    // Skip params already documented
-                    if existing.iter().any(|e| e == name) {
-                        continue;
+                // Filter out already-documented throws
+                let missing: Vec<&String> = uncaught
+                    .iter()
+                    .filter(|t| {
+                        !existing_throws
+                            .iter()
+                            .any(|e| e.eq_ignore_ascii_case(t.as_str()))
+                    })
+                    .collect();
+
+                if !missing.is_empty() {
+                    let use_insert_pos = find_use_insert_position(content);
+
+                    for (idx, exc_type) in missing.iter().enumerate() {
+                        let insert = format!("throws {}", exc_type);
+                        let label = format!("@throws {}", exc_type);
+
+                        // Build an auto-import edit if the exception type
+                        // isn't already imported.
+                        let additional_edits =
+                            resolve_exception_fqn(exc_type, use_map, file_namespace)
+                                .filter(|fqn| !has_use_import(content, fqn))
+                                .and_then(|fqn| {
+                                    build_use_edit(&fqn, use_insert_pos, file_namespace)
+                                });
+
+                        items.push(CompletionItem {
+                            label,
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some(def.detail.to_string()),
+                            insert_text: Some(insert),
+                            filter_text: Some(def.tag.to_string()),
+                            sort_text: Some(format!("0a_{}_{:03}", def.tag.to_lowercase(), idx)),
+                            additional_text_edits: additional_edits,
+                            ..CompletionItem::default()
+                        });
                     }
-
-                    let (insert, label) = if let Some(th) = type_hint {
-                        (
-                            format!("param {} {}", th, name),
-                            format!("@param {} {}", th, name),
-                        )
-                    } else {
-                        (format!("param {}", name), format!("@param {}", name))
-                    };
-
-                    items.push(CompletionItem {
-                        label,
-                        kind: Some(CompletionItemKind::KEYWORD),
-                        detail: Some(def.detail.to_string()),
-                        insert_text: Some(insert),
-                        filter_text: Some(def.tag.to_string()),
-                        sort_text: Some(format!("0_{}_{:03}", def.tag.to_lowercase(), param_idx)),
-                        ..CompletionItem::default()
-                    });
-                    param_idx += 1;
                 }
+                // Always skip the generic fallback — either we emitted
+                // smart items above, or all thrown exceptions are already
+                // documented / there are none.
+                continue;
+            }
 
-                // If we emitted at least one smart @param, don't add the
-                // generic fallback.  If all are already documented, fall
-                // through to the generic one.
-                if param_idx > 0 {
-                    continue;
+            // ── Smart items for @param ──────────────────────────────
+            if def.tag == "@param" {
+                // If the function has parameters, offer smart pre-filled
+                // items for each undocumented one.  When ALL params are
+                // already documented (or the function has none), skip
+                // entirely — the generic fallback is not useful.
+                if !sym.params.is_empty() {
+                    let existing = find_existing_param_tags(content, position);
+                    let mut param_idx = 0u32;
+
+                    for (type_hint, name) in &sym.params {
+                        // Skip params already documented
+                        if existing.iter().any(|e| e == name) {
+                            continue;
+                        }
+
+                        let (insert, label) = if let Some(th) = type_hint {
+                            (
+                                format!("param {} {}", th, name),
+                                format!("@param {} {}", th, name),
+                            )
+                        } else {
+                            (format!("param {}", name), format!("@param {}", name))
+                        };
+
+                        items.push(CompletionItem {
+                            label,
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some(def.detail.to_string()),
+                            insert_text: Some(insert),
+                            filter_text: Some(def.tag.to_string()),
+                            sort_text: Some(format!(
+                                "0a_{}_{:03}",
+                                def.tag.to_lowercase(),
+                                param_idx
+                            )),
+                            ..CompletionItem::default()
+                        });
+                        param_idx += 1;
+                    }
                 }
+                // Always skip the generic fallback for @param — either
+                // we emitted smart items above, or all params are
+                // documented / there are none.
+                continue;
             }
 
             // ── Smart item for @return ──────────────────────────────
@@ -842,11 +1824,14 @@ pub fn build_phpdoc_completions(
                         detail: Some(def.detail.to_string()),
                         insert_text: Some(format!("return {}", ret)),
                         filter_text: Some(def.tag.to_string()),
-                        sort_text: Some(format!("0_{}", def.tag.to_lowercase())),
+                        sort_text: Some(format!("0a_{}", def.tag.to_lowercase())),
                         ..CompletionItem::default()
                     });
-                    continue;
                 }
+                // Always skip the generic fallback — either we emitted
+                // a smart item above, or the return type is void / not
+                // detectable, or @return is already documented.
+                continue;
             }
 
             // ── Smart item for @var on properties / constants ───────
@@ -863,7 +1848,7 @@ pub fn build_phpdoc_completions(
                     detail: Some(def.detail.to_string()),
                     insert_text: Some(format!("var {}", th)),
                     filter_text: Some(def.tag.to_string()),
-                    sort_text: Some(format!("0_{}", def.tag.to_lowercase())),
+                    sort_text: Some(format!("0a_{}", def.tag.to_lowercase())),
                     ..CompletionItem::default()
                 });
                 continue;
@@ -872,13 +1857,20 @@ pub fn build_phpdoc_completions(
             // ── Generic fallback ────────────────────────────────────
             let display_label = def.label.unwrap_or(def.tag);
 
+            // PHPStan tags sort after standard tags.
+            let sort_prefix = if def.tag.starts_with("@phpstan") {
+                "2"
+            } else {
+                "1"
+            };
+
             items.push(CompletionItem {
                 label: display_label.to_string(),
                 kind: Some(CompletionItemKind::KEYWORD),
                 detail: Some(def.detail.to_string()),
                 insert_text: Some(strip_at(def.tag).to_string()),
                 filter_text: Some(def.tag.to_string()),
-                sort_text: Some(format!("0_{}", def.tag.to_lowercase())),
+                sort_text: Some(format!("{}_{}", sort_prefix, def.tag.to_lowercase())),
                 ..CompletionItem::default()
             });
         }

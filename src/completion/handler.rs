@@ -46,24 +46,11 @@ impl Backend {
         if let Some(content) = content {
             let classes = classes.unwrap_or_default();
 
-            // ── PHPDoc tag completion ────────────────────────────────
-            // When the user types `@` inside a `/** … */` docblock,
-            // offer context-aware PHPDoc / PHPStan tag suggestions.
-            if let Some(prefix) =
-                crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
-            {
-                let context = crate::completion::phpdoc::detect_context(&content, position);
-                let items = crate::completion::phpdoc::build_phpdoc_completions(
-                    &content, &prefix, context, position,
-                );
-                if !items.is_empty() {
-                    return Ok(Some(CompletionResponse::Array(items)));
-                }
-            }
-
             // Gather the current file's `use` statement mappings and namespace
             // so the class_loader can resolve short names like `Resource` to
             // their fully-qualified equivalents like `Klarna\Rest\Resource`.
+            // These are loaded early because PHPDoc `@throws` completion
+            // needs them for auto-import edits.
             let file_use_map: HashMap<String, String> = if let Ok(map) = self.use_map.lock() {
                 map.get(&uri).cloned().unwrap_or_default()
             } else {
@@ -75,6 +62,26 @@ impl Backend {
             } else {
                 None
             };
+
+            // ── PHPDoc tag completion ────────────────────────────────
+            // When the user types `@` inside a `/** … */` docblock,
+            // offer context-aware PHPDoc / PHPStan tag suggestions.
+            if let Some(prefix) =
+                crate::completion::phpdoc::extract_phpdoc_prefix(&content, position)
+            {
+                let context = crate::completion::phpdoc::detect_context(&content, position);
+                let items = crate::completion::phpdoc::build_phpdoc_completions(
+                    &content,
+                    &prefix,
+                    context,
+                    position,
+                    &file_use_map,
+                    &file_namespace,
+                );
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
 
             // ── Named argument completion ───────────────────────────
             // When the cursor is inside the parentheses of a function or

@@ -603,12 +603,21 @@ fn no_existing_param_tags() {
 
 #[test]
 fn completions_bare_at_function() {
-    let content = "<?php\n/**\n * @\n */\nfunction foo(): void {}\n";
+    // Function with a param, non-void return, and a throw so that smart
+    // tags are emitted for @param, @return, and @throws.
+    let content = "<?php\n/**\n * @\n */\nfunction foo(string $x): int {\n    throw new RuntimeException('boom');\n}\n";
     let pos = Position {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     // Should suggest function tags (some may have pre-filled info)
@@ -660,7 +669,14 @@ fn completions_bare_at_class() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::ClassLike, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::ClassLike,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
@@ -710,7 +726,14 @@ fn completions_bare_at_property() {
         line: 3,
         character: 8,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::Property, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::Property,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
@@ -750,7 +773,14 @@ fn completions_bare_at_constant() {
         line: 3,
         character: 8,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::Constant, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::Constant,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
@@ -775,14 +805,22 @@ fn completions_unknown_includes_all() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::Unknown, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::Unknown,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
         .collect();
 
-    assert!(filter_texts.contains(&"@param"), "Should suggest @param");
-    assert!(filter_texts.contains(&"@return"), "Should suggest @return");
+    // Unknown context: class tags and general tags should appear.
+    // @param, @return, @throws are filtered because no function body
+    // can be detected (no params, no return, no throws).
     assert!(
         filter_texts.contains(&"@property"),
         "Should suggest @property"
@@ -793,16 +831,28 @@ fn completions_unknown_includes_all() {
         filter_texts.contains(&"@deprecated"),
         "Should suggest @deprecated"
     );
+    assert!(
+        filter_texts.contains(&"@inheritdoc"),
+        "Should suggest @inheritdoc"
+    );
 }
 
 #[test]
 fn completions_filtered_by_prefix() {
-    let content = "<?php\n/**\n * @par\n */\nfunction foo(): void {}\n";
+    // Function needs a param so that @param is emitted as a smart item.
+    let content = "<?php\n/**\n * @par\n */\nfunction foo(string $x): void {}\n";
     let pos = Position {
         line: 2,
         character: 7,
     };
-    let items = build_phpdoc_completions(content, "@par", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@par",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
@@ -827,6 +877,8 @@ fn completions_phpstan_prefix() {
         "@phpstan-a",
         DocblockContext::FunctionOrMethod,
         pos,
+        &std::collections::HashMap::new(),
+        &None,
     );
     let filter_texts: Vec<&str> = items
         .iter()
@@ -853,12 +905,20 @@ fn completions_phpstan_prefix() {
 
 #[test]
 fn completions_case_insensitive() {
-    let content = "<?php\n/**\n * @PAR\n */\nfunction foo(): void {}\n";
+    // Function needs a param so that @param is emitted.
+    let content = "<?php\n/**\n * @PAR\n */\nfunction foo(int $n): void {}\n";
     let pos = Position {
         line: 2,
         character: 7,
     };
-    let items = build_phpdoc_completions(content, "@PAR", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@PAR",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
@@ -877,7 +937,14 @@ fn completions_have_keyword_kind() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     for item in &items {
         assert_eq!(
             item.kind,
@@ -894,7 +961,14 @@ fn completions_no_duplicates() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::Unknown, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::Unknown,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
     let filter_texts: Vec<&str> = items
         .iter()
         .filter_map(|i| i.filter_text.as_deref())
@@ -923,7 +997,14 @@ fn smart_param_completions_per_parameter() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let param_items: Vec<_> = items
         .iter()
@@ -964,7 +1045,14 @@ fn smart_param_skips_already_documented() {
         line: 3,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let param_items: Vec<_> = items
         .iter()
@@ -994,7 +1082,14 @@ fn smart_return_prefilled() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let return_item = items
         .iter()
@@ -1010,7 +1105,7 @@ fn smart_return_prefilled() {
 }
 
 #[test]
-fn smart_return_void_uses_generic_label() {
+fn smart_return_void_uses_no_return_item() {
     let content = concat!(
         "<?php\n",
         "/**\n",
@@ -1022,16 +1117,24 @@ fn smart_return_void_uses_generic_label() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let return_item = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@return"));
-    assert!(return_item.is_some(), "Should have @return item");
-    let r = return_item.unwrap();
-    // void return → generic label (no point pre-filling @return void)
-    assert_eq!(r.label, "@return Type");
-    assert_eq!(r.insert_text.as_deref(), Some("return"));
+    // void return → @return is filtered out entirely
+    assert!(
+        return_item.is_none(),
+        "Should NOT suggest @return for void functions. Got: {:?}",
+        return_item.map(|i| &i.label)
+    );
 }
 
 #[test]
@@ -1048,7 +1151,14 @@ fn smart_return_skipped_when_already_documented() {
         line: 3,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let return_items: Vec<_> = items
         .iter()
@@ -1076,7 +1186,14 @@ fn smart_var_prefilled_for_property() {
         line: 3,
         character: 8,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::Property, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::Property,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let var_item = items
         .iter()
@@ -1101,7 +1218,14 @@ fn smart_var_nullable_property() {
         line: 3,
         character: 8,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::Property, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::Property,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let var_item = items
         .iter()
@@ -1117,7 +1241,14 @@ fn display_labels_for_generic_tags() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::ClassLike, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::ClassLike,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let method_item = items
         .iter()
@@ -1142,18 +1273,28 @@ fn display_labels_for_generic_tags() {
 
 #[test]
 fn display_labels_for_general_tags() {
-    let content = "<?php\n/**\n * @\n */\nfunction foo(): void {}\n";
+    // Function with a throw so that @throws appears as a smart item.
+    let content =
+        "<?php\n/**\n * @\n */\nfunction foo(): void {\n    throw new RuntimeException('x');\n}\n";
     let pos = Position {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let throws_item = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@throws"));
     assert!(throws_item.is_some(), "Should have @throws item");
-    assert_eq!(throws_item.unwrap().label, "@throws ExceptionType");
+    // Smart item shows the concrete type, not the generic label
+    assert_eq!(throws_item.unwrap().label, "@throws RuntimeException");
 
     // Tags with no special format should use tag as label
     let deprecated_item = items
@@ -1176,7 +1317,14 @@ fn smart_param_untyped_params() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let param_items: Vec<_> = items
         .iter()
@@ -1202,7 +1350,14 @@ fn smart_return_nullable() {
         line: 2,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let return_item = items
         .iter()
@@ -1225,15 +1380,24 @@ fn all_params_documented_falls_back_to_generic() {
         line: 3,
         character: 4,
     };
-    let items = build_phpdoc_completions(content, "@", DocblockContext::FunctionOrMethod, pos);
+    let items = build_phpdoc_completions(
+        content,
+        "@",
+        DocblockContext::FunctionOrMethod,
+        pos,
+        &std::collections::HashMap::new(),
+        &None,
+    );
 
     let param_items: Vec<_> = items
         .iter()
         .filter(|i| i.filter_text.as_deref() == Some("@param"))
         .collect();
 
-    // All params documented → falls back to generic @param
-    assert_eq!(param_items.len(), 1);
-    assert_eq!(param_items[0].label, "@param Type $name");
-    assert_eq!(param_items[0].insert_text.as_deref(), Some("param"));
+    // All params documented → @param is filtered out entirely
+    assert!(
+        param_items.is_empty(),
+        "Should NOT suggest @param when all params are documented. Got: {:?}",
+        param_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
 }
