@@ -48,4 +48,6 @@ pub use tags::{
 pub use conditional::extract_conditional_return_type;
 
 // Type utilities
-pub use types::{base_class_name, clean_type, extract_generic_value_type};
+pub use types::{
+    base_class_name, clean_type, extract_generic_key_type, extract_generic_value_type,
+};

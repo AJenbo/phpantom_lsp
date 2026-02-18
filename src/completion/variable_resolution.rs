@@ -489,7 +489,7 @@ impl Backend {
                     if ctx.cursor_offset >= body_span.start.offset
                         && ctx.cursor_offset <= body_span.end.offset
                     {
-                        // ── Foreach value type from generic iterables ──
+                        // ── Foreach value/key type from generic iterables ──
                         // When the variable we're resolving is the foreach
                         // *value* variable, try to infer its type from the
                         // iterated expression's generic type annotation.
@@ -499,7 +499,18 @@ impl Backend {
                         //   foreach ($users as $user) { $user-> }
                         //
                         // Here `$user` is resolved to `User`.
+                        //
+                        // Similarly, when the variable is the foreach *key*
+                        // variable, try to infer its type from the key
+                        // position of a two-parameter generic annotation.
+                        //
+                        // Example:
+                        //   /** @var SplObjectStorage<Request, Response> $storage */
+                        //   foreach ($storage as $req => $res) { $req-> }
+                        //
+                        // Here `$req` is resolved to `Request`.
                         Self::try_resolve_foreach_value_type(foreach, ctx, results, conditional);
+                        Self::try_resolve_foreach_key_type(foreach, ctx, results, conditional);
 
                         match &foreach.body {
                             ForeachBody::Statement(inner) => {
@@ -667,6 +678,93 @@ impl Backend {
         // Resolve the element type to ClassInfo.
         let resolved = Self::type_hint_to_classes(
             &element_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+
+        if resolved.is_empty() {
+            return;
+        }
+
+        if !conditional {
+            results.clear();
+        }
+        for cls in resolved {
+            if !results.iter().any(|c| c.name == cls.name) {
+                results.push(cls);
+            }
+        }
+    }
+
+    /// Try to resolve the foreach **key** variable's type from a generic
+    /// iterable annotation on the iterated expression.
+    ///
+    /// When the variable being resolved (`ctx.var_name`) matches the
+    /// foreach key variable and the iterated expression is a simple
+    /// `$variable` whose type is annotated as a two-parameter generic
+    /// iterable (via `@var array<Request, Response> $var` or similar),
+    /// this method extracts the key type and pushes the resolved
+    /// `ClassInfo` into `results`.
+    ///
+    /// For common scalar key types (`int`, `string`), no `ClassInfo` is
+    /// produced — which is correct because scalars have no members to
+    /// complete on.
+    fn try_resolve_foreach_key_type<'b>(
+        foreach: &'b Foreach<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
+    ) {
+        // Check if the foreach has a key variable and if it matches what
+        // we're resolving.
+        let key_expr = match foreach.target.key() {
+            Some(expr) => expr,
+            None => return,
+        };
+        let key_var_name = match key_expr {
+            Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+            _ => return,
+        };
+        if key_var_name != ctx.var_name {
+            return;
+        }
+
+        // Extract the iterated expression's source text.
+        let expr_span = foreach.expression.span();
+        let expr_start = expr_span.start.offset as usize;
+        let expr_end = expr_span.end.offset as usize;
+        let expr_text = match ctx.content.get(expr_start..expr_end) {
+            Some(t) => t.trim(),
+            None => return,
+        };
+
+        // Currently we handle simple `$variable` expressions.
+        if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
+            return;
+        }
+
+        // Search backward from the foreach for @var or @param annotations
+        // on the iterated variable that include a generic type.
+        let foreach_offset = foreach.foreach.span().start.offset as usize;
+        let raw_type = match docblock::find_iterable_raw_type_in_source(
+            ctx.content,
+            foreach_offset,
+            expr_text,
+        ) {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Extract the generic key type (e.g. `array<Request, Response>` → `Request`).
+        let key_type = match docblock::types::extract_generic_key_type(&raw_type) {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Resolve the key type to ClassInfo.
+        let resolved = Self::type_hint_to_classes(
+            &key_type,
             &ctx.current_class.name,
             ctx.all_classes,
             ctx.class_loader,

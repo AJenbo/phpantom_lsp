@@ -8129,3 +8129,355 @@ async fn test_completion_array_access_scalar_no_completion() {
         );
     }
 }
+
+// ─── Foreach key type resolution ────────────────────────────────────────────
+
+/// When iterating over a two-parameter generic with a class key type,
+/// the foreach key variable should resolve to that class and offer
+/// completions.
+///
+/// Example: `SplObjectStorage<Request, Response>` → `$key` is `Request`.
+#[tokio::test]
+async fn test_completion_foreach_key_object_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_key_object.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Request {\n",
+        "    public string $method;\n",
+        "    public function getUri(): string {}\n",
+        "}\n",
+        "class Response {\n",
+        "    public int $status;\n",
+        "}\n",
+        "class Handler {\n",
+        "    public function process() {\n",
+        "        /** @var SplObjectStorage<Request, Response> $storage */\n",
+        "        $storage = getStorage();\n",
+        "        foreach ($storage as $req => $res) {\n",
+        "            $req->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $req from SplObjectStorage<Request, Response>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("method")),
+                "Should include method property from Request, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getUri")),
+                "Should include getUri method from Request, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When iterating over `array<int, Order>`, the key type is `int` (scalar).
+/// No class-member completions should be offered for `$key->`.
+#[tokio::test]
+async fn test_completion_foreach_key_scalar_no_completions() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_key_scalar.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order { public int $id; }\n",
+        "/** @var array<int, Order> $orders */\n",
+        "$orders = [];\n",
+        "foreach ($orders as $key => $order) {\n",
+        "    $key->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // Should not get class-member completions for a scalar key type (int)
+    if let Some(response) = result {
+        let items = match response {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        let method_items: Vec<_> = items
+            .iter()
+            .filter(|i| {
+                i.kind == Some(CompletionItemKind::METHOD)
+                    || i.kind == Some(CompletionItemKind::PROPERTY)
+            })
+            .collect();
+        assert!(
+            method_items.is_empty(),
+            "Should not offer method/property completions for scalar key type (int), got: {:?}",
+            method_items.iter().map(|i| &i.label).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// When iterating over a custom generic collection with class key types,
+/// the foreach key variable should resolve correctly.
+///
+/// Example: `WeakMap<User, Session>` → `$key` is `User`.
+#[tokio::test]
+async fn test_completion_foreach_key_custom_generic_collection() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_key_custom.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class Session {\n",
+        "    public string $token;\n",
+        "}\n",
+        "class Manager {\n",
+        "    public function check() {\n",
+        "        /** @var WeakMap<User, Session> $sessions */\n",
+        "        $sessions = new WeakMap();\n",
+        "        foreach ($sessions as $user => $session) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $user from WeakMap<User, Session>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Foreach key type should work with @param annotations on function
+/// parameters, not just @var.
+#[tokio::test]
+async fn test_completion_foreach_key_from_param_annotation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_key_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $sku;\n",
+        "    public function getPrice(): float {}\n",
+        "}\n",
+        "class Category {\n",
+        "    public string $label;\n",
+        "    public function getSlug(): string {}\n",
+        "}\n",
+        "class Catalog {\n",
+        "    /**\n",
+        "     * @param array<Category, Product> $grouped\n",
+        "     */\n",
+        "    public function display(array $grouped) {\n",
+        "        foreach ($grouped as $cat => $product) {\n",
+        "            $cat->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 15,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $cat from array<Category, Product>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include label property from Category, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getSlug")),
+                "Should include getSlug method from Category, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When iterating with no key variable (`foreach ($items as $val)`),
+/// the value type should still resolve correctly — regression guard.
+#[tokio::test]
+async fn test_completion_foreach_value_still_works_without_key() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_no_key.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Item { public string $name; }\n",
+        "/** @var list<Item> $items */\n",
+        "$items = [];\n",
+        "foreach ($items as $item) {\n",
+        "    $item->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $item from list<Item>"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from Item, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

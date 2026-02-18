@@ -1367,3 +1367,63 @@ function traitGenericDemo(): void {
     $idx = new UserIndex();
     $idx->get()->getEmail();        // Resolved: TValue → User → User::getEmail()
 }
+
+// ─── Foreach Key Type Resolution ────────────────────────────────────
+//
+// When iterating over a generic type with two type parameters
+// (e.g. SplObjectStorage<K, V>, WeakMap<K, V>, array<K, V>),
+// the foreach key variable resolves to the first type parameter
+// and the value variable resolves to the second.
+//
+// This is most useful when the key type is a class (not a scalar
+// like int or string), for example with SplObjectStorage or WeakMap.
+
+class Request {
+    public string $method;
+    public string $path;
+    public function getUri(): string { return $this->path; }
+}
+
+class HttpResponse {
+    public int $statusCode;
+    public function getBody(): string { return ''; }
+}
+
+class ForeachKeyDemo {
+    /**
+     * Object keys: SplObjectStorage<Request, HttpResponse>
+     *
+     * @param \SplObjectStorage<Request, HttpResponse> $storage
+     */
+    public function objectKeys(\SplObjectStorage $storage): void {
+        // $req resolves to Request, $res resolves to HttpResponse
+        foreach ($storage as $req => $res) {
+            $req->getUri();     // Resolved: Request::getUri()
+            $req->method;       // Resolved: Request::$method
+            $res->statusCode;   // Resolved: HttpResponse::$statusCode
+            $res->getBody();    // Resolved: HttpResponse::getBody()
+        }
+    }
+
+    public function weakMapKeys(): void {
+        /** @var \WeakMap<User, UserProfile> $profiles */
+        $profiles = new \WeakMap();
+        foreach ($profiles as $user => $profile) {
+            $user->getEmail();          // Resolved: User::getEmail()
+            $profile->getDisplayName(); // Resolved: UserProfile::getDisplayName()
+        }
+    }
+
+    /**
+     * Scalar keys (int, string) don't produce completions — correct,
+     * since you can't call methods on scalars.
+     *
+     * @param array<int, User> $users
+     */
+    public function scalarKeys(array $users): void {
+        foreach ($users as $key => $user) {
+            // $key is int — no completions on $key->
+            $user->getEmail();  // Resolved: User::getEmail()
+        }
+    }
+}

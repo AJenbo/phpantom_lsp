@@ -1263,3 +1263,103 @@ fn generic_value_type_plain_class_returns_none() {
 fn generic_value_type_empty_angle_brackets_returns_none() {
     assert_eq!(extract_generic_value_type("list<>"), None);
 }
+
+// ─── extract_generic_key_type ───────────────────────────────────────
+
+#[test]
+fn generic_key_type_array_two_params() {
+    assert_eq!(
+        extract_generic_key_type("array<User, Order>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_iterable_two_params() {
+    assert_eq!(
+        extract_generic_key_type("iterable<Request, Response>"),
+        Some("Request".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_custom_collection_two_params() {
+    assert_eq!(
+        extract_generic_key_type("SplObjectStorage<Request, Response>"),
+        Some("Request".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_weakmap() {
+    assert_eq!(
+        extract_generic_key_type("WeakMap<User, Session>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_nullable() {
+    assert_eq!(
+        extract_generic_key_type("?SplObjectStorage<User, mixed>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_fqn_prefix() {
+    assert_eq!(
+        extract_generic_key_type("\\SplObjectStorage<User, Response>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_fqn_key() {
+    assert_eq!(
+        extract_generic_key_type("WeakMap<\\App\\Models\\User, Session>"),
+        Some("App\\Models\\User".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_nested_generic_value() {
+    // The key is `Request`, the value is `Collection<string, User>`.
+    assert_eq!(
+        extract_generic_key_type("array<Request, Collection<string, User>>"),
+        Some("Request".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_scalar_key_returns_none() {
+    assert_eq!(extract_generic_key_type("array<int, User>"), None);
+    assert_eq!(extract_generic_key_type("array<string, User>"), None);
+    assert_eq!(extract_generic_key_type("iterable<int, Order>"), None);
+}
+
+#[test]
+fn generic_key_type_single_param_returns_none() {
+    // Single-parameter generics have an implicit int key — no class to resolve.
+    assert_eq!(extract_generic_key_type("list<User>"), None);
+    assert_eq!(extract_generic_key_type("array<User>"), None);
+    assert_eq!(extract_generic_key_type("iterable<User>"), None);
+}
+
+#[test]
+fn generic_key_type_bracket_shorthand_returns_none() {
+    // `Type[]` shorthand — key is always int.
+    assert_eq!(extract_generic_key_type("User[]"), None);
+    assert_eq!(extract_generic_key_type("\\App\\Models\\User[]"), None);
+}
+
+#[test]
+fn generic_key_type_plain_class_returns_none() {
+    assert_eq!(extract_generic_key_type("User"), None);
+    assert_eq!(extract_generic_key_type("string"), None);
+}
+
+#[test]
+fn generic_key_type_empty_angle_brackets_returns_none() {
+    assert_eq!(extract_generic_key_type("list<>"), None);
+}

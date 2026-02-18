@@ -289,6 +289,74 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
     Some(cleaned)
 }
 
+/// Extract the key type from a generic iterable type annotation.
+///
+/// Handles the most common PHPDoc generic iterable patterns:
+///   - `array<int, User>`        → `Some("int")`
+///   - `array<string, User>`     → `Some("string")`
+///   - `iterable<string, User>`  → `Some("string")`
+///   - `Collection<User, Order>` → `Some("User")` (first param of 2+ param generic)
+///   - `list<User>`              → `None` (single-param list → key is always `int`, scalar)
+///   - `User[]`                  → `None` (shorthand → key is always `int`, scalar)
+///   - `array<User>`             → `None` (single-param array → key is `int`, scalar)
+///
+/// Returns `None` if the type is not a recognised generic iterable with an
+/// explicit key type, or if the key type is a scalar (e.g. `int`, `string`).
+pub fn extract_generic_key_type(raw_type: &str) -> Option<String> {
+    let s = raw_type.strip_prefix('\\').unwrap_or(raw_type);
+    let s = s.strip_prefix('?').unwrap_or(s);
+
+    // ── `Type[]` shorthand — key is always int (scalar) ─────────────────
+    if s.ends_with("[]") {
+        return None;
+    }
+
+    // ── Handle `GenericType<…>` ─────────────────────────────────────────
+    let angle_pos = s.find('<')?;
+    let inner = s.get(angle_pos + 1..)?.strip_suffix('>')?.trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    // Only two-or-more-parameter generics have an explicit key type.
+    // Single-parameter generics (e.g. `list<User>`, `array<User>`) have
+    // an implicit `int` key which is scalar — nothing to resolve.
+    let key_part = split_first_generic_param(inner)?;
+    let cleaned = clean_type(key_part.trim());
+    let base_name = strip_generics(&cleaned);
+
+    if base_name.is_empty() || is_scalar(&base_name) {
+        return None;
+    }
+    Some(cleaned)
+}
+
+/// Split a comma-separated generic parameter list and return the **first**
+/// parameter, but only when there are at least two parameters.
+/// Respects `<…>` nesting.
+///
+/// - `"int, User"`             → `Some("int")`
+/// - `"Request, Response"`     → `Some("Request")`
+/// - `"User"`                  → `None` (single param)
+/// - `"int, list<User>"`       → `Some("int")`
+/// - `"Collection<A, B>, User"` → `Some("Collection<A, B>")`
+fn split_first_generic_param(s: &str) -> Option<&str> {
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ',' if depth == 0 => {
+                // Found the first comma at depth 0 → there are 2+ params.
+                return Some(s[..i].trim());
+            }
+            _ => {}
+        }
+    }
+    // No comma at depth 0 → single parameter.
+    None
+}
+
 /// Split a comma-separated generic parameter list and return the **last**
 /// parameter, respecting `<…>` nesting.
 ///
