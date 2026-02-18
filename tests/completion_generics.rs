@@ -3113,3 +3113,741 @@ async fn test_generic_property_assignment_to_variable() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Trait generic substitution (@use) tests ────────────────────────────────
+//
+// These tests verify that `@template` parameters declared on a trait are
+// correctly substituted with concrete types when a class uses
+// `@use TraitName<ConcreteType>` in its docblock.
+
+/// Basic test: a class uses a generic trait with a concrete type.
+/// Methods inherited from the trait should have their template parameter
+/// return types resolved to the concrete types.
+#[tokio::test]
+async fn test_trait_use_generic_resolves_return_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_use_generic_basic.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TFactory\n",
+        " */\n",
+        "trait HasFactory {\n",
+        "    /** @return TFactory */\n",
+        "    public static function factory() {}\n",
+        "}\n",
+        "\n",
+        "class UserFactory {\n",
+        "    public function create(): void {}\n",
+        "    public function count(int $n): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @use HasFactory<UserFactory>\n",
+        " */\n",
+        "class User {\n",
+        "    use HasFactory;\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    User::factory()->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 22,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"create"),
+                "Should resolve TFactory to UserFactory and show 'create', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"count"),
+                "Should resolve TFactory to UserFactory and show 'count', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test with two template parameters on a trait.
+#[tokio::test]
+async fn test_trait_use_generic_two_params() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_use_generic_two_params.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template TValue\n",
+        " */\n",
+        "trait Indexable {\n",
+        "    /** @return TValue */\n",
+        "    public function get() {}\n",
+        "    /** @return TKey */\n",
+        "    public function key() {}\n",
+        "}\n",
+        "\n",
+        "class User {\n",
+        "    public function getName(): string {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @use Indexable<int, User>\n",
+        " */\n",
+        "class UserList {\n",
+        "    use Indexable;\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $list = new UserList();\n",
+        "    $list->get()->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 25,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve TValue to User and show User's 'getName', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test that trait property types are also substituted via @use generics.
+#[tokio::test]
+async fn test_trait_use_generic_property_substitution() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_use_generic_property.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TModel\n",
+        " */\n",
+        "trait HasRelation {\n",
+        "    /** @var TModel */\n",
+        "    public $related;\n",
+        "}\n",
+        "\n",
+        "class Address {\n",
+        "    public function getCity(): string {}\n",
+        "    public function getZip(): string {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @use HasRelation<Address>\n",
+        " */\n",
+        "class User {\n",
+        "    use HasRelation;\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $user = new User();\n",
+        "    $user->related->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 23,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getCity"),
+                "Should resolve TModel to Address and show 'getCity', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getZip"),
+                "Should resolve TModel to Address and show 'getZip', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test that @phpstan-use variant is also accepted.
+#[tokio::test]
+async fn test_trait_phpstan_use_variant() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_phpstan_use.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "trait Wrapper {\n",
+        "    /** @return T */\n",
+        "    public function unwrap() {}\n",
+        "}\n",
+        "\n",
+        "class Gift {\n",
+        "    public function open(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @phpstan-use Wrapper<Gift>\n",
+        " */\n",
+        "class GiftBox {\n",
+        "    use Wrapper;\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $box = new GiftBox();\n",
+        "    $box->unwrap()->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 22,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"open"),
+                "Should resolve T to Gift via @phpstan-use and show 'open', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test that class own members take precedence over substituted trait members.
+#[tokio::test]
+async fn test_trait_use_generic_class_own_wins() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_use_generic_precedence.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "trait Getter {\n",
+        "    /** @return T */\n",
+        "    public function get() {}\n",
+        "    /** @return T */\n",
+        "    public function first() {}\n",
+        "}\n",
+        "\n",
+        "class Apple {\n",
+        "    public function bite(): void {}\n",
+        "}\n",
+        "\n",
+        "class Orange {\n",
+        "    public function squeeze(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @use Getter<Apple>\n",
+        " */\n",
+        "class FruitBowl {\n",
+        "    use Getter;\n",
+        "    /** @return Orange */\n",
+        "    public function get() {}\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $bowl = new FruitBowl();\n",
+        "    $bowl->get()->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 30,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            // Class own get() returns Orange, so we should see Orange's methods
+            assert!(
+                method_names.contains(&"squeeze"),
+                "Class own 'get' should override trait's, returning Orange with 'squeeze', got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"bite"),
+                "Apple's 'bite' should NOT appear since class own 'get' returns Orange, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test trait generic substitution works across files via PSR-4.
+#[tokio::test]
+async fn test_trait_use_generic_cross_file_psr4() {
+    let composer_json = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            (
+                "src/Concerns/HasFactory.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Concerns;\n",
+                    "\n",
+                    "/**\n",
+                    " * @template TFactory\n",
+                    " */\n",
+                    "trait HasFactory {\n",
+                    "    /** @return TFactory */\n",
+                    "    public static function factory() {}\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Factories/UserFactory.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Factories;\n",
+                    "\n",
+                    "class UserFactory {\n",
+                    "    public function create(): void {}\n",
+                    "    public function make(): void {}\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Models/User.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Models;\n",
+                    "\n",
+                    "use App\\Concerns\\HasFactory;\n",
+                    "use App\\Factories\\UserFactory;\n",
+                    "\n",
+                    "/**\n",
+                    " * @use HasFactory<UserFactory>\n",
+                    " */\n",
+                    "class User {\n",
+                    "    use HasFactory;\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    // Open a file that uses User::factory()
+    let uri = Url::parse("file:///test_trait_cross_file.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Models\\User;\n",
+        "\n",
+        "function test() {\n",
+        "    User::factory()->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"create"),
+                "Should resolve TFactory to UserFactory across files and show 'create', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"make"),
+                "Should resolve TFactory to UserFactory across files and show 'make', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test that without @use generics, template params remain unresolved
+/// (no crash, methods still available but return types are raw template names).
+#[tokio::test]
+async fn test_trait_use_without_generics_no_crash() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_no_use_generics.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "trait Wrapper {\n",
+        "    /** @return T */\n",
+        "    public function unwrap() {}\n",
+        "    public function isEmpty(): bool {}\n",
+        "}\n",
+        "\n",
+        "class Box {\n",
+        "    use Wrapper;\n",
+        "}\n",
+        "\n",
+        "function test() {\n",
+        "    $box = new Box();\n",
+        "    $box->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 16,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            // Methods from the trait should still be visible even without @use generics
+            assert!(
+                method_names.contains(&"unwrap"),
+                "Trait method 'unwrap' should be visible even without @use generics, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"isEmpty"),
+                "Trait method 'isEmpty' should be visible, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test @use generics with $this-> context inside the class.
+#[tokio::test]
+async fn test_trait_use_generic_this_context() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_use_generic_this.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TFactory\n",
+        " */\n",
+        "trait HasFactory {\n",
+        "    /** @return TFactory */\n",
+        "    public function getFactory() {}\n",
+        "}\n",
+        "\n",
+        "class UserFactory {\n",
+        "    public function create(): void {}\n",
+        "}\n",
+        "\n",
+        "/**\n",
+        " * @use HasFactory<UserFactory>\n",
+        " */\n",
+        "class User {\n",
+        "    use HasFactory;\n",
+        "\n",
+        "    public function test() {\n",
+        "        $this->getFactory()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 20,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"create"),
+                "Should resolve TFactory to UserFactory via $this-> and show 'create', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test that `extract_generics_tag` correctly parses @use tags.
+#[test]
+fn test_extract_generics_tag_use_basic() {
+    use phpantom_lsp::docblock::extract_generics_tag;
+
+    let docblock = "/**\n * @use HasFactory<UserFactory>\n */";
+    let result = extract_generics_tag(docblock, "@use");
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "HasFactory");
+    assert_eq!(result[0].1, vec!["UserFactory"]);
+}
+
+/// Test that @phpstan-use variant is parsed by extract_generics_tag.
+#[test]
+fn test_extract_generics_tag_phpstan_use() {
+    use phpantom_lsp::docblock::extract_generics_tag;
+
+    let docblock = "/**\n * @phpstan-use HasFactory<UserFactory>\n */";
+    let result = extract_generics_tag(docblock, "@use");
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "HasFactory");
+    assert_eq!(result[0].1, vec!["UserFactory"]);
+}
+
+/// Test @use with multiple template parameters.
+#[test]
+fn test_extract_generics_tag_use_multiple_params() {
+    use phpantom_lsp::docblock::extract_generics_tag;
+
+    let docblock = "/**\n * @use Indexable<int, User>\n */";
+    let result = extract_generics_tag(docblock, "@use");
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "Indexable");
+    assert_eq!(result[0].1, vec!["int", "User"]);
+}
+
+/// Test @use with fully-qualified trait name.
+#[test]
+fn test_extract_generics_tag_use_fqn() {
+    use phpantom_lsp::docblock::extract_generics_tag;
+
+    let docblock = "/**\n * @use \\App\\Concerns\\HasFactory<\\App\\Factories\\UserFactory>\n */";
+    let result = extract_generics_tag(docblock, "@use");
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].0, "App\\Concerns\\HasFactory");
+    assert_eq!(result[0].1, vec!["App\\Factories\\UserFactory"]);
+}

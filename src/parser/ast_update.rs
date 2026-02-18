@@ -8,6 +8,8 @@
 /// class names to fully-qualified names.
 use std::collections::HashMap;
 
+use crate::docblock::types::is_scalar;
+
 use bumpalo::Bump;
 
 use mago_syntax::ast::*;
@@ -204,6 +206,45 @@ impl Backend {
                 .iter()
                 .map(|m| Self::resolve_name(m, use_map, namespace))
                 .collect();
+
+            // Resolve type arguments in @extends, @implements, and @use
+            // generics so that after generic substitution, return types
+            // and property types are fully-qualified and can be resolved
+            // across files via PSR-4.
+            Self::resolve_generics_type_args(&mut class.extends_generics, use_map, namespace);
+            Self::resolve_generics_type_args(&mut class.implements_generics, use_map, namespace);
+            Self::resolve_generics_type_args(&mut class.use_generics, use_map, namespace);
+        }
+    }
+
+    /// Resolve type arguments in a generics list (e.g. `@extends`, `@implements`,
+    /// `@use`) to fully-qualified names.
+    ///
+    /// Each entry is `(ClassName, [TypeArg1, TypeArg2, …])`.  The class name
+    /// itself is resolved (e.g. `HasFactory` → `App\Concerns\HasFactory`),
+    /// and each type argument that looks like a class name (i.e. not a scalar
+    /// like `int`, `string`, etc.) is also resolved.
+    fn resolve_generics_type_args(
+        generics: &mut [(String, Vec<String>)],
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+    ) {
+        for (class_name, type_args) in generics.iter_mut() {
+            // Resolve the base class/trait/interface name
+            *class_name = Self::resolve_name(class_name, use_map, namespace);
+
+            // Resolve each type argument that is a class-like name
+            for arg in type_args.iter_mut() {
+                if !is_scalar(arg)
+                    && *arg != "mixed"
+                    && *arg != "object"
+                    && *arg != "static"
+                    && *arg != "self"
+                    && *arg != "$this"
+                {
+                    *arg = Self::resolve_name(arg, use_map, namespace);
+                }
+            }
         }
     }
 

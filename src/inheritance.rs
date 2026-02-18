@@ -44,7 +44,13 @@ impl Backend {
         //    PHP precedence: class methods > trait methods > inherited methods.
         //    Since `merged` already contains the class's own members, we only
         //    add trait members that don't collide with existing ones.
-        Self::merge_traits_into(&mut merged, &class.used_traits, class_loader, 0);
+        Self::merge_traits_into(
+            &mut merged,
+            &class.used_traits,
+            &class.use_generics,
+            class_loader,
+            0,
+        );
 
         // 2. Walk up the `extends` chain and merge parent members.
         let mut current = class.clone();
@@ -86,7 +92,13 @@ impl Backend {
 
             // Merge traits used by the parent class as well, so that
             // grandparent-level trait members are visible.
-            Self::merge_traits_into(&mut merged, &parent.used_traits, class_loader, 0);
+            Self::merge_traits_into(
+                &mut merged,
+                &parent.used_traits,
+                &parent.use_generics,
+                class_loader,
+                0,
+            );
 
             // Merge parent methods — skip private, skip if child already has one with same name
             for method in &parent.methods {
@@ -282,9 +294,15 @@ impl Backend {
     /// Private trait members *are* merged (unlike parent class private
     /// members), because PHP copies trait members into the using class
     /// regardless of visibility.
+    ///
+    /// When `use_generics` contains an entry for a trait (e.g.
+    /// `@use SomeTrait<ConcreteType>`) and the trait declares
+    /// `@template T`, the inherited methods and properties have their
+    /// template parameter types replaced with the concrete types.
     fn merge_traits_into(
         merged: &mut ClassInfo,
         trait_names: &[String],
+        use_generics: &[(String, Vec<String>)],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: u32,
     ) {
@@ -300,9 +318,22 @@ impl Backend {
                 continue;
             };
 
+            // Build a substitution map for this trait if the using class
+            // declared `@use TraitName<Type1, Type2>` and the trait has
+            // `@template` parameters.
+            let trait_subs = build_trait_substitution_map(trait_name, &trait_info, use_generics);
+
             // Recursively merge traits used by this trait (trait composition).
+            // The sub-trait's own `@use` generics (from the trait's docblock)
+            // apply, not the outer class's.
             if !trait_info.used_traits.is_empty() {
-                Self::merge_traits_into(merged, &trait_info.used_traits, class_loader, depth + 1);
+                Self::merge_traits_into(
+                    merged,
+                    &trait_info.used_traits,
+                    &trait_info.use_generics,
+                    class_loader,
+                    depth + 1,
+                );
             }
 
             // Walk the `parent_class` (extends) chain so that interface
@@ -328,6 +359,7 @@ impl Backend {
                     Self::merge_traits_into(
                         merged,
                         &parent.used_traits,
+                        &parent.use_generics,
                         class_loader,
                         parent_depth + 1,
                     );
@@ -369,20 +401,29 @@ impl Backend {
                 current = parent;
             }
 
-            // Merge trait methods — skip if already present
+            // Merge trait methods — skip if already present.
+            // Apply generic substitution if a `@use` mapping exists.
             for method in &trait_info.methods {
                 if merged.methods.iter().any(|m| m.name == method.name) {
                     continue;
                 }
-                merged.methods.push(method.clone());
+                let mut method = method.clone();
+                if !trait_subs.is_empty() {
+                    apply_substitution_to_method(&mut method, &trait_subs);
+                }
+                merged.methods.push(method);
             }
 
-            // Merge trait properties
+            // Merge trait properties — apply substitution.
             for property in &trait_info.properties {
                 if merged.properties.iter().any(|p| p.name == property.name) {
                     continue;
                 }
-                merged.properties.push(property.clone());
+                let mut property = property.clone();
+                if !trait_subs.is_empty() {
+                    apply_substitution_to_property(&mut property, &trait_subs);
+                }
+                merged.properties.push(property);
             }
 
             // Merge trait constants
@@ -397,6 +438,46 @@ impl Backend {
 }
 
 // ─── Generic Type Substitution ──────────────────────────────────────────────
+
+/// Build a substitution map for a trait based on `@use` generics and the
+/// trait's `@template` parameters.
+///
+/// If the using class declares `@use HasFactory<UserFactory>` and the
+/// trait `HasFactory` has `@template TFactory`, the returned map is
+/// `{TFactory => UserFactory}`.
+fn build_trait_substitution_map(
+    trait_name: &str,
+    trait_info: &ClassInfo,
+    use_generics: &[(String, Vec<String>)],
+) -> HashMap<String, String> {
+    if trait_info.template_params.is_empty() || use_generics.is_empty() {
+        return HashMap::new();
+    }
+
+    let trait_short = short_name(trait_name);
+
+    // Find the @use entry that matches this trait.
+    let type_args = use_generics
+        .iter()
+        .find(|(name, _)| {
+            let name_short = short_name(name);
+            name_short == trait_short
+        })
+        .map(|(_, args)| args);
+
+    let type_args = match type_args {
+        Some(args) => args,
+        None => return HashMap::new(),
+    };
+
+    let mut map = HashMap::new();
+    for (i, param_name) in trait_info.template_params.iter().enumerate() {
+        if let Some(arg) = type_args.get(i) {
+            map.insert(param_name.clone(), arg.clone());
+        }
+    }
+    map
+}
 
 /// Build a substitution map for a parent class based on the child's
 /// `@extends` generics and the parent's `@template` parameters.
@@ -877,6 +958,7 @@ mod tests {
                 vec!["int".to_string(), "Language".to_string()],
             )],
             implements_generics: vec![],
+            use_generics: vec![],
         };
 
         let parent = ClassInfo {
@@ -894,6 +976,7 @@ mod tests {
             template_params: vec!["TKey".to_string(), "TValue".to_string()],
             extends_generics: vec![],
             implements_generics: vec![],
+            use_generics: vec![],
         };
 
         let subs = build_substitution_map(&child, &parent, &HashMap::new());
@@ -922,6 +1005,7 @@ mod tests {
             template_params: vec!["T".to_string()],
             extends_generics: vec![("A".to_string(), vec!["T".to_string()])],
             implements_generics: vec![],
+            use_generics: vec![],
         };
 
         let parent_a = ClassInfo {
@@ -939,6 +1023,7 @@ mod tests {
             template_params: vec!["U".to_string()],
             extends_generics: vec![],
             implements_generics: vec![],
+            use_generics: vec![],
         };
 
         let mut active = HashMap::new();

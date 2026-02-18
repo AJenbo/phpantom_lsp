@@ -328,6 +328,7 @@ impl Backend {
                         template_params: vec![],
                         extends_generics: vec![],
                         implements_generics: vec![],
+                        use_generics: vec![],
                     };
                     &dummy_class
                 }

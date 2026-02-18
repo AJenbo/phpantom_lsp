@@ -298,4 +298,15 @@ pub struct ClassInfo {
     /// For example, `@implements ArrayAccess<int, User>` produces
     /// `("ArrayAccess", ["int", "User"])`.
     pub implements_generics: Vec<(String, Vec<String>)>,
+    /// Generic type arguments from `@use` / `@phpstan-use` tags.
+    ///
+    /// Each entry is `(TraitName, [TypeArg1, TypeArg2, …])`.
+    /// For example, `@use HasFactory<UserFactory>` produces
+    /// `("HasFactory", ["UserFactory"])`.
+    ///
+    /// When a trait declares `@template T` and a class uses it with
+    /// `@use SomeTrait<ConcreteType>`, the trait's template parameter `T`
+    /// is substituted with `ConcreteType` in all inherited methods and
+    /// properties.
+    pub use_generics: Vec<(String, Vec<String>)>,
 }

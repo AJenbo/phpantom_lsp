@@ -1293,3 +1293,77 @@ function prepareKitchen(): void {
     $kitchen = new Kitchen(new Recipe([], new \stdClass(), 'Pasta'));
     $kitchen->recipe->title;  // Resolved: Recipe::$title via @param override + $var chain
 }
+
+// ─── Trait Generic Substitution (@use) ──────────────────────────────────────
+//
+// When a trait declares @template parameters and a class uses the trait
+// with @use TraitName<ConcreteType>, the template parameters are substituted
+// with concrete types in the trait's methods and properties.
+// This mirrors the same mechanism used for @extends on parent classes.
+
+/**
+ * @template TFactory
+ */
+trait HasFactory {
+    /** @return TFactory */
+    public static function factory() {}
+}
+
+class UserFactory {
+    public function create(): User { return new User('', '', new UserProfile(''), Status::Active); }
+    public function count(int $n): static { return $this; }
+    public function make(): User { return new User('', '', new UserProfile(''), Status::Active); }
+}
+
+/**
+ * A trait with two template parameters for key/value lookups.
+ *
+ * @template TKey
+ * @template TValue
+ */
+trait Indexable {
+    /** @return TValue */
+    public function get() {}
+    /** @return TKey */
+    public function key() {}
+}
+
+/**
+ * @use HasFactory<UserFactory>
+ */
+class Product {
+    use HasFactory;
+
+    public function getPrice(): float { return 0.0; }
+}
+
+/**
+ * @use Indexable<int, User>
+ */
+class UserIndex {
+    use Indexable;
+}
+
+// Try these completions:
+//
+// Product::factory()->         → shows UserFactory methods: create(), count(), make()
+// Product::factory()->create()->  → shows User methods (factory returns UserFactory, create returns User)
+//
+// $idx = new UserIndex();
+// $idx->get()->               → shows User methods (TValue resolved to User)
+//
+// @phpstan-use variant also works:
+// /** @phpstan-use HasFactory<UserFactory> */
+// class AnotherModel { use HasFactory; }
+// AnotherModel::factory()->   → shows UserFactory methods
+
+function traitGenericDemo(): void {
+    // Static method on a class using a generic trait
+    Product::factory()->create();   // Resolved: UserFactory::create() → User
+    Product::factory()->count(5);   // Resolved: UserFactory::count()
+    Product::factory()->make();     // Resolved: UserFactory::make() → User
+
+    // Two-param trait substitution
+    $idx = new UserIndex();
+    $idx->get()->getEmail();        // Resolved: TValue → User → User::getEmail()
+}

@@ -42,6 +42,7 @@ impl Backend {
                     let mut template_params = Vec::new();
                     let mut extends_generics = Vec::new();
                     let mut implements_generics = Vec::new();
+                    let mut use_generics = Vec::new();
                     let mut class_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
@@ -52,6 +53,7 @@ impl Backend {
                         extends_generics = docblock::extract_generics_tag(doc_text, "@extends");
                         implements_generics =
                             docblock::extract_generics_tag(doc_text, "@implements");
+                        use_generics = docblock::extract_generics_tag(doc_text, "@use");
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             // Only add if not already declared as a real property.
@@ -100,6 +102,7 @@ impl Backend {
                         template_params,
                         extends_generics,
                         implements_generics,
+                        use_generics,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -122,6 +125,7 @@ impl Backend {
                     let mut template_params = Vec::new();
                     let mut extends_generics = Vec::new();
                     let mut implements_generics = Vec::new();
+                    let mut use_generics = Vec::new();
                     let mut iface_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
@@ -132,6 +136,7 @@ impl Backend {
                         extends_generics = docblock::extract_generics_tag(doc_text, "@extends");
                         implements_generics =
                             docblock::extract_generics_tag(doc_text, "@implements");
+                        use_generics = docblock::extract_generics_tag(doc_text, "@use");
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
@@ -176,6 +181,7 @@ impl Backend {
                         template_params,
                         extends_generics,
                         implements_generics,
+                        use_generics,
                     });
                 }
                 Statement::Trait(trait_def) => {
@@ -242,6 +248,7 @@ impl Backend {
                         template_params,
                         extends_generics: vec![],
                         implements_generics: vec![],
+                        use_generics: vec![],
                     });
                 }
                 Statement::Enum(enum_def) => {
@@ -320,6 +327,7 @@ impl Backend {
                         template_params: vec![],
                         extends_generics: vec![],
                         implements_generics: vec![],
+                        use_generics: vec![],
                     });
                 }
                 Statement::Namespace(namespace) => {
