@@ -1129,3 +1129,108 @@ class TernaryDemo {
         $handler->reindex();        // Resolved: ElasticProductReviewIndexService::reindex()
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// §14  Property Chains on Non-$this Variables
+// ═══════════════════════════════════════════════════════════════════════
+// Previously only `$this->prop->` chains worked.  Now `$var->prop->`
+// also resolves the property type and offers completions.
+
+class Address {
+    public string $city;
+    public string $zip;
+    public string $country;
+
+    public function format(): string {
+        return "{$this->city}, {$this->zip}, {$this->country}";
+    }
+}
+
+class Customer {
+    public Address $address;
+    public string $email;
+
+    public function __construct(string $email, Address $address) {
+        $this->email = $email;
+        $this->address = $address;
+    }
+}
+
+class Order {
+    public Customer $customer;
+    public float $total;
+
+    public function __construct(Customer $customer, float $total) {
+        $this->customer = $customer;
+        $this->total = $total;
+    }
+}
+
+class PropertyChainDemo {
+    public Order $order;
+
+    public function __construct(Order $order) {
+        $this->order = $order;
+    }
+
+    // ── Simple: $var->prop-> ──
+    // Variable assigned via `new`, then chain through its property.
+    public function simpleChain(): void {
+        $customer = new Customer('test@example.com', new Address());
+        $customer->address->city;     // Resolved: Address::$city
+        $customer->address->format(); // Resolved: Address::format()
+    }
+
+    // ── Deep: $var->prop->subprop-> ──
+    // Two levels of property chain resolution.
+    public function deepChain(): void {
+        $order = new Order(new Customer('a@b.com', new Address()), 99.99);
+        $order->customer->address->zip;      // Resolved: Address::$zip
+        $order->customer->address->format();  // Resolved: Address::format()
+        $order->customer->email;              // Resolved: Customer::$email
+    }
+
+    // ── Parameter type hint ──
+    // Function parameter types drive property chain resolution.
+    public function fromParameter(Customer $cust): void {
+        $cust->address->country;  // Resolved: Address::$country
+        $cust->address->format(); // Resolved: Address::format()
+    }
+
+    // ── @var annotation ──
+    // Docblock annotations also drive property chain resolution.
+    public function fromDocblock(): void {
+        /** @var Order $o */
+        $o = loadOrder();
+        $o->customer->address->city; // Resolved: Address::$city
+    }
+
+    // ── Nullsafe operator ──
+    // `$var?->prop->` resolves the same as `$var->prop->`.
+    public function nullsafeChain(?Customer $cust): void {
+        $cust?->address->city; // Resolved: Address::$city
+    }
+
+    // ── Method return + property chain ──
+    // Method return type feeds into property chain.
+    public function methodThenProperty(): void {
+        $repo = new UserRepository();
+        $user = $repo->findByEmail('test@example.com');
+        // $user is User, so $user->... shows User members
+        // (deeper chains work when the property type is a class)
+    }
+
+    // ── Mixed with $this ──
+    // $this->prop chains still work alongside $var->prop chains.
+    public function mixedThisAndVar(): void {
+        $this->order->customer->email;        // Resolved: Customer::$email via $this
+        $local = new Order(new Customer('x@y.com', new Address()), 50.0);
+        $local->customer->address->format();  // Resolved: Address::format() via $local
+    }
+}
+
+// ── Top-level code ──
+// Property chains work in top-level code too (outside any class).
+$myOrder = new Order(new Customer('hello@world.com', new Address()), 42.0);
+$myOrder->customer->address->city;    // Resolved: Address::$city
+$myOrder->customer->address->format(); // Resolved: Address::format()

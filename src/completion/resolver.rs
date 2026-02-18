@@ -60,6 +60,56 @@ pub(super) struct CallResolutionCtx<'a> {
     pub function_loader: FunctionLoaderFn<'a>,
 }
 
+/// Split a subject string at the **last** `->` or `?->` operator,
+/// returning `(base, property_name)`.
+///
+/// Only splits at depth 0 (i.e. arrows inside balanced parentheses are
+/// ignored).  Returns `None` if no arrow is found at depth 0.
+///
+/// # Examples
+///
+/// - `"$user->address"` → `Some(("$user", "address"))`
+/// - `"$user->address->city"` → `Some(("$user->address", "city"))`
+/// - `"$user?->address"` → `Some(("$user", "address"))`
+fn split_last_arrow(subject: &str) -> Option<(&str, &str)> {
+    let bytes = subject.as_bytes();
+    let mut depth = 0i32;
+    let mut last_arrow: Option<(usize, usize)> = None; // (start_of_arrow, start_of_prop)
+
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b'-' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
+                // Check for `?->`: the char before `-` might be `?`
+                let arrow_start = if i > 0 && bytes[i - 1] == b'?' {
+                    i - 1
+                } else {
+                    i
+                };
+                let prop_start = i + 2; // skip `->`
+                last_arrow = Some((arrow_start, prop_start));
+                i += 2; // skip past `->`
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let (arrow_start, prop_start) = last_arrow?;
+    if prop_start >= subject.len() {
+        return None;
+    }
+    let base = &subject[..arrow_start];
+    let prop = &subject[prop_start..];
+    if base.is_empty() || prop.is_empty() {
+        return None;
+    }
+    Some((base, prop))
+}
+
 impl Backend {
     /// Determine which class (if any) the completion subject refers to.
     ///
@@ -191,6 +241,45 @@ impl Backend {
                     return resolved;
                 }
             }
+            return vec![];
+        }
+
+        // ── Property chain on non-`$this` variable: `$var->prop`, `$var->prop->sub` ──
+        // When the subject starts with `$`, contains `->` (or `?->`), and
+        // does not start with `$this->`, split at the last arrow to get
+        // the base expression and the trailing property name, then
+        // recursively resolve the base and look up the property type.
+        if subject.starts_with('$')
+            && !subject.starts_with("$this->")
+            && !subject.starts_with("$this?->")
+            && !subject.ends_with(')')
+            && let Some((base, prop_name)) = split_last_arrow(subject)
+        {
+            let base_classes = Self::resolve_target_classes(
+                base,
+                _access_kind,
+                current_class,
+                all_classes,
+                content,
+                cursor_offset,
+                class_loader,
+                function_loader,
+            );
+            let mut results = Vec::new();
+            for cls in &base_classes {
+                let resolved =
+                    Self::resolve_property_types(prop_name, cls, all_classes, class_loader);
+                for r in resolved {
+                    if !results.iter().any(|c: &ClassInfo| c.name == r.name) {
+                        results.push(r);
+                    }
+                }
+            }
+            if !results.is_empty() {
+                return results;
+            }
+            // If property lookup failed, don't fall through to the
+            // bare `$var` branch — the subject is clearly a chain.
             return vec![];
         }
 
