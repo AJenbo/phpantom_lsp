@@ -1378,6 +1378,7 @@ impl Backend {
     ///   - Property access: `$this->prop`, `$obj->prop` → property type
     ///   - Match expressions: union of all arm types
     ///   - Ternary / null-coalescing: union of both branches
+    ///   - Clone: `clone $expr` → preserves the cloned expression's type
     ///
     /// Used by `check_expression_for_assignment` (for `$var = <expr>`)
     /// and recursively by multi-branch constructs (match, ternary, `??`).
@@ -1635,6 +1636,44 @@ impl Backend {
             ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(binary.lhs, ctx));
             ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(binary.rhs, ctx));
             return combined;
+        }
+
+        // ── Clone expression: `clone $expr` preserves the type ──
+        // First try resolving the inner expression structurally (handles
+        // `clone new Foo()`, `clone $this->getConfig()`, ternary, etc.).
+        // If that yields nothing and the inner expression is a variable,
+        // fall back to text-based resolution by extracting the source
+        // text of the cloned expression and resolving it as a subject
+        // string via `resolve_target_classes`.
+        if let Expression::Clone(clone_expr) = expr {
+            let structural = Self::resolve_rhs_expression(clone_expr.object, ctx);
+            if !structural.is_empty() {
+                return structural;
+            }
+            // Fallback: extract source text of the cloned expression
+            // and resolve it as a subject.  This handles cases like
+            // `clone $original` where `$original`'s type was set by a
+            // prior assignment or parameter type hint.
+            let obj_span = clone_expr.object.span();
+            let start = obj_span.start.offset as usize;
+            let end = obj_span.end.offset as usize;
+            if end <= content.len() {
+                let obj_text = content[start..end].trim();
+                if !obj_text.is_empty() {
+                    let current_class = all_classes.iter().find(|c| c.name == current_class_name);
+                    return Self::resolve_target_classes(
+                        obj_text,
+                        crate::types::AccessKind::Arrow,
+                        current_class,
+                        all_classes,
+                        content,
+                        ctx.cursor_offset,
+                        class_loader,
+                        ctx.function_loader,
+                    );
+                }
+            }
+            return vec![];
         }
 
         vec![]

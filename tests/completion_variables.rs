@@ -9668,3 +9668,446 @@ async fn test_completion_catch_variable_with_namespace() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Clone expression type preservation ─────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_clone_new_instance() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///clone_new.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public function render(): string { return ''; }\n",
+        "    public function resize(int $w): void {}\n",
+        "}\n",
+        "class CloneNewDemo {\n",
+        "    public function demo(): void {\n",
+        "        $original = new Widget();\n",
+        "        $copy = clone $original;\n",
+        "        $copy->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for clone of new instance"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"render"),
+                "Should include 'render' from Widget via clone, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"resize"),
+                "Should include 'resize' from Widget via clone, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_clone_parameter() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///clone_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Invoice {\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "    public function addItem(string $name): void {}\n",
+        "}\n",
+        "class CloneParamDemo {\n",
+        "    public function duplicate(Invoice $invoice): void {\n",
+        "        $copy = clone $invoice;\n",
+        "        $copy->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for clone of parameter"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getTotal"),
+                "Should include 'getTotal' from Invoice via clone of param, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"addItem"),
+                "Should include 'addItem' from Invoice via clone of param, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_clone_this() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///clone_this.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Immutable {\n",
+        "    public function withValue(int $v): self {\n",
+        "        $clone = clone $this;\n",
+        "        $clone->\n",
+        "    }\n",
+        "    public function getValue(): int { return 0; }\n",
+        "    public function toArray(): array { return []; }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 4,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for clone $this"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getValue"),
+                "Should include 'getValue' from Immutable via clone $this, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"toArray"),
+                "Should include 'toArray' from Immutable via clone $this, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_clone_method_return() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///clone_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public function get(string $key): string { return ''; }\n",
+        "    public function set(string $key, string $val): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function getConfig(): Config { return new Config(); }\n",
+        "    public function demo(): void {\n",
+        "        $cfg = clone $this->getConfig();\n",
+        "        $cfg->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for clone of method return"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"get"),
+                "Should include 'get' from Config via clone of method return, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"set"),
+                "Should include 'set' from Config via clone of method return, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_clone_in_ternary() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///clone_ternary.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Settings {\n",
+        "    public function save(): void {}\n",
+        "    public function reset(): void {}\n",
+        "}\n",
+        "class TernaryCloneDemo {\n",
+        "    public function demo(Settings $s, bool $flag): void {\n",
+        "        $result = $flag ? clone $s : new Settings();\n",
+        "        $result->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for clone in ternary"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"save"),
+                "Should include 'save' from Settings via clone in ternary, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"reset"),
+                "Should include 'reset' from Settings via clone in ternary, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_clone_cross_file() {
+    let composer_json = r#"{
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        }
+    }"#;
+
+    let entity_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Entity {\n",
+        "    public function getId(): int { return 0; }\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+    );
+
+    let service_php = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Entity;\n",
+        "class Service {\n",
+        "    public function snapshot(Entity $entity): void {\n",
+        "        $snapshot = clone $entity;\n",
+        "        $snapshot->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            ("src/Entity.php", entity_php),
+            ("src/Service.php", service_php),
+        ],
+    );
+
+    let uri = Url::parse("file:///src/Service.php").unwrap();
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: service_php.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for clone in cross-file scenario"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"getId"),
+                "Should include 'getId' from Entity via clone cross-file, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName' from Entity via clone cross-file, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

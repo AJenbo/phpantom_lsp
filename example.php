@@ -2059,3 +2059,65 @@ class PropagatedThrowsDemo
 $obj = getUnknownValue();
 $obj->name;   // Resolved: string
 $obj->value;  // Resolved: int
+
+// ─── Clone Expression Type Preservation ─────────────────────────────────────
+// `clone $expr` preserves the type of the original expression, so the cloned
+// variable gets full completion support.
+
+class Immutable
+{
+    private int $value;
+
+    public function __construct(int $value)
+    {
+        $this->value = $value;
+    }
+
+    public function getValue(): int
+    {
+        return $this->value;
+    }
+
+    public function withValue(int $v): self
+    {
+        // clone $this → resolved as Immutable
+        $clone = clone $this;
+        $clone->getValue(); // Resolved: int
+        return $clone;
+    }
+}
+
+class CloneDemo
+{
+    public function fromNewInstance(): void
+    {
+        $original = new User('clone', 'clone@example.com');
+        // clone $original → resolved as User
+        $copy = clone $original;
+        $copy->getEmail();  // Resolved: string
+        $copy->getName();   // Resolved: string (inherited from Model)
+    }
+
+    public function fromParameter(User $user): void
+    {
+        // clone $user → resolved as User (from parameter type hint)
+        $snapshot = clone $user;
+        $snapshot->getStatus(); // Resolved: Status
+    }
+
+    public function fromMethodReturn(): void
+    {
+        $config = new Response(200, 'OK');
+        // clone of method return → resolved as Response
+        $copy = clone $config;
+        $copy->getStatusCode(); // Resolved: int
+        $copy->getBody();       // Resolved: string
+    }
+
+    public function inTernary(User $user, bool $flag): void
+    {
+        // clone inside ternary → union resolved correctly
+        $result = $flag ? clone $user : new AdminUser('admin', 'a@b.com', 1);
+        $result->getEmail(); // Resolved: string (both User and AdminUser have it)
+    }
+}
