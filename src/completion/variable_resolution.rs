@@ -697,30 +697,34 @@ impl Backend {
             return;
         }
 
-        // Extract the iterated expression's source text.
-        let expr_span = foreach.expression.span();
-        let expr_start = expr_span.start.offset as usize;
-        let expr_end = expr_span.end.offset as usize;
-        let expr_text = match ctx.content.get(expr_start..expr_end) {
-            Some(t) => t.trim(),
-            None => return,
-        };
+        // Try to extract the raw iterable type from the foreach expression.
+        // `extract_rhs_iterable_raw_type` handles method calls, static
+        // calls, property access, function calls, and simple variables.
+        let raw_type = if let Some(rt) =
+            Self::extract_rhs_iterable_raw_type(foreach.expression, ctx)
+        {
+            rt
+        } else {
+            // Fallback: for simple `$variable` expressions, search backward
+            // from the foreach for @var or @param annotations.
+            let expr_span = foreach.expression.span();
+            let expr_start = expr_span.start.offset as usize;
+            let expr_end = expr_span.end.offset as usize;
+            let expr_text = match ctx.content.get(expr_start..expr_end) {
+                Some(t) => t.trim(),
+                None => return,
+            };
 
-        // Currently we handle simple `$variable` expressions.
-        if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
-            return;
-        }
+            if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
+                return;
+            }
 
-        // Search backward from the foreach for @var or @param annotations
-        // on the iterated variable that include a generic type.
-        let foreach_offset = foreach.foreach.span().start.offset as usize;
-        let raw_type = match docblock::find_iterable_raw_type_in_source(
-            ctx.content,
-            foreach_offset,
-            expr_text,
-        ) {
-            Some(t) => t,
-            None => return,
+            let foreach_offset = foreach.foreach.span().start.offset as usize;
+            match docblock::find_iterable_raw_type_in_source(ctx.content, foreach_offset, expr_text)
+            {
+                Some(t) => t,
+                None => return,
+            }
         };
 
         // Extract the generic element type (e.g. `list<User>` → `User`).
@@ -784,30 +788,34 @@ impl Backend {
             return;
         }
 
-        // Extract the iterated expression's source text.
-        let expr_span = foreach.expression.span();
-        let expr_start = expr_span.start.offset as usize;
-        let expr_end = expr_span.end.offset as usize;
-        let expr_text = match ctx.content.get(expr_start..expr_end) {
-            Some(t) => t.trim(),
-            None => return,
-        };
+        // Try to extract the raw iterable type from the foreach expression.
+        // `extract_rhs_iterable_raw_type` handles method calls, static
+        // calls, property access, function calls, and simple variables.
+        let raw_type = if let Some(rt) =
+            Self::extract_rhs_iterable_raw_type(foreach.expression, ctx)
+        {
+            rt
+        } else {
+            // Fallback: for simple `$variable` expressions, search backward
+            // from the foreach for @var or @param annotations.
+            let expr_span = foreach.expression.span();
+            let expr_start = expr_span.start.offset as usize;
+            let expr_end = expr_span.end.offset as usize;
+            let expr_text = match ctx.content.get(expr_start..expr_end) {
+                Some(t) => t.trim(),
+                None => return,
+            };
 
-        // Currently we handle simple `$variable` expressions.
-        if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
-            return;
-        }
+            if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
+                return;
+            }
 
-        // Search backward from the foreach for @var or @param annotations
-        // on the iterated variable that include a generic type.
-        let foreach_offset = foreach.foreach.span().start.offset as usize;
-        let raw_type = match docblock::find_iterable_raw_type_in_source(
-            ctx.content,
-            foreach_offset,
-            expr_text,
-        ) {
-            Some(t) => t,
-            None => return,
+            let foreach_offset = foreach.foreach.span().start.offset as usize;
+            match docblock::find_iterable_raw_type_in_source(ctx.content, foreach_offset, expr_text)
+            {
+                Some(t) => t,
+                None => return,
+            }
         };
 
         // Extract the generic key type (e.g. `array<Request, Response>` → `Request`).

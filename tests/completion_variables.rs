@@ -10111,3 +10111,627 @@ async fn test_completion_clone_cross_file() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Foreach over method calls / property access / static calls ─────────────
+
+/// `foreach ($this->getUsers() as $user)` should resolve `$user` to `User`.
+#[tokio::test]
+async fn test_completion_foreach_method_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class UserService {\n",
+        "    /** @return list<User> */\n",
+        "    public function getUsers(): array { return []; }\n",
+        "    public function process() {\n",
+        "        foreach ($this->getUsers() as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over $this->getUsers()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include 'getEmail' method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `foreach ($this->users as $user)` should resolve `$user` via property type.
+#[tokio::test]
+async fn test_completion_foreach_property_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class UserService {\n",
+        "    /** @var list<User> */\n",
+        "    public array $users;\n",
+        "    public function process() {\n",
+        "        foreach ($this->users as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over $this->users"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include 'getEmail' method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `foreach (UserService::getAll() as $user)` should resolve `$user`.
+#[tokio::test]
+async fn test_completion_foreach_static_method_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "class UserService {\n",
+        "    /** @return list<User> */\n",
+        "    public static function getAll(): array { return []; }\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function index() {\n",
+        "        foreach (UserService::getAll() as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over UserService::getAll()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include 'getEmail' method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `foreach (self::getAll() as $user)` should resolve via self.
+#[tokio::test]
+async fn test_completion_foreach_self_static_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_self.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "}\n",
+        "class UserRepo {\n",
+        "    /** @return list<User> */\n",
+        "    public static function getAll(): array { return []; }\n",
+        "    public function process() {\n",
+        "        foreach (self::getAll() as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over self::getAll()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' property from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `foreach ($this->getUsers() as $key => $user)` — key type should also work.
+#[tokio::test]
+async fn test_completion_foreach_method_call_key_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_method_key.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Request {\n",
+        "    public string $url;\n",
+        "}\n",
+        "class Response {\n",
+        "    public int $status;\n",
+        "}\n",
+        "class Service {\n",
+        "    /** @return array<Request, Response> */\n",
+        "    public function getMapping(): array { return []; }\n",
+        "    public function process() {\n",
+        "        foreach ($this->getMapping() as $req => $res) {\n",
+        "            $req->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach key from method call"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("url")),
+                "Should include 'url' property from Request (key type), got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `foreach ($var->getItems() as $item)` — method call on non-$this variable.
+#[tokio::test]
+async fn test_completion_foreach_method_call_on_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_var_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Item {\n",
+        "    public string $label;\n",
+        "}\n",
+        "class ItemRepo {\n",
+        "    /** @return list<Item> */\n",
+        "    public function getItems(): array { return []; }\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function index() {\n",
+        "        $repo = new ItemRepo();\n",
+        "        foreach ($repo->getItems() as $item) {\n",
+        "            $item->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over $repo->getItems()"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include 'label' property from Item, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Cross-file: `foreach ($this->getUsers() as $user)` where User is in another file.
+#[tokio::test]
+async fn test_completion_foreach_method_call_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Models/User.php",
+                "<?php\nnamespace App\\Models;\nclass User {\n    public string $name;\n    public function getEmail(): string {}\n}\n",
+            ),
+            (
+                "src/Services/UserService.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Services;\n",
+                    "use App\\Models\\User;\n",
+                    "class UserService {\n",
+                    "    /** @return list<User> */\n",
+                    "    public function getUsers(): array { return []; }\n",
+                    "    public function process() {\n",
+                    "        foreach ($this->getUsers() as $user) {\n",
+                    "            $user->\n",
+                    "        }\n",
+                    "    }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let service_path = _dir.path().join("src/Services/UserService.php");
+    let uri = Url::from_file_path(&service_path).unwrap();
+    let text = std::fs::read_to_string(&service_path).unwrap();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over method call (cross-file)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' from User via cross-file foreach method call, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include 'getEmail' from User via cross-file foreach method call, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Foreach over property access on non-$this variable: `foreach ($repo->items as $item)`.
+#[tokio::test]
+async fn test_completion_foreach_property_access_on_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_var_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Item {\n",
+        "    public string $label;\n",
+        "}\n",
+        "class ItemRepo {\n",
+        "    /** @var list<Item> */\n",
+        "    public array $items;\n",
+        "}\n",
+        "class Controller {\n",
+        "    public function index() {\n",
+        "        $repo = new ItemRepo();\n",
+        "        foreach ($repo->items as $item) {\n",
+        "            $item->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over $repo->items"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include 'label' property from Item, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Foreach with array type shorthand in method return: `@return User[]`.
+#[tokio::test]
+async fn test_completion_foreach_method_call_array_shorthand() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_shorthand.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "}\n",
+        "class UserService {\n",
+        "    /** @return User[] */\n",
+        "    public function getUsers(): array { return []; }\n",
+        "    public function process() {\n",
+        "        foreach ($this->getUsers() as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for foreach over method returning User[]"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' property from User via User[] return type, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

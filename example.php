@@ -1420,6 +1420,80 @@ class ForeachKeyDemo {
     }
 }
 
+// ─── Foreach over Method Calls / Property Access / Static Calls ─────
+//
+// When the foreach expression is a method call, property access, or
+// static method call, the element type is inferred from the return
+// type / property type annotation.
+
+class ForeachExpressionDemo {
+    /** @var list<User> */
+    public array $users;
+
+    /** @return list<User> */
+    public function getUsers(): array { return []; }
+
+    /** @return array<Request, HttpResponse> */
+    public function getMapping(): array { return []; }
+
+    /** @return list<AdminUser> */
+    public static function getAllAdmins(): array { return []; }
+
+    public function methodCallOnThis(): void {
+        // $this->getUsers() returns list<User> → $user is User
+        foreach ($this->getUsers() as $user) {
+            $user->getEmail();       // Resolved: User::getEmail()
+            $user->getName();        // Resolved: User::getName()
+        }
+    }
+
+    public function propertyAccessOnThis(): void {
+        // $this->users is list<User> → $user is User
+        foreach ($this->users as $user) {
+            $user->getEmail();       // Resolved: User::getEmail()
+        }
+    }
+
+    public function staticMethodCall(): void {
+        // ForeachExpressionDemo::getAllAdmins() returns list<AdminUser>
+        foreach (ForeachExpressionDemo::getAllAdmins() as $admin) {
+            $admin->grantPermission('x'); // Resolved: AdminUser::grantPermission()
+        }
+    }
+
+    public function selfStaticCall(): void {
+        // self::getAllAdmins() returns list<AdminUser>
+        foreach (self::getAllAdmins() as $admin) {
+            $admin->grantPermission('x'); // Resolved: AdminUser::grantPermission()
+        }
+    }
+
+    public function methodCallOnVariable(): void {
+        $service = new ForeachExpressionDemo();
+        // $service->getUsers() returns list<User> → $user is User
+        foreach ($service->getUsers() as $user) {
+            $user->getEmail();       // Resolved: User::getEmail()
+        }
+    }
+
+    public function propertyAccessOnVariable(): void {
+        $service = new ForeachExpressionDemo();
+        // $service->users is list<User> → $user is User
+        foreach ($service->users as $user) {
+            $user->getEmail();       // Resolved: User::getEmail()
+        }
+    }
+
+    public function keyTypeFromMethodCall(): void {
+        // $this->getMapping() returns array<Request, HttpResponse>
+        // → $req is Request (key), $res is HttpResponse (value)
+        foreach ($this->getMapping() as $req => $res) {
+            $req->getUri();          // Resolved: Request::getUri()
+            $res->getBody();         // Resolved: HttpResponse::getBody()
+        }
+    }
+}
+
 // ─── Array Destructuring ────────────────────────────────────────────
 //
 // When the LHS of an assignment is `[$a, $b]` (short syntax) or
