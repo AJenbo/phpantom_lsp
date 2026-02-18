@@ -27,6 +27,70 @@ use super::conditional_resolution::{
     resolve_conditional_with_text_args, resolve_conditional_without_args, split_call_subject,
 };
 
+/// A single bracket segment in a chained array access subject.
+///
+/// Used by [`parse_bracket_segments`] to decompose subjects like
+/// `$response['items'][]` into structured parts.
+#[derive(Debug, Clone)]
+enum BracketSegment {
+    /// A string-key access, e.g. `['items']` → `StringKey("items")`.
+    StringKey(String),
+    /// A numeric / variable index access, e.g. `[0]` or `[$i]` → `ElementAccess`.
+    ElementAccess,
+}
+
+/// Result of parsing a chained array access subject.
+#[derive(Debug)]
+struct BracketSubject {
+    /// The base variable (e.g. `"$response"`).
+    base_var: String,
+    /// The bracket segments in left-to-right order.
+    segments: Vec<BracketSegment>,
+}
+
+/// Parse a subject like `$var['key'][]` into its base variable and
+/// bracket segments.
+///
+/// Returns `None` if the subject doesn't start with `$` or has no `[`.
+fn parse_bracket_segments(subject: &str) -> Option<BracketSubject> {
+    if !subject.starts_with('$') || !subject.contains('[') {
+        return None;
+    }
+
+    let first_bracket = subject.find('[')?;
+    let base_var = subject[..first_bracket].to_string();
+    if base_var.len() < 2 {
+        return None;
+    }
+
+    let mut segments = Vec::new();
+    let mut rest = &subject[first_bracket..];
+
+    while rest.starts_with('[') {
+        // Find the matching `]`.
+        let close = rest.find(']')?;
+        let inner = rest[1..close].trim();
+
+        if let Some(key) = inner
+            .strip_prefix('\'')
+            .and_then(|s| s.strip_suffix('\''))
+            .or_else(|| inner.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+        {
+            segments.push(BracketSegment::StringKey(key.to_string()));
+        } else {
+            segments.push(BracketSegment::ElementAccess);
+        }
+
+        rest = &rest[close + 1..];
+    }
+
+    if segments.is_empty() {
+        return None;
+    }
+
+    Some(BracketSubject { base_var, segments })
+}
+
 /// Type alias for the optional function-loader closure passed through
 /// the resolution chain.  Reduces clippy `type_complexity` warnings.
 pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
@@ -283,23 +347,26 @@ impl Backend {
             return vec![];
         }
 
-        // ── Array-element access: `$var[]` ──
-        // When the subject ends with `[]`, the user wrote `$var[0]->` or
-        // `$var[$key]->`.  Resolve the base variable's generic/iterable
-        // type and extract the element type.
-        if let Some(base_var) = subject.strip_suffix("[]")
-            && base_var.starts_with('$')
-        {
-            let resolved = Self::resolve_array_element_type(
-                base_var,
-                content,
-                cursor_offset,
-                current_class,
-                all_classes,
-                class_loader,
-            );
-            if !resolved.is_empty() {
-                return resolved;
+        // ── Chained array access: `$var['key'][]`, `$var['a']['b']` ──
+        // When the subject has multiple bracket segments (e.g. from
+        // `$response['items'][0]->`), walk through each segment to
+        // resolve the final type.  This handles combinations of array
+        // shape key lookups and generic element extraction.
+        if subject.starts_with('$') && subject.contains('[') {
+            let segments = parse_bracket_segments(subject);
+            if let Some(ref segs) = segments {
+                let resolved = Self::resolve_chained_array_access(
+                    &segs.base_var,
+                    &segs.segments,
+                    content,
+                    cursor_offset,
+                    current_class,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    return resolved;
+                }
             }
         }
 
@@ -347,6 +414,175 @@ impl Backend {
         vec![]
     }
 
+    /// Text-based assignment following for raw type extraction.
+    ///
+    /// Scans backward from `cursor_offset` for `$var = expr;`, then
+    /// extracts the raw return type from the RHS expression.  This is
+    /// used as a fallback when no `@var` / `@param` annotation is found.
+    fn extract_raw_type_from_assignment_text(
+        base_var: &str,
+        content: &str,
+        cursor_offset: usize,
+        current_class: Option<&ClassInfo>,
+        _all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        let search_area = content.get(..cursor_offset)?;
+
+        // Find the most recent assignment to this variable.
+        let assign_pattern = format!("{} = ", base_var);
+        let assign_pos = search_area.rfind(&assign_pattern)?;
+        let rhs_start = assign_pos + assign_pattern.len();
+
+        // Extract the RHS up to the next `;`
+        let remaining = &content[rhs_start..];
+        let semi_pos = Self::find_semicolon_balanced(remaining)?;
+        let rhs_text = remaining[..semi_pos].trim();
+
+        // RHS is a call expression — extract the return type.
+        if rhs_text.ends_with(')') {
+            let paren_pos = Self::find_top_level_open_paren(rhs_text)?;
+            let callee = &rhs_text[..paren_pos];
+
+            // Method call: `$this->methodName(…)`
+            if let Some(method_name) = callee.strip_prefix("$this->") {
+                let owner = current_class?;
+                let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+                return merged
+                    .methods
+                    .iter()
+                    .find(|m| m.name == method_name)
+                    .and_then(|m| m.return_type.clone());
+            }
+
+            // Static call: `ClassName::methodName(…)`
+            if let Some((class_part, method_part)) = callee.rsplit_once("::") {
+                let resolved_class = if class_part == "self" || class_part == "static" {
+                    current_class.cloned()
+                } else {
+                    class_loader(class_part)
+                };
+                if let Some(cls) = resolved_class {
+                    let merged = Self::resolve_class_with_inheritance(&cls, class_loader);
+                    return merged
+                        .methods
+                        .iter()
+                        .find(|m| m.name == method_part)
+                        .and_then(|m| m.return_type.clone());
+                }
+            }
+
+            // Standalone function call — search all classes for a matching
+            // global function.  Since we don't have `function_loader` here,
+            // search backward in the source for a `@return` in the
+            // function's docblock.
+            return Self::extract_function_return_from_source(callee, content);
+        }
+
+        // RHS is a property access: `$this->propName`
+        if let Some(prop_name) = rhs_text.strip_prefix("$this->")
+            && prop_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && let Some(owner) = current_class
+        {
+            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+            return merged
+                .properties
+                .iter()
+                .find(|p| p.name == prop_name)
+                .and_then(|p| p.type_hint.clone());
+        }
+
+        None
+    }
+
+    /// Find `;` in `s`, respecting `()`, `[]`, `{}`, and string nesting.
+    fn find_semicolon_balanced(s: &str) -> Option<usize> {
+        let mut depth_paren = 0i32;
+        let mut depth_bracket = 0i32;
+        let mut depth_brace = 0i32;
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut prev_char = '\0';
+
+        for (i, ch) in s.char_indices() {
+            if in_single_quote {
+                if ch == '\'' && prev_char != '\\' {
+                    in_single_quote = false;
+                }
+                prev_char = ch;
+                continue;
+            }
+            if in_double_quote {
+                if ch == '"' && prev_char != '\\' {
+                    in_double_quote = false;
+                }
+                prev_char = ch;
+                continue;
+            }
+            match ch {
+                '\'' => in_single_quote = true,
+                '"' => in_double_quote = true,
+                '(' => depth_paren += 1,
+                ')' => depth_paren -= 1,
+                '[' => depth_bracket += 1,
+                ']' => depth_bracket -= 1,
+                '{' => depth_brace += 1,
+                '}' => depth_brace -= 1,
+                ';' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
+                    return Some(i);
+                }
+                _ => {}
+            }
+            prev_char = ch;
+        }
+        None
+    }
+
+    /// Find the position of the first `(` at nesting depth 0.
+    ///
+    /// Respects `<…>` nesting for generic types but is careful not to
+    /// treat `>` in `->` (arrow operator) as a closing angle bracket.
+    fn find_top_level_open_paren(s: &str) -> Option<usize> {
+        let mut depth_angle = 0i32;
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'<' => depth_angle += 1,
+                b'>' if depth_angle > 0 => depth_angle -= 1,
+                b'-' if i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
+                    // Skip `->` entirely — it's an arrow operator, not
+                    // an angle bracket.
+                    i += 2;
+                    continue;
+                }
+                b'(' if depth_angle == 0 => return Some(i),
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Search backward in `content` for a function definition matching
+    /// `func_name` and extract its `@return` type from the docblock.
+    fn extract_function_return_from_source(func_name: &str, content: &str) -> Option<String> {
+        // Look for `function funcName(` in the source.
+        let pattern = format!("function {}(", func_name);
+        let func_pos = content.find(&pattern)?;
+
+        // Search backward from the function definition for a docblock.
+        let before = content.get(..func_pos)?;
+        let trimmed = before.trim_end();
+        if !trimmed.ends_with("*/") {
+            return None;
+        }
+        let open_pos = trimmed.rfind("/**")?;
+        let docblock = &trimmed[open_pos..];
+
+        docblock::extract_return_type(docblock)
+    }
+
     /// Resolve a call expression to the class of its return type.
     ///
     /// `call_body` is the subject without the trailing `()`, for example:
@@ -362,12 +598,18 @@ impl Backend {
     /// Resolve the element type of an array/list variable accessed with `[]`.
     ///
     /// Given a base variable name like `$admins`, searches backward from
-    /// `cursor_offset` for a `@var` / `@param` docblock annotation that
-    /// declares a generic iterable type (e.g. `array<int, AdminUser>`,
-    /// `list<User>`, `User[]`).  Extracts the element type and resolves
-    /// it to `ClassInfo`.
-    fn resolve_array_element_type(
+    /// Resolve a chained array access subject like `$var['key'][]`.
+    ///
+    /// Walks through each bracket segment in order:
+    /// - `BracketSegment::StringKey(k)` → extract the value type for key
+    ///   `k` from an array shape annotation.
+    /// - `BracketSegment::ElementAccess` → extract the generic element
+    ///   type (e.g. `list<User>` → `User`).
+    ///
+    /// Returns the resolved `ClassInfo` for the final type.
+    fn resolve_chained_array_access(
         base_var: &str,
+        segments: &[BracketSegment],
         content: &str,
         cursor_offset: u32,
         current_class: Option<&ClassInfo>,
@@ -376,24 +618,55 @@ impl Backend {
     ) -> Vec<ClassInfo> {
         let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
 
-        // Search backward from the cursor for a @var/@param annotation on
-        // this variable that includes a generic type.
-        let raw_type = match docblock::find_iterable_raw_type_in_source(
-            content,
-            cursor_offset as usize,
-            base_var,
-        ) {
+        // 1. Resolve the raw type annotation for the base variable.
+        let raw_type =
+            docblock::find_iterable_raw_type_in_source(content, cursor_offset as usize, base_var)
+                .or_else(|| {
+                    Self::extract_raw_type_from_assignment_text(
+                        base_var,
+                        content,
+                        cursor_offset as usize,
+                        current_class,
+                        all_classes,
+                        class_loader,
+                    )
+                });
+
+        let mut current_type = match raw_type {
             Some(t) => t,
             None => return vec![],
         };
 
-        // Extract the generic element type (e.g. `list<User>` → `User`).
-        let element_type = match docblock::types::extract_generic_value_type(&raw_type) {
-            Some(t) => t,
-            None => return vec![],
-        };
+        // 2. Walk through each bracket segment to refine the type.
+        for seg in segments {
+            match seg {
+                BracketSegment::StringKey(key) => {
+                    // Array shape key lookup: array{key: Type} → Type
+                    current_type =
+                        match docblock::extract_array_shape_value_type(&current_type, key) {
+                            Some(t) => t,
+                            None => return vec![],
+                        };
+                }
+                BracketSegment::ElementAccess => {
+                    // Generic element extraction: list<User> → User
+                    current_type = match docblock::types::extract_generic_value_type(&current_type)
+                    {
+                        Some(t) => t,
+                        None => return vec![],
+                    };
+                }
+            }
+        }
 
-        Self::type_hint_to_classes(&element_type, current_class_name, all_classes, class_loader)
+        // 3. Resolve the final type string to ClassInfo.
+        let cleaned = docblock::clean_type(&current_type);
+        let base_name = docblock::types::strip_generics(&cleaned);
+        if base_name.is_empty() || docblock::types::is_scalar(&base_name) {
+            return vec![];
+        }
+
+        Self::type_hint_to_classes(&cleaned, current_class_name, all_classes, class_loader)
     }
 
     pub(super) fn resolve_call_return_types(

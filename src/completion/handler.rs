@@ -2,9 +2,9 @@
 ///
 /// This module contains the main `handle_completion` method that was
 /// previously inlined in `server.rs`.  It coordinates the various
-/// completion strategies (PHPDoc tags, named arguments, member access,
-/// variable names, class/constant/function names) and returns the first
-/// successful result.
+/// completion strategies (PHPDoc tags, named arguments, array shape keys,
+/// member access, variable names, class/constant/function names) and
+/// returns the first successful result.
 ///
 /// Helper methods `patch_content_at_cursor` and `resolve_named_arg_params`
 /// are also housed here because they are exclusively used by the
@@ -120,6 +120,25 @@ impl Backend {
                     if !items.is_empty() {
                         return Ok(Some(CompletionResponse::Array(items)));
                     }
+                }
+            }
+
+            // ── Array shape key completion ───────────────────────────
+            // When the cursor is inside `$var['` or `$var["`, offer
+            // known array shape keys from the variable's type annotation.
+            if let Some(ak_ctx) =
+                crate::completion::array_shape::detect_array_key_context(&content, position)
+            {
+                let items = self.build_array_key_completions(
+                    &ak_ctx,
+                    &content,
+                    position,
+                    &classes,
+                    &file_use_map,
+                    &file_namespace,
+                );
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
                 }
             }
 

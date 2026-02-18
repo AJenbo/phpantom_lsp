@@ -9,6 +9,8 @@
 /// - **variable_completion**: Variable name completions and scope collection
 /// - **phpdoc**: PHPDoc tag completion inside `/** … */` blocks
 /// - **named_args**: Named argument completion inside function/method call parens
+/// - **array_shape**: Array shape key completion (`$arr['` → suggest known keys)
+///   and raw variable type resolution for array shape value chaining
 /// - **conditional_resolution**: PHPStan conditional return type resolution at call sites
 /// - **type_narrowing**: instanceof / assert / custom type guard narrowing
 /// - **variable_resolution**: Variable type resolution via assignment scanning
@@ -17,6 +19,7 @@
 /// Class inheritance merging (traits, mixins, parent chain) lives in the
 /// top-level [`crate::inheritance`] module since it is shared infrastructure
 /// used by completion, definition, and future features (hover, references).
+pub(crate) mod array_shape;
 pub mod builder;
 pub mod class_completion;
 pub mod closure_resolution;

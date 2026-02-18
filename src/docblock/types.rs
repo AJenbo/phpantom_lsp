@@ -11,34 +11,74 @@ pub(crate) const SCALAR_TYPES: &[&str] = &[
     "false", "true", "array", "callable", "iterable", "resource",
 ];
 
-/// Split off the first type token from `s`, respecting `<…>` nesting.
+/// Split off the first type token from `s`, respecting `<…>` and `{…}`
+/// nesting (the latter is needed for PHPStan array shape syntax like
+/// `array{name: string, age: int}`).
 ///
 /// Returns `(type_token, remainder)` where `type_token` is the full type
-/// (e.g. `Collection<int, User>`) and `remainder` is whatever follows.
+/// (e.g. `Collection<int, User>` or `array{name: string}`) and
+/// `remainder` is whatever follows.
 pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
     let mut angle_depth = 0i32;
+    let mut brace_depth = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+
     for (i, c) in s.char_indices() {
+        // Handle string literals inside array shape keys — skip everything
+        // inside quotes so that `{`, `}`, `,`, `:` etc. are not
+        // misinterpreted as structural delimiters.
+        if in_single_quote {
+            if c == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = c;
+            continue;
+        }
+        if in_double_quote {
+            if c == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = c;
+            continue;
+        }
+
         match c {
+            '\'' if brace_depth > 0 => in_single_quote = true,
+            '"' if brace_depth > 0 => in_double_quote = true,
             '<' => angle_depth += 1,
-            '>' => {
+            '>' if angle_depth > 0 => {
                 angle_depth -= 1;
-                // If we just closed the outermost `<`, the type ends here.
-                if angle_depth == 0 {
+                // If we just closed the outermost `<`, the type ends here
+                // (but only when we're not also inside braces).
+                if angle_depth == 0 && brace_depth == 0 {
                     let end = i + c.len_utf8();
                     return (&s[..end], &s[end..]);
                 }
             }
-            c if c.is_whitespace() && angle_depth == 0 => {
+            '{' => brace_depth += 1,
+            '}' => {
+                brace_depth -= 1;
+                // If we just closed the outermost `{`, the type ends here
+                // (but only when we're not also inside angle brackets).
+                if brace_depth == 0 && angle_depth == 0 {
+                    let end = i + c.len_utf8();
+                    return (&s[..end], &s[end..]);
+                }
+            }
+            c if c.is_whitespace() && angle_depth == 0 && brace_depth == 0 => {
                 return (&s[..i], &s[i..]);
             }
             _ => {}
         }
+        prev_char = c;
     }
     (s, "")
 }
 
-/// Split a type string on `|` at nesting depth 0, respecting `<…>` and
-/// `(…)` nesting.
+/// Split a type string on `|` at nesting depth 0, respecting `<…>`,
+/// `(…)`, and `{…}` nesting.
 ///
 /// Returns a `Vec` with at least one element.  If there is no `|` at
 /// depth 0, the returned vector contains the entire input as a single
@@ -48,11 +88,13 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
 ///
 /// - `"Foo|null"` → `["Foo", "null"]`
 /// - `"Collection<int|string, User>|null"` → `["Collection<int|string, User>", "null"]`
+/// - `"array{name: string|int}|null"` → `["array{name: string|int}", "null"]`
 /// - `"Foo"` → `["Foo"]`
 pub(crate) fn split_union_depth0(s: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth_angle = 0i32;
     let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
     let mut start = 0;
 
     for (i, c) in s.char_indices() {
@@ -61,7 +103,9 @@ pub(crate) fn split_union_depth0(s: &str) -> Vec<&str> {
             '>' => depth_angle -= 1,
             '(' => depth_paren += 1,
             ')' => depth_paren -= 1,
-            '|' if depth_angle == 0 && depth_paren == 0 => {
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            '|' if depth_angle == 0 && depth_paren == 0 && depth_brace == 0 => {
                 parts.push(&s[start..i]);
                 start = i + c.len_utf8();
             }
@@ -134,13 +178,24 @@ pub fn base_class_name(raw: &str) -> String {
     strip_generics(&cleaned)
 }
 
-/// Strip generic parameters from a (already cleaned) type string.
+/// Strip generic parameters and array shape braces from a (already
+/// cleaned) type string.
 ///
 /// `"Collection<int, User>"` → `"Collection"`
+/// `"array{name: string}"` → `"array"`
 /// `"Foo"` → `"Foo"`
 pub(crate) fn strip_generics(s: &str) -> String {
-    if let Some(idx) = s.find('<') {
-        s[..idx].to_string()
+    // Find the earliest `<` or `{` — both delimit parameterisation.
+    let angle = s.find('<');
+    let brace = s.find('{');
+    let idx = match (angle, brace) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+    if let Some(i) = idx {
+        s[..i].to_string()
     } else {
         s.to_string()
     }
@@ -150,6 +205,9 @@ pub(crate) fn strip_generics(s: &str) -> String {
 ///
 /// Returns `(base_name, args)` where `args` is empty if the type has no
 /// generic parameters.
+///
+/// **Note:** This only handles `<…>` generics. For array shape syntax
+/// (`array{…}`), use [`parse_array_shape`] instead.
 ///
 /// # Examples
 ///
@@ -193,12 +251,60 @@ fn find_matching_close(s: &str) -> usize {
     s.len()
 }
 
-/// Split generic arguments on commas at depth 0, respecting `<…>` and
-/// `(…)` nesting.
+/// Find the position of the matching `}` for an opening `{` that has
+/// already been consumed.  `s` starts right after the `{`.
+fn find_matching_brace_close(s: &str) -> usize {
+    let mut depth = 1i32;
+    let mut angle_depth = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+
+    for (i, ch) in s.char_indices() {
+        // Skip characters inside quoted strings so that `{`, `}`, etc.
+        // inside array shape keys like `"host}?"` are not misinterpreted.
+        if in_single_quote {
+            if ch == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '{' => depth += 1,
+            '}' if angle_depth == 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+            '<' => angle_depth += 1,
+            '>' if angle_depth > 0 => angle_depth -= 1,
+            _ => {}
+        }
+        prev_char = ch;
+    }
+    // Fallback: end of string (malformed type).
+    s.len()
+}
+
+/// Split generic arguments on commas at depth 0, respecting `<…>`,
+/// `(…)`, and `{…}` nesting.
 fn split_generic_params(s: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth_angle = 0i32;
     let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
     let mut start = 0;
 
     for (i, ch) in s.char_indices() {
@@ -207,7 +313,9 @@ fn split_generic_params(s: &str) -> Vec<&str> {
             '>' => depth_angle -= 1,
             '(' => depth_paren += 1,
             ')' => depth_paren -= 1,
-            ',' if depth_angle == 0 && depth_paren == 0 => {
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ',' if depth_angle == 0 && depth_paren == 0 && depth_brace == 0 => {
                 parts.push(s[start..i].trim());
                 start = i + 1;
             }
@@ -228,9 +336,13 @@ pub(crate) fn strip_nullable(type_str: &str) -> &str {
 
 /// Check whether a type name is a built-in scalar (i.e. can never be an object).
 pub(crate) fn is_scalar(type_name: &str) -> bool {
-    // Strip generic parameters before checking so that `array<int, User>`
-    // is still recognised as a scalar base type.
-    let base = if let Some(idx) = type_name.find('<') {
+    // Strip generic parameters and array shape braces before checking so
+    // that `array<int, User>` and `array{name: string}` are still
+    // recognised as scalar base types.
+    let base = if let Some(idx_angle) = type_name.find('<') {
+        let idx_brace = type_name.find('{').unwrap_or(usize::MAX);
+        &type_name[..idx_angle.min(idx_brace)]
+    } else if let Some(idx) = type_name.find('{') {
         &type_name[..idx]
     } else {
         type_name
@@ -358,19 +470,22 @@ fn split_first_generic_param(s: &str) -> Option<&str> {
 }
 
 /// Split a comma-separated generic parameter list and return the **last**
-/// parameter, respecting `<…>` nesting.
+/// parameter, respecting `<…>` and `{…}` nesting.
 ///
 /// - `"User"`             → `"User"`
 /// - `"int, User"`        → `"User"`
 /// - `"int, list<User>"`  → `"list<User>"`
 fn split_last_generic_param(s: &str) -> &str {
-    let mut depth = 0i32;
+    let mut depth_angle = 0i32;
+    let mut depth_brace = 0i32;
     let mut last_comma = None;
     for (i, c) in s.char_indices() {
         match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            ',' if depth == 0 => last_comma = Some(i),
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ',' if depth_angle == 0 && depth_brace == 0 => last_comma = Some(i),
             _ => {}
         }
     }
@@ -378,4 +493,228 @@ fn split_last_generic_param(s: &str) -> &str {
         Some(pos) => &s[pos + 1..],
         None => s,
     }
+}
+
+// ─── Array Shape Parsing ────────────────────────────────────────────────────
+
+use crate::types::ArrayShapeEntry;
+
+/// Parse a PHPStan/Psalm array shape type string into its constituent
+/// entries.
+///
+/// Handles both named and positional (implicit-key) entries, optional
+/// keys (with `?` suffix), and nested types.
+///
+/// # Examples
+///
+/// - `"array{name: string, age: int}"` → two entries
+/// - `"array{name: string, age?: int}"` → "age" is optional
+/// - `"array{string, int}"` → positional keys "0", "1"
+/// - `"array{user: User, items: list<Item>}"` → nested generics preserved
+///
+/// Returns `None` if the type is not an array shape.
+pub fn parse_array_shape(type_str: &str) -> Option<Vec<ArrayShapeEntry>> {
+    let s = type_str.strip_prefix('\\').unwrap_or(type_str);
+    let s = s.strip_prefix('?').unwrap_or(s);
+
+    // Must start with `array{` (case-insensitive base).
+    let brace_pos = s.find('{')?;
+    let base = &s[..brace_pos];
+    if !base.eq_ignore_ascii_case("array") {
+        return None;
+    }
+
+    // Extract the content between `{` and the matching `}`.
+    let rest = &s[brace_pos + 1..];
+    let close_pos = find_matching_brace_close(rest);
+    let inner = rest[..close_pos].trim();
+
+    if inner.is_empty() {
+        return Some(vec![]);
+    }
+
+    let raw_entries = split_shape_entries(inner);
+    let mut entries = Vec::with_capacity(raw_entries.len());
+    let mut implicit_index: u32 = 0;
+
+    for raw in raw_entries {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+
+        // Try to split on `:` to find `key: type` or `key?: type`.
+        // Must respect nesting and quoted strings so that `list<int>`
+        // inside a value type doesn't get split, and colons inside
+        // quoted keys like `"host:port"` are handled correctly.
+        if let Some((key_part, value_part)) = split_shape_key_value(raw) {
+            let key_trimmed = key_part.trim();
+            let value_trimmed = value_part.trim();
+
+            let (key, optional) = if let Some(k) = key_trimmed.strip_suffix('?') {
+                (k.to_string(), true)
+            } else {
+                (key_trimmed.to_string(), false)
+            };
+
+            // Strip surrounding quotes from keys — PHPStan allows
+            // `'foo'`, `"bar"`, and unquoted `baz` as key names.
+            let key = strip_shape_key_quotes(&key);
+
+            entries.push(ArrayShapeEntry {
+                key,
+                value_type: value_trimmed.to_string(),
+                optional,
+            });
+        } else {
+            // No `:` found — positional entry with implicit numeric key.
+            entries.push(ArrayShapeEntry {
+                key: implicit_index.to_string(),
+                value_type: raw.to_string(),
+                optional: false,
+            });
+            implicit_index += 1;
+        }
+    }
+
+    Some(entries)
+}
+
+/// Strip surrounding single or double quotes from an array shape key.
+///
+/// PHPStan/Psalm allow array shape keys to be quoted when they contain
+/// special characters (spaces, punctuation, etc.):
+///   - `'po rt'` → `po rt`
+///   - `"host"` → `host`
+///   - `foo` → `foo` (unchanged)
+fn strip_shape_key_quotes(key: &str) -> String {
+    if ((key.starts_with('\'') && key.ends_with('\''))
+        || (key.starts_with('"') && key.ends_with('"')))
+        && key.len() >= 2
+    {
+        return key[1..key.len() - 1].to_string();
+    }
+    key.to_string()
+}
+
+/// Split array shape entries on commas at depth 0, respecting `<…>`,
+/// `(…)`, and `{…}` nesting.
+fn split_shape_entries(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        // Skip characters inside quoted strings so that commas inside
+        // quoted array shape keys (e.g. `",host"`) don't split entries.
+        if in_single_quote {
+            if ch == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ',' if depth_angle == 0 && depth_paren == 0 && depth_brace == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        prev_char = ch;
+    }
+    let last = &s[start..];
+    if !last.trim().is_empty() {
+        parts.push(last);
+    }
+    parts
+}
+
+/// Split a single array shape entry into key and value on the **first**
+/// `:` at depth 0, outside of quoted strings.
+///
+/// Returns `Some((key_part, value_part))` if a `:` separator is found,
+/// or `None` for positional entries.
+///
+/// Must respect `<…>`, `{…}` nesting and quoted strings so that colons
+/// inside nested types or quoted keys (e.g. `"host:port"`) are not
+/// mistaken for the key–value separator.
+fn split_shape_key_value(s: &str) -> Option<(&str, &str)> {
+    let mut depth_angle = 0i32;
+    let mut depth_paren = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+
+    for (i, ch) in s.char_indices() {
+        // Skip characters inside quoted strings so that `:` inside
+        // quoted keys like `"host:port"` is not treated as a separator.
+        if in_single_quote {
+            if ch == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ':' if depth_angle == 0 && depth_paren == 0 && depth_brace == 0 => {
+                return Some((&s[..i], &s[i + 1..]));
+            }
+            _ => {}
+        }
+        prev_char = ch;
+    }
+    None
+}
+
+/// Look up the value type for a specific key in an array shape type string.
+///
+/// Given a type like `"array{name: string, user: User}"` and key `"user"`,
+/// returns `Some("User")`.
+///
+/// Returns `None` if the type is not an array shape or the key is not found.
+pub fn extract_array_shape_value_type(type_str: &str, key: &str) -> Option<String> {
+    let entries = parse_array_shape(type_str)?;
+    entries
+        .into_iter()
+        .find(|e| e.key == key)
+        .map(|e| e.value_type)
 }

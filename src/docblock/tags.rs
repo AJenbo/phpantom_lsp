@@ -658,7 +658,7 @@ pub fn should_override_type(docblock_type: &str, native_type: &str) -> bool {
     // so that downstream consumers (foreach element resolution, array
     // destructuring, etc.) can extract the generic type arguments.
     let clean_doc = strip_nullable(docblock_type);
-    if is_scalar(clean_doc) && !clean_doc.contains('<') {
+    if is_scalar(clean_doc) && !clean_doc.contains('<') && !clean_doc.contains('{') {
         return false;
     }
 

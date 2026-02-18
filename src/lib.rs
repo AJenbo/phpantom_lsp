@@ -22,7 +22,8 @@
 //!     `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval)
 //!   - `docblock::conditional` — PHPStan conditional return type parsing
 //!   - `docblock::types` — type cleaning utilities (`clean_type`, `strip_nullable`,
-//!     `is_scalar`, `split_type_token`)
+//!     `is_scalar`, `split_type_token`) and PHPStan array shape parsing
+//!     (`parse_array_shape`, `extract_array_shape_value_type`)
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -50,8 +51,8 @@ mod util;
 // Re-export public types so that dependents (tests, main) can import them
 // from the crate root, e.g. `use phpantom_lsp::{Backend, AccessKind}`.
 pub use types::{
-    AccessKind, AssertionKind, ClassInfo, CompletionTarget, ConstantInfo, FunctionInfo, MethodInfo,
-    ParameterInfo, PropertyInfo, TypeAssertion, Visibility,
+    AccessKind, ArrayShapeEntry, AssertionKind, ClassInfo, CompletionTarget, ConstantInfo,
+    FunctionInfo, MethodInfo, ParameterInfo, PropertyInfo, TypeAssertion, Visibility,
 };
 
 // ─── Backend ────────────────────────────────────────────────────────────────

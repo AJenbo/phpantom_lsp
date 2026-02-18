@@ -1461,7 +1461,7 @@ class DestructuringDemo {
     public function fromStaticCall(): void {
         // list() syntax works the same way
         list($first, $second) = self::loadOrders();
-        $first->getId();    // Resolved: Order (via Model)::getId()
+        $first->customer->address;    // Resolved: Order (via Model)
     }
 
     public function fromProperty(): void {
@@ -1486,3 +1486,142 @@ class DestructuringDemo {
         $x->getEmail();     // Resolved: User::getEmail()
     }
 }
+
+// ─── Array Shapes ───────────────────────────────────────────────────────────
+//
+// PHPStan/Psalm array shape types describe the exact structure of an array,
+// including named keys and their value types.  PHPantomLSP supports:
+//
+//   1. Key completion: typing `$arr['` suggests known keys from the shape.
+//   2. Value type resolution: `$arr['key']->` offers members of the value type.
+//
+// Supported annotation sources:
+//   - @var array{key: Type, ...} $var
+//   - @param array{key: Type, ...} $param
+//   - @return array{key: Type, ...}  (followed through assignments)
+//   - Property types with array shapes
+
+class ArrayShapeDemo {
+
+    /**
+     * @return array{user: User, profile: UserProfile, active: bool}
+     */
+    public function getUserData(): array {
+        return [];
+    }
+
+    /**
+     * @param array{host: string, port: int, credentials: User} $config
+     */
+    public function connect(array $config): void {
+        // Key completion: typing $config[' suggests: host, port, credentials
+        $config['host'];        // Resolved: string
+        $config['port'];        // Resolved: int
+        $config['credentials']; // Resolved: User
+
+        // Value type chaining: $config['credentials']-> shows User members
+        $config['credentials']->getEmail();  // Resolved: User::getEmail()
+    }
+
+    public function fromReturnType(): void {
+        // Array shape flows through method return types
+        $data = $this->getUserData();
+
+        // Key completion on $data[' suggests: user, profile, active
+        $data['user']->getName();       // Resolved: User::getName()
+        $data['profile']->setBio('');   // Resolved: UserProfile::setBio()
+    }
+
+    public function fromInlineVar(): void {
+        /** @var array{address: Address, customer: Customer} $order */
+        $order = getUnknownValue();
+
+        // Key completion on $order[' suggests: address, customer
+        $order['address']->format();           // Resolved: Address::format()
+        $order['customer']->getFirstName();    // Resolved: Customer members
+    }
+
+    public function optionalKeys(): void {
+        /** @var array{name: string, age?: int, email?: string} $profile */
+        $profile = getUnknownValue();
+
+        // All keys shown — optional ones marked with ? in the detail
+        $profile['name'];   // Detail: "name: string"
+        $profile['age'];    // Detail: "age?: int"
+        $profile['email'];  // Detail: "email?: string"
+    }
+
+    public function nestedShapes(): void {
+        /** @var array{meta: array{page: int, total: int}, items: list<User>} $response */
+        $response = getUnknownValue();
+
+        // Key completion shows: meta, items
+        // Nested generic types are preserved in the detail
+        $response['meta'];   // Detail: "meta: array{page: int, total: int}"
+        $response['items'];  // Detail: "items: list<User>"
+
+        // Nested shape key completion:
+        // Typing $response['meta'][' suggests keys from the inner shape
+        $response['meta']['page'];   // Resolved: int
+        $response['meta']['total'];  // Resolved: int
+
+        // Chained array shape + list element access:
+        // $response['items'][0]-> offers User members (name, getEmail, …)
+        $response['items'][0]->getName();    // Resolved: User::getName()
+        $response['items'][0]->getEmail();   // Resolved: User::getEmail()
+    }
+
+    public function methodReturnShapeKeys(): void {
+        // Array shape keys flow through method return types.
+        // $data = $this->getUserData(); $data[' suggests: user, profile, active
+        $data = $this->getUserData();
+        $data['user'];       // Resolved: User
+        $data['profile'];    // Resolved: UserProfile
+        $data['active'];     // Resolved: bool
+    }
+}
+
+/**
+ * Top-level array shape usage.
+ *
+ * @return array{logger: User, debug: bool}
+ */
+function getAppConfig(): array { return []; }
+
+// Array shapes work in top-level code too
+$cfg = getAppConfig();
+$cfg['logger']->getEmail(); // Resolved: User::getEmail()
+
+// Direct @var annotation
+/** @var array{first: User, second: AdminUser} $pair */
+$pair = getUnknownValue();
+$pair['first']->getName();          // Resolved: User::getName()
+$pair['second']->grantPermission('admin'); // Resolved: AdminUser::grantPermission()
+
+// ─── $_SERVER Superglobal Key Completion ────────────────────────────────────
+//
+// PHPantomLSP provides key completion for the $_SERVER superglobal.
+// Typing $_SERVER[' or $_SERVER[ suggests all well-known server keys
+// such as REQUEST_METHOD, HTTP_HOST, REMOTE_ADDR, etc.
+//
+// Each key includes a detail string showing the type and description.
+// Partial filtering works too: $_SERVER['REQ narrows to REQUEST_METHOD,
+// REQUEST_TIME, REQUEST_TIME_FLOAT, REQUEST_URI.
+
+$_SERVER['REQUEST_METHOD'];  // Detail: "string — Request method (GET, POST, …)"
+$_SERVER['HTTP_HOST'];       // Detail: "string — Host header"
+$_SERVER['REMOTE_ADDR'];     // Detail: "string — Client IP address"
+$_SERVER['REQUEST_URI'];     // Detail: "string — URI used to access the page"
+$_SERVER['SERVER_PORT'];     // Detail: "string — Server port"
+
+// ─── Auto-Close Handling ────────────────────────────────────────────────────
+//
+// When the IDE auto-inserts closing brackets/quotes, PHPantomLSP uses
+// text_edit ranges that cover the trailing characters, preventing
+// duplicates like $config['host']] or $config['host']'].
+//
+// Examples of what works correctly:
+//   $config[]    — cursor between [ and ], ] is auto-inserted
+//                  → selecting 'host' produces $config['host']
+//   $config['']  — cursor between quotes, '] is auto-inserted
+//                  → selecting 'host' produces $config['host']

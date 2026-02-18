@@ -3,8 +3,35 @@
 //! This module contains all the "model" structs and enums that represent
 //! extracted PHP information (classes, methods, properties, constants,
 //! standalone functions) as well as completion-related types
-//! (AccessKind, CompletionTarget) and PHPStan conditional return type
-//! representations.
+//! (AccessKind, CompletionTarget), PHPStan conditional return type
+//! representations, and PHPStan/Psalm array shape types.
+
+// ─── Array Shape Types ──────────────────────────────────────────────────────
+
+/// A single entry in a PHPStan/Psalm array shape type.
+///
+/// Array shapes describe the exact structure of an array, including
+/// named or positional keys and their value types.
+///
+/// # Examples
+///
+/// ```text
+/// array{name: string, age: int}       → two entries with keys "name" and "age"
+/// array{0: User, 1: Address}          → two entries with numeric keys
+/// array{name: string, age?: int}      → "age" is optional
+/// array{string, int}                  → implicit keys "0" and "1"
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArrayShapeEntry {
+    /// The key name (e.g. `"name"`, `"0"`, `"1"`).
+    /// For positional entries without explicit keys, this is the
+    /// stringified index (`"0"`, `"1"`, …).
+    pub key: String,
+    /// The value type string (e.g. `"string"`, `"int"`, `"User"`).
+    pub value_type: String,
+    /// Whether this key is optional (declared with `?` suffix, e.g. `age?: int`).
+    pub optional: bool,
+}
 
 /// Visibility of a class member (method, property, or constant).
 ///

@@ -212,18 +212,42 @@ pub(crate) fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String 
     end = i;
 
     // ── Array access: detect `]` ──
-    // e.g. `$admins[0]->`, `$admins[$key]->`
-    // Skip backwards past balanced `[…]` and extract the variable before it.
-    if i > 0
-        && chars[i - 1] == ']'
-        && let Some(bracket_open) = skip_balanced_brackets_back(chars, i)
-    {
-        // Now extract whatever is before the `[` — typically a variable.
-        let before_bracket = extract_simple_variable(chars, bracket_open);
-        if !before_bracket.is_empty() {
-            // Return subject with `[]` suffix so the resolver knows
-            // this is an array-element access.
-            return format!("{}[]", before_bracket);
+    // e.g. `$admins[0]->`, `$admins[$key]->`, `$config['key']->`
+    // Also handles chained access: `$response['items'][0]->`
+    //
+    // Walk backward through one or more balanced `[…]` pairs, collecting
+    // each bracket segment.  The segments are stored innermost-first and
+    // reversed at the end so the final subject reads left-to-right.
+    if i > 0 && chars[i - 1] == ']' {
+        let mut segments: Vec<String> = Vec::new();
+        let mut pos = i;
+
+        while pos > 0
+            && chars[pos - 1] == ']'
+            && let Some(bracket_open) = skip_balanced_brackets_back(chars, pos)
+        {
+            let inner: String = chars[bracket_open + 1..pos - 1].iter().collect();
+            let inner_trimmed = inner.trim();
+            // Quoted string key → preserve it so the resolver can look
+            // up the specific key in an array shape type annotation.
+            if (inner_trimmed.starts_with('\'') && inner_trimmed.ends_with('\''))
+                || (inner_trimmed.starts_with('"') && inner_trimmed.ends_with('"'))
+            {
+                segments.push(format!("[{}]", inner_trimmed));
+            } else {
+                // Generic / numeric index → strip to `[]`.
+                segments.push("[]".to_string());
+            }
+            pos = bracket_open;
+        }
+
+        if !segments.is_empty() {
+            let before = extract_simple_variable(chars, pos);
+            if !before.is_empty() {
+                // Reverse so segments read left-to-right.
+                segments.reverse();
+                return format!("{}{}", before, segments.join(""));
+            }
         }
     }
 
