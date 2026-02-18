@@ -1324,8 +1324,8 @@ async fn test_phpdoc_smart_return_prefilled() {
     assert_eq!(r.insert_text.as_deref(), Some("return string"));
 }
 
-/// @return with void return type and no return statements should suggest
-/// `@return void` as a smart completion.
+/// When a function has an explicit `: void` type hint, `@return` should
+/// not be suggested at all — the type hint speaks for itself.
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_generic() {
     let backend = create_test_backend();
@@ -1343,25 +1343,16 @@ async fn test_phpdoc_smart_return_void_generic() {
     let return_item = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@return"));
-    // void return with no return statements → suggest @return void
+    // Explicit `: void` type hint → @return is not needed
     assert!(
-        return_item.is_some(),
-        "Should suggest @return void for void functions with no return statements"
-    );
-    assert_eq!(
-        return_item.unwrap().label,
-        "@return void",
-        "Label should be @return void"
-    );
-    assert_eq!(
-        return_item.unwrap().insert_text.as_deref(),
-        Some("return void"),
-        "Insert text should be 'return void'"
+        return_item.is_none(),
+        "Should NOT suggest @return when `: void` type hint is present. Got: {:?}",
+        return_item.map(|i| &i.label)
     );
 }
 
-/// @return void should NOT be suggested when the void function contains
-/// return statements with values (the void hint is likely wrong).
+/// When an explicit `: void` type hint is present, `@return` should not
+/// be suggested even if the body contains return statements with values.
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_with_return_value() {
     let backend = create_test_backend();
@@ -1383,13 +1374,13 @@ async fn test_phpdoc_smart_return_void_with_return_value() {
         .find(|i| i.filter_text.as_deref() == Some("@return"));
     assert!(
         return_item.is_none(),
-        "Should NOT suggest @return void when body has return with value. Got: {:?}",
+        "Should NOT suggest @return when `: void` type hint is present. Got: {:?}",
         return_item.map(|i| &i.label)
     );
 }
 
-/// @return void SHOULD be suggested when the void function only has bare
-/// `return;` statements (early returns with no value).
+/// When an explicit `: void` type hint is present, `@return` should not
+/// be suggested even with bare `return;` statements.
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_with_bare_return() {
     let backend = create_test_backend();
@@ -1413,10 +1404,10 @@ async fn test_phpdoc_smart_return_void_with_bare_return() {
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@return"));
     assert!(
-        return_item.is_some(),
-        "Should suggest @return void when body only has bare return;"
+        return_item.is_none(),
+        "Should NOT suggest @return when `: void` type hint is present. Got: {:?}",
+        return_item.map(|i| &i.label)
     );
-    assert_eq!(return_item.unwrap().label, "@return void");
 }
 
 /// @var should be pre-filled with the property type hint.

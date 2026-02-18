@@ -1972,8 +1972,11 @@ pub fn build_phpdoc_completions(
                             sort_text: Some(format!("0a_{}", def.tag.to_lowercase())),
                             ..CompletionItem::default()
                         });
+                        continue;
                     }
-                    continue;
+                    // Body has return-with-value statements — fall through
+                    // to the generic `@return Type` fallback so the user
+                    // can type the actual return type manually.
                 }
                 // Return type not detected — fall through to the generic
                 // `@return Type` fallback so the user can type it manually.

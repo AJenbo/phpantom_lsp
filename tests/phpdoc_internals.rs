@@ -1129,20 +1129,11 @@ fn smart_return_void_uses_no_return_item() {
     let return_item = items
         .iter()
         .find(|i| i.filter_text.as_deref() == Some("@return"));
-    // void return with no return statements → suggest @return void
+    // Explicit `: void` type hint → @return is not needed
     assert!(
-        return_item.is_some(),
-        "Should suggest @return void for void functions with no return statements"
-    );
-    assert_eq!(
-        return_item.unwrap().label,
-        "@return void",
-        "Label should be @return void"
-    );
-    assert_eq!(
-        return_item.unwrap().insert_text.as_deref(),
-        Some("return void"),
-        "Insert text should be 'return void'"
+        return_item.is_none(),
+        "Should NOT suggest @return when `: void` type hint is present. Got: {:?}",
+        return_item.map(|i| &i.label)
     );
 }
 
