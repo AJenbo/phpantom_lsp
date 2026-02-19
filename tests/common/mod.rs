@@ -212,6 +212,61 @@ class SimpleXMLElement
 }
 ";
 
+// ─── Exception class stubs ──────────────────────────────────────────────────
+
+static EXCEPTION_CLASS_STUB: &str = "\
+<?php
+class Exception implements Throwable
+{
+    public function __construct(string $message = \"\", int $code = 0, ?Throwable $previous = null) {}
+
+    /**
+     * @return string
+     */
+    final public function getMessage(): string {}
+
+    /**
+     * @return int
+     */
+    final public function getCode(): int {}
+
+    /**
+     * @return string
+     */
+    final public function getFile(): string {}
+
+    /**
+     * @return int
+     */
+    final public function getLine(): int {}
+
+    /**
+     * @return array
+     */
+    final public function getTrace(): array {}
+
+    /**
+     * @return string
+     */
+    final public function getTraceAsString(): string {}
+
+    /**
+     * @return ?Throwable
+     */
+    final public function getPrevious(): ?Throwable {}
+
+    /**
+     * @return string
+     */
+    public function __toString(): string {}
+}
+";
+
+static RUNTIME_EXCEPTION_CLASS_STUB: &str = "\
+<?php
+class RuntimeException extends Exception {}
+";
+
 // ─── Constant stubs ─────────────────────────────────────────────────────────
 
 static CONSTANTS_STUB: &str = "\
@@ -223,6 +278,16 @@ define('PHP_MAJOR_VERSION', 8);
 define('SORT_ASC', 4);
 define('SORT_DESC', 3);
 ";
+
+/// Create a test backend whose `stub_index` contains minimal `Exception`
+/// and `RuntimeException` stubs.  This makes catch-variable tests fully
+/// self-contained — they work without phpstorm-stubs installed.
+pub fn create_test_backend_with_exception_stubs() -> Backend {
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert("Exception", EXCEPTION_CLASS_STUB);
+    stubs.insert("RuntimeException", RUNTIME_EXCEPTION_CLASS_STUB);
+    Backend::new_test_with_stubs(stubs)
+}
 
 /// Create a test backend whose `stub_index` contains minimal `UnitEnum`
 /// and `BackedEnum` stubs.  This makes "embedded stub" tests fully

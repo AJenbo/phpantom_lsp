@@ -1,6 +1,8 @@
 mod common;
 
-use common::{create_psr4_workspace, create_test_backend};
+use common::{
+    create_psr4_workspace, create_test_backend, create_test_backend_with_exception_stubs,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -9442,7 +9444,7 @@ async fn test_completion_catch_variable_top_level() {
 async fn test_completion_catch_variable_no_own_methods_no_namespace() {
     // Same as the namespace test but WITHOUT a namespace — verifies
     // whether the bug is namespace-specific or inheritance-specific.
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_exception_stubs();
 
     let uri = Url::parse("file:///catch_bare_no_ns.php").unwrap();
     let text = concat!(
@@ -9513,7 +9515,7 @@ async fn test_completion_catch_variable_namespace_no_own_methods() {
     // Reproduces: namespace + exception class with NO own methods (only
     // inherits from \RuntimeException) → catch variable should still
     // resolve via inheritance.
-    let backend = create_test_backend();
+    let backend = create_test_backend_with_exception_stubs();
 
     let uri = Url::parse("file:///catch_ns_bare.php").unwrap();
     let text = concat!(
