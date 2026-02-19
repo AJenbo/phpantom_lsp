@@ -1130,7 +1130,25 @@ pub fn resolve_effective_type(
     native_type: Option<&str>,
     docblock_type: Option<&str>,
 ) -> Option<String> {
-    match (native_type, docblock_type) {
+    // When the docblock type has unclosed brackets (e.g. a multi-line
+    // `@return` that couldn't be fully joined), treat it as broken and
+    // attempt partial recovery.  If recovery yields nothing useful, fall
+    // back to the native type so that resolution is never blocked by a
+    // malformed PHPDoc annotation.
+    let sanitised_doc = docblock_type.and_then(|doc| {
+        if has_unclosed_brackets(doc) {
+            let base = recover_base_type(doc);
+            if base.is_empty() {
+                None
+            } else {
+                Some(base.to_string())
+            }
+        } else {
+            Some(doc.to_string())
+        }
+    });
+
+    match (native_type, sanitised_doc.as_deref()) {
         // Docblock provided, no native hint → use docblock.
         (None, Some(doc)) => Some(doc.to_string()),
         // Both present → override only if compatible.
@@ -1165,7 +1183,10 @@ fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
         .strip_suffix("*/")
         .unwrap_or(docblock);
 
-    for line in inner.lines() {
+    let lines: Vec<&str> = inner.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
         // Strip leading whitespace and the `*` gutter common in docblocks.
         let trimmed = line.trim().trim_start_matches('*').trim();
 
@@ -1174,6 +1195,7 @@ fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
             // at end-of-line, which is invalid and we skip).
             let rest = rest.trim_start();
             if rest.is_empty() {
+                i += 1;
                 continue;
             }
 
@@ -1185,12 +1207,154 @@ fn extract_tag_type(docblock: &str, tag: &str) -> Option<String> {
 
             // Extract the type token, respecting `<…>` nesting so that
             // generics like `Collection<int, User>` are treated as one unit.
+            //
+            // When the type spans multiple docblock lines (e.g.
+            // `@return static<\n *   int,\n *   string\n * >`), the
+            // single-line `split_type_token` will hit end-of-line with
+            // unclosed brackets.  In that case, collect continuation
+            // lines until brackets are balanced, then re-parse.
             let (type_str, _remainder) = split_type_token(rest);
+            let needs_continuation = has_unclosed_brackets(type_str);
 
+            if !needs_continuation {
+                return Some(clean_type(type_str));
+            }
+
+            // ── Multi-line type: join continuation lines ────────
+            let mut joined = rest.to_string();
+            let mut j = i + 1;
+            while j < lines.len() {
+                let cont = lines[j].trim().trim_start_matches('*').trim();
+                // Stop if we hit another tag or an empty line.
+                if cont.starts_with('@') {
+                    break;
+                }
+                joined.push(' ');
+                joined.push_str(cont);
+                // Check whether brackets are now balanced.
+                if !has_unclosed_brackets(&joined) {
+                    break;
+                }
+                j += 1;
+            }
+
+            let joined = normalize_bracket_whitespace(&joined);
+            let (type_str, _) = split_type_token(&joined);
+            let type_str = if has_unclosed_brackets(type_str) {
+                // Brackets still unclosed — partially recover by
+                // stripping the unclosed generic/brace suffix to get
+                // the base type (e.g. `static<…broken` → `static`).
+                recover_base_type(type_str)
+            } else {
+                type_str
+            };
+
+            if type_str.is_empty() {
+                return None;
+            }
             return Some(clean_type(type_str));
         }
+        i += 1;
     }
     None
+}
+
+/// Collapse whitespace immediately after `<` or `{` and immediately
+/// before `>` or `}` so that multi-line joined types like
+/// `array< string, int >` become `array<string, int>`.
+fn normalize_bracket_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i < len {
+        let c = chars[i];
+        out.push(c);
+        // After `<` or `{`, skip whitespace.
+        if (c == '<' || c == '{') && i + 1 < len {
+            let mut j = i + 1;
+            while j < len && chars[j].is_whitespace() {
+                j += 1;
+            }
+            i = j;
+            continue;
+        }
+        // Before `>` or `}`, trim trailing whitespace already in `out`.
+        if (c == '>' || c == '}') && !out.is_empty() {
+            // We already pushed c — remove it, trim trailing ws, re-push.
+            out.pop();
+            let trimmed_len = out.trim_end().len();
+            out.truncate(trimmed_len);
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Check whether a type string has unclosed `<…>` or `{…}` brackets.
+fn has_unclosed_brackets(s: &str) -> bool {
+    let mut angle: i32 = 0;
+    let mut brace: i32 = 0;
+    for c in s.chars() {
+        match c {
+            '<' => angle += 1,
+            '>' if angle > 0 => angle -= 1,
+            '{' => brace += 1,
+            '}' if brace > 0 => brace -= 1,
+            _ => {}
+        }
+    }
+    angle != 0 || brace != 0
+}
+
+/// Attempt to recover a usable base type from a type string with unclosed
+/// brackets.  Truncates at the first unclosed `<` or `{` and returns the
+/// base portion (e.g. `static<…broken` → `static`,
+/// `Collection<int, User` → `Collection`).  Returns an empty string if
+/// nothing useful can be recovered.
+fn recover_base_type(s: &str) -> &str {
+    // Walk forward and find the position where the first `<` or `{`
+    // opens without a corresponding close.
+    let mut angle: i32 = 0;
+    let mut brace: i32 = 0;
+    let mut first_unclosed = None;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => {
+                if angle == 0 && brace == 0 && first_unclosed.is_none() {
+                    first_unclosed = Some(i);
+                }
+                angle += 1;
+            }
+            '>' if angle > 0 => {
+                angle -= 1;
+                if angle == 0 && brace == 0 {
+                    first_unclosed = None;
+                }
+            }
+            '{' => {
+                if brace == 0 && angle == 0 && first_unclosed.is_none() {
+                    first_unclosed = Some(i);
+                }
+                brace += 1;
+            }
+            '}' if brace > 0 => {
+                brace -= 1;
+                if brace == 0 && angle == 0 {
+                    first_unclosed = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    match first_unclosed {
+        Some(pos) => {
+            let base = s[..pos].trim();
+            if base.is_empty() { "" } else { base }
+        }
+        None => s,
+    }
 }
 
 /// Parse the parameter list from a `@method` tag.

@@ -1507,3 +1507,95 @@ function isRegularUser(mixed $value): bool
 {
     return !$value instanceof AdminUser;
 }
+
+// ─── Multi-line @return & Broken Docblock Recovery ──────────────────────────
+//
+// PHPantomLSP handles @return types that span multiple docblock lines
+// (common in Laravel's Collection, Eloquent Builder, etc.).  When a
+// multi-line @return cannot be fully parsed, the base type is recovered
+// (e.g. `static<…broken` → `static`) so resolution still works.
+
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class FluentCollection
+{
+    /**
+     * Multi-line @return with conditionals inside generics.
+     * PHPantomLSP joins the lines and parses the full type.
+     *
+     * @template TGroupKey of array-key
+     *
+     * @param  (callable(TValue, TKey): TGroupKey)|array|string  $groupBy
+     * @param  bool  $preserveKeys
+     * @return static<
+     *  ($groupBy is (array|string)
+     *      ? array-key
+     *      : TGroupKey),
+     *  static<($preserveKeys is true ? TKey : int), TValue>
+     * >
+     */
+    public function groupBy($groupBy, $preserveKeys = false)
+    {
+    }
+
+    /**
+     * Single-line @return — works as before.
+     *
+     * @template TMapValue
+     *
+     * @param  callable(TValue, TKey): TMapValue  $callback
+     * @return static<TKey, TMapValue>
+     */
+    public function map(callable $callback)
+    {
+    }
+
+    /**
+     * Multi-line @return with nested generics spanning lines.
+     *
+     * @return array<
+     *   string,
+     *   FluentCollection<int, TValue>
+     * >
+     */
+    public function toGroupedArray()
+    {
+    }
+
+    /**
+     * @return static<TKey, TValue>
+     */
+    public function values()
+    {
+    }
+}
+
+/** @return FluentCollection */
+function collect(mixed $value = []): FluentCollection
+{
+    return new FluentCollection();
+}
+
+// Try: collect([])->       ← shows map, groupBy, values, toGroupedArray
+// Try: collect([])->map(   ← map() resolves correctly despite groupBy's complex @return
+
+class BrokenDocRecovery
+{
+    /**
+     * Broken multi-line @return — base `static` is recovered.
+     * @return static<
+     */
+    public function broken(): static
+    {
+        return $this;
+    }
+
+    public function working(): string
+    {
+        return 'hello';
+    }
+}
+
+// Try: (new BrokenDocRecovery())->broken()->  ← recovers `static`, shows broken() and working()

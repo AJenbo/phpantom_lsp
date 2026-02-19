@@ -334,6 +334,119 @@ fn return_type_generic_preserved() {
     );
 }
 
+// ── Multi-line @return types ────────────────────────────────────────
+
+#[test]
+fn return_type_multiline_generic_simple() {
+    let doc = concat!(
+        "/**\n",
+        " * @return array<\n",
+        " *   string,\n",
+        " *   int\n",
+        " * >\n",
+        " */",
+    );
+    assert_eq!(extract_return_type(doc), Some("array<string, int>".into()));
+}
+
+#[test]
+fn return_type_multiline_static_with_conditionals() {
+    // Stripped-down version of Laravel Collection::groupBy's @return
+    let doc = concat!(
+        "/**\n",
+        " * @return static<\n",
+        " *  ($groupBy is (array|string)\n",
+        " *      ? array-key\n",
+        " *      : TGroupKey),\n",
+        " *  static<($preserveKeys is true ? TKey : int), TValue>\n",
+        " * >\n",
+        " */",
+    );
+    assert_eq!(
+        extract_return_type(doc),
+        Some("static<($groupBy is (array|string) ? array-key : TGroupKey), static<($preserveKeys is true ? TKey : int), TValue>>".into())
+    );
+}
+
+#[test]
+fn return_type_multiline_nested_generics() {
+    let doc = concat!(
+        "/**\n",
+        " * @return Collection<\n",
+        " *   int,\n",
+        " *   Collection<string, User>\n",
+        " * >\n",
+        " */",
+    );
+    assert_eq!(
+        extract_return_type(doc),
+        Some("Collection<int, Collection<string, User>>".into())
+    );
+}
+
+#[test]
+fn return_type_multiline_brace_shape() {
+    let doc = concat!(
+        "/**\n",
+        " * @return array{\n",
+        " *   name: string,\n",
+        " *   age: int\n",
+        " * }\n",
+        " */",
+    );
+    assert_eq!(
+        extract_return_type(doc),
+        Some("array{name: string, age: int}".into())
+    );
+}
+
+// ── Unclosed-bracket recovery ───────────────────────────────────────
+
+#[test]
+fn return_type_unclosed_angle_recovers_base() {
+    // A docblock where the closing `>` is simply missing — we should
+    // recover the base type rather than returning a broken string.
+    let doc = concat!("/**\n", " * @return SomeType<\n", " */",);
+    assert_eq!(extract_return_type(doc), Some("SomeType".into()));
+}
+
+#[test]
+fn return_type_unclosed_angle_static_recovers() {
+    let doc = concat!("/**\n", " * @return static<\n", " */",);
+    assert_eq!(extract_return_type(doc), Some("static".into()));
+}
+
+// ── resolve_effective_type fallback ─────────────────────────────────
+
+#[test]
+fn effective_type_broken_docblock_falls_back_to_native() {
+    // If the docblock type is completely unrecoverable, the native type
+    // should win.
+    assert_eq!(
+        resolve_effective_type(Some("Result"), Some("<broken")),
+        Some("Result".into()),
+    );
+}
+
+#[test]
+fn effective_type_broken_docblock_recovers_base() {
+    // When there IS a recoverable base in the broken docblock and no
+    // native hint, partial recovery should kick in.
+    assert_eq!(
+        resolve_effective_type(None, Some("Collection<int")),
+        Some("Collection".into()),
+    );
+}
+
+#[test]
+fn effective_type_balanced_docblock_unchanged() {
+    // A well-formed docblock type should pass through normally.
+    assert_eq!(
+        resolve_effective_type(Some("array"), Some("Collection<int, User>")),
+        Some("Collection<int, User>".into()),
+    );
+}
+
 // ── extract_var_type ────────────────────────────────────────────────
 
 #[test]
