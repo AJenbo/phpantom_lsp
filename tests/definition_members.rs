@@ -1525,6 +1525,259 @@ async fn test_goto_definition_member_does_not_fallthrough_to_function() {
 /// chain), go-to-definition on the member should return None — not jump
 /// to a standalone function with the same name.
 #[tokio::test]
+async fn test_goto_definition_method_on_enum_returned_by_static_call_forward_ref() {
+    // Exact reproduction of user report: class defined BEFORE the enum
+    // (forward reference), empty method bodies, no enum cases.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///forward_ref_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                           // 0
+        "final class CurrentEnvironment {\n",                // 1
+        "    public static function country(): Country {\n", // 2
+        "    }\n",                                           // 3
+        "}\n",                                               // 4
+        "\n",                                                // 5
+        "enum Country: string {\n",                          // 6
+        "    public function getName(): string {\n",         // 7
+        "    }\n",                                           // 8
+        "}\n",                                               // 9
+        "\n",                                                // 10
+        "CurrentEnvironment::country()->getName();\n",       // 11
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getName" in `CurrentEnvironment::country()->getName()` on line 11
+    let line_text = "CurrentEnvironment::country()->getName();";
+    let col = line_text.find("getName").unwrap();
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: col as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve ->getName() on enum Country even when class is defined before enum (forward reference)"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 7,
+                "Country::getName() is declared on line 7"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_method_on_enum_returned_by_static_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///static_enum_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                       // 0
+        "enum Country: string {\n",                                      // 1
+        "    case DK = 'DK';\n",                                         // 2
+        "    public function getName(): string { return 'Denmark'; }\n", // 3
+        "}\n",                                                           // 4
+        "\n",                                                            // 5
+        "final class CurrentEnvironment {\n",                            // 6
+        "    public static function country(): Country {\n",             // 7
+        "        return Country::DK;\n",                                 // 8
+        "    }\n",                                                       // 9
+        "}\n",                                                           // 10
+        "\n",                                                            // 11
+        "CurrentEnvironment::country()->getName();\n",                   // 12
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getName" in `CurrentEnvironment::country()->getName()` on line 12
+    let line_text = "CurrentEnvironment::country()->getName();";
+    let col = line_text.find("getName").unwrap();
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 12,
+                character: col as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve ->getName() on enum Country returned by static call"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 3,
+                "Country::getName() is declared on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_method_on_enum_returned_by_static_call_cross_file() {
+    // Reproduces the real-world bug: the enum (`Country`) lives in a
+    // different namespace (`Vendor\Enums`) than the class that returns it
+    // (`App\CurrentEnvironment`).  The return type `Country` is only
+    // resolvable via the `use Vendor\Enums\Country` in the *source* file,
+    // NOT in the caller's file.  This fails if return types are not
+    // resolved to FQN at parse time.
+    let composer_json = r#"{
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/",
+                "Vendor\\Enums\\": "vendor/enums/"
+            }
+        }
+    }"#;
+
+    let country_php = r#"<?php
+namespace Vendor\Enums;
+
+enum Country: string {
+    case DK = 'DK';
+
+    public function getName(): string {
+        return 'Denmark';
+    }
+}
+"#;
+
+    let env_php = r#"<?php
+namespace App;
+
+use Vendor\Enums\Country;
+
+final class CurrentEnvironment {
+    public static function country(): Country {
+        return Country::DK;
+    }
+}
+"#;
+
+    let controller_php = r#"<?php
+namespace App\Http;
+
+use App\CurrentEnvironment;
+
+class MyController {
+    public function index(): void {
+        CurrentEnvironment::country()->getName();
+    }
+}
+"#;
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            ("vendor/enums/Country.php", country_php),
+            ("src/CurrentEnvironment.php", env_php),
+            ("src/Http/MyController.php", controller_php),
+        ],
+    );
+
+    let controller_uri = {
+        let path = _dir.path().join("src/Http/MyController.php");
+        Url::from_file_path(&path).unwrap()
+    };
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: controller_uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: controller_php.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getName" in `CurrentEnvironment::country()->getName()` on line 7
+    let line_text = "        CurrentEnvironment::country()->getName();";
+    let col = line_text.find("getName").unwrap();
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: controller_uri.clone(),
+            },
+            position: Position {
+                line: 7,
+                character: col as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve ->getName() on enum Country returned by cross-file static call \
+         where Country is in a different namespace (Vendor\\Enums) than the returning \
+         class (App\\CurrentEnvironment)"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let country_uri = {
+                let path = _dir.path().join("vendor/enums/Country.php");
+                Url::from_file_path(&path).unwrap()
+            };
+            assert_eq!(
+                location.uri, country_uri,
+                "Should jump to Country.php in the vendor namespace"
+            );
+            assert_eq!(
+                location.range.start.line, 6,
+                "Country::getName() is declared on line 6 in Country.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_goto_definition_unresolvable_member_returns_none() {
     let backend = create_test_backend();
 

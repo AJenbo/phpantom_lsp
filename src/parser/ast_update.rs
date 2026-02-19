@@ -217,6 +217,15 @@ impl Backend {
         use_map: &HashMap<String, String>,
         namespace: &Option<String>,
     ) {
+        // Collect type alias names from ALL classes in the file up-front.
+        // A type alias defined on one class can be referenced from methods
+        // in a different class in the same file, so we must skip all of
+        // them to avoid mangling alias names into FQN form.
+        let all_alias_names: Vec<String> = classes
+            .iter()
+            .flat_map(|c| c.type_aliases.keys().cloned())
+            .collect();
+
         for class in classes.iter_mut() {
             if let Some(ref parent) = class.parent_class {
                 let resolved = Self::resolve_name(parent, use_map, namespace);
@@ -243,6 +252,71 @@ impl Backend {
             Self::resolve_generics_type_args(&mut class.extends_generics, use_map, namespace);
             Self::resolve_generics_type_args(&mut class.implements_generics, use_map, namespace);
             Self::resolve_generics_type_args(&mut class.use_generics, use_map, namespace);
+
+            // Resolve class-like names in method return types and property
+            // type hints so that cross-file resolution works correctly.
+            // For example, if a method returns `Country` and the file has
+            // `use Luxplus\Core\Enums\Country`, the return type becomes
+            // the FQN `Luxplus\Core\Enums\Country`.
+            //
+            // Template params and type alias names are excluded to avoid
+            // mangling generic types and locally-defined type aliases.
+            // We collect alias names from ALL classes in the file because
+            // a type alias defined on one class may be referenced from a
+            // method in a different class in the same file.
+            let template_params = &class.template_params;
+            let skip_names: Vec<String> = template_params
+                .iter()
+                .cloned()
+                .chain(all_alias_names.iter().cloned())
+                .collect();
+
+            // Also resolve class-like names inside type alias definitions
+            // so that `@phpstan-type ActiveUser User` where `User` is
+            // imported via `use App\Models\User` becomes `App\Models\User`.
+            // Skip imported aliases (`from:ClassName:OriginalName`) — those
+            // are internal references, not type strings.
+            for def in class.type_aliases.values_mut() {
+                if let Some(rest) = def.strip_prefix("from:")
+                    && let Some((class_name, original)) = rest.split_once(':')
+                {
+                    // Imported alias — resolve the class name portion.
+                    // Format: `from:ClassName:OriginalName`
+                    let resolved_class = Self::resolve_name(class_name, use_map, namespace);
+                    *def = format!("from:{}:{}", resolved_class, original);
+                    continue;
+                }
+                let resolved = Self::resolve_type_string(def, use_map, namespace, &skip_names);
+                if resolved != *def {
+                    *def = resolved;
+                }
+            }
+
+            for method in &mut class.methods {
+                if let Some(ref ret) = method.return_type {
+                    let resolved = Self::resolve_type_string(ret, use_map, namespace, &skip_names);
+                    if resolved != *ret {
+                        method.return_type = Some(resolved);
+                    }
+                }
+                for param in &mut method.parameters {
+                    if let Some(ref hint) = param.type_hint {
+                        let resolved =
+                            Self::resolve_type_string(hint, use_map, namespace, &skip_names);
+                        if resolved != *hint {
+                            param.type_hint = Some(resolved);
+                        }
+                    }
+                }
+            }
+            for prop in &mut class.properties {
+                if let Some(ref hint) = prop.type_hint {
+                    let resolved = Self::resolve_type_string(hint, use_map, namespace, &skip_names);
+                    if resolved != *hint {
+                        prop.type_hint = Some(resolved);
+                    }
+                }
+            }
         }
     }
 
@@ -275,6 +349,139 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Resolve class-like identifiers within a type string to their
+    /// fully-qualified forms.
+    ///
+    /// Walks through the type string token-by-token, identifies class-like
+    /// identifiers (words that are not scalars, keywords, or template
+    /// params), and resolves each one via `resolve_name`.
+    ///
+    /// Handles complex type strings including unions (`A|B`), intersections
+    /// (`A&B`), nullable (`?A`), generics (`Collection<int, User>`), and
+    /// array shapes (`array{name: string, user: User}`).
+    ///
+    /// # Examples
+    /// - `"Country"` → `"Luxplus\\Core\\Enums\\Country"` (via use map)
+    /// - `"?Country"` → `"?Luxplus\\Core\\Enums\\Country"`
+    /// - `"Country|null"` → `"Luxplus\\Core\\Enums\\Country|null"`
+    /// - `"Collection<int, User>"` → `"App\\Collection<int, App\\User>"`
+    /// - `"T"` (template param) → `"T"` (unchanged)
+    fn resolve_type_string(
+        type_str: &str,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+        skip_names: &[String],
+    ) -> String {
+        // Keywords that should never be resolved as class names.
+        const TYPE_KEYWORDS: &[&str] = &[
+            "self",
+            "static",
+            "parent",
+            "$this",
+            "mixed",
+            "object",
+            "void",
+            "never",
+            "null",
+            "true",
+            "false",
+            "class-string",
+            "list",
+            "non-empty-list",
+            "non-empty-array",
+            "positive-int",
+            "negative-int",
+            "non-empty-string",
+            "numeric-string",
+            "class",
+            "callable",
+            "key-of",
+            "value-of",
+        ];
+
+        let mut result = String::with_capacity(type_str.len());
+        let bytes = type_str.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+
+        // Track brace depth so we can distinguish array shape keys
+        // (identifiers before `:` inside `{…}`) from type names.
+        let mut brace_depth: u32 = 0;
+        // Whether we are in "key position" inside a shape (before the `:`).
+        // Reset to true after each `,` or `{` at the current brace level.
+        let mut in_shape_key = false;
+
+        while i < len {
+            let c = bytes[i] as char;
+
+            // Start of an identifier (letter, underscore, or backslash for FQN)
+            if c.is_ascii_alphabetic() || c == '_' || c == '\\' {
+                let start = i;
+                // Consume the full identifier including namespace separators
+                while i < len
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'\\')
+                {
+                    i += 1;
+                }
+                let word = &type_str[start..i];
+
+                // Inside `{…}` in key position, identifiers are array shape
+                // keys (e.g. `name` in `array{name: string}`), not types.
+                if brace_depth > 0 && in_shape_key {
+                    result.push_str(word);
+                    continue;
+                }
+
+                let lower = word.to_ascii_lowercase();
+                if is_scalar(word)
+                    || TYPE_KEYWORDS.contains(&lower.as_str())
+                    || skip_names.iter().any(|s| s == word)
+                    || word.starts_with('\\')
+                {
+                    // Leave as-is: scalar, keyword, template param,
+                    // type alias name, or already fully-qualified.
+                    result.push_str(word);
+                } else {
+                    result.push_str(&Self::resolve_name(word, use_map, namespace));
+                }
+            } else if c == '$' {
+                // Variable reference like `$this` — consume fully
+                let start = i;
+                i += 1;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                result.push_str(&type_str[start..i]);
+            } else {
+                // Track brace depth and key/value position for array shapes.
+                match c {
+                    '{' => {
+                        brace_depth += 1;
+                        in_shape_key = true;
+                    }
+                    '}' => {
+                        brace_depth = brace_depth.saturating_sub(1);
+                        in_shape_key = brace_depth > 0;
+                    }
+                    ':' if brace_depth > 0 => {
+                        // Colon separates key from value type — switch
+                        // to value position where identifiers ARE types.
+                        in_shape_key = false;
+                    }
+                    ',' if brace_depth > 0 => {
+                        // Comma separates entries — next identifier is a key.
+                        in_shape_key = true;
+                    }
+                    _ => {}
+                }
+                result.push(c);
+                i += 1;
+            }
+        }
+
+        result
     }
 
     /// Resolve a class name to its fully-qualified form given a use_map and
