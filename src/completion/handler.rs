@@ -16,6 +16,39 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
+/// PHP scalar and built-in types offered in docblock type positions.
+///
+/// These are prepended to class-name results so that typing `@param str`
+/// suggests `string` alongside any user-defined classes starting with `str`.
+const PHPDOC_SCALAR_TYPES: &[&str] = &[
+    "string",
+    "int",
+    "float",
+    "bool",
+    "array",
+    "object",
+    "mixed",
+    "void",
+    "null",
+    "callable",
+    "iterable",
+    "never",
+    "self",
+    "static",
+    "parent",
+    "true",
+    "false",
+    "resource",
+    "class-string",
+    "positive-int",
+    "negative-int",
+    "non-empty-string",
+    "non-empty-array",
+    "non-empty-list",
+    "list",
+    "numeric-string",
+];
+
 impl Backend {
     /// Main completion handler — called by `LanguageServer::completion`.
     ///
@@ -45,6 +78,15 @@ impl Backend {
 
         if let Some(content) = content {
             let classes = classes.unwrap_or_default();
+
+            // ── Suppress completion inside non-doc comments ─────────
+            // When the cursor is inside a `//` line comment or a `/* … */`
+            // block comment (but NOT a `/** … */` docblock), return no
+            // completions — typing inside comments should not trigger
+            // suggestions.
+            if crate::completion::phpdoc::is_inside_non_doc_comment(&content, position) {
+                return Ok(None);
+            }
 
             // Gather the current file's `use` statement mappings and namespace
             // so the class_loader can resolve short names like `Resource` to
@@ -83,6 +125,98 @@ impl Backend {
                     &file_namespace,
                 );
                 return Ok(Some(CompletionResponse::Array(items)));
+            }
+
+            // ── Docblock type / variable completion ─────────────────
+            // When the cursor is inside a `/** … */` docblock at a
+            // recognised tag position (e.g. after `@param `, `@return `,
+            // `@throws `, `@var `, …), offer class-name or $variable
+            // completions as appropriate.  At all other docblock
+            // positions (descriptions, unknown tags) suppress the
+            // remaining strategies so random words don't trigger
+            // class / variable suggestions.
+            if crate::completion::phpdoc::is_inside_docblock(&content, position) {
+                use crate::completion::phpdoc::{
+                    DocblockTypingContext, detect_docblock_typing_position, extract_symbol_info,
+                };
+
+                match detect_docblock_typing_position(&content, position) {
+                    Some(DocblockTypingContext::Type { partial }) => {
+                        // Offer scalar / built-in types first, then class
+                        // / interface / enum names from the project.
+                        let partial_lower = partial.to_lowercase();
+                        let mut items: Vec<CompletionItem> = PHPDOC_SCALAR_TYPES
+                            .iter()
+                            .filter(|t| t.to_lowercase().starts_with(&partial_lower))
+                            .enumerate()
+                            .map(|(idx, t)| CompletionItem {
+                                label: t.to_string(),
+                                kind: Some(CompletionItemKind::KEYWORD),
+                                detail: Some("PHP built-in type".to_string()),
+                                insert_text: Some(t.to_string()),
+                                filter_text: Some(t.to_string()),
+                                sort_text: Some(format!("0_scalar_{:03}", idx)),
+                                ..CompletionItem::default()
+                            })
+                            .collect();
+
+                        let (class_items, class_incomplete) = self.build_class_name_completions(
+                            &file_use_map,
+                            &file_namespace,
+                            &partial,
+                            &content,
+                            false, // not a `new` context
+                        );
+                        items.extend(class_items);
+
+                        if !items.is_empty() {
+                            return Ok(Some(CompletionResponse::List(CompletionList {
+                                is_incomplete: class_incomplete,
+                                items,
+                            })));
+                        }
+                        return Ok(None);
+                    }
+                    Some(DocblockTypingContext::Variable { partial }) => {
+                        // Offer $parameter names from the function declaration.
+                        let sym = extract_symbol_info(&content, position);
+                        let partial_lower = partial.to_lowercase();
+                        let items: Vec<CompletionItem> = sym
+                            .params
+                            .iter()
+                            .filter(|(_, name)| {
+                                partial_lower.is_empty()
+                                    || name.to_lowercase().starts_with(&partial_lower)
+                            })
+                            .map(|(type_hint, name)| {
+                                let detail = type_hint.as_deref().unwrap_or("mixed").to_string();
+                                // Always use the full `$name` as insert_text
+                                // — the LSP client replaces the typed prefix
+                                // (whether `$`, `$na`, or empty) with whatever
+                                // we provide, matching how regular variable
+                                // completion works in variable_completion.rs.
+                                CompletionItem {
+                                    label: name.clone(),
+                                    kind: Some(CompletionItemKind::VARIABLE),
+                                    detail: Some(detail),
+                                    insert_text: Some(name.clone()),
+                                    filter_text: Some(name.clone()),
+                                    sort_text: Some(format!("0_{}", name.to_lowercase())),
+                                    ..CompletionItem::default()
+                                }
+                            })
+                            .collect();
+                        if !items.is_empty() {
+                            return Ok(Some(CompletionResponse::Array(items)));
+                        }
+                        return Ok(None);
+                    }
+                    None => {
+                        // Description text or unrecognised position — no
+                        // completions.
+                        return Ok(None);
+                    }
+                }
             }
 
             // ── Named argument completion ───────────────────────────

@@ -63,6 +63,277 @@ pub struct SymbolInfo {
     pub type_hint: Option<String>,
 }
 
+// ─── Docblock Typing Position Detection ─────────────────────────────────────
+
+/// What kind of completion the cursor position inside a docblock tag
+/// calls for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocblockTypingContext {
+    /// Cursor is at a position where a type/class name is expected.
+    ///
+    /// `partial` is the identifier fragment being typed (may be empty).
+    Type { partial: String },
+    /// Cursor is at a position where a `$variable` name is expected
+    /// (e.g. after the type in `@param Type $`).
+    ///
+    /// `partial` is the `$…` fragment being typed (including the `$`).
+    Variable { partial: String },
+}
+
+/// Tags whose first argument is a type expression.
+const TYPE_TAGS: &[&str] = &[
+    "param",
+    "return",
+    "var",
+    "throws",
+    "property",
+    "property-read",
+    "property-write",
+    "mixin",
+    "extends",
+    "implements",
+    "use",
+    "phpstan-param",
+    "phpstan-return",
+    "phpstan-self-out",
+    "phpstan-this-out",
+    "phpstan-assert",
+    "phpstan-assert-if-true",
+    "phpstan-assert-if-false",
+    "phpstan-require-extends",
+    "phpstan-require-implements",
+    "psalm-param",
+    "psalm-return",
+];
+
+/// Tags where a `$variable` follows the type (second argument).
+const VARIABLE_TAGS: &[&str] = &[
+    "param",
+    "property",
+    "property-read",
+    "property-write",
+    "phpstan-param",
+    "phpstan-assert",
+    "phpstan-assert-if-true",
+    "phpstan-assert-if-false",
+    "psalm-param",
+];
+
+/// Detect whether the cursor is at a **type** or **$variable** position
+/// inside a PHPDoc tag line.
+///
+/// Returns `None` when the cursor is in a description area, on a line
+/// without a recognised tag, or outside a docblock.
+///
+/// # Examples
+///
+/// ```text
+/// /** @param |          → Type { partial: "" }
+/// /** @param Str|       → Type { partial: "Str" }
+/// /** @param string |   → Variable { partial: "" }
+/// /** @param string $n| → Variable { partial: "$n" }
+/// /** @return |         → Type { partial: "" }
+/// /** @return Coll|     → Type { partial: "Coll" }
+/// /** @throws |         → Type { partial: "" }
+/// ```
+pub fn detect_docblock_typing_position(
+    content: &str,
+    position: Position,
+) -> Option<DocblockTypingContext> {
+    if !is_inside_docblock(content, position) {
+        return None;
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    let line_idx = position.line as usize;
+    if line_idx >= lines.len() {
+        return None;
+    }
+
+    let line = lines[line_idx];
+    let col = (position.character as usize).min(line.len());
+    let before_cursor = &line[..col];
+
+    // Find the `@tag` on this line.
+    // Look for `@` preceded by whitespace or `*` (docblock prefix).
+    let tag_name = extract_tag_name_from_line(before_cursor)?;
+
+    // Only recognised type-accepting tags trigger completion.
+    let tag_lower = tag_name.to_lowercase();
+    if !TYPE_TAGS.iter().any(|t| *t == tag_lower) {
+        return None;
+    }
+
+    // Find where the tag ends in `before_cursor`.
+    // The tag is `@<tag_name>` — find the byte right after it.
+    let at_pos = before_cursor.rfind('@')?;
+    let tag_end = at_pos + 1 + tag_name.len();
+
+    // Text between the end of the tag and the cursor.
+    let after_tag = &before_cursor[tag_end..];
+
+    // If there's no whitespace after the tag yet, the user is still
+    // typing the tag name — `extract_phpdoc_prefix` handles that.
+    if after_tag.is_empty() || !after_tag.starts_with(|c: char| c.is_whitespace()) {
+        return None;
+    }
+
+    let trimmed = after_tag.trim_start();
+
+    // Nothing after whitespace → empty type position.
+    if trimmed.is_empty() {
+        return Some(DocblockTypingContext::Type {
+            partial: String::new(),
+        });
+    }
+
+    // Does the text after the tag already contain a complete type
+    // followed by whitespace?  We need to respect balanced brackets
+    // so that `array<string, int>` counts as one type token.
+    let (type_token_len, finished) = measure_type_token(trimmed);
+
+    if !finished {
+        // Still inside the type expression — extract the partial
+        // identifier fragment being typed (the last word-like segment).
+        let partial = extract_trailing_identifier(trimmed);
+        return Some(DocblockTypingContext::Type { partial });
+    }
+
+    // The type token is complete.  Does this tag expect a $variable next?
+    let expects_var = VARIABLE_TAGS.iter().any(|t| *t == tag_lower);
+    if !expects_var {
+        // Tags like @return, @throws, @mixin — after the type it's
+        // just a description, no special completion.
+        return None;
+    }
+
+    // Text after the type token.
+    let after_type = trimmed[type_token_len..].trim_start();
+    if after_type.is_empty() {
+        // Space after the type, nothing typed yet → variable position.
+        return Some(DocblockTypingContext::Variable {
+            partial: String::new(),
+        });
+    }
+
+    if after_type.starts_with('$') {
+        // User is typing a variable name.
+        // Extract the partial `$…` fragment (up to cursor).
+        let var_end = after_type
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(after_type.len());
+        let var_fragment = &after_type[..var_end];
+
+        // If there's a space after the variable, we're in description.
+        if var_end < after_type.len() {
+            return None;
+        }
+
+        return Some(DocblockTypingContext::Variable {
+            partial: var_fragment.to_string(),
+        });
+    }
+
+    // Something else after the type (not `$`) — description territory.
+    None
+}
+
+/// Extract the tag name (without `@`) from a docblock line prefix.
+///
+/// Looks for the last `@` preceded by whitespace or `*`, then reads
+/// the tag name (alphanumeric, `-`, `_`).
+fn extract_tag_name_from_line(before_cursor: &str) -> Option<String> {
+    // Find the last `@` that's preceded by whitespace or `*`.
+    let bytes = before_cursor.as_bytes();
+    let mut at_pos = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'@' && (i == 0 || bytes[i - 1].is_ascii_whitespace() || bytes[i - 1] == b'*') {
+            at_pos = Some(i);
+        }
+    }
+    let at = at_pos?;
+    let after_at = &before_cursor[at + 1..];
+
+    // Read tag name: alphanumeric, `-`, `_`
+    let tag_end = after_at
+        .find(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
+        .unwrap_or(after_at.len());
+
+    if tag_end == 0 {
+        return None;
+    }
+
+    Some(after_at[..tag_end].to_string())
+}
+
+/// Measure the length of a type token at the start of `text`.
+///
+/// Returns `(byte_length, finished)` where `finished` is `true` when
+/// the type token is followed by whitespace (meaning it's complete).
+///
+/// Handles balanced `<>`, `{}`, and `()` so that generic types like
+/// `array<string, int>` and array shapes like `array{name: string}`
+/// are treated as a single token.
+fn measure_type_token(text: &str) -> (usize, bool) {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut depth_angle: i32 = 0;
+    let mut depth_brace: i32 = 0;
+    let mut depth_paren: i32 = 0;
+
+    while i < len {
+        let b = bytes[i];
+
+        // Inside nested brackets, keep consuming.
+        if depth_angle > 0 || depth_brace > 0 || depth_paren > 0 {
+            match b {
+                b'<' => depth_angle += 1,
+                b'>' => depth_angle -= 1,
+                b'{' => depth_brace += 1,
+                b'}' => depth_brace -= 1,
+                b'(' => depth_paren += 1,
+                b')' => depth_paren -= 1,
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+
+        // At depth 0:
+        match b {
+            b'<' => depth_angle += 1,
+            b'{' => depth_brace += 1,
+            b'(' => depth_paren += 1,
+            // Union / intersection separators — type continues.
+            b'|' | b'&' => {}
+            // Whitespace at depth 0 → type token is complete.
+            _ if b.is_ascii_whitespace() => return (i, true),
+            _ => {}
+        }
+        i += 1;
+    }
+
+    // Reached end of text — type is unfinished (cursor is inside it).
+    (i, false)
+}
+
+/// Extract the trailing identifier fragment from a partial type string.
+///
+/// Walks backward from the end through characters that can appear in a
+/// PHP class name (`A-Za-z0-9_\`).  This handles union types like
+/// `string|Fo` → `"Fo"` and nullable types like `?Fo` → `"Fo"`.
+fn extract_trailing_identifier(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut i = bytes.len();
+    while i > 0
+        && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_' || bytes[i - 1] == b'\\')
+    {
+        i -= 1;
+    }
+    text[i..].to_string()
+}
+
 /// Check whether the cursor at `position` is inside a `/** … */` docblock
 /// comment, and if so, return the partial tag prefix the user is typing
 /// (e.g. `"@par"`, `"@"`, `"@phpstan-a"`).
@@ -134,6 +405,171 @@ pub fn is_inside_docblock(content: &str, position: Position) -> bool {
     // (which would mean the docblock is closed)
     let after_open = &before_cursor[open_pos + 3..];
     !after_open.contains("*/")
+}
+
+/// Returns `true` if the given position is inside a `//` line comment or
+/// a `/* … */` block comment that is **not** a `/** … */` docblock.
+///
+/// Uses a forward state-machine scan from the start of the file to
+/// correctly handle comments inside string literals (which are ignored).
+pub fn is_inside_non_doc_comment(content: &str, position: Position) -> bool {
+    let target = position_to_byte_offset(content, position);
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Scanner states
+    #[derive(PartialEq)]
+    enum State {
+        Code,
+        SingleString,
+        DoubleString,
+        LineComment,
+        BlockComment,
+        Docblock,
+        Heredoc,
+    }
+
+    let mut state = State::Code;
+    // For heredoc/nowdoc we track the closing label
+    let mut heredoc_label: Vec<u8> = Vec::new();
+
+    while i < len {
+        if i >= target {
+            return state == State::LineComment || state == State::BlockComment;
+        }
+
+        match state {
+            State::Code => {
+                if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
+                    state = State::LineComment;
+                    i += 2;
+                } else if bytes[i] == b'/'
+                    && i + 2 < len
+                    && bytes[i + 1] == b'*'
+                    && bytes[i + 2] == b'*'
+                    && (i + 3 >= len || bytes[i + 3] != b'*')
+                {
+                    // `/**` but not `/***` — that's a docblock
+                    state = State::Docblock;
+                    i += 3;
+                } else if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
+                    state = State::BlockComment;
+                    i += 2;
+                } else if bytes[i] == b'\'' {
+                    state = State::SingleString;
+                    i += 1;
+                } else if bytes[i] == b'"' {
+                    state = State::DoubleString;
+                    i += 1;
+                } else if bytes[i] == b'<'
+                    && i + 2 < len
+                    && bytes[i + 1] == b'<'
+                    && bytes[i + 2] == b'<'
+                {
+                    // Possible heredoc / nowdoc
+                    i += 3;
+                    // Skip optional whitespace
+                    while i < len && bytes[i] == b' ' {
+                        i += 1;
+                    }
+                    let is_nowdoc = i < len && bytes[i] == b'\'';
+                    if is_nowdoc {
+                        i += 1; // skip opening quote
+                    }
+                    heredoc_label.clear();
+                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                        heredoc_label.push(bytes[i]);
+                        i += 1;
+                    }
+                    if !heredoc_label.is_empty() {
+                        if is_nowdoc && i < len && bytes[i] == b'\'' {
+                            i += 1; // skip closing quote
+                        }
+                        state = State::Heredoc;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            State::LineComment => {
+                if bytes[i] == b'\n' {
+                    state = State::Code;
+                }
+                i += 1;
+            }
+            State::BlockComment => {
+                if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
+                    state = State::Code;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            State::Docblock => {
+                if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
+                    state = State::Code;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            State::SingleString => {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    i += 2; // skip escaped char
+                } else if bytes[i] == b'\'' {
+                    state = State::Code;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+            State::DoubleString => {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    i += 2; // skip escaped char
+                } else if bytes[i] == b'"' {
+                    state = State::Code;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+            State::Heredoc => {
+                // Look for the closing label at the start of a line
+                if bytes[i] == b'\n' {
+                    i += 1;
+                    // Skip optional whitespace before the label
+                    let line_start = i;
+                    while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                        i += 1;
+                    }
+                    if i + heredoc_label.len() <= len
+                        && &bytes[i..i + heredoc_label.len()] == heredoc_label.as_slice()
+                    {
+                        let after_label = i + heredoc_label.len();
+                        if after_label >= len
+                            || bytes[after_label] == b';'
+                            || bytes[after_label] == b'\n'
+                            || bytes[after_label] == b'\r'
+                        {
+                            i = after_label;
+                            state = State::Code;
+                            continue;
+                        }
+                    }
+                    // Not the closing label — rewind to just after the newline
+                    // to avoid skipping content, but we already advanced past
+                    // whitespace which is fine (it's part of the heredoc body).
+                    let _ = line_start; // consumed above
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    // Cursor is at or past end of file
+    state == State::LineComment || state == State::BlockComment
 }
 
 /// Determine what PHP symbol follows the docblock at the cursor position.

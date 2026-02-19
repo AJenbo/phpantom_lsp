@@ -7,6 +7,718 @@
 use phpantom_lsp::completion::phpdoc::*;
 use tower_lsp::lsp_types::*;
 
+// ── is_inside_non_doc_comment ───────────────────────────────────────
+
+#[test]
+fn inside_line_comment() {
+    let content = "<?php\n// this is a comment\n";
+    let pos = Position {
+        line: 1,
+        character: 10,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn inside_line_comment_at_start() {
+    let content = "<?php\n// comment\n";
+    let pos = Position {
+        line: 1,
+        character: 2,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn not_inside_line_comment_next_line() {
+    let content = "<?php\n// comment\n$x = 1;\n";
+    let pos = Position {
+        line: 2,
+        character: 3,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn inside_block_comment() {
+    let content = "<?php\n/* block comment */\n";
+    let pos = Position {
+        line: 1,
+        character: 8,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn inside_multiline_block_comment() {
+    let content = "<?php\n/* block\n   comment\n*/\n";
+    let pos = Position {
+        line: 2,
+        character: 5,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn not_inside_block_comment_after_close() {
+    let content = "<?php\n/* block comment */\n$x = 1;\n";
+    let pos = Position {
+        line: 2,
+        character: 3,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn not_inside_docblock_for_non_doc_check() {
+    // `/** … */` docblocks should NOT be flagged as non-doc comments
+    let content = "<?php\n/**\n * @param string $x\n */\n";
+    let pos = Position {
+        line: 2,
+        character: 5,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn not_inside_code_for_non_doc_check() {
+    let content = "<?php\n$x = 1;\n";
+    let pos = Position {
+        line: 1,
+        character: 3,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn line_comment_inside_string_ignored() {
+    // `//` inside a string literal is not a comment
+    let content = "<?php\n$x = '// not a comment';\n";
+    let pos = Position {
+        line: 1,
+        character: 12,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn block_comment_inside_double_string_ignored() {
+    // `/* */` inside a double-quoted string is not a comment
+    let content = "<?php\n$x = \"/* not a comment */\";\n";
+    let pos = Position {
+        line: 1,
+        character: 12,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn line_comment_after_code_on_same_line() {
+    let content = "<?php\n$x = 1; // trailing comment\n";
+    let pos = Position {
+        line: 1,
+        character: 18,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn before_line_comment_on_same_line() {
+    let content = "<?php\n$x = 1; // trailing comment\n";
+    let pos = Position {
+        line: 1,
+        character: 3,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn triple_star_is_block_comment_not_docblock() {
+    // `/***` — PHP's tokeniser treats this as T_COMMENT (regular comment),
+    // NOT T_DOC_COMMENT.  Only `/**` followed by a non-`*` char is a docblock.
+    let content = "<?php\n/*** not a docblock */\n";
+    let pos = Position {
+        line: 1,
+        character: 10,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn heredoc_does_not_leak_into_comment_detection() {
+    // Ensure `//` inside a heredoc body is not treated as a comment
+    let content = "<?php\n$x = <<<EOT\n// not a comment\nEOT;\n$y = 1;\n";
+    let pos = Position {
+        line: 2,
+        character: 5,
+    };
+    assert!(!is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn after_heredoc_code_is_normal() {
+    let content = "<?php\n$x = <<<EOT\nsome text\nEOT;\n// real comment\n";
+    let pos = Position {
+        line: 4,
+        character: 5,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn escaped_quote_in_string_does_not_leak() {
+    // Escaped quote inside a string should not close it prematurely
+    let content = "<?php\n$x = 'it\\'s fine'; // comment\n";
+    let pos = Position {
+        line: 1,
+        character: 25,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn unclosed_line_comment_at_eof() {
+    let content = "<?php\n// comment without newline";
+    let pos = Position {
+        line: 1,
+        character: 15,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+#[test]
+fn unclosed_block_comment_at_eof() {
+    let content = "<?php\n/* unclosed block comment";
+    let pos = Position {
+        line: 1,
+        character: 15,
+    };
+    assert!(is_inside_non_doc_comment(content, pos));
+}
+
+// ── detect_docblock_typing_position ─────────────────────────────
+
+#[test]
+fn typing_pos_param_empty_type() {
+    let content = "<?php\n/**\n * @param \n */\nfunction foo(string $x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 11,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_param_partial_type() {
+    let content = "<?php\n/**\n * @param Str\n */\nfunction foo(string $x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 14,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Str".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_param_variable_empty() {
+    let content = "<?php\n/**\n * @param string \n */\nfunction foo(string $x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 18,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Variable {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_param_variable_partial() {
+    let content = "<?php\n/**\n * @param string $x\n */\nfunction foo(string $x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 20,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Variable {
+            partial: "$x".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_param_description_after_variable() {
+    let content =
+        "<?php\n/**\n * @param string $x some description\n */\nfunction foo(string $x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 30,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+#[test]
+fn typing_pos_return_empty_type() {
+    let content = "<?php\n/**\n * @return \n */\nfunction foo(): string {}\n";
+    let pos = Position {
+        line: 2,
+        character: 12,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_return_partial_type() {
+    let content = "<?php\n/**\n * @return Coll\n */\nfunction foo(): Collection {}\n";
+    let pos = Position {
+        line: 2,
+        character: 15,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Coll".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_return_description() {
+    let content = "<?php\n/**\n * @return string the name\n */\nfunction foo(): string {}\n";
+    let pos = Position {
+        line: 2,
+        character: 25,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+#[test]
+fn typing_pos_throws_empty_type() {
+    let content = "<?php\n/**\n * @throws \n */\nfunction foo(): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 12,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_throws_partial_type() {
+    let content = "<?php\n/**\n * @throws Invalid\n */\nfunction foo(): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 19,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Invalid".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_var_empty_type() {
+    let content = "<?php\n/**\n * @var \n */\n";
+    let pos = Position {
+        line: 2,
+        character: 8,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_var_partial_type() {
+    let content = "<?php\n/**\n * @var Dat\n */\n";
+    let pos = Position {
+        line: 2,
+        character: 11,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Dat".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_mixin_empty_type() {
+    let content = "<?php\n/**\n * @mixin \n */\nclass Foo {}\n";
+    let pos = Position {
+        line: 2,
+        character: 11,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_extends_partial_type() {
+    let content = "<?php\n/**\n * @extends Base\n */\nclass Foo extends Bar {}\n";
+    let pos = Position {
+        line: 2,
+        character: 16,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Base".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_implements_empty_type() {
+    let content = "<?php\n/**\n * @implements \n */\nclass Foo implements Bar {}\n";
+    let pos = Position {
+        line: 2,
+        character: 17,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_property_empty_type() {
+    let content = "<?php\n/**\n * @property \n */\nclass Foo {}\n";
+    let pos = Position {
+        line: 2,
+        character: 15,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_property_variable() {
+    let content = "<?php\n/**\n * @property string $\n */\nclass Foo {}\n";
+    let pos = Position {
+        line: 2,
+        character: 23,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Variable {
+            partial: "$".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_property_read_type() {
+    let content = "<?php\n/**\n * @property-read \n */\nclass Foo {}\n";
+    let pos = Position {
+        line: 2,
+        character: 20,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_phpstan_param_type() {
+    let content = "<?php\n/**\n * @phpstan-param \n */\nfunction foo(array $x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 20,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_phpstan_return_type() {
+    let content = "<?php\n/**\n * @phpstan-return Coll\n */\nfunction foo(): Collection {}\n";
+    let pos = Position {
+        line: 2,
+        character: 23,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Coll".to_string()
+        })
+    );
+}
+
+// ── Union / intersection / nullable types ───────────────────────
+
+#[test]
+fn typing_pos_union_type_second_part() {
+    let content = "<?php\n/**\n * @param string|Fo\n */\nfunction foo($x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 21,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Fo".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_union_type_pipe_only() {
+    let content = "<?php\n/**\n * @param string|\n */\nfunction foo($x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 19,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_intersection_type() {
+    let content = "<?php\n/**\n * @param Foo&Ba\n */\nfunction foo($x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 17,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Ba".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_nullable_type() {
+    let content = "<?php\n/**\n * @param ?Fo\n */\nfunction foo($x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 14,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Fo".to_string()
+        })
+    );
+}
+
+// ── Generic types ───────────────────────────────────────────────
+
+#[test]
+fn typing_pos_generic_type_inside_angle_brackets() {
+    // Cursor inside `Collection<Us` — still inside the type token
+    let content = "<?php\n/**\n * @return Collection<Us\n */\nfunction foo() {}\n";
+    let pos = Position {
+        line: 2,
+        character: 25,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Us".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_generic_type_after_comma() {
+    // Cursor inside `array<string, ` — still in type token
+    let content = "<?php\n/**\n * @return array<string, \n */\nfunction foo() {}\n";
+    let pos = Position {
+        line: 2,
+        character: 26,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: String::new()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_generic_type_after_comma_partial() {
+    let content = "<?php\n/**\n * @return array<string, Us\n */\nfunction foo() {}\n";
+    let pos = Position {
+        line: 2,
+        character: 28,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "Us".to_string()
+        })
+    );
+}
+
+#[test]
+fn typing_pos_closed_generic_then_variable() {
+    // `@param Collection<User> $` — generic is closed, now at variable pos
+    let content =
+        "<?php\n/**\n * @param Collection<User> $\n */\nfunction foo(Collection $c): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 30,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Variable {
+            partial: "$".to_string()
+        })
+    );
+}
+
+// ── Array shape types ───────────────────────────────────────────
+
+#[test]
+fn typing_pos_array_shape_inside_braces() {
+    // Cursor inside `array{name: str` — still in type token
+    let content = "<?php\n/**\n * @return array{name: str\n */\nfunction foo() {}\n";
+    let pos = Position {
+        line: 2,
+        character: 28,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "str".to_string()
+        })
+    );
+}
+
+// ── Namespaced types ────────────────────────────────────────────
+
+#[test]
+fn typing_pos_namespaced_partial() {
+    let content = "<?php\n/**\n * @param App\\Models\\Us\n */\nfunction foo($x): void {}\n";
+    let pos = Position {
+        line: 2,
+        character: 24,
+    };
+    assert_eq!(
+        detect_docblock_typing_position(content, pos),
+        Some(DocblockTypingContext::Type {
+            partial: "App\\Models\\Us".to_string()
+        })
+    );
+}
+
+// ── Unrecognised / non-type tags ────────────────────────────────
+
+#[test]
+fn typing_pos_deprecated_returns_none() {
+    let content = "<?php\n/**\n * @deprecated \n */\n";
+    let pos = Position {
+        line: 2,
+        character: 17,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+#[test]
+fn typing_pos_todo_returns_none() {
+    let content = "<?php\n/**\n * @todo \n */\n";
+    let pos = Position {
+        line: 2,
+        character: 10,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+#[test]
+fn typing_pos_description_line_returns_none() {
+    // Plain description line (no tag)
+    let content = "<?php\n/**\n * This class handles Foo\n */\n";
+    let pos = Position {
+        line: 2,
+        character: 24,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+#[test]
+fn typing_pos_outside_docblock_returns_none() {
+    let content = "<?php\n// @param string\n";
+    let pos = Position {
+        line: 1,
+        character: 15,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+// ── Still typing tag name ───────────────────────────────────────
+
+#[test]
+fn typing_pos_still_typing_tag_name_returns_none() {
+    // `@par` — still typing the tag, no space yet → None (handled by extract_phpdoc_prefix)
+    let content = "<?php\n/**\n * @par\n */\n";
+    let pos = Position {
+        line: 2,
+        character: 8,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
+#[test]
+fn typing_pos_tag_no_space_returns_none() {
+    // Cursor right after `@param` with no space — tag name, not type
+    let content = "<?php\n/**\n * @param\n */\n";
+    let pos = Position {
+        line: 2,
+        character: 10,
+    };
+    assert_eq!(detect_docblock_typing_position(content, pos), None);
+}
+
 // ── is_inside_docblock ──────────────────────────────────────────
 
 #[test]
