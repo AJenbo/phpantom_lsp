@@ -1,6 +1,8 @@
 mod common;
 
-use common::{create_psr4_workspace, create_test_backend_with_stubs};
+use common::{
+    create_psr4_workspace, create_test_backend_with_function_stubs, create_test_backend_with_stubs,
+};
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
 use std::collections::HashMap;
@@ -1365,5 +1367,455 @@ async fn test_auto_import_global_class_inserts_after_existing_use_statements() {
             line: 6,
             character: 0,
         },
+    );
+}
+
+// ─── `new` context filtering tests ─────────────────────────────────────────
+
+/// After `new`, completion should NOT include constants or functions.
+#[tokio::test]
+async fn test_new_context_excludes_constants_and_functions() {
+    let backend = create_test_backend_with_function_stubs();
+    let uri = Url::parse("file:///test_new_no_const_func.php").unwrap();
+    let text = concat!("<?php\n", "new Date\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 8).await;
+
+    // Should find DateTime (a class stub).
+    let has_class = items
+        .iter()
+        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+    assert!(has_class, "Should include class completions after `new`");
+
+    // Should NOT find any constants.
+    let constants: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(
+        constants.is_empty(),
+        "Should not include constants after `new`, got: {:?}",
+        constants
+    );
+
+    // Should NOT find any functions.
+    let functions: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(
+        functions.is_empty(),
+        "Should not include functions after `new`, got: {:?}",
+        functions
+    );
+}
+
+/// Without `new`, completion SHOULD include constants and functions.
+#[tokio::test]
+async fn test_non_new_context_includes_constants_and_functions() {
+    let backend = create_test_backend_with_function_stubs();
+    let uri = Url::parse("file:///test_no_new.php").unwrap();
+    // Bare identifier context — no `new` keyword.
+    let text = concat!("<?php\n", "PHP_\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 4).await;
+
+    let constants: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(
+        !constants.is_empty(),
+        "Should include constants without `new`, got: {:?}",
+        labels(&items)
+    );
+}
+
+/// After `new`, loaded abstract classes should be excluded.
+#[tokio::test]
+async fn test_new_context_excludes_loaded_abstract_class() {
+    let backend = create_test_backend_with_stubs();
+    let uri = Url::parse("file:///test_new_abstract.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "abstract class AbstractWidget {}\n",
+        "class ConcreteWidget extends AbstractWidget {}\n",
+        "new Wid\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 7).await;
+    let class_labels: Vec<&str> = class_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        class_labels.contains(&"ConcreteWidget"),
+        "Should include concrete class, got: {:?}",
+        class_labels
+    );
+    assert!(
+        !class_labels.contains(&"AbstractWidget"),
+        "Should exclude loaded abstract class, got: {:?}",
+        class_labels
+    );
+}
+
+/// After `new`, loaded interfaces should be excluded.
+#[tokio::test]
+async fn test_new_context_excludes_loaded_interface() {
+    let backend = create_test_backend_with_stubs();
+    let uri = Url::parse("file:///test_new_iface.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "interface Renderable {}\n",
+        "class HtmlRenderer implements Renderable {}\n",
+        "new Render\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 10).await;
+    let class_labels: Vec<&str> = class_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        class_labels.contains(&"HtmlRenderer"),
+        "Should include concrete class, got: {:?}",
+        class_labels
+    );
+    assert!(
+        !class_labels.contains(&"Renderable"),
+        "Should exclude loaded interface, got: {:?}",
+        class_labels
+    );
+}
+
+/// After `new`, loaded traits should be excluded.
+#[tokio::test]
+async fn test_new_context_excludes_loaded_trait() {
+    let backend = create_test_backend_with_stubs();
+    let uri = Url::parse("file:///test_new_trait.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "trait Loggable {}\n",
+        "class Logger { use Loggable; }\n",
+        "new Logg\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 8).await;
+    let class_labels: Vec<&str> = class_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        class_labels.contains(&"Logger"),
+        "Should include concrete class, got: {:?}",
+        class_labels
+    );
+    assert!(
+        !class_labels.contains(&"Loggable"),
+        "Should exclude loaded trait, got: {:?}",
+        class_labels
+    );
+}
+
+/// After `new`, loaded enums should be excluded (enums cannot be instantiated).
+#[tokio::test]
+async fn test_new_context_excludes_loaded_enum() {
+    let backend = create_test_backend_with_stubs();
+    let uri = Url::parse("file:///test_new_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "enum ColorEnum { case Red; case Blue; }\n",
+        "class ColorPicker {}\n",
+        "new Color\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 9).await;
+    let class_labels: Vec<&str> = class_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        class_labels.contains(&"ColorPicker"),
+        "Should include concrete class, got: {:?}",
+        class_labels
+    );
+    assert!(
+        !class_labels.contains(&"ColorEnum"),
+        "Should exclude loaded enum, got: {:?}",
+        class_labels
+    );
+}
+
+/// After `new`, unloaded classmap entries whose name matches non-instantiable
+/// naming conventions should sort below normal names:
+/// - ends/starts with "Abstract"
+/// - ends with "Interface"
+/// - starts with `I[A-Z]` (C#-style interface prefix)
+/// - starts/ends with case-sensitive "Base"
+#[tokio::test]
+async fn test_new_context_demotes_likely_non_instantiable_classmap() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{"name": "test/project"}"#,
+    )
+    .expect("failed to write composer.json");
+
+    let composer_dir = dir.path().join("vendor").join("composer");
+    fs::create_dir_all(&composer_dir).expect("failed to create vendor/composer");
+    fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        concat!(
+            "<?php\n",
+            "$vendorDir = dirname(__DIR__);\n",
+            "$baseDir = dirname($vendorDir);\n",
+            "return array(\n",
+            // Concrete — should NOT be demoted
+            "    'Vendor\\\\ConcreteHandler' => $vendorDir . '/src/ConcreteHandler.php',\n",
+            "    'Vendor\\\\ImageHandler' => $vendorDir . '/src/ImageHandler.php',\n",
+            "    'Vendor\\\\DatabaseHandler' => $vendorDir . '/src/DatabaseHandler.php',\n",
+            "    'Vendor\\\\BaselineHandler' => $vendorDir . '/src/BaselineHandler.php',\n",
+            // Abstract prefix/suffix — should be demoted
+            "    'Vendor\\\\AbstractHandler' => $vendorDir . '/src/AbstractHandler.php',\n",
+            "    'Vendor\\\\HandlerAbstract' => $vendorDir . '/src/HandlerAbstract.php',\n",
+            // Interface suffix — should be demoted
+            "    'Vendor\\\\HandlerInterface' => $vendorDir . '/src/HandlerInterface.php',\n",
+            // I[A-Z] prefix — should be demoted
+            "    'Vendor\\\\IHandler' => $vendorDir . '/src/IHandler.php',\n",
+            // Base[A-Z] prefix — should be demoted
+            "    'Vendor\\\\BaseHandler' => $vendorDir . '/src/BaseHandler.php',\n",
+            ");\n",
+        ),
+    )
+    .expect("failed to write autoload_classmap.php");
+
+    let backend = Backend::new_test();
+    *backend.workspace_root.lock().unwrap() = Some(dir.path().to_path_buf());
+
+    let classmap = parse_autoload_classmap(dir.path(), "vendor");
+    if let Ok(mut cm) = backend.classmap.lock() {
+        *cm = classmap;
+    }
+
+    let uri = Url::parse("file:///test_new_demote.php").unwrap();
+    let text = concat!("<?php\n", "new Handler\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 11).await;
+    let classes = class_items(&items);
+
+    let concrete = classes
+        .iter()
+        .find(|i| i.label == "ConcreteHandler")
+        .expect("Should find ConcreteHandler");
+
+    // These should all be demoted below ConcreteHandler.
+    let demoted_names = [
+        "AbstractHandler",
+        "HandlerAbstract",
+        "HandlerInterface",
+        "IHandler",
+        "BaseHandler",
+    ];
+    for name in &demoted_names {
+        let item = classes
+            .iter()
+            .find(|i| i.label == *name)
+            .unwrap_or_else(|| panic!("Should find {} (unloaded, included but demoted)", name));
+        assert!(
+            concrete.sort_text < item.sort_text,
+            "ConcreteHandler ({:?}) should sort before {} ({:?})",
+            concrete.sort_text,
+            name,
+            item.sort_text
+        );
+    }
+
+    // ImageHandler starts with "I" but second char is lowercase — NOT demoted.
+    let image = classes
+        .iter()
+        .find(|i| i.label == "ImageHandler")
+        .expect("Should find ImageHandler");
+    assert_eq!(
+        concrete.sort_text.as_deref().map(|s| &s[..2]),
+        image.sort_text.as_deref().map(|s| &s[..2]),
+        "ImageHandler should have the same sort prefix as ConcreteHandler (not demoted)"
+    );
+
+    // DatabaseHandler contains "base" but not case-sensitive "Base" — NOT demoted.
+    let database = classes
+        .iter()
+        .find(|i| i.label == "DatabaseHandler")
+        .expect("Should find DatabaseHandler");
+    assert_eq!(
+        concrete.sort_text.as_deref().map(|s| &s[..2]),
+        database.sort_text.as_deref().map(|s| &s[..2]),
+        "DatabaseHandler should have the same sort prefix as ConcreteHandler (not demoted)"
+    );
+
+    // BaselineHandler starts with "Base" but 5th char is lowercase — NOT demoted.
+    let baseline = classes
+        .iter()
+        .find(|i| i.label == "BaselineHandler")
+        .expect("Should find BaselineHandler");
+    assert_eq!(
+        concrete.sort_text.as_deref().map(|s| &s[..2]),
+        baseline.sort_text.as_deref().map(|s| &s[..2]),
+        "BaselineHandler should have the same sort prefix as ConcreteHandler (not demoted)"
+    );
+}
+
+/// After `new`, unloaded stub entries whose name starts with "Abstract"
+/// should sort below normal stub names.
+#[tokio::test]
+async fn test_new_context_demotes_likely_non_instantiable_stubs() {
+    let mut stubs: HashMap<&str, &str> = HashMap::new();
+    stubs.insert("ConcreteService", "<?php\nclass ConcreteService {}\n");
+    stubs.insert(
+        "AbstractService",
+        "<?php\nabstract class AbstractService {}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///test_new_demote_stubs.php").unwrap();
+    let text = concat!("<?php\n", "new Service\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 11).await;
+    let classes = class_items(&items);
+
+    let concrete = classes
+        .iter()
+        .find(|i| i.label == "ConcreteService")
+        .expect("Should find ConcreteService");
+    let abstract_item = classes
+        .iter()
+        .find(|i| i.label == "AbstractService")
+        .expect("Should find AbstractService (unloaded stub, included but demoted)");
+
+    assert!(
+        concrete.sort_text < abstract_item.sort_text,
+        "ConcreteService ({:?}) should sort before AbstractService ({:?})",
+        concrete.sort_text,
+        abstract_item.sort_text
+    );
+}
+
+/// After `new`, use-imported classes that are loaded as interfaces should
+/// be excluded.
+#[tokio::test]
+async fn test_new_context_excludes_use_imported_interface() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            (
+                "src/Contracts/Cacheable.php",
+                "<?php\nnamespace App\\Contracts;\ninterface Cacheable {\n    public function cacheKey(): string;\n}\n",
+            ),
+            (
+                "src/Models/CacheStore.php",
+                "<?php\nnamespace App\\Models;\nclass CacheStore {}\n",
+            ),
+        ],
+    );
+
+    // Open both files so they are loaded into the ast_map.
+    let iface_uri = Url::parse("file:///iface.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: iface_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: "<?php\nnamespace App\\Contracts;\ninterface Cacheable {\n    public function cacheKey(): string;\n}\n".to_string(),
+            },
+        })
+        .await;
+
+    let class_uri = Url::parse("file:///cls.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: class_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: "<?php\nnamespace App\\Models;\nclass CacheStore {}\n".to_string(),
+            },
+        })
+        .await;
+
+    let uri = Url::parse("file:///test_new_use_iface.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Contracts\\Cacheable;\n",
+        "use App\\Models\\CacheStore;\n",
+        "new Cache\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 9).await;
+    let class_labels: Vec<&str> = class_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        class_labels.contains(&"CacheStore"),
+        "Should include concrete use-imported class, got: {:?}",
+        class_labels
+    );
+    assert!(
+        !class_labels.contains(&"Cacheable"),
+        "Should exclude use-imported interface in `new` context, got: {:?}",
+        class_labels
+    );
+}
+
+/// After `new`, class_index entries that are loaded as abstract should be
+/// excluded.
+#[tokio::test]
+async fn test_new_context_excludes_class_index_abstract() {
+    let backend = create_test_backend_with_stubs();
+
+    // Load an abstract class into the ast_map.
+    let abs_uri = Url::parse("file:///app/AbstractRepo.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: abs_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: "<?php\nnamespace App;\nabstract class AbstractRepo {}\n".to_string(),
+            },
+        })
+        .await;
+
+    // Also put it in the class_index.
+    if let Ok(mut idx) = backend.class_index.lock() {
+        idx.insert("App\\AbstractRepo".to_string(), abs_uri.to_string());
+    }
+
+    let uri = Url::parse("file:///test_new_idx_abs.php").unwrap();
+    let text = concat!("<?php\n", "new AbstractR\n",);
+
+    let items = complete_at(&backend, &uri, text, 1, 13).await;
+    let class_labels: Vec<&str> = class_items(&items)
+        .iter()
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        !class_labels.contains(&"AbstractRepo"),
+        "Should exclude class_index entry that is loaded as abstract, got: {:?}",
+        class_labels
     );
 }

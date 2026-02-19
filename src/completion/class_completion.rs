@@ -17,6 +17,44 @@ use crate::types::*;
 
 use super::builder::{build_callable_snippet, build_use_edit, find_use_insert_position};
 
+/// Heuristic check for class names that are unlikely to be instantiable.
+///
+/// Returns `true` when the short name matches common naming conventions
+/// for abstract classes and interfaces:
+///
+/// - **Abstract:** case-insensitive `"abstract"` as prefix or suffix
+///   (e.g. `AbstractController`, `HandlerAbstract`)
+/// - **Interface:** case-insensitive `"interface"` as suffix
+///   (e.g. `LoggerInterface`)
+/// - **I-prefix:** `I` followed by an uppercase letter
+///   (e.g. `ILogger`, `IRepository` — C#-style interface naming)
+/// - **Base-prefix:** `Base` followed by an uppercase letter
+///   (e.g. `BaseController`, `BaseModel`)
+fn likely_non_instantiable(short_name: &str) -> bool {
+    let lower = short_name.to_ascii_lowercase();
+    if lower.ends_with("abstract") || lower.starts_with("abstract") || lower.ends_with("interface")
+    {
+        return true;
+    }
+    // I[A-Z] prefix — C#-style interface naming (ILogger, IRepository).
+    // The length check + ascii uppercase guard avoids matching `Image`, `Item`, etc.
+    if short_name.starts_with('I') && short_name.len() >= 2 {
+        let second = short_name.as_bytes()[1];
+        if second.is_ascii_uppercase() {
+            return true;
+        }
+    }
+    // Base[A-Z] prefix (BaseController, BaseModel).
+    // Requires uppercase after "Base" to avoid matching e.g. `Baseline`.
+    if short_name.starts_with("Base") && short_name.len() >= 5 {
+        let fifth = short_name.as_bytes()[4];
+        if fifth.is_ascii_uppercase() {
+            return true;
+        }
+    }
+    false
+}
+
 impl Backend {
     /// Extract the partial identifier (class name fragment) that the user
     /// is currently typing at the given cursor position.
@@ -229,6 +267,11 @@ impl Backend {
             if !seen_fqns.insert(fqn.clone()) {
                 continue;
             }
+            // After `new`, skip interfaces, traits, enums and abstract
+            // classes that we already know about.
+            if is_new && !self.is_instantiable_or_unloaded(fqn) {
+                continue;
+            }
             let (insert_text, insert_text_format) = if is_new {
                 Self::build_new_insert(short_name, None)
             } else {
@@ -268,6 +311,10 @@ impl Backend {
                     if let Some(classes) = amap.get(uri) {
                         for cls in classes {
                             if !cls.name.to_lowercase().contains(&prefix_lower) {
+                                continue;
+                            }
+                            // After `new`, only concrete classes are valid.
+                            if is_new && (cls.kind != ClassLikeKind::Class || cls.is_abstract) {
                                 continue;
                             }
                             let fqn = format!("{}\\{}", ns, cls.name);
@@ -313,12 +360,23 @@ impl Backend {
                 if !seen_fqns.insert(fqn.clone()) {
                     continue;
                 }
+                // After `new`, skip non-concrete classes that are loaded.
+                if is_new && !self.is_instantiable_or_unloaded(fqn) {
+                    continue;
+                }
                 let (insert_text, insert_text_format) = if is_new {
                     // class_index is a FQN → URI map; the class may or
                     // may not be fully loaded — just insert empty parens.
                     (format!("{short_name}()$0"), Some(InsertTextFormat::SNIPPET))
                 } else {
                     (short_name.to_string(), None)
+                };
+                // In `new` context, demote names that look like abstract
+                // classes or interfaces so concrete-looking names appear first.
+                let sort_prefix = if is_new && likely_non_instantiable(short_name) {
+                    "7"
+                } else {
+                    "2"
                 };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
@@ -327,7 +385,7 @@ impl Backend {
                     insert_text: Some(insert_text),
                     insert_text_format,
                     filter_text: Some(short_name.to_string()),
-                    sort_text: Some(format!("2_{}", short_name.to_lowercase())),
+                    sort_text: Some(format!("{}_{}", sort_prefix, short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
                     ..CompletionItem::default()
                 });
@@ -349,6 +407,13 @@ impl Backend {
                 } else {
                     (short_name.to_string(), None)
                 };
+                // In `new` context, demote names that look like abstract
+                // classes or interfaces so concrete-looking names appear first.
+                let sort_prefix = if is_new && likely_non_instantiable(short_name) {
+                    "8"
+                } else {
+                    "3"
+                };
                 items.push(CompletionItem {
                     label: short_name.to_string(),
                     kind: Some(CompletionItemKind::CLASS),
@@ -356,7 +421,7 @@ impl Backend {
                     insert_text: Some(insert_text),
                     insert_text_format,
                     filter_text: Some(short_name.to_string()),
-                    sort_text: Some(format!("3_{}", short_name.to_lowercase())),
+                    sort_text: Some(format!("{}_{}", sort_prefix, short_name.to_lowercase())),
                     additional_text_edits: build_use_edit(fqn, use_insert_pos, file_namespace),
                     ..CompletionItem::default()
                 });
@@ -379,6 +444,13 @@ impl Backend {
             } else {
                 (short_name.to_string(), None)
             };
+            // In `new` context, demote names that look like abstract
+            // classes or interfaces so concrete-looking names appear first.
+            let sort_prefix = if is_new && likely_non_instantiable(short_name) {
+                "9"
+            } else {
+                "4"
+            };
             items.push(CompletionItem {
                 label: short_name.to_string(),
                 kind: Some(CompletionItemKind::CLASS),
@@ -386,7 +458,7 @@ impl Backend {
                 insert_text: Some(insert_text),
                 insert_text_format,
                 filter_text: Some(short_name.to_string()),
-                sort_text: Some(format!("4_{}", short_name.to_lowercase())),
+                sort_text: Some(format!("{}_{}", sort_prefix, short_name.to_lowercase())),
                 additional_text_edits: build_use_edit(name, use_insert_pos, file_namespace),
                 ..CompletionItem::default()
             });
@@ -471,6 +543,47 @@ impl Backend {
             },
             None => false, // class not loaded — can't confirm
         }
+    }
+
+    /// Check whether the class identified by `class_name` is instantiable
+    /// or simply not loaded yet.
+    ///
+    /// Returns `true` when the class is **not** found in the `ast_map`
+    /// (unloaded — we cannot tell, so we allow it) **or** when it is
+    /// found and is a concrete, non-abstract `class`.
+    ///
+    /// Returns `false` only when the class **is** loaded and is an
+    /// interface, trait, enum, or abstract class.  This never triggers
+    /// disk I/O.
+    fn is_instantiable_or_unloaded(&self, class_name: &str) -> bool {
+        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
+        let last_segment = normalized.rsplit('\\').next().unwrap_or(normalized);
+        let expected_ns: Option<&str> = if normalized.contains('\\') {
+            Some(&normalized[..normalized.len() - last_segment.len() - 1])
+        } else {
+            None
+        };
+
+        let Some(map) = self.ast_map.lock().ok() else {
+            return true;
+        };
+        let nmap = self.namespace_map.lock().ok();
+        for (uri, classes) in map.iter() {
+            if let Some(c) = classes.iter().find(|c| c.name == last_segment) {
+                if let Some(exp_ns) = expected_ns {
+                    let file_ns = nmap
+                        .as_ref()
+                        .and_then(|nm| nm.get(uri))
+                        .and_then(|opt| opt.as_deref());
+                    if file_ns != Some(exp_ns) {
+                        continue;
+                    }
+                }
+                return c.kind == ClassLikeKind::Class && !c.is_abstract;
+            }
+        }
+        // Not found in ast_map — unloaded, so allow it.
+        true
     }
 
     /// Check whether the class identified by `class_name` is a concrete,

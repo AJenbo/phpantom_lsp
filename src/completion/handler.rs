@@ -513,20 +513,34 @@ impl Backend {
                     &content,
                     is_new,
                 );
-                let (constant_items, const_incomplete) = self.build_constant_completions(&partial);
-                let (function_items, func_incomplete) = self.build_function_completions(&partial);
 
-                if !class_items.is_empty()
-                    || !constant_items.is_empty()
-                    || !function_items.is_empty()
-                {
-                    let mut items = class_items;
-                    items.extend(constant_items);
-                    items.extend(function_items);
-                    return Ok(Some(CompletionResponse::List(CompletionList {
-                        is_incomplete: class_incomplete || const_incomplete || func_incomplete,
-                        items,
-                    })));
+                // After `new`, only class names are valid — skip
+                // constants and functions.
+                if is_new {
+                    if !class_items.is_empty() {
+                        return Ok(Some(CompletionResponse::List(CompletionList {
+                            is_incomplete: class_incomplete,
+                            items: class_items,
+                        })));
+                    }
+                } else {
+                    let (constant_items, const_incomplete) =
+                        self.build_constant_completions(&partial);
+                    let (function_items, func_incomplete) =
+                        self.build_function_completions(&partial);
+
+                    if !class_items.is_empty()
+                        || !constant_items.is_empty()
+                        || !function_items.is_empty()
+                    {
+                        let mut items = class_items;
+                        items.extend(constant_items);
+                        items.extend(function_items);
+                        return Ok(Some(CompletionResponse::List(CompletionList {
+                            is_incomplete: class_incomplete || const_incomplete || func_incomplete,
+                            items,
+                        })));
+                    }
                 }
             }
         }
