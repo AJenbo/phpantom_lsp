@@ -396,6 +396,20 @@ $typedClosure = function(User $u): string { return $u->getName(); };
 $typedArrow = fn(int $x): float => $x * 1.5;
 
 
+// ── Multi-line @return & Broken Docblock Recovery ───────────────────────────
+
+// Try: collect([])->       ← shows map, groupBy, values, toGroupedArray
+// Try: collect([])->map(   ← map() resolves correctly despite groupBy's complex @return
+// Try: (new BrokenDocRecovery())->broken()->  ← recovers `static`, shows broken() and working()
+
+
+// ── Foreach over Generic Collection Classes ─────────────────────────────────
+// When a class has @extends or @implements with generic type parameters,
+// foreach automatically resolves the element type — even without an
+// inline @var annotation.
+// Open CollectionForeachDemo methods below to try completion inside them.
+
+
 // ── parent:: Completion ─────────────────────────────────────────────────────
 // Open AdminUser's constructor and toArray() in scaffolding below for
 // parent:: examples (inherited methods, overridden methods, constants).
@@ -802,6 +816,48 @@ class ParamOverrideDemo
 
         // $this->recipe is Recipe from @param, not just object
         $this->recipe->title;               // Recipe::$title
+    }
+}
+
+// ── Foreach over Generic Collection Classes ─────────────────────────────────
+
+class CollectionForeachDemo
+{
+    public UserEloquentCollection $users;
+
+    public function getUsers(): UserEloquentCollection
+    {
+        return new UserEloquentCollection();
+    }
+
+    public function foreachNewCollection(): void
+    {
+        $items = new UserEloquentCollection();
+        foreach ($items as $item) {
+            $item->getEmail();            // resolves to User via @extends generics
+        }
+    }
+
+    public function foreachMethodReturn(): void
+    {
+        foreach ($this->getUsers() as $user) {
+            $user->getName();             // resolves via method return type → collection generics
+        }
+    }
+
+    public function foreachProperty(): void
+    {
+        foreach ($this->users as $user) {
+            $user->getEmail();            // resolves via property type → collection generics
+        }
+    }
+
+    public function foreachVariable(): void
+    {
+        $collection = $this->getUsers();
+        foreach ($collection as $user) {
+            $user->getName();             // resolves via variable assignment scanning
+        }
     }
 }
 
@@ -1509,11 +1565,6 @@ function isRegularUser(mixed $value): bool
 }
 
 // ─── Multi-line @return & Broken Docblock Recovery ──────────────────────────
-//
-// PHPantomLSP handles @return types that span multiple docblock lines
-// (common in Laravel's Collection, Eloquent Builder, etc.).  When a
-// multi-line @return cannot be fully parsed, the base type is recovered
-// (e.g. `static<…broken` → `static`) so resolution still works.
 
 /**
  * @template TKey of array-key
@@ -1578,9 +1629,6 @@ function collect(mixed $value = []): FluentCollection
     return new FluentCollection();
 }
 
-// Try: collect([])->       ← shows map, groupBy, values, toGroupedArray
-// Try: collect([])->map(   ← map() resolves correctly despite groupBy's complex @return
-
 class BrokenDocRecovery
 {
     /**
@@ -1598,4 +1646,27 @@ class BrokenDocRecovery
     }
 }
 
-// Try: (new BrokenDocRecovery())->broken()->  ← recovers `static`, shows broken() and working()
+// ─── Foreach over Generic Collection Classes ────────────────────────────────
+
+/**
+ * @template TKey of array-key
+ * @template-covariant TValue
+ * @implements \IteratorAggregate<TKey, TValue>
+ */
+class BaseCollection implements \IteratorAggregate
+{
+    /** @return \ArrayIterator<TKey, TValue> */
+    public function getIterator(): \ArrayIterator { return new \ArrayIterator([]); }
+}
+
+/**
+ * @template TKey of array-key
+ * @template TModel of Model
+ * @extends BaseCollection<TKey, TModel>
+ */
+class EloquentCollection extends BaseCollection {}
+
+/**
+ * @extends EloquentCollection<int, User>
+ */
+final class UserEloquentCollection extends EloquentCollection {}

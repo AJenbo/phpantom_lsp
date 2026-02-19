@@ -748,57 +748,61 @@ impl Backend {
         // Try to extract the raw iterable type from the foreach expression.
         // `extract_rhs_iterable_raw_type` handles method calls, static
         // calls, property access, function calls, and simple variables.
-        let raw_type = if let Some(rt) =
-            Self::extract_rhs_iterable_raw_type(foreach.expression, ctx)
-        {
-            rt
-        } else {
+        let raw_type = Self::extract_rhs_iterable_raw_type(foreach.expression, ctx).or_else(|| {
             // Fallback: for simple `$variable` expressions, search backward
             // from the foreach for @var or @param annotations.
             let expr_span = foreach.expression.span();
             let expr_start = expr_span.start.offset as usize;
             let expr_end = expr_span.end.offset as usize;
-            let expr_text = match ctx.content.get(expr_start..expr_end) {
-                Some(t) => t.trim(),
-                None => return,
-            };
+            let expr_text = ctx.content.get(expr_start..expr_end)?.trim();
 
             if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
-                return;
+                return None;
             }
 
             let foreach_offset = foreach.foreach.span().start.offset as usize;
-            match docblock::find_iterable_raw_type_in_source(ctx.content, foreach_offset, expr_text)
-            {
-                Some(t) => t,
-                None => return,
-            }
-        };
+            docblock::find_iterable_raw_type_in_source(ctx.content, foreach_offset, expr_text)
+        });
 
         // Extract the generic element type (e.g. `list<User>` → `User`).
-        let element_type = match docblock::types::extract_generic_value_type(&raw_type) {
-            Some(t) => t,
-            None => return,
-        };
-
-        // Resolve the element type to ClassInfo.
-        let resolved = Self::type_hint_to_classes(
-            &element_type,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
-
-        if resolved.is_empty() {
+        if let Some(ref rt) = raw_type
+            && let Some(element_type) = docblock::types::extract_generic_value_type(rt)
+        {
+            Self::push_foreach_resolved_types(&element_type, ctx, results, conditional);
             return;
         }
 
-        if !conditional {
-            results.clear();
-        }
-        for cls in resolved {
-            if !results.iter().any(|c| c.name == cls.name) {
-                results.push(cls);
+        // ── Fallback: resolve the iterated expression to ClassInfo and
+        //    extract the value type from its generic annotations ─────────
+        //
+        // This handles cases where the iterated expression resolves to a
+        // concrete collection class (e.g. `$items = new UserCollection()`)
+        // whose `@extends` or `@implements` annotations carry the generic
+        // type parameters, but no inline `@var` annotation is present.
+        //
+        // Also handles the case where a method/property returns a class
+        // name like `PaymentOptionLocaleCollection` without generic syntax
+        // in the return type string.
+        let iterable_classes = if let Some(ref rt) = raw_type {
+            // raw_type is a class name like "PaymentOptionLocaleCollection"
+            // (extract_generic_value_type returned None above).
+            Self::type_hint_to_classes(
+                rt,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        } else {
+            // No raw type at all — resolve the foreach expression as a
+            // subject string via variable / assignment scanning.
+            Self::resolve_foreach_expression_to_classes(foreach.expression, ctx)
+        };
+
+        for cls in &iterable_classes {
+            let merged = Self::resolve_class_with_inheritance(cls, ctx.class_loader);
+            if let Some(value_type) = Self::extract_iterable_element_type_from_class(&merged) {
+                Self::push_foreach_resolved_types(&value_type, ctx, results, conditional);
+                return;
             }
         }
     }
@@ -839,42 +843,64 @@ impl Backend {
         // Try to extract the raw iterable type from the foreach expression.
         // `extract_rhs_iterable_raw_type` handles method calls, static
         // calls, property access, function calls, and simple variables.
-        let raw_type = if let Some(rt) =
-            Self::extract_rhs_iterable_raw_type(foreach.expression, ctx)
-        {
-            rt
-        } else {
+        let raw_type = Self::extract_rhs_iterable_raw_type(foreach.expression, ctx).or_else(|| {
             // Fallback: for simple `$variable` expressions, search backward
             // from the foreach for @var or @param annotations.
             let expr_span = foreach.expression.span();
             let expr_start = expr_span.start.offset as usize;
             let expr_end = expr_span.end.offset as usize;
-            let expr_text = match ctx.content.get(expr_start..expr_end) {
-                Some(t) => t.trim(),
-                None => return,
-            };
+            let expr_text = ctx.content.get(expr_start..expr_end)?.trim();
 
             if !expr_text.starts_with('$') || expr_text.contains("->") || expr_text.contains("::") {
-                return;
+                return None;
             }
 
             let foreach_offset = foreach.foreach.span().start.offset as usize;
-            match docblock::find_iterable_raw_type_in_source(ctx.content, foreach_offset, expr_text)
-            {
-                Some(t) => t,
-                None => return,
-            }
-        };
+            docblock::find_iterable_raw_type_in_source(ctx.content, foreach_offset, expr_text)
+        });
 
         // Extract the generic key type (e.g. `array<Request, Response>` → `Request`).
-        let key_type = match docblock::types::extract_generic_key_type(&raw_type) {
-            Some(t) => t,
-            None => return,
+        if let Some(ref rt) = raw_type
+            && let Some(key_type) = docblock::types::extract_generic_key_type(rt)
+        {
+            Self::push_foreach_resolved_types(&key_type, ctx, results, conditional);
+            return;
+        }
+
+        // ── Fallback: resolve the iterated expression to ClassInfo and
+        //    extract the key type from its generic annotations ───────────
+        let iterable_classes = if let Some(ref rt) = raw_type {
+            Self::type_hint_to_classes(
+                rt,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        } else {
+            Self::resolve_foreach_expression_to_classes(foreach.expression, ctx)
         };
 
-        // Resolve the key type to ClassInfo.
+        for cls in &iterable_classes {
+            let merged = Self::resolve_class_with_inheritance(cls, ctx.class_loader);
+            if let Some(key_type) = Self::extract_iterable_key_type_from_class(&merged) {
+                Self::push_foreach_resolved_types(&key_type, ctx, results, conditional);
+                return;
+            }
+        }
+    }
+
+    /// Push resolved foreach element types into the results list.
+    ///
+    /// Shared by both value and key foreach resolution paths: resolves a
+    /// type string to `ClassInfo`(s) and merges them into `results`.
+    fn push_foreach_resolved_types(
+        type_str: &str,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
+    ) {
         let resolved = Self::type_hint_to_classes(
-            &key_type,
+            type_str,
             &ctx.current_class.name,
             ctx.all_classes,
             ctx.class_loader,
@@ -892,6 +918,123 @@ impl Backend {
                 results.push(cls);
             }
         }
+    }
+
+    /// Resolve the foreach iterated expression to `ClassInfo`(s).
+    ///
+    /// Extracts the source text of the expression and resolves it using
+    /// `resolve_target_classes`, which handles `$variable`, `$this->prop`,
+    /// method calls, etc.
+    fn resolve_foreach_expression_to_classes<'b>(
+        expression: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        let expr_span = expression.span();
+        let expr_start = expr_span.start.offset as usize;
+        let expr_end = expr_span.end.offset as usize;
+        let expr_text = match ctx.content.get(expr_start..expr_end) {
+            Some(t) => t.trim(),
+            None => return vec![],
+        };
+
+        if expr_text.is_empty() {
+            return vec![];
+        }
+
+        Self::resolve_target_classes(
+            expr_text,
+            crate::types::AccessKind::Arrow,
+            Some(ctx.current_class),
+            ctx.all_classes,
+            ctx.content,
+            ctx.cursor_offset,
+            ctx.class_loader,
+            ctx.function_loader,
+        )
+    }
+
+    /// Known interface/class names whose generic parameters describe
+    /// iteration types in PHP's `foreach`.
+    const ITERABLE_IFACE_NAMES: &'static [&'static str] = &[
+        "Iterator",
+        "IteratorAggregate",
+        "Traversable",
+        "ArrayAccess",
+        "Enumerable",
+    ];
+
+    /// Extract the iterable **value** (element) type from a class's generic
+    /// annotations.
+    ///
+    /// When a collection class like `PaymentOptionLocaleCollection` has
+    /// `@extends Collection<int, PaymentOptionLocale>` or
+    /// `@implements IteratorAggregate<int, PaymentOptionLocale>`, this
+    /// function returns `Some("PaymentOptionLocale")`.
+    ///
+    /// Checks (in order of priority):
+    /// 1. `implements_generics` for known iterable interfaces
+    /// 2. `extends_generics` for any parent with generic type args
+    ///
+    /// Returns `None` when no generic iterable annotation is found or
+    /// when the element type is a scalar (scalars have no completable
+    /// members).
+    fn extract_iterable_element_type_from_class(class: &ClassInfo) -> Option<String> {
+        // 1. Check implements_generics for known iterable interfaces.
+        for (name, args) in &class.implements_generics {
+            let short = name.rsplit('\\').next().unwrap_or(name);
+            if Self::ITERABLE_IFACE_NAMES.contains(&short) && !args.is_empty() {
+                let value = args.last().unwrap();
+                if !docblock::types::is_scalar(value) {
+                    return Some(value.clone());
+                }
+            }
+        }
+
+        // 2. Check extends_generics — common for collection subclasses
+        //    like `@extends Collection<int, User>`.
+        for (_, args) in &class.extends_generics {
+            if !args.is_empty() {
+                let value = args.last().unwrap();
+                if !docblock::types::is_scalar(value) {
+                    return Some(value.clone());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Extract the iterable **key** type from a class's generic annotations.
+    ///
+    /// For two-parameter generics (e.g. `@implements ArrayAccess<int, User>`),
+    /// returns the first parameter (`"int"`).
+    ///
+    /// Returns `None` when no suitable annotation is found or when only a
+    /// single type parameter is present (single-param generics have an
+    /// implicit `int` key which is scalar).
+    fn extract_iterable_key_type_from_class(class: &ClassInfo) -> Option<String> {
+        // 1. Check implements_generics for known iterable interfaces.
+        for (name, args) in &class.implements_generics {
+            let short = name.rsplit('\\').next().unwrap_or(name);
+            if Self::ITERABLE_IFACE_NAMES.contains(&short) && args.len() >= 2 {
+                let key = &args[0];
+                if !docblock::types::is_scalar(key) {
+                    return Some(key.clone());
+                }
+            }
+        }
+
+        // 2. Check extends_generics.
+        for (_, args) in &class.extends_generics {
+            if args.len() >= 2 {
+                let key = &args[0];
+                if !docblock::types::is_scalar(key) {
+                    return Some(key.clone());
+                }
+            }
+        }
+
+        None
     }
 
     pub(super) fn check_statement_for_assignments<'b>(
