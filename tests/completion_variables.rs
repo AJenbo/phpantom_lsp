@@ -11892,3 +11892,605 @@ async fn test_chained_method_call_extract_raw_type_chain() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Named key destructuring from array shapes ─────────────────────────────
+
+/// `['user' => $person] = $data` where `$data` is `array{user: User, active: bool}`
+/// should resolve `$person` to `User`.
+#[tokio::test]
+async fn test_completion_destructuring_named_key_from_array_shape_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "    public function getEmail(): string {}\n",
+        "}\n",
+        "/** @var array{user: User, active: bool} $data */\n",
+        "$data = loadRecord();\n",
+        "['user' => $person, 'active' => $flag] = $data;\n",
+        "$person->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 8: `$person->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $person from array shape"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include name property from User, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail method from User, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Named key destructuring from function return type annotated as array shape.
+/// `['order' => $ord] = getRecord()` where `getRecord` returns `array{order: Order, total: float}`.
+#[tokio::test]
+async fn test_completion_destructuring_named_key_from_function_return_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public int $id;\n",
+        "    public function getTotal(): float {}\n",
+        "}\n",
+        "/**\n",
+        " * @return array{order: Order, total: float}\n",
+        " */\n",
+        "function getRecord(): array { return []; }\n",
+        "['order' => $ord] = getRecord();\n",
+        "$ord->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$ord->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $ord from array shape return type"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("id")),
+                "Should include id property from Order, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTotal")),
+                "Should include getTotal method from Order, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Positional destructuring from array shape with numeric keys.
+/// `[$first, $second] = $data` where `$data` is `array{User, Address}`
+/// should resolve `$first` to `User` and `$second` to `Address`.
+#[tokio::test]
+async fn test_completion_destructuring_positional_from_array_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_pos.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public string $name;\n",
+        "}\n",
+        "class Address {\n",
+        "    public string $city;\n",
+        "}\n",
+        "/** @var array{User, Address} $data */\n",
+        "$data = getStuff();\n",
+        "[$first, $second] = $data;\n",
+        "$second->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$second->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $second from positional array shape"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("city")),
+                "Should include city property from Address (2nd positional entry), got: {:?}",
+                labels
+            );
+            // Should NOT include User members since $second is the 2nd element.
+            assert!(
+                !labels.iter().any(|l| l.starts_with("name")),
+                "Should NOT include name from User (1st element) on $second, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Explicit numeric key destructuring: `[0 => $a, 1 => $b] = $data`
+/// where `$data` is `array{0: User, 1: Address}`.
+#[tokio::test]
+async fn test_completion_destructuring_numeric_key_from_array_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_numkey.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $sku;\n",
+        "}\n",
+        "class Category {\n",
+        "    public string $label;\n",
+        "}\n",
+        "/** @var array{0: Product, 1: Category} $pair */\n",
+        "$pair = getPair();\n",
+        "[0 => $item, 1 => $cat] = $pair;\n",
+        "$item->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 10: `$item->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $item from numeric key array shape"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("sku")),
+                "Should include sku property from Product, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Named key destructuring inside a class method, with the RHS coming
+/// from a method call returning an array shape.
+#[tokio::test]
+async fn test_completion_destructuring_named_key_method_return_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public string $email;\n",
+        "    public function getBilling(): string {}\n",
+        "}\n",
+        "class Service {\n",
+        "    /**\n",
+        "     * @return array{customer: Customer, total: float}\n",
+        "     */\n",
+        "    public function getInvoice(): array { return []; }\n",
+        "    public function process(): void {\n",
+        "        ['customer' => $cust] = $this->getInvoice();\n",
+        "        $cust->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 12: `$cust->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $cust from method returning array shape"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("email")),
+                "Should include email property from Customer, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getBilling")),
+                "Should include getBilling method from Customer, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Inline `/** @var array{name: string, user: User} */` annotation before
+/// a named destructuring assignment should resolve the keyed entry type.
+#[tokio::test]
+async fn test_completion_destructuring_named_key_inline_var_annotation() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_inline.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public string $label;\n",
+        "    public function render(): string {}\n",
+        "}\n",
+        "/** @var array{widget: Widget, count: int} */\n",
+        "['widget' => $w] = getData();\n",
+        "$w->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 7: `$w->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 4,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $w from inline var array shape"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("label")),
+                "Should include label property from Widget, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("render")),
+                "Should include render method from Widget, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Double-quoted key destructuring: `["user" => $u] = $data` should work
+/// the same as single-quoted keys.
+#[tokio::test]
+async fn test_completion_destructuring_double_quoted_key_from_array_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_dblquote.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Animal {\n",
+        "    public string $species;\n",
+        "}\n",
+        "/** @var array{animal: Animal, count: int} $zoo */\n",
+        "$zoo = getZoo();\n",
+        "[\"animal\" => $a] = $zoo;\n",
+        "$a->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 7: `$a->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 4,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $a from double-quoted key destructuring"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("species")),
+                "Should include species property from Animal, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Generic list destructuring should still work when array shape lookup
+/// does not match — regression guard.
+#[tokio::test]
+async fn test_completion_destructuring_generic_list_still_works() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_generic_guard.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Gadget {\n",
+        "    public string $code;\n",
+        "}\n",
+        "/**\n",
+        " * @return list<Gadget>\n",
+        " */\n",
+        "function loadGadgets(): array { return []; }\n",
+        "[$g1, $g2] = loadGadgets();\n",
+        "$g1->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 9: `$g1->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 5,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should still return results for generic list destructuring"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("code")),
+                "Should include code property from Gadget, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// `list()` syntax with named keys: `list('user' => $u) = $data`.
+#[tokio::test]
+async fn test_completion_destructuring_list_syntax_named_key_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///destruct_shape_list.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Ticket {\n",
+        "    public string $seat;\n",
+        "    public function validate(): bool {}\n",
+        "}\n",
+        "/** @var array{ticket: Ticket, price: float} $booking */\n",
+        "$booking = getBooking();\n",
+        "list('ticket' => $t) = $booking;\n",
+        "$t->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Line 8: `$t->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 4,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $t from list() named key destructuring"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("seat")),
+                "Should include seat property from Ticket, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("validate")),
+                "Should include validate method from Ticket, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

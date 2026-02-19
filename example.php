@@ -937,6 +937,57 @@ class TypeAliasImportDemo
 }
 
 
+// ── Named Key Destructuring from Array Shapes ───────────────────────────────
+
+class DestructuringShapeDemo
+{
+    /**
+     * @return array{customer: Customer, order: Order, total: float}
+     */
+    public function getInvoice(): array { return []; }
+
+    public function namedKeyFromMethodReturn(): void
+    {
+        // Try: $cust->  ← offers email, address (Customer members)
+        ['customer' => $cust, 'order' => $ord] = $this->getInvoice();
+        $cust->email;                     // Customer from 'customer' key
+        $ord->total;                      // Order from 'order' key
+    }
+
+    public function namedKeyFromVariable(): void
+    {
+        /** @var array{user: User, profile: UserProfile, active: bool} $data */
+        $data = getUnknownValue();
+
+        // Try: $person->  ← offers getName(), getEmail() (User members)
+        ['user' => $person, 'profile' => $prof] = $data;
+        $person->getEmail();              // User from 'user' key
+        $prof->getDisplayName();          // UserProfile from 'profile' key
+    }
+
+    public function positionalFromShape(): void
+    {
+        /** @var array{User, Address} $pair */
+        $pair = getUnknownValue();
+
+        // Try: $second->  ← offers city, format() (Address members)
+        [$first, $second] = $pair;
+        $first->getEmail();               // User (positional index 0)
+        $second->format();                // Address (positional index 1)
+    }
+
+    public function listSyntaxNamedKey(): void
+    {
+        /** @var array{recipe: Recipe, servings: int} $meal */
+        $meal = getUnknownValue();
+
+        // Try: $r->  ← offers ingredients (Recipe members)
+        list('recipe' => $r) = $meal;
+        $r->ingredients;                  // Recipe from 'recipe' key
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃

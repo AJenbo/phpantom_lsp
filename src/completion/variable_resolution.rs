@@ -1048,16 +1048,20 @@ impl Backend {
 
     /// Check whether the target variable appears inside an array/list
     /// destructuring LHS and, if so, resolve its type from the RHS's
-    /// generic element type.
+    /// generic element type or array shape entry.
     ///
     /// Supported patterns:
-    ///   - `[$a, $b] = getUsers()`   — function call RHS
-    ///   - `list($a, $b) = $users`   — variable RHS with `@var`/`@param`
-    ///   - `[$a, $b] = $this->m()`   — method/static-method call RHS
+    ///   - `[$a, $b] = getUsers()`           — function call RHS (generic)
+    ///   - `list($a, $b) = $users`           — variable RHS with `@var`/`@param`
+    ///   - `[$a, $b] = $this->m()`           — method/static-method call RHS
+    ///   - `['user' => $p] = $data`          — named key from array shape
+    ///   - `[0 => $first, 1 => $second] = $data` — numeric key from array shape
     ///
-    /// The element type is extracted from the raw return/annotation type
-    /// via `extract_generic_value_type`, so `array<int, User>`, `list<User>`,
-    /// `User[]`, etc. all work.
+    /// When the RHS type is an array shape (`array{key: Type, …}`), the
+    /// destructured variable's key is matched against the shape entries.
+    /// For positional (value-only) elements, the 0-based index is used as
+    /// the key.  Falls back to `extract_generic_value_type` for generic
+    /// iterable types (`list<User>`, `array<int, User>`, `User[]`).
     fn try_resolve_destructured_type<'b>(
         assignment: &'b Assignment<'b>,
         ctx: &VarResolutionCtx<'_>,
@@ -1071,20 +1075,42 @@ impl Backend {
             _ => return,
         };
 
-        // ── 2. Check if our target variable is among the elements ───────
+        // ── 2. Find our target variable and extract its destructuring key
+        //
+        // For `KeyValue` elements like `'user' => $person`, extract the
+        // string/integer key.  For positional `Value` elements, track
+        // the 0-based index so we can look up positional shape entries.
         let var_name = ctx.var_name;
-        let found = elements.iter().any(|elem| {
-            let value_expr = match elem {
-                ArrayElement::Value(val) => Some(val.value),
-                ArrayElement::KeyValue(kv) => Some(kv.value),
-                _ => None,
-            };
-            if let Some(Expression::Variable(Variable::Direct(dv))) = value_expr {
-                dv.name == var_name
-            } else {
-                false
+        let mut shape_key: Option<String> = None;
+        let mut found = false;
+        let mut positional_index: usize = 0;
+
+        for elem in elements.iter() {
+            match elem {
+                ArrayElement::KeyValue(kv) => {
+                    if let Expression::Variable(Variable::Direct(dv)) = kv.value
+                        && dv.name == var_name
+                    {
+                        found = true;
+                        // Extract the key from the LHS expression.
+                        shape_key = Self::extract_destructuring_key(kv.key);
+                        break;
+                    }
+                }
+                ArrayElement::Value(val) => {
+                    if let Expression::Variable(Variable::Direct(dv)) = val.value
+                        && dv.name == var_name
+                    {
+                        found = true;
+                        // Use the positional index as the shape key.
+                        shape_key = Some(positional_index.to_string());
+                        break;
+                    }
+                    positional_index += 1;
+                }
+                _ => {}
             }
-        });
+        }
         if !found {
             return;
         }
@@ -1097,53 +1123,124 @@ impl Backend {
         // ── 3. Try inline `/** @var … */` annotation ────────────────────
         // Handles both:
         //   `/** @var list<User> */`             (no variable name)
-        //   `/** @var array<int, User> $result */` (with variable name — rare)
+        //   `/** @var array{user: User} $data */` (with variable name)
         let stmt_offset = assignment.span().start.offset as usize;
         if let Some((var_type, _var_name_opt)) =
             docblock::find_inline_var_docblock(content, stmt_offset)
-            && let Some(element_type) = docblock::types::extract_generic_value_type(&var_type)
         {
-            let resolved = Self::type_hint_to_classes(
-                &element_type,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
-            if !resolved.is_empty() {
-                if !conditional {
-                    results.clear();
-                }
-                for cls in resolved {
-                    if !results.iter().any(|c| c.name == cls.name) {
-                        results.push(cls);
+            if let Some(ref key) = shape_key
+                && let Some(entry_type) =
+                    docblock::types::extract_array_shape_value_type(&var_type, key)
+            {
+                let resolved = Self::type_hint_to_classes(
+                    &entry_type,
+                    current_class_name,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    if !conditional {
+                        results.clear();
                     }
+                    for cls in resolved {
+                        if !results.iter().any(|c| c.name == cls.name) {
+                            results.push(cls);
+                        }
+                    }
+                    return;
                 }
-                return;
+            }
+
+            if let Some(element_type) = docblock::types::extract_generic_value_type(&var_type) {
+                let resolved = Self::type_hint_to_classes(
+                    &element_type,
+                    current_class_name,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    if !conditional {
+                        results.clear();
+                    }
+                    for cls in resolved {
+                        if !results.iter().any(|c| c.name == cls.name) {
+                            results.push(cls);
+                        }
+                    }
+                    return;
+                }
             }
         }
 
         // ── 4. Try to extract the raw iterable type from the RHS ────────
         let raw_type: Option<String> = Self::extract_rhs_iterable_raw_type(assignment.rhs, ctx);
 
-        if let Some(ref raw) = raw_type
-            && let Some(element_type) = docblock::types::extract_generic_value_type(raw)
-        {
-            let resolved = Self::type_hint_to_classes(
-                &element_type,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
-            if !resolved.is_empty() {
-                if !conditional {
-                    results.clear();
+        if let Some(ref raw) = raw_type {
+            // First try array shape lookup with the destructured key.
+            if let Some(ref key) = shape_key
+                && let Some(entry_type) = docblock::types::extract_array_shape_value_type(raw, key)
+            {
+                let resolved = Self::type_hint_to_classes(
+                    &entry_type,
+                    current_class_name,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    if !conditional {
+                        results.clear();
+                    }
+                    for cls in resolved {
+                        if !results.iter().any(|c| c.name == cls.name) {
+                            results.push(cls);
+                        }
+                    }
+                    return;
                 }
-                for cls in resolved {
-                    if !results.iter().any(|c| c.name == cls.name) {
-                        results.push(cls);
+            }
+
+            // Fall back to generic element type extraction.
+            if let Some(element_type) = docblock::types::extract_generic_value_type(raw) {
+                let resolved = Self::type_hint_to_classes(
+                    &element_type,
+                    current_class_name,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    if !conditional {
+                        results.clear();
+                    }
+                    for cls in resolved {
+                        if !results.iter().any(|c| c.name == cls.name) {
+                            results.push(cls);
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// Extract a string key from a destructuring key expression.
+    ///
+    /// Handles string literals (`'user'`, `"user"`) and integer literals
+    /// (`0`, `1`).  Returns `None` for dynamic or unsupported key
+    /// expressions.
+    fn extract_destructuring_key(key_expr: &Expression<'_>) -> Option<String> {
+        match key_expr {
+            Expression::Literal(Literal::String(lit_str)) => {
+                // `value` strips the quotes; fall back to `raw` trimmed.
+                lit_str.value.map(|v| v.to_string()).or_else(|| {
+                    let raw = lit_str.raw;
+                    // Strip surrounding quotes from the raw representation.
+                    raw.strip_prefix('\'')
+                        .and_then(|s| s.strip_suffix('\''))
+                        .or_else(|| raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+                        .map(|s| s.to_string())
+                })
+            }
+            Expression::Literal(Literal::Integer(lit_int)) => Some(lit_int.raw.to_string()),
+            _ => None,
         }
     }
 
