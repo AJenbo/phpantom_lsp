@@ -14,6 +14,8 @@
 /// - **catch_completion**: Smart exception type completion inside `catch()` clauses
 /// - **conditional_resolution**: PHPStan conditional return type resolution at call sites
 /// - **type_narrowing**: instanceof / assert / custom type guard narrowing
+/// - **type_hint_completion**: Type completion inside function/method parameter lists,
+///   return types, and property declarations (offers native PHP types + class names)
 /// - **variable_resolution**: Variable type resolution via assignment scanning
 /// - **closure_resolution**: Closure and arrow-function parameter resolution
 ///
@@ -31,6 +33,7 @@ pub mod named_args;
 pub mod phpdoc;
 pub mod resolver;
 pub mod target;
+pub(crate) mod type_hint_completion;
 pub mod type_narrowing;
 pub mod use_edit;
 pub mod variable_completion;

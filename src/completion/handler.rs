@@ -219,6 +219,57 @@ impl Backend {
                 }
             }
 
+            // ── Type hint completion in definitions ─────────────────
+            // When the cursor is at a type-hint position inside a
+            // function/method parameter list, return type, or property
+            // declaration, offer PHP native scalar types alongside
+            // class-name completions (but NOT constants or standalone
+            // functions, which are invalid in type positions).
+            //
+            // This check MUST run before named-argument detection so
+            // that typing inside a function *definition* like
+            // `function foo(Us|)` offers type completions rather than
+            // named-argument suggestions for a same-named function.
+            if let Some(th_ctx) = crate::completion::type_hint_completion::detect_type_hint_context(
+                &content, position,
+            ) {
+                let partial_lower = th_ctx.partial.to_lowercase();
+                let mut items: Vec<CompletionItem> =
+                    crate::completion::type_hint_completion::PHP_NATIVE_TYPES
+                        .iter()
+                        .filter(|t| t.to_lowercase().starts_with(&partial_lower))
+                        .enumerate()
+                        .map(|(idx, t)| CompletionItem {
+                            label: t.to_string(),
+                            kind: Some(CompletionItemKind::KEYWORD),
+                            detail: Some("PHP built-in type".to_string()),
+                            insert_text: Some(t.to_string()),
+                            filter_text: Some(t.to_string()),
+                            sort_text: Some(format!("0_{:03}", idx)),
+                            ..CompletionItem::default()
+                        })
+                        .collect();
+
+                let (class_items, class_incomplete) = self.build_class_name_completions(
+                    &file_use_map,
+                    &file_namespace,
+                    &th_ctx.partial,
+                    &content,
+                    false, // not a `new` context
+                );
+                items.extend(class_items);
+
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::List(CompletionList {
+                        is_incomplete: class_incomplete,
+                        items,
+                    })));
+                }
+                // Even when empty, return early so we don't fall through
+                // to named-arg or class+constant+function completion.
+                return Ok(None);
+            }
+
             // ── Named argument completion ───────────────────────────
             // When the cursor is inside the parentheses of a function or
             // method call, offer parameter names as `name:` completions.

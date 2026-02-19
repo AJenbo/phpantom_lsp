@@ -353,6 +353,32 @@ User::findByEmail('a@b.c');               // → findByEmail(${1:$email})
 $r = new Response(200);                   // → Response(${1:$statusCode})
 
 
+// ── Type Hint Completion in Definitions ─────────────────────────────────────
+// When typing a type hint inside a function/method definition, return type,
+// or property declaration, PHPantomLSP offers PHP native scalar types
+// (string, int, float, bool, …) alongside class-name completions.
+// Constants and standalone functions are excluded since they're invalid
+// in type positions.
+
+// Try triggering completion after the `(` or `,` in these signatures:
+function typeHintDemo(User $user, string $name): User { return $user; }
+//                    ↑ type hint  ↑ scalar      ↑ return type
+
+// Union types, nullable types, and intersection types also work:
+function unionDemo(string|int $value, ?User $maybe): User|null { return $maybe; }
+//                 ↑ after |   ↑ after ?             ↑ after |
+
+// Property type hints after visibility modifiers:
+// (see Model class below — `public readonly string $uuid`)
+
+// Promoted constructor parameters with modifiers:
+// (see Customer class below — `private readonly string $email`)
+
+// Closures and arrow functions:
+$typedClosure = function(User $u): string { return $u->getName(); };
+$typedArrow = fn(int $x): float => $x * 1.5;
+
+
 // ── parent:: Completion ─────────────────────────────────────────────────────
 // Open AdminUser's constructor and toArray() in scaffolding below for
 // parent:: examples (inherited methods, overridden methods, constants).
