@@ -29,6 +29,8 @@
 /// Type narrowing (instanceof, assert, custom type guards) is delegated
 /// to the [`super::type_narrowing`] module.  Closure/arrow-function scope
 /// handling is delegated to [`super::closure_resolution`].
+use std::panic;
+
 use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
@@ -61,23 +63,38 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
     ) -> Vec<ClassInfo> {
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = parse_file_content(&arena, file_id, content);
+        // Wrap in catch_unwind so a mago-syntax parser panic doesn't
+        // crash the LSP server (producing a zombie process).
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let arena = Bump::new();
+            let file_id = mago_database::file::FileId::new("input.php");
+            let program = parse_file_content(&arena, file_id, content);
 
-        let ctx = VarResolutionCtx {
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
-            function_loader,
-        };
+            let ctx = VarResolutionCtx {
+                var_name,
+                current_class,
+                all_classes,
+                content,
+                cursor_offset,
+                class_loader,
+                function_loader,
+            };
 
-        // Walk top-level (and namespace-nested) statements to find the
-        // class + method containing the cursor.
-        Self::resolve_variable_in_statements(program.statements.iter(), &ctx)
+            // Walk top-level (and namespace-nested) statements to find the
+            // class + method containing the cursor.
+            Self::resolve_variable_in_statements(program.statements.iter(), &ctx)
+        }));
+
+        match result {
+            Ok(classes) => classes,
+            Err(_) => {
+                log::error!(
+                    "PHPantomLSP: parser panicked during variable resolution for '{}'",
+                    var_name
+                );
+                vec![]
+            }
+        }
     }
 
     pub(super) fn resolve_variable_in_statements<'b>(
@@ -1398,7 +1415,25 @@ impl Backend {
             }
 
             // Delegate all RHS resolution to the shared helper.
-            let resolved = Self::resolve_rhs_expression(assignment.rhs, ctx);
+            //
+            // Use the assignment's own start offset as cursor_offset so
+            // that any recursive variable resolution only considers
+            // assignments *before* this one.  Without this, a
+            // self-referential assignment like `$value = $value->value`
+            // would infinitely recurse: resolving the RHS `$value`
+            // would re-discover the same assignment, resolve its RHS
+            // again, and so on until a stack overflow crashes the
+            // process.
+            let rhs_ctx = VarResolutionCtx {
+                var_name: ctx.var_name,
+                current_class: ctx.current_class,
+                all_classes: ctx.all_classes,
+                content: ctx.content,
+                cursor_offset: assignment.span().start.offset,
+                class_loader: ctx.class_loader,
+                function_loader: ctx.function_loader,
+            };
+            let resolved = Self::resolve_rhs_expression(assignment.rhs, &rhs_ctx);
             push_results(results, resolved, conditional);
         }
     }

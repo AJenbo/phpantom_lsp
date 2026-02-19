@@ -7,6 +7,7 @@
 /// (`resolve_parent_class_names`, `resolve_name`) used to convert short
 /// class names to fully-qualified names.
 use std::collections::HashMap;
+use std::panic;
 
 use crate::docblock::types::is_scalar;
 
@@ -24,6 +25,34 @@ impl Backend {
     /// Update the ast_map, use_map, and namespace_map for a given file URI
     /// by parsing its content.
     pub fn update_ast(&self, uri: &str, content: &str) {
+        // The mago-syntax parser contains `unreachable!()` and `.expect()`
+        // calls that can panic on malformed PHP (e.g. partially-written
+        // heredocs/nowdocs, which are common while editing).  Wrap the
+        // entire parse + extraction in `catch_unwind` so a parser panic
+        // doesn't crash the LSP server and produce a zombie process.
+        //
+        // On panic the file is simply skipped — no maps are updated, and
+        // the user gets stale (but not missing) completions until the
+        // file is saved in a parseable state.
+        let content_owned = content.to_string();
+        let uri_owned = uri.to_string();
+
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            self.update_ast_inner(&uri_owned, &content_owned);
+        }));
+
+        if result.is_err() {
+            log::error!(
+                "PHPantomLSP: parser panicked while parsing {}. Skipping file.",
+                uri
+            );
+        }
+    }
+
+    /// Inner implementation of [`update_ast`] that performs the actual
+    /// parsing and map updates.  Separated so that [`update_ast`] can
+    /// wrap the call in [`std::panic::catch_unwind`].
+    fn update_ast_inner(&self, uri: &str, content: &str) {
         let arena = Bump::new();
         let file_id = mago_database::file::FileId::new("input.php");
         let program = parse_file_content(&arena, file_id, content);

@@ -151,22 +151,33 @@ impl Backend {
     /// Parse PHP source text and extract class information.
     /// Returns a Vec of ClassInfo for all classes found in the file.
     pub fn parse_php(&self, content: &str) -> Vec<ClassInfo> {
-        let arena = bumpalo::Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let content_owned = content.to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let arena = bumpalo::Bump::new();
+            let file_id = mago_database::file::FileId::new("input.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, &content_owned);
 
-        let doc_ctx = DocblockCtx {
-            trivias: program.trivia.as_slice(),
-            content,
-        };
+            let doc_ctx = DocblockCtx {
+                trivias: program.trivia.as_slice(),
+                content: &content_owned,
+            };
 
-        let mut classes = Vec::new();
-        Self::extract_classes_from_statements(
-            program.statements.iter(),
-            &mut classes,
-            Some(&doc_ctx),
-        );
-        classes
+            let mut classes = Vec::new();
+            Self::extract_classes_from_statements(
+                program.statements.iter(),
+                &mut classes,
+                Some(&doc_ctx),
+            );
+            classes
+        }));
+
+        match result {
+            Ok(classes) => classes,
+            Err(_) => {
+                log::error!("PHPantomLSP: parser panicked in parse_php");
+                Vec::new()
+            }
+        }
     }
 
     /// Parse PHP source text and extract standalone function definitions.
@@ -174,23 +185,34 @@ impl Backend {
     /// Returns a list of `FunctionInfo` for every `function` declaration
     /// found at the top level (or inside a namespace block).
     pub fn parse_functions(&self, content: &str) -> Vec<FunctionInfo> {
-        let arena = bumpalo::Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let content_owned = content.to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let arena = bumpalo::Bump::new();
+            let file_id = mago_database::file::FileId::new("input.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, &content_owned);
 
-        let doc_ctx = DocblockCtx {
-            trivias: program.trivia.as_slice(),
-            content,
-        };
+            let doc_ctx = DocblockCtx {
+                trivias: program.trivia.as_slice(),
+                content: &content_owned,
+            };
 
-        let mut functions = Vec::new();
-        Self::extract_functions_from_statements(
-            program.statements.iter(),
-            &mut functions,
-            &None,
-            Some(&doc_ctx),
-        );
-        functions
+            let mut functions = Vec::new();
+            Self::extract_functions_from_statements(
+                program.statements.iter(),
+                &mut functions,
+                &None,
+                Some(&doc_ctx),
+            );
+            functions
+        }));
+
+        match result {
+            Ok(functions) => functions,
+            Err(_) => {
+                log::error!("PHPantomLSP: parser panicked in parse_functions");
+                Vec::new()
+            }
+        }
     }
 
     /// Parse PHP source text and extract constant names from `define()` calls.
@@ -199,13 +221,24 @@ impl Backend {
     /// call found at the top level, inside namespace blocks, block
     /// statements, or `if` guards.
     pub fn parse_defines(&self, content: &str) -> Vec<String> {
-        let arena = bumpalo::Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let content_owned = content.to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let arena = bumpalo::Bump::new();
+            let file_id = mago_database::file::FileId::new("input.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, &content_owned);
 
-        let mut defines = Vec::new();
-        Self::extract_defines_from_statements(program.statements.iter(), &mut defines);
-        defines
+            let mut defines = Vec::new();
+            Self::extract_defines_from_statements(program.statements.iter(), &mut defines);
+            defines
+        }));
+
+        match result {
+            Ok(defines) => defines,
+            Err(_) => {
+                log::error!("PHPantomLSP: parser panicked in parse_defines");
+                Vec::new()
+            }
+        }
     }
 
     /// Parse PHP source text and extract `use` statement mappings.
@@ -224,13 +257,24 @@ impl Backend {
     ///     (function / const imports are skipped — we only track classes)
     ///   - Use statements inside namespace bodies
     pub fn parse_use_statements(&self, content: &str) -> std::collections::HashMap<String, String> {
-        let arena = bumpalo::Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let content_owned = content.to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let arena = bumpalo::Bump::new();
+            let file_id = mago_database::file::FileId::new("input.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, &content_owned);
 
-        let mut use_map = std::collections::HashMap::new();
-        Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
-        use_map
+            let mut use_map = std::collections::HashMap::new();
+            Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
+            use_map
+        }));
+
+        match result {
+            Ok(use_map) => use_map,
+            Err(_) => {
+                log::error!("PHPantomLSP: parser panicked in parse_use_statements");
+                std::collections::HashMap::new()
+            }
+        }
     }
 
     /// Parse PHP source text and extract the declared namespace (if any).
@@ -238,10 +282,21 @@ impl Backend {
     /// Returns the namespace string (e.g. `"Klarna\Rest\Checkout"`) or
     /// `None` if the file has no namespace declaration.
     pub fn parse_namespace(&self, content: &str) -> Option<String> {
-        let arena = bumpalo::Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+        let content_owned = content.to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let arena = bumpalo::Bump::new();
+            let file_id = mago_database::file::FileId::new("input.php");
+            let program = mago_syntax::parser::parse_file_content(&arena, file_id, &content_owned);
 
-        Self::extract_namespace_from_statements(program.statements.iter())
+            Self::extract_namespace_from_statements(program.statements.iter())
+        }));
+
+        match result {
+            Ok(ns) => ns,
+            Err(_) => {
+                log::error!("PHPantomLSP: parser panicked in parse_namespace");
+                None
+            }
+        }
     }
 }

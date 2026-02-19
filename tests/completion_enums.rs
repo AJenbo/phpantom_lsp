@@ -2765,3 +2765,65 @@ async fn test_completion_variable_assigned_enum_case_top_level() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Regression test: `$value = $value->value` after `instanceof BackedEnum`
+/// must not cause infinite recursion / stack overflow.
+///
+/// The variable `$value` is reassigned from its own property access.  Without
+/// the cursor-offset limiting fix in `check_expression_for_assignment`, the
+/// resolver would try to resolve `$value` on the RHS, re-discover the same
+/// assignment, and recurse until the stack overflows — crashing the LSP
+/// server into a zombie process with no error log.
+#[tokio::test]
+async fn test_completion_self_referential_assignment_backed_enum_value() {
+    let backend = create_test_backend_with_stubs();
+
+    let uri = Url::parse("file:///self_ref_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "class ConvertHelper {\n",                                   // 1
+        "    public static function toBool(mixed $value): bool {\n", // 2
+        "        if ($value instanceof \\BackedEnum) {\n",           // 3
+        "            $value = $value->value;\n",                     // 4
+        "        }\n",                                               // 5
+        "        $value->\n",                                        // 6
+        "    }\n",                                                   // 7
+        "}\n",                                                       // 8
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // The main assertion is that this does NOT hang / crash.
+    // The completion request must return within a reasonable time.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        backend.completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 17,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        }),
+    )
+    .await;
+
+    // If we got here without timeout/crash, the fix works.
+    assert!(
+        result.is_ok(),
+        "Completion request should not hang on self-referential assignment"
+    );
+}
