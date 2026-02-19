@@ -1272,6 +1272,14 @@ impl Backend {
                 Expression::Identifier(ident) => Some(ident.value().to_string()),
                 _ => None,
             };
+            if let Some(ref name) = func_name {
+                // Check for known array functions that preserve element type.
+                if let Some(raw) =
+                    Self::resolve_array_func_raw_type(name, &func_call.argument_list, ctx)
+                {
+                    return Some(raw);
+                }
+            }
             if let Some(name) = func_name
                 && let Some(fl) = function_loader
                 && let Some(func_info) = fl(&name)
@@ -1756,6 +1764,26 @@ impl Backend {
                         Expression::Identifier(ident) => Some(ident.value().to_string()),
                         _ => None,
                     };
+                    // ── Known array functions ────────────────────────
+                    // For element-extracting functions (array_pop, etc.)
+                    // resolve to the element ClassInfo directly.
+                    if let Some(ref name) = func_name
+                        && let Some(element_type) = Self::resolve_array_func_element_type(
+                            name,
+                            &func_call.argument_list,
+                            ctx,
+                        )
+                    {
+                        let resolved = Self::type_hint_to_classes(
+                            &element_type,
+                            current_class_name,
+                            all_classes,
+                            class_loader,
+                        );
+                        if !resolved.is_empty() {
+                            return resolved;
+                        }
+                    }
                     if let Some(name) = func_name
                         && let Some(fl) = function_loader
                         && let Some(func_info) = fl(&name)
@@ -1991,5 +2019,333 @@ impl Backend {
         }
 
         vec![]
+    }
+
+    // ── Array function type preservation helpers ─────────────────────────
+
+    /// Known array functions that return an array with the same element
+    /// type as their input array argument (which is the first positional
+    /// argument).
+    const ARRAY_PRESERVING_FUNCS: &'static [&'static str] = &[
+        "array_filter",
+        "array_values",
+        "array_unique",
+        "array_reverse",
+        "array_slice",
+        "array_splice",
+        "array_chunk",
+        "array_diff",
+        "array_intersect",
+        "array_merge",
+    ];
+
+    /// Known array functions that extract a single element from the input
+    /// array (first positional argument).
+    const ARRAY_ELEMENT_FUNCS: &'static [&'static str] = &[
+        "array_pop",
+        "array_shift",
+        "current",
+        "end",
+        "reset",
+        "next",
+        "prev",
+    ];
+
+    /// Extract the first positional argument expression from an
+    /// argument list.
+    fn first_arg_expr<'b>(args: &'b ArgumentList<'b>) -> Option<&'b Expression<'b>> {
+        args.arguments.first().map(|arg| match arg {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        })
+    }
+
+    /// Extract the nth positional argument expression (0-based).
+    fn nth_arg_expr<'b>(args: &'b ArgumentList<'b>, n: usize) -> Option<&'b Expression<'b>> {
+        args.arguments.iter().nth(n).map(|arg| match arg {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        })
+    }
+
+    /// Resolve the raw iterable type of an argument expression.
+    ///
+    /// Handles `$variable` (via docblock scanning) and delegates to
+    /// `extract_rhs_iterable_raw_type` for method calls, property access,
+    /// etc.
+    fn resolve_arg_raw_type<'b>(
+        arg_expr: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Option<String> {
+        // Direct variable — scan for @var / @param annotation.
+        if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
+            let var_text = dv.name.to_string();
+            let offset = arg_expr.span().start.offset as usize;
+            let from_docblock =
+                docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text);
+            if from_docblock.is_some() {
+                return from_docblock;
+            }
+
+            // No docblock — chase the variable's assignment to extract
+            // the raw iterable type.  This handles cases like
+            // `$users = $this->getUsers(); array_pop($users)` where
+            // `$users` has no `@var` annotation but was assigned from a
+            // method returning `list<User>`.
+            let current_class = ctx
+                .all_classes
+                .iter()
+                .find(|c| c.name == ctx.current_class.name);
+            if let Some(raw) = Self::chase_var_assignment_raw_type(
+                &var_text,
+                ctx.content,
+                offset,
+                current_class,
+                ctx.all_classes,
+                ctx.class_loader,
+            ) && docblock::types::extract_generic_value_type(&raw).is_some()
+            {
+                return Some(raw);
+            }
+        }
+        // Fall back to structural extraction (method calls, etc.)
+        Self::extract_rhs_iterable_raw_type(arg_expr, ctx)
+    }
+
+    /// Text-based fallback for resolving a variable's raw iterable type
+    /// by scanning backward for its assignment and extracting the RHS
+    /// return type.
+    ///
+    /// Used by `resolve_arg_raw_type` when a variable argument to an
+    /// array function has no `@var` / `@param` docblock but was assigned
+    /// from a method call (e.g. `$users = $this->getUsers()`).
+    fn chase_var_assignment_raw_type(
+        var_name: &str,
+        content: &str,
+        before_offset: usize,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        let search_area = content.get(..before_offset)?;
+
+        // Find the most recent assignment to this variable.
+        let assign_pattern = format!("{} = ", var_name);
+        let assign_pos = search_area.rfind(&assign_pattern)?;
+        let rhs_start = assign_pos + assign_pattern.len();
+
+        // Extract the RHS up to the next `;`
+        let remaining = &content[rhs_start..];
+        let semi_pos = Self::find_semicolon_balanced_vr(remaining)?;
+        let rhs_text = remaining[..semi_pos].trim();
+
+        // Only handle call expressions — that's the common case for
+        // `$users = $this->getUsers()` or `$users = getUsers()`.
+        if !rhs_text.ends_with(')') {
+            return None;
+        }
+
+        let (callee, _args_text) = split_call_subject(rhs_text)?;
+
+        // Method call: `$this->methodName(…)`
+        if let Some(method_name) = callee
+            .strip_prefix("$this->")
+            .or_else(|| callee.strip_prefix("$this?->"))
+        {
+            let owner = current_class?;
+            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+            return merged
+                .methods
+                .iter()
+                .find(|m| m.name == method_name)
+                .and_then(|m| m.return_type.clone());
+        }
+
+        // Static call: `ClassName::methodName(…)`
+        if let Some((class_part, method_part)) = callee.rsplit_once("::") {
+            let resolved_class = if class_part == "self" || class_part == "static" {
+                current_class.cloned()
+            } else {
+                let lookup = class_part.rsplit('\\').next().unwrap_or(class_part);
+                all_classes
+                    .iter()
+                    .find(|c| c.name == lookup)
+                    .cloned()
+                    .or_else(|| class_loader(class_part))
+            };
+            if let Some(cls) = resolved_class {
+                let merged = Self::resolve_class_with_inheritance(&cls, class_loader);
+                return merged
+                    .methods
+                    .iter()
+                    .find(|m| m.name == method_part)
+                    .and_then(|m| m.return_type.clone());
+            }
+        }
+
+        None
+    }
+
+    /// Find `;` in `s`, respecting `()`, `[]`, `{}`, and string nesting.
+    fn find_semicolon_balanced_vr(s: &str) -> Option<usize> {
+        let mut depth_paren = 0i32;
+        let mut depth_bracket = 0i32;
+        let mut depth_brace = 0i32;
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut prev_char = '\0';
+
+        for (i, ch) in s.char_indices() {
+            if in_single_quote {
+                if ch == '\'' && prev_char != '\\' {
+                    in_single_quote = false;
+                }
+                prev_char = ch;
+                continue;
+            }
+            if in_double_quote {
+                if ch == '"' && prev_char != '\\' {
+                    in_double_quote = false;
+                }
+                prev_char = ch;
+                continue;
+            }
+            match ch {
+                '\'' => in_single_quote = true,
+                '"' => in_double_quote = true,
+                '(' => depth_paren += 1,
+                ')' => depth_paren -= 1,
+                '[' => depth_bracket += 1,
+                ']' => depth_bracket -= 1,
+                '{' => depth_brace += 1,
+                '}' => depth_brace -= 1,
+                ';' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
+                    return Some(i);
+                }
+                _ => {}
+            }
+            prev_char = ch;
+        }
+        None
+    }
+
+    /// For known array functions, resolve the **raw output type** string
+    /// (e.g. `"list<User>"`) from the input arguments.
+    ///
+    /// Used by `extract_rhs_iterable_raw_type` so that foreach and
+    /// destructuring over `array_filter(...)` etc. preserve element types.
+    fn resolve_array_func_raw_type(
+        func_name: &str,
+        args: &ArgumentList<'_>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Option<String> {
+        // Type-preserving functions: output array has same element type.
+        if Self::ARRAY_PRESERVING_FUNCS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(func_name))
+        {
+            let arr_expr = Self::first_arg_expr(args)?;
+            let raw = Self::resolve_arg_raw_type(arr_expr, ctx)?;
+            // If the raw type already has generic params, return it as-is
+            // so downstream `extract_generic_value_type` can extract the
+            // element type.  Otherwise it's a plain class name and we
+            // can't infer element type.
+            if docblock::types::extract_generic_value_type(&raw).is_some() {
+                return Some(raw);
+            }
+        }
+
+        // array_map: callback is first arg, array is second.
+        // The callback's return type determines the output element type.
+        if func_name.eq_ignore_ascii_case("array_map")
+            && let Some(element_type) = Self::extract_array_map_element_type(args, ctx)
+        {
+            return Some(format!("list<{}>", element_type));
+        }
+
+        // Element-extracting functions: wrap element type in list<> so
+        // it can be used as an iterable raw type.
+        if Self::ARRAY_ELEMENT_FUNCS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(func_name))
+        {
+            let arr_expr = Self::first_arg_expr(args)?;
+            let raw = Self::resolve_arg_raw_type(arr_expr, ctx)?;
+            if docblock::types::extract_generic_value_type(&raw).is_some() {
+                return Some(raw);
+            }
+        }
+
+        None
+    }
+
+    /// For known array functions, resolve the **element type** string
+    /// (e.g. `"User"`) for the output.
+    ///
+    /// Used by `resolve_rhs_expression` so that `$item = array_pop($users)`
+    /// resolves `$item` to `User`.  This handles both element-extracting
+    /// functions (array_pop, current, etc.) and `array_map` (via callback
+    /// return type).
+    fn resolve_array_func_element_type(
+        func_name: &str,
+        args: &ArgumentList<'_>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Option<String> {
+        // Element-extracting functions: return the element type directly.
+        if Self::ARRAY_ELEMENT_FUNCS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(func_name))
+        {
+            let arr_expr = Self::first_arg_expr(args)?;
+            let raw = Self::resolve_arg_raw_type(arr_expr, ctx)?;
+            return docblock::types::extract_generic_value_type(&raw);
+        }
+
+        // array_map: callback return type is the element type.
+        if func_name.eq_ignore_ascii_case("array_map") {
+            return Self::extract_array_map_element_type(args, ctx);
+        }
+
+        None
+    }
+
+    /// Extract the output element type for `array_map($callback, $array)`.
+    ///
+    /// Strategy:
+    /// 1. If the callback (first arg) is a closure/arrow function with a
+    ///    return type hint, use that.
+    /// 2. Otherwise, fall back to the **input array's** element type
+    ///    (assumes the callback preserves type, which is a reasonable
+    ///    default when no return type is declared).
+    fn extract_array_map_element_type(
+        args: &ArgumentList<'_>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Option<String> {
+        let callback_expr = Self::first_arg_expr(args)?;
+
+        // Try to get the callback's return type hint.
+        let return_hint = match callback_expr {
+            Expression::Closure(closure) => closure
+                .return_type_hint
+                .as_ref()
+                .map(|rth| Self::extract_hint_string(&rth.hint)),
+            Expression::ArrowFunction(arrow) => arrow
+                .return_type_hint
+                .as_ref()
+                .map(|rth| Self::extract_hint_string(&rth.hint)),
+            _ => None,
+        };
+
+        if let Some(hint) = return_hint {
+            let cleaned = docblock::clean_type(&hint);
+            if !cleaned.is_empty() && !docblock::types::is_scalar(&cleaned) {
+                return Some(cleaned);
+            }
+        }
+
+        // Fallback: use the input array's element type.
+        let arr_expr = Self::nth_arg_expr(args, 1)?;
+        let raw = Self::resolve_arg_raw_type(arr_expr, ctx)?;
+        docblock::types::extract_generic_value_type(&raw)
     }
 }

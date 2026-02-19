@@ -988,6 +988,78 @@ class DestructuringShapeDemo
 }
 
 
+// ── Array Function Type Preservation ────────────────────────────────────────
+
+class ArrayFuncDemo
+{
+    /** @var list<User> */
+    public array $users;
+
+    /** @return list<User> */
+    public function getUsers(): array { return []; }
+
+    public function filterPreservesType(): void
+    {
+        // Try: $active[0]->  ← offers getName(), getEmail() (User members)
+        $active = array_filter($this->users, fn(User $u) => $u->getStatus() === Status::Active);
+        $active[0]->getName();            // User preserved through array_filter
+    }
+
+    public function valuesPreservesType(): void
+    {
+        $vals = array_values($this->users);
+        $vals[0]->getEmail();             // User preserved through array_values
+    }
+
+    public function reversePreservesType(): void
+    {
+        $reversed = array_reverse($this->users);
+        $reversed[0]->getName();          // User preserved through array_reverse
+    }
+
+    public function slicePreservesType(): void
+    {
+        $page = array_slice($this->users, 0, 10);
+        $page[0]->getEmail();             // User preserved through array_slice
+    }
+
+    public function popExtractsElement(): void
+    {
+        // Try: $last->  ← offers getName(), getEmail() (User members)
+        $users = $this->getUsers();
+        $last = array_pop($users);
+        $last->getName();                 // single User from array_pop
+
+        $first = array_shift($users);
+        $first->getEmail();               // single User from array_shift
+    }
+
+    public function currentEndReset(): void
+    {
+        $cur = current($this->users);
+        $cur->getName();                  // User from current()
+
+        $last = end($this->users);
+        $last->getEmail();                // User from end()
+    }
+
+    public function foreachOverFiltered(): void
+    {
+        // Try: $u->  ← offers getName(), getEmail() (User members)
+        foreach (array_filter($this->users, fn(User $u) => true) as $u) {
+            $u->getEmail();               // User preserved in foreach
+        }
+    }
+
+    public function arrayMapFallback(): void
+    {
+        // When callback has no return type, falls back to input element type
+        $mapped = array_map(fn($u) => $u, $this->users);
+        $mapped[0]->getName();            // User from array_map fallback
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃

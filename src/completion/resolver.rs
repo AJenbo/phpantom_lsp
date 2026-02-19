@@ -543,6 +543,19 @@ impl Backend {
                 }
             }
 
+            // ── Known array functions — preserve element type ───────
+            if let Some(raw) = Self::resolve_array_func_raw_type_from_text(
+                callee,
+                _args_text,
+                content,
+                assign_pos,
+                current_class,
+                all_classes,
+                class_loader,
+            ) {
+                return Some(raw);
+            }
+
             // Standalone function call — search all classes for a matching
             // global function.  Since we don't have `function_loader` here,
             // search backward in the source for a `@return` in the
@@ -564,6 +577,210 @@ impl Backend {
         }
 
         None
+    }
+
+    /// Known array functions whose output preserves the input array's
+    /// element type.
+    const TEXT_ARRAY_PRESERVING_FUNCS: &'static [&'static str] = &[
+        "array_filter",
+        "array_values",
+        "array_unique",
+        "array_reverse",
+        "array_slice",
+        "array_splice",
+        "array_chunk",
+        "array_diff",
+        "array_intersect",
+        "array_merge",
+    ];
+
+    /// Known array functions that extract a single element (the element
+    /// type is the output type, not wrapped in an array).
+    const TEXT_ARRAY_ELEMENT_FUNCS: &'static [&'static str] = &[
+        "array_pop",
+        "array_shift",
+        "current",
+        "end",
+        "reset",
+        "next",
+        "prev",
+    ];
+
+    /// Text-based resolution for known array functions.
+    ///
+    /// Given a function name and its argument text, extract the first
+    /// variable argument and look up its iterable raw type from docblock
+    /// annotations.  For type-preserving functions the raw type is returned
+    /// as-is; for element-extracting functions the element type is returned.
+    ///
+    /// This is the text-based counterpart of
+    /// `variable_resolution::resolve_array_func_raw_type` and is used by
+    /// `extract_raw_type_from_assignment_text` which operates on source
+    /// text rather than the AST.
+    fn resolve_array_func_raw_type_from_text(
+        func_name: &str,
+        args_text: &str,
+        content: &str,
+        before_offset: usize,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        let is_preserving = Self::TEXT_ARRAY_PRESERVING_FUNCS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(func_name));
+        let is_element = Self::TEXT_ARRAY_ELEMENT_FUNCS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(func_name));
+        let is_array_map = func_name.eq_ignore_ascii_case("array_map");
+
+        if !is_preserving && !is_element && !is_array_map {
+            return None;
+        }
+
+        // For array_map the array is the second argument; for everything
+        // else it's the first.
+        let arg_index = if is_array_map { 1 } else { 0 };
+
+        // Try to resolve the raw iterable type from the nth argument.
+        // First try plain `$variable` with docblock lookup, then try
+        // `$this->prop` via the enclosing class's property type hints,
+        // and finally try `$variable` assigned from a method call.
+        let raw = Self::resolve_nth_arg_raw_type(
+            args_text,
+            arg_index,
+            content,
+            before_offset,
+            current_class,
+            all_classes,
+            class_loader,
+        )?;
+
+        // Make sure the raw type actually carries generic/array info.
+        docblock::types::extract_generic_value_type(&raw)?;
+
+        if is_preserving || is_array_map {
+            // Return the full raw type so downstream callers can extract
+            // the element type via `extract_generic_value_type`.
+            Some(raw)
+        } else {
+            // Element-extracting: return just the element type.
+            docblock::types::extract_generic_value_type(&raw)
+        }
+    }
+
+    /// Resolve the raw iterable type of the nth argument in a text-based
+    /// argument list.
+    ///
+    /// Tries multiple strategies in order:
+    /// 1. Plain `$variable` → docblock `@var` / `@param` lookup
+    /// 2. `$this->prop` → property type hint from the enclosing class
+    /// 3. Plain `$variable` → chase its assignment to extract the raw type
+    fn resolve_nth_arg_raw_type(
+        args_text: &str,
+        n: usize,
+        content: &str,
+        before_offset: usize,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        let arg_text = Self::extract_nth_arg_text(args_text, n)?;
+
+        // Strategy 1: plain `$variable` with @var / @param annotation.
+        if let Some(var_name) = Self::extract_plain_variable(&arg_text) {
+            if let Some(raw) =
+                docblock::find_iterable_raw_type_in_source(content, before_offset, &var_name)
+            {
+                return Some(raw);
+            }
+            // Strategy 3: chase the variable's assignment to extract raw type.
+            if let Some(raw) = Self::extract_raw_type_from_assignment_text(
+                &var_name,
+                content,
+                before_offset,
+                current_class,
+                all_classes,
+                class_loader,
+            ) {
+                return Some(raw);
+            }
+        }
+
+        // Strategy 2: `$this->prop` — resolve via the enclosing class.
+        if let Some(prop_name) = arg_text
+            .strip_prefix("$this->")
+            .or_else(|| arg_text.strip_prefix("$this?->"))
+            && prop_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            let owner = current_class?;
+            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+            return merged
+                .properties
+                .iter()
+                .find(|p| p.name == prop_name)
+                .and_then(|p| p.type_hint.clone());
+        }
+
+        None
+    }
+
+    /// Extract the nth (0-based) argument text from a comma-separated
+    /// argument text string.
+    ///
+    /// Returns the raw trimmed argument text, which may be a plain
+    /// variable, a property access, a function call, etc.  Respects
+    /// nested parentheses and brackets so that commas inside sub-
+    /// expressions are not treated as argument separators.
+    fn extract_nth_arg_text(args_text: &str, n: usize) -> Option<String> {
+        let trimmed = args_text.trim();
+        let mut depth = 0i32;
+        let mut arg_start = 0usize;
+        let mut arg_index = 0usize;
+
+        let bytes = trimmed.as_bytes();
+        for (i, &ch) in bytes.iter().enumerate() {
+            match ch {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth -= 1,
+                b',' if depth == 0 => {
+                    if arg_index == n {
+                        let arg = trimmed[arg_start..i].trim();
+                        if !arg.is_empty() {
+                            return Some(arg.to_string());
+                        }
+                        return None;
+                    }
+                    arg_index += 1;
+                    arg_start = i + 1;
+                }
+                _ => {}
+            }
+        }
+
+        // Last (or only) argument.
+        if arg_index == n {
+            let arg = trimmed[arg_start..].trim();
+            if !arg.is_empty() {
+                return Some(arg.to_string());
+            }
+        }
+
+        None
+    }
+
+    /// If `text` is a plain variable reference (`$foo`), return it.
+    /// Returns `None` for expressions like `$foo->bar`, `func()`, etc.
+    fn extract_plain_variable(text: &str) -> Option<String> {
+        let text = text.trim();
+        if text.starts_with('$')
+            && text.len() > 1
+            && text[1..].chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            Some(text.to_string())
+        } else {
+            None
+        }
     }
 
     /// Extract the class name from a `new` expression, handling both
