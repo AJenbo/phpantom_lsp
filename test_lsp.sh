@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Test script for PHPantomLSP
+# Test script for PHPantom
 # Sends LSP JSON-RPC messages over stdin and prints responses from stdout
 
 cargo build 2>/dev/null

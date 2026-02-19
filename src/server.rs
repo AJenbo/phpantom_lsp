@@ -150,13 +150,13 @@ impl LanguageServer for Backend {
             self.log(
                 MessageType::INFO,
                 format!(
-                    "PHPantomLSP initialized! Loaded {} PSR-4 mapping(s), {} classmap entries, {} autoload file(s)",
+                    "PHPantom initialized! Loaded {} PSR-4 mapping(s), {} classmap entries, {} autoload file(s)",
                     mapping_count, classmap_count, autoload_count
                 ),
             )
             .await;
         } else {
-            self.log(MessageType::INFO, "PHPantomLSP initialized!".to_string())
+            self.log(MessageType::INFO, "PHPantom initialized!".to_string())
                 .await;
         }
     }
@@ -255,7 +255,7 @@ impl LanguageServer for Backend {
                 Ok(None) => {}
                 Err(_) => {
                     log::error!(
-                        "PHPantomLSP: panic during goto_definition at {}:{}:{}",
+                        "PHPantom: panic during goto_definition at {}:{}:{}",
                         uri,
                         position.line,
                         position.character

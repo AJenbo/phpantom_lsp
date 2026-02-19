@@ -43,7 +43,7 @@ impl Backend {
 
         if result.is_err() {
             log::error!(
-                "PHPantomLSP: parser panicked while parsing {}. Skipping file.",
+                "PHPantom: parser panicked while parsing {}. Skipping file.",
                 uri
             );
         }

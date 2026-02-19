@@ -1,10 +1,10 @@
-# PHPantomLSP Architecture
+# PHPantom Architecture
 
-This document explains how PHPantomLSP resolves PHP symbols — classes, interfaces, traits, enums, and functions — across files and from the PHP standard library.
+This document explains how PHPantom resolves PHP symbols — classes, interfaces, traits, enums, and functions — across files and from the PHP standard library.
 
 ## Overview
 
-PHPantomLSP is a language server that provides completion and go-to-definition for PHP projects. It works by:
+PHPantom is a language server that provides completion and go-to-definition for PHP projects. It works by:
 
 1. **Parsing** PHP files into lightweight `ClassInfo` / `FunctionInfo` structures (not a full AST — just the information needed for IDE features).
 2. **Caching** parsed results in an in-memory `ast_map` keyed by file URI.
@@ -112,7 +112,7 @@ Every phase that successfully parses a file caches the result in `ast_map`. This
 
 ## Embedded PHP Stubs
 
-PHPantomLSP bundles the [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) directly into the binary. This provides type information for ~1,450 built-in classes/interfaces, ~5,000 built-in functions, and ~2,000 built-in constants without requiring any external files at runtime.
+PHPantom bundles the [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) directly into the binary. This provides type information for ~1,450 built-in classes/interfaces, ~5,000 built-in functions, and ~2,000 built-in constants without requiring any external files at runtime.
 
 ### Build-Time Processing
 
@@ -184,7 +184,7 @@ If the stubs aren't installed (e.g. `composer install` hasn't been run), `build.
 
 ## Inheritance Resolution
 
-When building completion items or resolving definitions, PHPantomLSP merges members from the full inheritance chain via `resolve_class_with_inheritance`:
+When building completion items or resolving definitions, PHPantom merges members from the full inheritance chain via `resolve_class_with_inheritance`:
 
 ```
 ClassInfo (own members)

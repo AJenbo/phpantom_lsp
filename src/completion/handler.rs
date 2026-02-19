@@ -55,7 +55,7 @@ impl Backend {
     ///
     /// Tries each completion strategy in priority order and returns the
     /// first one that produces results.  Falls back to a default
-    /// `PHPantomLSP` completion item when nothing else matches.
+    /// `PHPantom` completion item when nothing else matches.
     pub(crate) async fn handle_completion(
         &self,
         params: CompletionParams,
@@ -472,7 +472,7 @@ impl Backend {
                     }
                     Err(_) => {
                         log::error!(
-                            "PHPantomLSP: panic during member-access completion for '{}'",
+                            "PHPantom: panic during member-access completion for '{}'",
                             target.subject
                         );
                     }

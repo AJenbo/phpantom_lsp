@@ -1,4 +1,4 @@
-/// Utility functions for the PHPantomLSP server.
+/// Utility functions for the PHPantom server.
 ///
 /// This module contains helper methods for position/offset conversion,
 /// class lookup by offset, logging, and shared text-processing helpers

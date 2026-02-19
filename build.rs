@@ -1,4 +1,4 @@
-//! Build script for PHPantomLSP.
+//! Build script for PHPantom.
 //!
 //! Parses `stubs/jetbrains/phpstorm-stubs/PhpStormStubsMap.php` and generates
 //! a Rust source file (`stub_map_generated.rs`) that:

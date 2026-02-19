@@ -1,7 +1,7 @@
 <?php
 
 /**
- * PHPantomLSP — Feature Showcase
+ * PHPantom — Feature Showcase
  *
  * A single-file playground for every completion and go-to-definition feature.
  * Trigger completion after -> / :: / $, or Ctrl+Click for go-to-definition.
@@ -404,7 +404,7 @@ $r = new Response(200);                   // → Response(${1:$statusCode})
 
 // ── Type Hint Completion in Definitions ─────────────────────────────────────
 // When typing a type hint inside a function/method definition, return type,
-// or property declaration, PHPantomLSP offers PHP native scalar types
+// or property declaration, PHPantom offers PHP native scalar types
 // (string, int, float, bool, …) alongside class-name completions.
 // Constants and standalone functions are excluded since they're invalid
 // in type positions.
@@ -1839,7 +1839,7 @@ class FluentCollection
 {
     /**
      * Multi-line @return with conditionals inside generics.
-     * PHPantomLSP joins the lines and parses the full type.
+     * PHPantom joins the lines and parses the full type.
      *
      * @template TGroupKey of array-key
      *

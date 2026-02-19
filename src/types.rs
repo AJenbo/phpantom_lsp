@@ -1,4 +1,4 @@
-//! Data types used throughout the PHPantomLSP server.
+//! Data types used throughout the PHPantom server.
 //!
 //! This module contains all the "model" structs and enums that represent
 //! extracted PHP information (classes, methods, properties, constants,

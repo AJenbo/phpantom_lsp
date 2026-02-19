@@ -174,7 +174,7 @@ impl Backend {
         match result {
             Ok(classes) => classes,
             Err(_) => {
-                log::error!("PHPantomLSP: parser panicked in parse_php");
+                log::error!("PHPantom: parser panicked in parse_php");
                 Vec::new()
             }
         }
@@ -209,7 +209,7 @@ impl Backend {
         match result {
             Ok(functions) => functions,
             Err(_) => {
-                log::error!("PHPantomLSP: parser panicked in parse_functions");
+                log::error!("PHPantom: parser panicked in parse_functions");
                 Vec::new()
             }
         }
@@ -235,7 +235,7 @@ impl Backend {
         match result {
             Ok(defines) => defines,
             Err(_) => {
-                log::error!("PHPantomLSP: parser panicked in parse_defines");
+                log::error!("PHPantom: parser panicked in parse_defines");
                 Vec::new()
             }
         }
@@ -271,7 +271,7 @@ impl Backend {
         match result {
             Ok(use_map) => use_map,
             Err(_) => {
-                log::error!("PHPantomLSP: parser panicked in parse_use_statements");
+                log::error!("PHPantom: parser panicked in parse_use_statements");
                 std::collections::HashMap::new()
             }
         }
@@ -294,7 +294,7 @@ impl Backend {
         match result {
             Ok(ns) => ns,
             Err(_) => {
-                log::error!("PHPantomLSP: parser panicked in parse_namespace");
+                log::error!("PHPantom: parser panicked in parse_namespace");
                 None
             }
         }

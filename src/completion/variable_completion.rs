@@ -221,7 +221,7 @@ fn collect_variables_in_scope(content: &str, cursor_offset: u32) -> HashSet<Stri
     match result {
         Ok(vars) => vars,
         Err(_) => {
-            log::error!("PHPantomLSP: parser panicked during variable scope collection");
+            log::error!("PHPantom: parser panicked during variable scope collection");
             HashSet::new()
         }
     }

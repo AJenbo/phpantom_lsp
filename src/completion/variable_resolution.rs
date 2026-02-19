@@ -89,7 +89,7 @@ impl Backend {
             Ok(classes) => classes,
             Err(_) => {
                 log::error!(
-                    "PHPantomLSP: parser panicked during variable resolution for '{}'",
+                    "PHPantom: parser panicked during variable resolution for '{}'",
                     var_name
                 );
                 vec![]

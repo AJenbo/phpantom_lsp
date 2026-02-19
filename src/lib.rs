@@ -1,4 +1,4 @@
-//! PHPantomLSP — a lightweight PHP language server.
+//! PHPantom — a lightweight PHP language server.
 //!
 //! This crate is organised into the following modules:
 //!
@@ -159,7 +159,7 @@ impl Backend {
     /// fields that differ.
     fn defaults() -> Self {
         Self {
-            name: "PHPantomLSP".to_string(),
+            name: "PHPantom".to_string(),
             version: "0.2.0".to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),

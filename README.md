@@ -1,169 +1,86 @@
-# PHPantomLSP
+# PHPantom
 
-A fast, lightweight PHP language server that stays out of your way. Using only a few MB of RAM regardless of project size and fully usable in milliseconds without requiring high-end hardware.
+A fast, lightweight PHP language server written in Rust. Uses only a few MB of RAM regardless of project size and is fully responsive in milliseconds. No indexing phase, no background workers, no waiting.
 
-> **Note:** This project is in active development.
+> [!NOTE]
+> PHPantom is in active development. Completion and go-to-definition are solid and used daily. More LSP features (hover, signature help, find references) are on the roadmap.
 
 ## Features
 
-### Completion
+PHPantom focuses on completion and go-to-definition and aims to do them really well. Here's where it stands:
 
-- **Instance members** via `->` — methods, properties, constructor-promoted properties
-- **Static members** via `::` — static methods, static properties, constants, enum cases
-- **`parent::`** — inherited and overridden members (excludes private)
-- **Traits and interfaces** — trait members appear on the using class; interface contracts are resolved
-- **`@mixin` classes** — members from `@mixin` annotations are included
-- **Magic members** — `@property`, `@property-read`, `@method` from PHPDoc
-- **Method chaining** — return types are followed through arbitrarily long chains
-- **Null-safe chaining** — `?->` is handled identically to `->`
-- **Full signatures** in completion labels (parameters, types, return type)
-- Magic methods (`__construct`, `__call`, etc.) are only suggested interally
-- **Named argument completion** — when typing inside call parentheses, parameter names are suggested with a trailing `:`.
-- **PHPDoc tag completion** — context-aware suggestions inside `/** … */` blocks.
-- **Variable name completion** — typing `$` suggests variables that are in scope.
-- **Class name completion** — unqualified and partially-qualified class names are completed from the current file
-- **Function completion** — standalone functions are completed
-- **Constant completion** — constants defined via `define()` are offered alongside class names
-- **Deprecated detection** — members, classes, and functions marked with `@deprecated` in their PHPDoc are shown with strikethrough in the completion list
+| | PHPantom | Intelephense | PHP Tools | Phpactor | PHPStorm |
+|---|---|---|---|---|---|
+| Completion | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `@mixin` completion | ✅ | 💰 | ✅ | ✅ | ✅ |
+| `@phpstan-assert` narrowing | ✅ | ❌ | ✅ | ❌ | ⚠️ partial |
+| Conditional return types | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Array shape inference | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Object shape completion | ✅ | ❌ | ✅ | ❌ | ✅ |
+| `@phpstan-type` aliases | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Hover | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Signature help | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Find references | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Diagnostics | ❌ | ✅ | ✅ | ⚠️ limited | ✅ |
+| Rename / refactoring | ❌ | 💰 | ✅ | ✅ | ✅ |
+| Time to ready | **10 ms** | 1 min 25 s | 3 min 17 s | 15 min 39 s | 19 min 38 s |
+| RAM usage | **7 MB** | 520 MB | 3.9 GB | 498 MB | 2.0 GB |
+| Disk cache | **0** | 45 MB | 0 | 4.1 GB | 551 MB |
 
-<img width="683" height="339" alt="image" src="https://github.com/user-attachments/assets/65e8220d-5d94-466f-aea7-2f239a8d4b19" />
+<sub>Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application).</sub>
 
-### Go to Definition
+## Context-Aware Intelligence
 
-- **Classes, interfaces, traits, enums** — same-file and cross-file
-- **Methods, properties, constants** — resolves through inheritance, traits, and mixins
-- **Standalone functions** — including PHP built-ins via embedded stubs
-- **Variables** — jumps to the most recent assignment or declaration (assignment, parameter, `foreach`, `catch`, `static`/`global`)
-- **Property type definition** — when the cursor is on a property or parameter at its declaration site, jumps to the class definition of its type hint
-- **Namespace resolution** — fully-qualified, partially-qualified, and aliased names via `use ... as ...`
+- **Smart PHPDoc completion.** `@throws` detects uncaught exceptions in the method body, including those propagated from called methods. `@param` pre-fills with the name and type from the signature. Tags are filtered to context: `@var` only in property docblocks, `@param` only when there are undocumented parameters. Already-documented tags aren't suggested again.
+- **Array shape inference from code.** `$config = ['host' => 'localhost', 'port' => 3306]` offers key completion with no annotation. Incremental `$config['key'] = ...` assignments extend the shape. Nested access chains resolve through shapes and generics. `array_filter`, `array_map`, `array_pop`, `current`, etc. preserve the element type instead of losing it to `array`.
+- **Guard clause stacking.** Early return narrows subsequent code. Multiple guards stack to whittle a union down. Works in ternaries, `match(true)`, with `is_a()`, `assert()`.
+- **Generic collection foreach.** Iterating `Collection<User>`, `Generator<int, Item>`, or a class with `@implements IteratorAggregate<int, User>` resolves the loop variable to the element type. Keys too.
+- **Generics.** Class-level `@template` with substitution through inheritance (`@extends Base<User>`).
+- **Everything else you'd expect.** `foreach`, `clone`, `$arr[] = new Foo()`, destructuring with named keys, chained method calls in assignments.
 
-### Type Resolution
+## Project Awareness
 
-PHPantom infers variable types from assignments, parameter hints, return types, and PHPDoc annotations, then uses them to power both completion and go-to-definition.
+PHPantom understands Composer projects out of the box:
 
-- **Union types** (`A|B`) and **intersection types** (`A&B`), including PHP 8.2 DNF types like `(A&B)|C`
-- **Conditional return types** — PHPStan-style `@return ($param is class-string<T> ? T : mixed)`, used by patterns like `app(User::class)->getEmail()`
-- **`@var` overrides** — inline `/** @var Type $var */` docblocks refine variable types
-- **Ambiguous variables** — when a variable is assigned different types in conditional branches, all candidates are offered
+- **PSR-4 autoloading.** Resolves classes across files on demand.
+- **Classmap and file autoloading.** `autoload_classmap.php` and `autoload_files.php`.
+- **Embedded PHP stubs** from [phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) bundled in the binary, no runtime downloads needed.
+- **`require_once` discovery.** Functions from required files are available for completion.
 
-### Type Narrowing
-
-Completion results adapt to runtime type checks. PHPantomLSP narrows union types in both the positive and inverse branches of `if`/`else`, `while`, and `match(true)`:
-
-- `instanceof` and negated `!instanceof`
-- `is_a($var, ClassName::class)`
-- `get_class($var) === ClassName::class` and `$var::class === ClassName::class` (including `!==` and reversed operand order)
-- `assert($var instanceof ClassName)`
-- **Custom assertion functions** via `@phpstan-assert` / `@psalm-assert` annotations:
-  - `@phpstan-assert Type $param` — unconditional narrowing after the call
-  - `@phpstan-assert-if-true Type $param` — narrows in the then-branch
-  - `@phpstan-assert-if-false Type $param` — narrows in the else-branch
-
-### Composer & Project Awareness
-
-- Parses `composer.json` for PSR-4, classmap, and file autoload mappings
-- Resolves cross-file class lookups on demand
-- Discovers classes and functions from `require_once` files
-
-> **Note:**
-> - Run `composer install -o` (or `composer dump-autoload -o`) to generate autoload files needed for full class completion.
-> - If your project doesn’t use Composer, you can create a minimal `composer.json` to generate a classmap:
+> [!IMPORTANT]
+> Run `composer install -o` (or `composer dump-autoload -o`) in your project to generate the optimized autoload files PHPantom needs for cross-file class resolution.
 >
->   ```json
->   {
->     "autoload": {
->       "classmap": ["src/"]
->     }
->   }
->   ```
->
->   Then run:
->   ```bash
->   composer dump-autoload -o
->   ```
+> If your project doesn't use Composer, you can create a minimal `composer.json`:
+> ```json
+> { "autoload": { "classmap": ["src/"] } }
+> ```
+> Then run `composer dump-autoload -o`.
 
-## Building
+## Getting Started
 
-The PHP stubs are managed as a Composer dependency in `stubs/`. Install them before building:
+See **[docs/SETUP.md](docs/SETUP.md)** for editor-specific installation instructions (Zed, Neovim, and other editors).
 
-```bash
-# Install the PHP stubs (requires Composer)
-composer install
+## Building from Source
 
-# Build
-cargo build
-
-# or for a release build
-cargo build --release
-```
-
-> **Note:** The build will succeed without `composer install`, but the resulting binary won't know about built-in PHP symbols like `Iterator`, `Countable`, `UnitEnum`, etc. Always run `composer install` first for a fully functional build.
-
-After updating stubs (`composer update`), just rebuild — the `build.rs` script watches `composer.lock` and re-embeds everything automatically.
-
-For more details on how symbol resolution and stub loading work, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Testing
-
-Run the test suite:
-
-```bash
-cargo test
-```
-
-### Manual LSP Testing
-
-The included `test_lsp.sh` script sends JSON-RPC messages to the server over stdin/stdout, exercising the full LSP protocol flow (initialize, open file, hover, completion, shutdown):
-
-```bash
-./test_lsp.sh
-```
-
-This is useful for verifying end-to-end behavior outside of an editor.
-
-### Debugging
-
-Enable logging by setting the `RUST_LOG` environment variable:
-
-```bash
-RUST_LOG=debug cargo run 2>phpantom.log
-```
-
-Logs are written to stderr, so redirect as needed.
-
-## Editor Integration
-
-PHPantomLSP communicates over stdin/stdout. Point your editor's LSP client at the binary:
-
-- **Path:** `target/release/phpantom_lsp` (after `cargo build --release`)
-
-### Zed
-
-Install it as a dev extension from the `zed-extension/` directory in this repo:
-
-1. Open Zed
-2. Open the Extensions panel
-3. Click **Install Dev Extension**
-4. Select the `zed-extension/` directory
-
-The extension automatically downloads the correct pre-built binary from GitHub releases for your platform. If you'd prefer to use a locally built binary, ensure `phpantom_lsp` is on your `PATH` and the extension will use it instead.
-
-To configure PHPantom LSP as the default PHP language server in Zed, add the following to your Zed settings (`settings.json`):
-
-```json
-{
-  "languages": {
-    "PHP": {
-      "language_servers": ["phpantom_lsp", "!intelephense", "!phpactor", "!phptools", "..."]
-    }
-  }
-}
-```
+See **[docs/BUILDING.md](docs/BUILDING.md)** for build, test, and debug instructions.
 
 ## Contributing
 
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+See **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
+
+## Architecture
+
+For details on how symbol resolution, stub loading, and inheritance merging work, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+## Acknowledgements
+
+PHPantom stands on the shoulders of:
+
+- **[Mago](https://github.com/carthage-software/mago):** the PHP parser that powers all of PHPantom's AST analysis.
+- **[PHPStan](https://phpstan.org/)** and **[Psalm](https://psalm.dev/):** whose combined work on static analysis for PHP transformed the language's type ecosystem. Generics, array shapes, conditional return types, assertion annotations: these tools pushed each other forward and pushed the community toward rigorous PHPDoc annotations that make a language server like this possible. PHPantom's author cut his teeth on PHPStan, which is why `@phpstan-*` annotations are a first-class citizen here.
+- **[JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs):** type information for the entire PHP standard library, embedded directly into the binary.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
