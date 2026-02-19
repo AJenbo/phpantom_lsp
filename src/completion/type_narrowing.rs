@@ -13,6 +13,9 @@
 ///   - `@phpstan-assert` / `@psalm-assert` — custom type guard functions
 ///   - `match(true) { $var instanceof Foo => … }` — match-arm narrowing
 ///   - `$var instanceof Foo ? $var->method() : …` — ternary narrowing
+///   - Guard clauses: `if (!$var instanceof Foo) { return; }` — narrows
+///     after the if block when the body unconditionally exits via
+///     `return`, `throw`, `continue`, or `break`.
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -714,6 +717,198 @@ impl Backend {
                 }
             }
             _ => {}
+        }
+    }
+
+    // ── Guard clause narrowing (early return / throw) ────────────────
+
+    /// Check whether a statement unconditionally exits the current scope.
+    ///
+    /// A statement unconditionally exits if every code path through it
+    /// ends with `return`, `throw`, `continue`, or `break`.  This is used
+    /// to detect guard clause patterns like:
+    ///
+    /// ```text
+    /// if (!$var instanceof Foo) {
+    ///     return;
+    /// }
+    /// // $var is Foo here
+    /// ```
+    pub(super) fn statement_unconditionally_exits(stmt: &Statement<'_>) -> bool {
+        match stmt {
+            Statement::Return(_) => true,
+            Statement::Continue(_) => true,
+            Statement::Break(_) => true,
+            // `throw new …;` is parsed as an expression statement
+            // containing a Throw expression.
+            Statement::Expression(es) => matches!(es.expression, Expression::Throw(_)),
+            // A block exits if its last statement exits.
+            Statement::Block(block) => block
+                .statements
+                .last()
+                .is_some_and(Self::statement_unconditionally_exits),
+            // An if/else exits if ALL branches exist and ALL exit.
+            Statement::If(if_stmt) => Self::if_body_unconditionally_exits(&if_stmt.body),
+            _ => false,
+        }
+    }
+
+    /// Check whether an `if` body (including all branches) unconditionally
+    /// exits.  This requires:
+    ///   - The then-body exits, AND
+    ///   - All elseif bodies exit, AND
+    ///   - An else clause exists and exits.
+    fn if_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
+        match body {
+            IfBody::Statement(stmt_body) => {
+                // Then-body must exit
+                if !Self::statement_unconditionally_exits(stmt_body.statement) {
+                    return false;
+                }
+                // All elseif bodies must exit
+                if !stmt_body
+                    .else_if_clauses
+                    .iter()
+                    .all(|ei| Self::statement_unconditionally_exits(ei.statement))
+                {
+                    return false;
+                }
+                // Else must exist and exit
+                stmt_body
+                    .else_clause
+                    .as_ref()
+                    .is_some_and(|ec| Self::statement_unconditionally_exits(ec.statement))
+            }
+            IfBody::ColonDelimited(colon_body) => {
+                // Then-body: last statement must exit
+                if !colon_body
+                    .statements
+                    .last()
+                    .is_some_and(Self::statement_unconditionally_exits)
+                {
+                    return false;
+                }
+                // All elseif bodies must exit
+                if !colon_body.else_if_clauses.iter().all(|ei| {
+                    ei.statements
+                        .last()
+                        .is_some_and(Self::statement_unconditionally_exits)
+                }) {
+                    return false;
+                }
+                // Else must exist and exit
+                colon_body.else_clause.as_ref().is_some_and(|ec| {
+                    ec.statements
+                        .last()
+                        .is_some_and(Self::statement_unconditionally_exits)
+                })
+            }
+        }
+    }
+
+    /// Check whether an `if` body's then-branch unconditionally exits.
+    /// Used for guard clause detection where we only need the then-body
+    /// to exit (no else clause required).
+    fn then_body_unconditionally_exits(body: &IfBody<'_>) -> bool {
+        match body {
+            IfBody::Statement(stmt_body) => {
+                Self::statement_unconditionally_exits(stmt_body.statement)
+            }
+            IfBody::ColonDelimited(colon_body) => colon_body
+                .statements
+                .last()
+                .is_some_and(Self::statement_unconditionally_exits),
+        }
+    }
+
+    /// Apply guard clause narrowing after an `if` statement whose
+    /// then-body unconditionally exits (return/throw/continue/break)
+    /// and which has no else/elseif clauses.
+    ///
+    /// When a guard clause like:
+    /// ```text
+    /// if (!$var instanceof Foo) { return; }
+    /// ```
+    /// appears before the cursor, the code after it can only be reached
+    /// when the condition was *false* — so we apply the inverse narrowing.
+    ///
+    /// This handles:
+    ///   - `instanceof` / `is_a()` / `get_class()` / `::class` checks
+    ///   - `@phpstan-assert-if-true` / `@phpstan-assert-if-false` guards
+    pub(super) fn apply_guard_clause_narrowing(
+        if_stmt: &If<'_>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        // Only applies when the then-body exits and there are no
+        // elseif/else branches (simple guard clause pattern).
+        if !Self::then_body_unconditionally_exits(&if_stmt.body) {
+            return;
+        }
+        if if_stmt.body.has_else_clause() || if_stmt.body.has_else_if_clauses() {
+            return;
+        }
+
+        // ── instanceof / is_a / get_class / ::class narrowing ──
+        // The then-body exits, so subsequent code is the "else" — apply
+        // the inverse of the condition.
+        if let Some((cls_name, negated)) =
+            Self::try_extract_instanceof_with_negation(if_stmt.condition, ctx.var_name)
+        {
+            // Positive instanceof + exit → exclude after (var is NOT that class)
+            // Negated instanceof + exit → include after (var IS that class)
+            if negated {
+                Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+            } else {
+                Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+            }
+        }
+
+        // ── @phpstan-assert-if-true / @phpstan-assert-if-false ──
+        // When a function with assert-if-true/false is the condition and
+        // the then-body exits, the code after runs when the function
+        // returned the opposite boolean — apply the inverse narrowing.
+        let (func_call_expr, condition_negated) =
+            Self::unwrap_condition_negation(if_stmt.condition);
+
+        if let Expression::Call(Call::Function(func_call)) = func_call_expr {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value().to_string(),
+                _ => return,
+            };
+            let func_info = match ctx.function_loader {
+                Some(fl) => match fl(&func_name) {
+                    Some(fi) => fi,
+                    None => return,
+                },
+                None => return,
+            };
+
+            // The then-body exits, so we're in the "else" conceptually.
+            // inverted=true, same logic as try_apply_assert_condition_narrowing
+            let function_returned_true = condition_negated;
+
+            for assertion in &func_info.type_assertions {
+                let applies_positively = match assertion.kind {
+                    AssertionKind::IfTrue => function_returned_true,
+                    AssertionKind::IfFalse => !function_returned_true,
+                    AssertionKind::Always => continue,
+                };
+
+                if let Some(arg_var) = Self::find_assertion_arg_variable(
+                    &func_call.argument_list,
+                    &assertion.param_name,
+                    &func_info.parameters,
+                ) && arg_var == ctx.var_name
+                {
+                    let should_exclude = assertion.negated ^ !applies_positively;
+                    if should_exclude {
+                        Self::apply_instanceof_exclusion(&assertion.asserted_type, ctx, results);
+                    } else {
+                        Self::apply_instanceof_inclusion(&assertion.asserted_type, ctx, results);
+                    }
+                }
+            }
         }
     }
 }

@@ -180,6 +180,34 @@ if (isRegularUser($k)) {                  // @phpstan-assert-if-false AdminUser
 }
 
 
+// ── Guard Clause Narrowing (Early Return / Throw) ──────────────────────────
+
+$m = findOrFail(1);                       // User|AdminUser
+if (!$m instanceof User) {
+    return;                               // early return — guard clause
+}
+$m->getEmail();                           // narrowed to User after guard
+
+$n = findOrFail(1);
+if ($n instanceof AdminUser) {
+    throw new Exception('no admins');     // early throw — guard clause
+}
+$n->getEmail();                           // narrowed to User (AdminUser excluded)
+
+$o = findOrFail(1);
+if ($o instanceof User) {
+    return;
+}
+if ($o instanceof AdminUser) {
+    return;
+}
+// $o has been fully narrowed by sequential guards
+
+$q = getUnknownValue();
+if (!$q instanceof User) return;          // single-statement guard (no braces)
+$q->getEmail();                           // narrowed to User
+
+
 // ── Ternary Narrowing ──────────────────────────────────────────────────────
 
 $model = findOrFail(1);

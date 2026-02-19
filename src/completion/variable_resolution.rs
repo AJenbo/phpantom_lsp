@@ -354,179 +354,200 @@ impl Backend {
                 // cursor falls inside the corresponding branch body, we
                 // *narrow* the variable to only that class — replacing all
                 // previous candidates.
-                Statement::If(if_stmt) => match &if_stmt.body {
-                    IfBody::Statement(body) => {
-                        // ── instanceof narrowing for then-body ──
-                        Self::try_apply_instanceof_narrowing(
-                            if_stmt.condition,
-                            body.statement.span(),
-                            ctx,
-                            results,
-                        );
-                        // ── @phpstan-assert-if-true/false narrowing for then-body ──
-                        Self::try_apply_assert_condition_narrowing(
-                            if_stmt.condition,
-                            body.statement.span(),
-                            ctx,
-                            results,
-                            false, // not inverted — this is the then-body
-                        );
-                        Self::check_statement_for_assignments(body.statement, ctx, results, true);
+                Statement::If(if_stmt) => {
+                    match &if_stmt.body {
+                        IfBody::Statement(body) => {
+                            // ── instanceof narrowing for then-body ──
+                            Self::try_apply_instanceof_narrowing(
+                                if_stmt.condition,
+                                body.statement.span(),
+                                ctx,
+                                results,
+                            );
+                            // ── @phpstan-assert-if-true/false narrowing for then-body ──
+                            Self::try_apply_assert_condition_narrowing(
+                                if_stmt.condition,
+                                body.statement.span(),
+                                ctx,
+                                results,
+                                false, // not inverted — this is the then-body
+                            );
+                            Self::check_statement_for_assignments(
+                                body.statement,
+                                ctx,
+                                results,
+                                true,
+                            );
 
-                        for else_if in body.else_if_clauses.iter() {
-                            // ── instanceof narrowing for elseif-body ──
-                            Self::try_apply_instanceof_narrowing(
-                                else_if.condition,
-                                else_if.statement.span(),
-                                ctx,
-                                results,
-                            );
-                            Self::try_apply_assert_condition_narrowing(
-                                else_if.condition,
-                                else_if.statement.span(),
-                                ctx,
-                                results,
-                                false,
-                            );
-                            Self::check_statement_for_assignments(
-                                else_if.statement,
-                                ctx,
-                                results,
-                                true,
-                            );
+                            for else_if in body.else_if_clauses.iter() {
+                                // ── instanceof narrowing for elseif-body ──
+                                Self::try_apply_instanceof_narrowing(
+                                    else_if.condition,
+                                    else_if.statement.span(),
+                                    ctx,
+                                    results,
+                                );
+                                Self::try_apply_assert_condition_narrowing(
+                                    else_if.condition,
+                                    else_if.statement.span(),
+                                    ctx,
+                                    results,
+                                    false,
+                                );
+                                Self::check_statement_for_assignments(
+                                    else_if.statement,
+                                    ctx,
+                                    results,
+                                    true,
+                                );
+                            }
+                            if let Some(else_clause) = &body.else_clause {
+                                // ── inverse instanceof narrowing for else-body ──
+                                // `if ($v instanceof Foo) { … } else { ← here }`
+                                // means $v is NOT Foo in the else branch.
+                                Self::try_apply_instanceof_narrowing_inverse(
+                                    if_stmt.condition,
+                                    else_clause.statement.span(),
+                                    ctx,
+                                    results,
+                                );
+                                Self::try_apply_assert_condition_narrowing(
+                                    if_stmt.condition,
+                                    else_clause.statement.span(),
+                                    ctx,
+                                    results,
+                                    true, // inverted — this is the else-body
+                                );
+                                Self::check_statement_for_assignments(
+                                    else_clause.statement,
+                                    ctx,
+                                    results,
+                                    true,
+                                );
+                            }
                         }
-                        if let Some(else_clause) = &body.else_clause {
-                            // ── inverse instanceof narrowing for else-body ──
-                            // `if ($v instanceof Foo) { … } else { ← here }`
-                            // means $v is NOT Foo in the else branch.
-                            Self::try_apply_instanceof_narrowing_inverse(
-                                if_stmt.condition,
-                                else_clause.statement.span(),
-                                ctx,
-                                results,
-                            );
-                            Self::try_apply_assert_condition_narrowing(
-                                if_stmt.condition,
-                                else_clause.statement.span(),
-                                ctx,
-                                results,
-                                true, // inverted — this is the else-body
-                            );
-                            Self::check_statement_for_assignments(
-                                else_clause.statement,
-                                ctx,
-                                results,
-                                true,
-                            );
-                        }
-                    }
-                    IfBody::ColonDelimited(body) => {
-                        // Determine the then-body span: from the colon to
-                        // the first elseif / else / endif keyword.
-                        let then_end = if !body.else_if_clauses.is_empty() {
-                            body.else_if_clauses
-                                .first()
-                                .unwrap()
-                                .elseif
-                                .span()
-                                .start
-                                .offset
-                        } else if let Some(ref ec) = body.else_clause {
-                            ec.r#else.span().start.offset
-                        } else {
-                            body.endif.span().start.offset
-                        };
-                        let then_span = mago_span::Span::new(
-                            body.colon.file_id,
-                            body.colon.start,
-                            mago_span::Position::new(then_end),
-                        );
-                        Self::try_apply_instanceof_narrowing(
-                            if_stmt.condition,
-                            then_span,
-                            ctx,
-                            results,
-                        );
-                        Self::try_apply_assert_condition_narrowing(
-                            if_stmt.condition,
-                            then_span,
-                            ctx,
-                            results,
-                            false,
-                        );
-                        Self::walk_statements_for_assignments(
-                            body.statements.iter(),
-                            ctx,
-                            results,
-                            true,
-                        );
-                        for else_if in body.else_if_clauses.iter() {
-                            let ei_span = mago_span::Span::new(
-                                else_if.colon.file_id,
-                                else_if.colon.start,
-                                mago_span::Position::new(
-                                    else_if
-                                        .statements
-                                        .span(else_if.colon.file_id, else_if.colon.end)
-                                        .end
-                                        .offset,
-                                ),
+                        IfBody::ColonDelimited(body) => {
+                            // Determine the then-body span: from the colon to
+                            // the first elseif / else / endif keyword.
+                            let then_end = if !body.else_if_clauses.is_empty() {
+                                body.else_if_clauses
+                                    .first()
+                                    .unwrap()
+                                    .elseif
+                                    .span()
+                                    .start
+                                    .offset
+                            } else if let Some(ref ec) = body.else_clause {
+                                ec.r#else.span().start.offset
+                            } else {
+                                body.endif.span().start.offset
+                            };
+                            let then_span = mago_span::Span::new(
+                                body.colon.file_id,
+                                body.colon.start,
+                                mago_span::Position::new(then_end),
                             );
                             Self::try_apply_instanceof_narrowing(
-                                else_if.condition,
-                                ei_span,
+                                if_stmt.condition,
+                                then_span,
                                 ctx,
                                 results,
                             );
                             Self::try_apply_assert_condition_narrowing(
-                                else_if.condition,
-                                ei_span,
+                                if_stmt.condition,
+                                then_span,
                                 ctx,
                                 results,
                                 false,
                             );
                             Self::walk_statements_for_assignments(
-                                else_if.statements.iter(),
+                                body.statements.iter(),
                                 ctx,
                                 results,
                                 true,
                             );
-                        }
-                        if let Some(else_clause) = &body.else_clause {
-                            // ── inverse instanceof narrowing for else-body ──
-                            let else_span = mago_span::Span::new(
-                                else_clause.colon.file_id,
-                                else_clause.colon.start,
-                                mago_span::Position::new(
-                                    else_clause
-                                        .statements
-                                        .span(else_clause.colon.file_id, else_clause.colon.end)
-                                        .end
-                                        .offset,
-                                ),
-                            );
-                            Self::try_apply_instanceof_narrowing_inverse(
-                                if_stmt.condition,
-                                else_span,
-                                ctx,
-                                results,
-                            );
-                            Self::try_apply_assert_condition_narrowing(
-                                if_stmt.condition,
-                                else_span,
-                                ctx,
-                                results,
-                                true, // inverted — else-body
-                            );
-                            Self::walk_statements_for_assignments(
-                                else_clause.statements.iter(),
-                                ctx,
-                                results,
-                                true,
-                            );
+                            for else_if in body.else_if_clauses.iter() {
+                                let ei_span = mago_span::Span::new(
+                                    else_if.colon.file_id,
+                                    else_if.colon.start,
+                                    mago_span::Position::new(
+                                        else_if
+                                            .statements
+                                            .span(else_if.colon.file_id, else_if.colon.end)
+                                            .end
+                                            .offset,
+                                    ),
+                                );
+                                Self::try_apply_instanceof_narrowing(
+                                    else_if.condition,
+                                    ei_span,
+                                    ctx,
+                                    results,
+                                );
+                                Self::try_apply_assert_condition_narrowing(
+                                    else_if.condition,
+                                    ei_span,
+                                    ctx,
+                                    results,
+                                    false,
+                                );
+                                Self::walk_statements_for_assignments(
+                                    else_if.statements.iter(),
+                                    ctx,
+                                    results,
+                                    true,
+                                );
+                            }
+                            if let Some(else_clause) = &body.else_clause {
+                                // ── inverse instanceof narrowing for else-body ──
+                                let else_span = mago_span::Span::new(
+                                    else_clause.colon.file_id,
+                                    else_clause.colon.start,
+                                    mago_span::Position::new(
+                                        else_clause
+                                            .statements
+                                            .span(else_clause.colon.file_id, else_clause.colon.end)
+                                            .end
+                                            .offset,
+                                    ),
+                                );
+                                Self::try_apply_instanceof_narrowing_inverse(
+                                    if_stmt.condition,
+                                    else_span,
+                                    ctx,
+                                    results,
+                                );
+                                Self::try_apply_assert_condition_narrowing(
+                                    if_stmt.condition,
+                                    else_span,
+                                    ctx,
+                                    results,
+                                    true, // inverted — else-body
+                                );
+                                Self::walk_statements_for_assignments(
+                                    else_clause.statements.iter(),
+                                    ctx,
+                                    results,
+                                    true,
+                                );
+                            }
                         }
                     }
-                },
+
+                    // ── Guard clause narrowing (early return / throw) ──
+                    // When the cursor is *after* a guard clause (an `if`
+                    // whose then-body unconditionally exits via return /
+                    // throw / continue / break, with no else / elseif),
+                    // apply the inverse narrowing so subsequent code sees
+                    // the narrowed type.
+                    //
+                    // Example:
+                    //   if (!$var instanceof Foo) { return; }
+                    //   $var-> // narrowed to Foo here
+                    if stmt.span().end.offset < ctx.cursor_offset {
+                        Self::apply_guard_clause_narrowing(if_stmt, ctx, results);
+                    }
+                }
                 Statement::Foreach(foreach) => {
                     // Only resolve the foreach value variable and recurse
                     // into the body when the cursor is actually inside it.
