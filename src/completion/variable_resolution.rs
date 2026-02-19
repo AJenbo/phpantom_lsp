@@ -327,6 +327,16 @@ impl Backend {
 
                     // ── match(true) { $var instanceof Foo => … } narrowing ──
                     Self::try_apply_match_true_narrowing(expr_stmt.expression, ctx, results);
+
+                    // ── ternary instanceof narrowing ──
+                    // `$var instanceof Foo ? $var->method() : …`
+                    // When the cursor is inside a ternary whose condition
+                    // checks instanceof, narrow accordingly.
+                    Self::try_apply_ternary_instanceof_narrowing(
+                        expr_stmt.expression,
+                        ctx,
+                        results,
+                    );
                 }
                 // Recurse into blocks — these are just `{ … }` groupings,
                 // not conditional, so preserve the current `conditional` flag.

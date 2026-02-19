@@ -1130,6 +1130,52 @@ class TernaryDemo {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 19b. instanceof narrowing in ternary expressions
+// ═══════════════════════════════════════════════════════════════════
+// When a ternary condition checks `$var instanceof ClassName`, the
+// variable is narrowed in the then-branch and excluded in the
+// else-branch — just like `if`/`else`.  Negated conditions flip
+// the polarity.  Nested ternaries are also supported.
+
+class TernaryInstanceofDemo
+{
+    public function thenBranch(Model $item): void
+    {
+        // ── Then-branch narrowing ──
+        // $item is narrowed to User inside the then-branch:
+        $name = $item instanceof User ? $item->getEmail() : 'unknown';
+        //                               ↑ shows User methods (getEmail, getStatus, etc.)
+    }
+
+    public function elseBranch(Model $item): void
+    {
+        // ── Else-branch exclusion ──
+        // When $item is NOT User in the else-branch, User is excluded:
+        /** @param User|AdminUser $item */
+        $x = $item instanceof User ? null : $item->grantPermission();
+        //                                   ↑ shows AdminUser methods only
+    }
+
+    public function negated(Model $item): void
+    {
+        // ── Negated condition ──
+        // `!$item instanceof User` excludes User in the then-branch:
+        /** @param User|AdminUser $item */
+        $x = !$item instanceof User ? $item->grantPermission() : null;
+        //                             ↑ shows AdminUser methods only
+    }
+
+    public function inAssignment(Model $item): void
+    {
+        // ── Inside assignment RHS ──
+        // Works when the ternary is the RHS of an assignment to a
+        // *different* variable:
+        $result = $item instanceof User ? $item->getEmail() : 'fallback';
+        //                                 ↑ shows User methods
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // §14  Property Chains on Non-$this Variables
 // ═══════════════════════════════════════════════════════════════════════
@@ -2264,9 +2310,13 @@ class CallableSnippetDemo
     public function newSnippets(): void
     {
         // `new` inserts class name + constructor params as snippet:
-        $u = new User($name, $email)          // Inserted: User(${1:$name}, ${2:$email}) — 2 required
+        $u = new User($name, $email);         // Inserted: User(${1:$name}, ${2:$email}) — 2 required
         $r = new Response($statusCode);       // Inserted: Response(${1:$statusCode})    — 1 required
         $a = new AdminUser($name, $email);    // Inserted: AdminUser(${1:$name}, ${2:$email}, ${3:$role})
+        // After `new`, only class names are suggested — no constants
+        // or functions.  Loaded interfaces, traits, enums, and abstract
+        // classes are excluded.  Unloaded names like AbstractHandler or
+        // LoggerInterface are demoted in the sort order.
     }
 
     public function parentConstructorSnippet(): void

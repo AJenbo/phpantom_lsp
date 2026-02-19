@@ -1324,3 +1324,373 @@ async fn test_completion_chained_null_coalescing() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── instanceof narrowing in ternary expressions ────────────────────────────
+
+/// Extract labels from a completion response (handles both Array and List).
+fn extract_labels(response: CompletionResponse) -> Vec<String> {
+    match response {
+        CompletionResponse::Array(items) => items.into_iter().map(|i| i.label).collect(),
+        CompletionResponse::List(list) => list.items.into_iter().map(|i| i.label).collect(),
+    }
+}
+
+/// `$var instanceof Foo ? $var->` should narrow `$var` to `Foo` in the
+/// then-branch of the ternary.
+#[tokio::test]
+async fn test_completion_ternary_instanceof_then_branch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ternary_instanceof_then.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Animal {\n",
+        "    public function breathe(): void {}\n",
+        "}\n",
+        "class Dog extends Animal {\n",
+        "    public function bark(): void {}\n",
+        "}\n",
+        "class Cat extends Animal {\n",
+        "    public function purr(): void {}\n",
+        "}\n",
+        "class Zoo {\n",
+        "    public function test(Animal $a): void {\n",
+        //                        0         1         2         3
+        //                        0123456789012345678901234567890123456789
+        "        $x = $a instanceof Dog ? $a-> : null;\n",
+        //       ^8                       ^33    ^37
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 37,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for instanceof narrowing in ternary then-branch"
+    );
+
+    let labels = extract_labels(result.unwrap());
+    assert!(
+        labels.iter().any(|l| l.starts_with("bark")),
+        "Should include bark from Dog (narrowed via instanceof), got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("breathe")),
+        "Should include breathe (inherited from Animal), got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("purr")),
+        "Should NOT include purr from Cat (narrowed to Dog), got: {:?}",
+        labels
+    );
+}
+
+/// `$var instanceof Foo ? null : $var->` should exclude `Foo` from `$var`
+/// in the else-branch of the ternary.
+#[tokio::test]
+async fn test_completion_ternary_instanceof_else_branch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ternary_instanceof_else.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Vehicle {\n",
+        "    public function drive(): void {}\n",
+        "}\n",
+        "class Car extends Vehicle {\n",
+        "    public function honk(): void {}\n",
+        "}\n",
+        "class Bike extends Vehicle {\n",
+        "    public function pedal(): void {}\n",
+        "}\n",
+        "class Garage {\n",
+        "    /** @param Car|Bike $v */\n",
+        "    public function test($v): void {\n",
+        //                        0         1         2         3         4
+        //                        0123456789012345678901234567890123456789012345
+        "        $x = $v instanceof Car ? null : $v->;\n",
+        //       ^8                               ^40 ^44
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 44,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for instanceof narrowing in ternary else-branch"
+    );
+
+    let labels = extract_labels(result.unwrap());
+    assert!(
+        labels.iter().any(|l| l.starts_with("pedal")),
+        "Should include pedal from Bike (Car excluded in else-branch), got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("honk")),
+        "Should NOT include honk from Car (excluded in else-branch), got: {:?}",
+        labels
+    );
+}
+
+/// `!$var instanceof Foo ? $var->` should exclude `Foo` from `$var` in
+/// the then-branch (negated instanceof flips the polarity).
+#[tokio::test]
+async fn test_completion_ternary_negated_instanceof_then_branch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ternary_neg_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Shape {\n",
+        "    public function area(): float {}\n",
+        "}\n",
+        "class Circle extends Shape {\n",
+        "    public function radius(): float {}\n",
+        "}\n",
+        "class Square extends Shape {\n",
+        "    public function side(): float {}\n",
+        "}\n",
+        "class Canvas {\n",
+        "    /** @param Circle|Square $s */\n",
+        "    public function test($s): void {\n",
+        //                        0         1         2         3         4
+        //                        0123456789012345678901234567890123456789012
+        "        $x = !$s instanceof Circle ? $s-> : null;\n",
+        //       ^8                            ^37  ^41
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 41,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for negated instanceof in ternary then-branch"
+    );
+
+    let labels = extract_labels(result.unwrap());
+    assert!(
+        labels.iter().any(|l| l.starts_with("side")),
+        "Should include side from Square (Circle excluded by negation), got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|l| l.starts_with("radius")),
+        "Should NOT include radius from Circle (excluded by negation), got: {:?}",
+        labels
+    );
+}
+
+/// Ternary instanceof narrowing should work inside an assignment RHS:
+/// `$result = $var instanceof Foo ? $var->method() : default`
+#[tokio::test]
+async fn test_completion_ternary_instanceof_in_assignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ternary_instanceof_assign.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function log(string $msg): void {}\n",
+        "}\n",
+        "class FileLogger extends Logger {\n",
+        "    public function flush(): void {}\n",
+        "}\n",
+        "class App {\n",
+        "    public function test(Logger $logger): void {\n",
+        //                        0         1         2         3         4         5         6
+        //                        0123456789012345678901234567890123456789012345678901234567890
+        "        $result = $logger instanceof FileLogger ? $logger-> : 'default';\n",
+        //       ^8                                        ^50     ^59
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 59,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for instanceof narrowing in ternary assignment"
+    );
+
+    let labels = extract_labels(result.unwrap());
+    assert!(
+        labels.iter().any(|l| l.starts_with("flush")),
+        "Should include flush from FileLogger (narrowed via instanceof), got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("log")),
+        "Should include log (inherited from Logger), got: {:?}",
+        labels
+    );
+}
+
+/// Narrowing in a ternary with `instanceof` on a subclass.
+/// `$svc instanceof AdvancedService ? $svc->` should show AdvancedService members.
+#[tokio::test]
+async fn test_completion_ternary_instanceof_subclass() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ternary_instanceof_subclass.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Loggable {\n",
+        "    public function getLog(): string;\n",
+        "}\n",
+        "class BaseService {\n",
+        "    public function run(): void {}\n",
+        "}\n",
+        "class AdvancedService extends BaseService implements Loggable {\n",
+        "    public function getLog(): string {}\n",
+        "    public function optimize(): void {}\n",
+        "}\n",
+        "class Handler {\n",
+        "    public function test(BaseService $svc): void {\n",
+        //                        0         1         2         3         4         5
+        //                        01234567890123456789012345678901234567890123456789012345
+        "        $x = $svc instanceof AdvancedService ? $svc-> : null;\n",
+        //       ^8                                     ^47   ^53
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 53,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for instanceof narrowing in ternary"
+    );
+
+    let labels = extract_labels(result.unwrap());
+    assert!(
+        labels.iter().any(|l| l.starts_with("optimize")),
+        "Should include optimize from AdvancedService, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("run")),
+        "Should include run (inherited from BaseService), got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("getLog")),
+        "Should include getLog (from Loggable interface), got: {:?}",
+        labels
+    );
+}

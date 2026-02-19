@@ -12,6 +12,7 @@
 ///   - `assert($var instanceof ClassName)` — unconditional narrowing
 ///   - `@phpstan-assert` / `@psalm-assert` — custom type guard functions
 ///   - `match(true) { $var instanceof Foo => … }` — match-arm narrowing
+///   - `$var instanceof Foo ? $var->method() : …` — ternary narrowing
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -613,6 +614,106 @@ impl Backend {
                     }
                 }
             }
+        }
+    }
+
+    /// Apply `instanceof` narrowing inside ternary (`?:`) expressions.
+    ///
+    /// When the cursor falls inside a ternary whose condition is
+    /// `$var instanceof ClassName`:
+    ///   - **then-branch** → narrow to `ClassName`
+    ///   - **else-branch** → exclude `ClassName`
+    ///
+    /// Negated conditions (`!$var instanceof Foo ? … : …`) flip the
+    /// polarity, just like `if`/`else`.
+    ///
+    /// The function recursively walks the expression tree so that nested
+    /// ternaries and ternaries buried inside assignments, function
+    /// arguments, etc. are all handled.
+    pub(super) fn try_apply_ternary_instanceof_narrowing(
+        expr: &Expression<'_>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        match expr {
+            Expression::Conditional(cond_expr) => {
+                // Determine which branch (if any) the cursor is inside.
+                let in_then = cond_expr.then.is_some_and(|then_expr| {
+                    let span = then_expr.span();
+                    ctx.cursor_offset >= span.start.offset && ctx.cursor_offset <= span.end.offset
+                });
+                let in_else = {
+                    let span = cond_expr.r#else.span();
+                    ctx.cursor_offset >= span.start.offset && ctx.cursor_offset <= span.end.offset
+                };
+
+                if in_then {
+                    if let Some((cls_name, negated)) = Self::try_extract_instanceof_with_negation(
+                        cond_expr.condition,
+                        ctx.var_name,
+                    ) {
+                        if negated {
+                            Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+                        } else {
+                            Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+                        }
+                    }
+                } else if in_else
+                    && let Some((cls_name, negated)) = Self::try_extract_instanceof_with_negation(
+                        cond_expr.condition,
+                        ctx.var_name,
+                    )
+                {
+                    // Flip polarity for the else branch.
+                    if negated {
+                        Self::apply_instanceof_inclusion(&cls_name, ctx, results);
+                    } else {
+                        Self::apply_instanceof_exclusion(&cls_name, ctx, results);
+                    }
+                }
+
+                // Recurse into whichever branch contains the cursor so
+                // that nested ternaries are also narrowed.
+                if let Some(then_expr) = cond_expr.then {
+                    Self::try_apply_ternary_instanceof_narrowing(then_expr, ctx, results);
+                }
+                Self::try_apply_ternary_instanceof_narrowing(cond_expr.r#else, ctx, results);
+            }
+            // Recurse through common wrapper expressions so ternaries
+            // buried inside assignments, parentheses, binary ops, etc.
+            // are still discovered.
+            Expression::Parenthesized(inner) => {
+                Self::try_apply_ternary_instanceof_narrowing(inner.expression, ctx, results);
+            }
+            Expression::Assignment(assign) => {
+                Self::try_apply_ternary_instanceof_narrowing(assign.rhs, ctx, results);
+            }
+            Expression::Binary(bin) => {
+                Self::try_apply_ternary_instanceof_narrowing(bin.lhs, ctx, results);
+                Self::try_apply_ternary_instanceof_narrowing(bin.rhs, ctx, results);
+            }
+            Expression::UnaryPrefix(prefix) => {
+                Self::try_apply_ternary_instanceof_narrowing(prefix.operand, ctx, results);
+            }
+            Expression::UnaryPostfix(postfix) => {
+                Self::try_apply_ternary_instanceof_narrowing(postfix.operand, ctx, results);
+            }
+            Expression::Call(call) => {
+                let args = match call {
+                    Call::Function(fc) => &fc.argument_list.arguments,
+                    Call::Method(mc) => &mc.argument_list.arguments,
+                    Call::NullSafeMethod(mc) => &mc.argument_list.arguments,
+                    Call::StaticMethod(sc) => &sc.argument_list.arguments,
+                };
+                for arg in args.iter() {
+                    let arg_expr = match arg {
+                        Argument::Positional(pos) => pos.value,
+                        Argument::Named(named) => named.value,
+                    };
+                    Self::try_apply_ternary_instanceof_narrowing(arg_expr, ctx, results);
+                }
+            }
+            _ => {}
         }
     }
 }
