@@ -503,16 +503,11 @@ async fn test_completion_parent_double_colon_no_parent_falls_back() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    // Should fall back to the default PHPantomLSP item since there's no parent
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(items.len(), 1, "Should fall back to default completion");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    // Should return None since there's no parent class
+    assert!(
+        result.is_none(),
+        "parent:: with no parent class should return None"
+    );
 }
 
 #[tokio::test]
@@ -627,21 +622,11 @@ async fn test_completion_static_double_colon_suppressed_on_final_class() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    // Should fall back to the default PHPantomLSP item since the class is final
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(
-                items.len(),
-                1,
-                "static:: in a final class should fall back to default, got: {:?}",
-                items.iter().map(|i| &i.label).collect::<Vec<_>>()
-            );
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    // Should return None since the class is final — static:: is suppressed
+    assert!(
+        result.is_none(),
+        "static:: in a final class should return None"
+    );
 }
 
 /// `static::` inside a non-final class should work as normal.
@@ -744,20 +729,10 @@ async fn test_completion_static_double_colon_suppressed_on_enum() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(
-                items.len(),
-                1,
-                "static:: in an enum should fall back to default (enums are final), got: {:?}",
-                items.iter().map(|i| &i.label).collect::<Vec<_>>()
-            );
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    assert!(
+        result.is_none(),
+        "static:: in an enum should return None (enums are final)"
+    );
 }
 
 /// `self::` should still work on final classes (only `static::` is suppressed).

@@ -142,7 +142,7 @@ async fn test_completion_interface_constant_via_double_colon() {
 // ─── Basic Completion Tests ─────────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_completion_returns_phpantomlsp() {
+async fn test_completion_returns_none_when_nothing_matches() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///test.php").unwrap();
@@ -172,15 +172,10 @@ async fn test_completion_returns_phpantomlsp() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return results");
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert!(!items.is_empty(), "Should have at least one item");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    assert!(
+        result.is_none(),
+        "Completion should return None when nothing matches"
+    );
 }
 
 #[tokio::test]
@@ -306,15 +301,10 @@ async fn test_completion_outside_class_returns_fallback() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(items.len(), 1, "Should fall back to default item");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    assert!(
+        result.is_none(),
+        "Cursor outside class with no operator should return None"
+    );
 }
 
 #[tokio::test]
@@ -421,16 +411,11 @@ async fn test_completion_empty_class_falls_back() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    // Empty class has no methods or properties, so should fall back to PHPantomLSP
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    // Empty class has no methods or properties, so should return None
+    assert!(
+        result.is_none(),
+        "Empty class with no members should return None"
+    );
 }
 
 #[tokio::test]
@@ -475,14 +460,6 @@ async fn test_completion_no_access_operator_shows_fallback() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return fallback");
-
-    // Without `->` or `::`, no class members should be suggested — only fallback
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(items.len(), 1, "Should only have fallback item");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    // Without `->` or `::`, no class members should be suggested
+    assert!(result.is_none(), "No access operator should return None");
 }

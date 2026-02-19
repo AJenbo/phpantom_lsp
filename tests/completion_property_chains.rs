@@ -950,25 +950,12 @@ async fn test_var_property_chain_nonexistent_property() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    // Should either return None, an empty list, or only the default
-    // "PHPantomLSP" placeholder — no crash, no wrong results.
-    match result {
-        None => {} // acceptable
-        Some(CompletionResponse::Array(items)) => {
-            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-            // The only acceptable items are none or the default placeholder.
-            let meaningful: Vec<&&str> = labels
-                .iter()
-                .filter(|l| !l.contains("PHPantomLSP"))
-                .collect();
-            assert!(
-                meaningful.is_empty(),
-                "Should return no meaningful results for nonexistent property chain. Got: {:?}",
-                labels
-            );
-        }
-        Some(CompletionResponse::List(_)) => panic!("Expected Array response"),
-    }
+    // Should return None — no crash, no wrong results.
+    assert!(
+        result.is_none(),
+        "Should return None for nonexistent property chain, got: {:?}",
+        result
+    );
 }
 
 // ─── Foreach variable property chain ────────────────────────────────────────

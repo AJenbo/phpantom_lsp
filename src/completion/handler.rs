@@ -531,14 +531,8 @@ impl Backend {
             }
         }
 
-        // Fallback: return the default PHPantomLSP completion item
-        Ok(Some(CompletionResponse::Array(vec![CompletionItem {
-            label: "PHPantomLSP".to_string(),
-            kind: Some(CompletionItemKind::TEXT),
-            detail: Some("PHPantomLSP completion".to_string()),
-            insert_text: Some("PHPantomLSP".to_string()),
-            ..CompletionItem::default()
-        }])))
+        // Nothing matched — return no completions.
+        Ok(None)
     }
 
     /// Insert `);` at the given cursor position in `content`.

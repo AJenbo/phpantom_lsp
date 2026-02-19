@@ -1238,22 +1238,11 @@ async fn test_completion_promoted_property_param_scalar_not_overridden() {
 
     let result = backend.completion(completion_params).await.unwrap();
     // Scalar `int` should not be overridden — no class members to complete.
-    match result {
-        None => {} // acceptable
-        Some(CompletionResponse::Array(items)) => {
-            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-            let meaningful: Vec<&&str> = labels
-                .iter()
-                .filter(|l| !l.contains("PHPantomLSP"))
-                .collect();
-            assert!(
-                meaningful.is_empty(),
-                "Scalar promoted property should not resolve to class. Got: {:?}",
-                labels
-            );
-        }
-        Some(CompletionResponse::List(_)) => panic!("Expected Array response"),
-    }
+    assert!(
+        result.is_none(),
+        "Scalar promoted property should not resolve to class, got: {:?}",
+        result
+    );
 }
 
 /// Property chain on non-$this variable with promoted property @param override.

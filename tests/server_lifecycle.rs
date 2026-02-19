@@ -56,7 +56,7 @@ async fn test_did_open_stores_file() {
 }
 
 #[tokio::test]
-async fn test_completion_returns_phpantomlsp() {
+async fn test_completion_returns_none_when_nothing_matches() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///test.php").unwrap();
@@ -86,15 +86,10 @@ async fn test_completion_returns_phpantomlsp() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some(), "Completion should return results");
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert!(!items.is_empty(), "Should have at least one item");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    assert!(
+        result.is_none(),
+        "Completion should return None when nothing matches"
+    );
 }
 
 #[tokio::test]

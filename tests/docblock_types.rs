@@ -469,13 +469,17 @@ async fn test_docblock_does_not_override_scalar_type_hint() {
         context: None,
     };
 
-    let result = backend.completion(params).await.unwrap().unwrap();
-    let names = completion_names(result);
-    assert!(
-        !names.iter().any(|n| n == "regenerate"),
-        "Should NOT offer 'regenerate' — @var Session can't override int. Got: {:?}",
-        names
-    );
+    let result = backend.completion(params).await.unwrap();
+    // Scalar type `int` cannot be overridden by @var Session — result
+    // may be None (no completions) or an array without Session methods.
+    if let Some(resp) = result {
+        let names = completion_names(resp);
+        assert!(
+            !names.iter().any(|n| n == "regenerate"),
+            "Should NOT offer 'regenerate' — @var Session can't override int. Got: {:?}",
+            names
+        );
+    }
 }
 
 /// Test: `@var Session` does NOT override `string` type hint.
@@ -525,13 +529,17 @@ async fn test_docblock_does_not_override_string_type_hint() {
         context: None,
     };
 
-    let result = backend.completion(params).await.unwrap().unwrap();
-    let names = completion_names(result);
-    assert!(
-        !names.iter().any(|n| n == "regenerate"),
-        "Should NOT offer 'regenerate' — @var Session can't override string. Got: {:?}",
-        names
-    );
+    let result = backend.completion(params).await.unwrap();
+    // Scalar type `string` cannot be overridden by @var Session — result
+    // may be None (no completions) or an array without Session methods.
+    if let Some(resp) = result {
+        let names = completion_names(resp);
+        assert!(
+            !names.iter().any(|n| n == "regenerate"),
+            "Should NOT offer 'regenerate' — @var Session can't override string. Got: {:?}",
+            names
+        );
+    }
 }
 
 /// Test: `@return Session` overrides `mixed` return type on a method.
@@ -646,13 +654,17 @@ async fn test_docblock_return_does_not_override_scalar() {
         context: None,
     };
 
-    let result = backend.completion(params).await.unwrap().unwrap();
-    let names = completion_names(result);
-    assert!(
-        !names.iter().any(|n| n == "regenerate"),
-        "Should NOT offer 'regenerate' — @return Session can't override int. Got: {:?}",
-        names
-    );
+    let result = backend.completion(params).await.unwrap();
+    // Scalar type `int` cannot be overridden by @return Session — result
+    // may be None (no completions) or an array without Session methods.
+    if let Some(resp) = result {
+        let names = completion_names(resp);
+        assert!(
+            !names.iter().any(|n| n == "regenerate"),
+            "Should NOT offer 'regenerate' — @return Session can't override int. Got: {:?}",
+            names
+        );
+    }
 }
 
 // ─── Standalone Function @return Docblock ───────────────────────────────────

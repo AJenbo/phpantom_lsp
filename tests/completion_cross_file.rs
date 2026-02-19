@@ -411,15 +411,10 @@ async fn test_cross_file_no_psr4_mapping_falls_back() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(items.len(), 1, "Should fall back to default item");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    assert!(
+        result.is_none(),
+        "Should return None when no PSR-4 mapping resolves the class"
+    );
 }
 
 #[tokio::test]

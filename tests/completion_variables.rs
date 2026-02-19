@@ -229,15 +229,8 @@ async fn test_completion_unknown_variable_shows_fallback() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            assert_eq!(items.len(), 1, "Unknown variable should fall back");
-            assert_eq!(items[0].label, "PHPantomLSP");
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
-    }
+    // Unknown variable with no matching completion should return None
+    assert!(result.is_none(), "Unknown variable should return None");
 }
 
 #[tokio::test]
@@ -1995,24 +1988,23 @@ async fn test_completion_inline_var_docblock_wrong_variable_name_ignored() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            // The @var annotation names $other, not $log — so it should NOT
-            // apply and $log should fall back to the default placeholder.
-            let method_names: Vec<&str> = items
-                .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-                .map(|i| i.filter_text.as_deref().unwrap())
-                .collect();
-            assert!(
-                !method_names.contains(&"info"),
-                "Should NOT include Logger::info when @var names a different variable, got: {:?}",
-                method_names
-            );
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
+    // The @var annotation names $other, not $log — so it should NOT apply.
+    // Result may be None (no completions) or an array without Logger methods.
+    if let Some(resp) = result {
+        let items = match resp {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        let method_names: Vec<&str> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .map(|i| i.filter_text.as_deref().unwrap())
+            .collect();
+        assert!(
+            !method_names.contains(&"info"),
+            "Should NOT include Logger::info when @var names a different variable, got: {:?}",
+            method_names
+        );
     }
 }
 
@@ -2060,24 +2052,24 @@ async fn test_completion_inline_var_docblock_override_blocked_by_scalar() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    assert!(result.is_some());
-
-    match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            // getName() returns `string` — the @var Session override should
-            // be blocked because string is a scalar.
-            let method_names: Vec<&str> = items
-                .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-                .map(|i| i.filter_text.as_deref().unwrap())
-                .collect();
-            assert!(
-                !method_names.contains(&"getId"),
-                "Should NOT include Session::getId when native type is scalar string, got: {:?}",
-                method_names
-            );
-        }
-        _ => panic!("Expected CompletionResponse::Array"),
+    // getName() returns `string` — the @var Session override should be
+    // blocked because string is a scalar.  Result may be None or an
+    // array without Session methods.
+    if let Some(resp) = result {
+        let items = match resp {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
+        let method_names: Vec<&str> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .map(|i| i.filter_text.as_deref().unwrap())
+            .collect();
+        assert!(
+            !method_names.contains(&"getId"),
+            "Should NOT include Session::getId when native type is scalar string, got: {:?}",
+            method_names
+        );
     }
 }
 
@@ -9505,11 +9497,7 @@ async fn test_completion_catch_variable_no_own_methods_no_namespace() {
     match result.unwrap() {
         CompletionResponse::Array(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-            assert!(
-                !labels.contains(&"PHPantomLSP"),
-                "Should not fall back to PHPantomLSP placeholder (no namespace), got: {:?}",
-                labels
-            );
+
             assert!(
                 labels.iter().any(|l| l.starts_with("getMessage")),
                 "Should include getMessage from RuntimeException (no namespace), got: {:?}",
@@ -9584,11 +9572,7 @@ async fn test_completion_catch_variable_namespace_no_own_methods() {
             // getMessage(), getCode(), etc. — these should appear via
             // inheritance even though the class has no own members.
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-            assert!(
-                !labels.contains(&"PHPantomLSP"),
-                "Should not fall back to PHPantomLSP placeholder, got: {:?}",
-                labels
-            );
+
             assert!(
                 labels.iter().any(|l| l.starts_with("getMessage")),
                 "Should include getMessage from RuntimeException via inheritance, got: {:?}",

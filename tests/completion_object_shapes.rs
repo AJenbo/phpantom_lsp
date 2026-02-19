@@ -778,9 +778,12 @@ async fn test_bare_object_no_completions() {
     };
 
     let result = backend.completion(completion_params).await.unwrap();
-    // Bare `object` has no properties — result may be None or contain only
-    // the fallback PHPantomLSP item.
-    if let Some(CompletionResponse::Array(items)) = result {
+    // Bare `object` has no properties — result should be None.
+    if let Some(resp) = result {
+        let items = match resp {
+            CompletionResponse::Array(items) => items,
+            CompletionResponse::List(list) => list.items,
+        };
         let class_members: Vec<&str> = items
             .iter()
             .filter(|i| {
