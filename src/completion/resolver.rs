@@ -406,7 +406,7 @@ impl Backend {
         content: &str,
         cursor_offset: usize,
         current_class: Option<&ClassInfo>,
-        _all_classes: &[ClassInfo],
+        all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> Option<String> {
         let search_area = content.get(..cursor_offset)?;
@@ -472,9 +472,48 @@ impl Backend {
         }
 
         // RHS is a call expression — extract the return type.
+        //
+        // Use backward paren scanning (like `split_call_subject`) so that
+        // chained calls like `$this->getRepo()->findAll()` correctly
+        // identify `findAll` as the outermost call, not `getRepo`.
         if rhs_text.ends_with(')') {
-            let paren_pos = Self::find_top_level_open_paren(rhs_text)?;
-            let callee = &rhs_text[..paren_pos];
+            let (callee, _args_text) = split_call_subject(rhs_text)?;
+
+            // ── Chained call: callee contains `->` or `::` beyond a
+            // single-level access ────────────────────────────────────
+            // When the callee itself is a chain (e.g.
+            // `$this->getRepo()->findAll`), delegate to
+            // `resolve_raw_type_from_call_chain` which walks the full
+            // chain recursively.
+            let is_chain = callee.contains("->") && {
+                if let Some(rest) = callee
+                    .strip_prefix("$this->")
+                    .or_else(|| callee.strip_prefix("$this?->"))
+                {
+                    rest.contains("->") || rest.contains("::")
+                } else {
+                    true
+                }
+            };
+            let is_static_chain = !callee.contains("->") && callee.contains("::") && {
+                let first_dc = callee.find("::").unwrap_or(0);
+                callee[first_dc + 2..].contains("::") || callee[first_dc + 2..].contains("->")
+            };
+
+            if is_chain || is_static_chain {
+                return Self::resolve_raw_type_from_call_chain(
+                    callee,
+                    _args_text,
+                    current_class,
+                    all_classes,
+                    class_loader,
+                );
+            }
+
+            // ── `(new ClassName(…))` or `new ClassName(…)` ──────────
+            if let Some(class_name) = Self::extract_new_expression_class(rhs_text) {
+                return Some(class_name);
+            }
 
             // Method call: `$this->methodName(…)`
             if let Some(method_name) = callee.strip_prefix("$this->") {
@@ -527,6 +566,202 @@ impl Backend {
         None
     }
 
+    /// Extract the class name from a `new` expression, handling both
+    /// parenthesized and bare forms:
+    ///
+    /// - `(new Builder())`  → `Some("Builder")`
+    /// - `(new Builder)`    → `Some("Builder")`
+    /// - `new Builder()`    → `Some("Builder")`
+    /// - `(new \App\Builder())` → `Some("App\\Builder")`
+    /// - `$this->foo()`     → `None`
+    fn extract_new_expression_class(s: &str) -> Option<String> {
+        // Strip balanced outer parentheses.
+        let inner = if s.starts_with('(') && s.ends_with(')') {
+            &s[1..s.len() - 1]
+        } else {
+            s
+        };
+        let rest = inner.trim().strip_prefix("new ")?;
+        let rest = rest.trim_start();
+        // The class name runs until `(`, whitespace, or end-of-string.
+        let end = rest
+            .find(|c: char| c == '(' || c.is_whitespace())
+            .unwrap_or(rest.len());
+        let class_name = rest[..end].trim_start_matches('\\');
+        if class_name.is_empty()
+            || !class_name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+        {
+            return None;
+        }
+        Some(class_name.to_string())
+    }
+
+    /// Resolve a chained call expression to a raw type string, walking
+    /// the chain from left to right.
+    ///
+    /// This is used by `extract_raw_type_from_assignment_text` where we
+    /// don't have a `function_loader` or full `CallResolutionCtx`, only
+    /// `class_loader`.  Handles:
+    ///
+    /// - `$this->getRepo()->findAll` + args → return type of `findAll`
+    /// - `(new Builder())->build` + args → return type of `build`
+    /// - `Factory::create()->process` + args → return type of `process`
+    fn resolve_raw_type_from_call_chain(
+        callee: &str,
+        _args_text: &str,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        // Split at the rightmost `->` to get the final method name and
+        // the LHS expression that produces the owning object.
+        let pos = callee.rfind("->")?;
+        let lhs = &callee[..pos];
+        let method_name = &callee[pos + 2..];
+
+        // Resolve LHS to a class.
+        let owner = Self::resolve_lhs_to_class(lhs, current_class, all_classes, class_loader)?;
+        let merged = Self::resolve_class_with_inheritance(&owner, class_loader);
+        merged
+            .methods
+            .iter()
+            .find(|m| m.name == method_name)
+            .and_then(|m| m.return_type.clone())
+    }
+
+    /// Resolve a text-based LHS expression (the part before `->method`)
+    /// to a single `ClassInfo`.
+    ///
+    /// Handles `$this`, `$this->prop`, `ClassName::method()`,
+    /// `(new Foo())`, and recursive chains.  Used by
+    /// `resolve_raw_type_from_call_chain` for the text-only path.
+    fn resolve_lhs_to_class(
+        lhs: &str,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<ClassInfo> {
+        // `$this` / `self` / `static`
+        if lhs == "$this" || lhs == "self" || lhs == "static" {
+            return current_class.cloned();
+        }
+
+        // `(new ClassName(...))` or `new ClassName(...)`
+        if let Some(class_name) = Self::extract_new_expression_class(lhs) {
+            let lookup = class_name.rsplit('\\').next().unwrap_or(&class_name);
+            return all_classes
+                .iter()
+                .find(|c| c.name == lookup)
+                .cloned()
+                .or_else(|| class_loader(&class_name));
+        }
+
+        // LHS ends with `)` — it's a call expression.  Recurse.
+        if lhs.ends_with(')') {
+            let inner = lhs.strip_suffix(')')?;
+            // Find matching open paren.
+            let mut depth = 0u32;
+            let mut open = None;
+            for (i, b) in inner.bytes().enumerate().rev() {
+                match b {
+                    b')' => depth += 1,
+                    b'(' => {
+                        if depth == 0 {
+                            open = Some(i);
+                            break;
+                        }
+                        depth -= 1;
+                    }
+                    _ => {}
+                }
+            }
+            let open = open?;
+            let inner_callee = &inner[..open];
+            let inner_args = inner[open + 1..].trim();
+
+            // Inner callee may itself be a chain — recurse.
+            let ret_type = Self::resolve_raw_type_from_call_chain(
+                inner_callee,
+                inner_args,
+                current_class,
+                all_classes,
+                class_loader,
+            )
+            .or_else(|| {
+                // Single-level: `$this->method`
+                if let Some(m) = inner_callee
+                    .strip_prefix("$this->")
+                    .or_else(|| inner_callee.strip_prefix("$this?->"))
+                {
+                    let owner = current_class?;
+                    let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+                    return merged
+                        .methods
+                        .iter()
+                        .find(|mi| mi.name == m)
+                        .and_then(|mi| mi.return_type.clone());
+                }
+                // `ClassName::method`
+                if let Some((cls_part, m_part)) = inner_callee.rsplit_once("::") {
+                    let resolved = if cls_part == "self" || cls_part == "static" {
+                        current_class.cloned()
+                    } else {
+                        let lookup = cls_part.rsplit('\\').next().unwrap_or(cls_part);
+                        all_classes
+                            .iter()
+                            .find(|c| c.name == lookup)
+                            .cloned()
+                            .or_else(|| class_loader(cls_part))
+                    };
+                    if let Some(cls) = resolved {
+                        let merged = Self::resolve_class_with_inheritance(&cls, class_loader);
+                        return merged
+                            .methods
+                            .iter()
+                            .find(|mi| mi.name == m_part)
+                            .and_then(|mi| mi.return_type.clone());
+                    }
+                }
+                None
+            })?;
+
+            // `ret_type` is a type string — resolve it to ClassInfo.
+            let clean = crate::docblock::types::clean_type(&ret_type);
+            let lookup = clean.rsplit('\\').next().unwrap_or(&clean);
+            return all_classes
+                .iter()
+                .find(|c| c.name == lookup)
+                .cloned()
+                .or_else(|| class_loader(&clean));
+        }
+
+        // `$this->prop` — property access
+        if let Some(prop) = lhs
+            .strip_prefix("$this->")
+            .or_else(|| lhs.strip_prefix("$this?->"))
+            && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            let owner = current_class?;
+            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
+            let type_str = merged
+                .properties
+                .iter()
+                .find(|p| p.name == prop)
+                .and_then(|p| p.type_hint.clone())?;
+            let clean = crate::docblock::types::clean_type(&type_str);
+            let lookup = clean.rsplit('\\').next().unwrap_or(&clean);
+            return all_classes
+                .iter()
+                .find(|c| c.name == lookup)
+                .cloned()
+                .or_else(|| class_loader(&clean));
+        }
+
+        None
+    }
+
     /// Find `;` in `s`, respecting `()`, `[]`, `{}`, and string nesting.
     fn find_semicolon_balanced(s: &str) -> Option<usize> {
         let mut depth_paren = 0i32;
@@ -566,32 +801,6 @@ impl Backend {
                 _ => {}
             }
             prev_char = ch;
-        }
-        None
-    }
-
-    /// Find the position of the first `(` at nesting depth 0.
-    ///
-    /// Respects `<…>` nesting for generic types but is careful not to
-    /// treat `>` in `->` (arrow operator) as a closing angle bracket.
-    fn find_top_level_open_paren(s: &str) -> Option<usize> {
-        let mut depth_angle = 0i32;
-        let bytes = s.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'<' => depth_angle += 1,
-                b'>' if depth_angle > 0 => depth_angle -= 1,
-                b'-' if i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
-                    // Skip `->` entirely — it's an arrow operator, not
-                    // an angle bracket.
-                    i += 2;
-                    continue;
-                }
-                b'(' if depth_angle == 0 => return Some(i),
-                _ => {}
-            }
-            i += 1;
         }
         None
     }
@@ -725,6 +934,18 @@ impl Backend {
             let lhs_classes: Vec<ClassInfo> = if lhs == "$this" || lhs == "self" || lhs == "static"
             {
                 current_class.cloned().into_iter().collect()
+            } else if let Some(class_name) = Self::extract_new_expression_class(lhs) {
+                // Parenthesized (or bare) `new` expression:
+                //   `(new Builder())`, `(new Builder)`, `new Builder()`
+                // Resolve the class name to a ClassInfo.
+                let lookup = class_name.rsplit('\\').next().unwrap_or(&class_name);
+                all_classes
+                    .iter()
+                    .find(|c| c.name == lookup)
+                    .cloned()
+                    .or_else(|| class_loader(&class_name))
+                    .into_iter()
+                    .collect()
             } else if lhs.ends_with(')') {
                 // LHS is itself a call expression (e.g. `app()` in
                 // `app()->make(…)`, or `$this->getFactory()` in

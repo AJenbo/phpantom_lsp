@@ -68,6 +68,23 @@ $maybe = User::find(1);                  // null-safe chaining
 $maybe?->getProfile()?->getDisplayName();
 
 
+// ── Chained Method Calls in Variable Assignment ─────────────────────────────
+// When a variable is assigned from a chained call, the LSP walks the full
+// chain to resolve the stored type.
+
+$storedProfile = $user->getProfile();
+$storedName = $storedProfile->getUser()->getName(); // $var->method()->method()
+
+$directProfile = $user->getProfile()->getUser(); // chain stored in variable
+$directProfile->getEmail();              // resolves to User
+
+$staticBuilt = User::make('test');       // Static::method() in assignment
+$staticBuilt->getEmail();               // resolves to User
+
+$fromNew = (new UserProfile($user))->getUser(); // (new Class())->method()
+$fromNew->getEmail();                    // resolves to User
+
+
 // ── Return Type Resolution ──────────────────────────────────────────────────
 
 $made = User::make('Charlie');            // static return type

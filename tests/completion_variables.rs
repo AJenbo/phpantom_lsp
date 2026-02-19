@@ -10721,3 +10721,639 @@ async fn test_completion_foreach_method_call_array_shorthand() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Chained method calls in variable assignment RHS ────────────────────────
+
+#[tokio::test]
+async fn test_chained_method_call_this_method_chain() {
+    // $this->getRepository()->find(1) — method chain on $this
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Repository {\n",
+        "    public function find(int $id): User { return new User(); }\n",
+        "}\n",
+        "\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function getRepository(): Repository { return new Repository(); }\n",
+        "\n",
+        "    public function doStuff(): void {\n",
+        "        $user = $this->getRepository()->find(1);\n",
+        "        $user->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$user->` on line 15
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 15,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for chained $this->method()->method() in assignment RHS"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include getName from User via chained call, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getEmail")),
+                "Should include getEmail from User via chained call, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_function_then_method() {
+    // getFactory()->createWidget() — standalone function returning a class,
+    // then a method call on the result.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public function render(): string { return ''; }\n",
+        "    public function getSize(): int { return 0; }\n",
+        "}\n",
+        "\n",
+        "class Factory {\n",
+        "    public function createWidget(): Widget { return new Widget(); }\n",
+        "}\n",
+        "\n",
+        "/** @return Factory */\n",
+        "function getFactory(): Factory { return new Factory(); }\n",
+        "\n",
+        "$widget = getFactory()->createWidget();\n",
+        "$widget->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$widget->` on line 14
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 14,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for function()->method() chain in assignment RHS"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("render")),
+                "Should include render from Widget via function()->method() chain, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_variable_method_chain() {
+    // $repo->findOne()->toModel() — variable (not $this) resolved via
+    // prior assignment, then chained methods.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Model {\n",
+        "    public function save(): bool { return true; }\n",
+        "    public function toArray(): array { return []; }\n",
+        "}\n",
+        "\n",
+        "class QueryResult {\n",
+        "    public function toModel(): Model { return new Model(); }\n",
+        "}\n",
+        "\n",
+        "class Repo {\n",
+        "    public function findOne(): QueryResult { return new QueryResult(); }\n",
+        "}\n",
+        "\n",
+        "class Controller {\n",
+        "    public function action(): void {\n",
+        "        $repo = new Repo();\n",
+        "        $model = $repo->findOne()->toModel();\n",
+        "        $model->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$model->` on line 18
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 18,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $var->method()->method() chain in assignment RHS"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("save")),
+                "Should include save from Model via $var->method()->method() chain, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("toArray")),
+                "Should include toArray from Model via $var->method()->method() chain, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_static_then_method() {
+    // Factory::create()->process() — static method chain
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Processor {\n",
+        "    public function getOutput(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class Builder {\n",
+        "    public function process(): Processor { return new Processor(); }\n",
+        "}\n",
+        "\n",
+        "class Factory {\n",
+        "    public static function create(): Builder { return new Builder(); }\n",
+        "}\n",
+        "\n",
+        "$result = Factory::create()->process();\n",
+        "$result->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$result->` on line 14
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 14,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for Static::method()->method() chain in assignment RHS"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getOutput")),
+                "Should include getOutput from Processor via static chain, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_triple_chain() {
+    // $this->a()->b()->c() — three-deep chain
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_triple.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class A {\n",
+        "    public function b(): B { return new B(); }\n",
+        "}\n",
+        "class B {\n",
+        "    public function c(): C { return new C(); }\n",
+        "}\n",
+        "class C {\n",
+        "    public function doSomething(): void {}\n",
+        "    public function getValue(): int { return 0; }\n",
+        "}\n",
+        "\n",
+        "class Entry {\n",
+        "    public function a(): A { return new A(); }\n",
+        "    public function run(): void {\n",
+        "        $val = $this->a()->b()->c();\n",
+        "        $val->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$val->` on line 16
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 16,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for triple-deep method chain in assignment RHS"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("doSomething")),
+                "Should include doSomething from C via triple chain, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getValue")),
+                "Should include getValue from C via triple chain, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_new_then_method() {
+    // (new Builder())->build() — parenthesized new then method chain
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_new.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public function ship(): void {}\n",
+        "    public function getPrice(): float { return 0.0; }\n",
+        "}\n",
+        "\n",
+        "class Builder {\n",
+        "    public function build(): Product { return new Product(); }\n",
+        "}\n",
+        "\n",
+        "$result = (new Builder())->build();\n",
+        "$result->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$result->` on line 11
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 9,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for (new Class())->method() chain in assignment RHS"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("ship")),
+                "Should include ship from Product via (new Builder())->build(), got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getPrice")),
+                "Should include getPrice from Product via (new Builder())->build(), got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_new_then_method_inside_class() {
+    // (new Builder())->build() inside a class method
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_new_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public function ship(): void {}\n",
+        "    public function getPrice(): float { return 0.0; }\n",
+        "}\n",
+        "\n",
+        "class Builder {\n",
+        "    public function build(): Product { return new Product(); }\n",
+        "}\n",
+        "\n",
+        "class Store {\n",
+        "    public function run(): void {\n",
+        "        $result = (new Builder())->build();\n",
+        "        $result->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$result->` on line 13
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for (new Class())->method() inside class method"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("ship")),
+                "Should include ship from Product via (new Builder())->build() in class, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_new_no_parens_then_method() {
+    // new Builder()->build() — PHP 8.x style without outer parens
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_new_no_parens.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public function ship(): void {}\n",
+        "}\n",
+        "\n",
+        "class Builder {\n",
+        "    public function build(): Product { return new Product(); }\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function run(): void {\n",
+        "        $result = new Builder()->build();\n",
+        "        $result->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Note: `new Foo()->bar()` is parsed by PHP 8.4+ as `new (Foo()->bar())`.
+    // In PHP < 8.4, it's `(new Foo())->bar()`.
+    // The mago parser may interpret this differently; this test verifies
+    // we handle whichever AST we get.
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    // This may or may not resolve depending on how the parser interprets it.
+    // We mainly want to ensure no panic / crash.
+    if let Some(CompletionResponse::Array(items)) = result {
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        // If it resolves, it should show Product members
+        if !labels.is_empty() {
+            assert!(
+                labels.iter().any(|l| l.starts_with("ship")),
+                "If resolved, should include ship from Product, got: {:?}",
+                labels
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_chained_method_call_extract_raw_type_chain() {
+    // Verifies that extract_raw_type_from_assignment_text handles chained
+    // calls when the result is used with array access:
+    // $items = $this->getRepo()->findAll();  // returns array<int, User>
+    // $items[0]->
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chain_array_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class Repo {\n",
+        "    /** @return User[] */\n",
+        "    public function findAll(): array { return []; }\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function getRepo(): Repo { return new Repo(); }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $items = $this->getRepo()->findAll();\n",
+        "        $items[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$items[0]->` on line 15
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 15,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for array element after chained call assignment"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include getName from User via $this->getRepo()->findAll()[0]->, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
