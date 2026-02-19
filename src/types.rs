@@ -6,6 +6,8 @@
 //! (AccessKind, CompletionTarget), PHPStan conditional return type
 //! representations, and PHPStan/Psalm array shape types.
 
+use std::collections::HashMap;
+
 // ─── Array Shape Types ──────────────────────────────────────────────────────
 
 /// A single entry in a PHPStan/Psalm array shape type.
@@ -363,6 +365,17 @@ pub struct ClassInfo {
     /// is substituted with `ConcreteType` in all inherited methods and
     /// properties.
     pub use_generics: Vec<(String, Vec<String>)>,
+    /// Type aliases defined via `@phpstan-type` / `@psalm-type` tags in the
+    /// class-level docblock, and imported via `@phpstan-import-type` /
+    /// `@psalm-import-type`.
+    ///
+    /// Maps alias name → type definition string.
+    /// For example, `@phpstan-type UserData array{name: string, email: string}`
+    /// produces `("UserData", "array{name: string, email: string}")`.
+    ///
+    /// These are consulted during type resolution so that a method returning
+    /// `UserData` resolves to the underlying `array{name: string, email: string}`.
+    pub type_aliases: HashMap<String, String>,
 }
 
 // ─── ClassInfo helpers ──────────────────────────────────────────────────────

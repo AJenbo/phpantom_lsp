@@ -41,12 +41,14 @@ impl Backend {
                         Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
                     // Extract @property, @method, @mixin, @template, @extends,
-                    // @implements, and @deprecated tags from the class-level docblock.
+                    // @implements, @deprecated, and @phpstan-type / @psalm-type
+                    // tags from the class-level docblock.
                     let mut mixins = Vec::new();
                     let mut template_params = Vec::new();
                     let mut extends_generics = Vec::new();
                     let mut implements_generics = Vec::new();
                     let mut use_generics = Vec::new();
+                    let mut type_aliases = std::collections::HashMap::new();
                     let mut class_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
@@ -58,6 +60,7 @@ impl Backend {
                         implements_generics =
                             docblock::extract_generics_tag(doc_text, "@implements");
                         use_generics = docblock::extract_generics_tag(doc_text, "@use");
+                        type_aliases = docblock::extract_type_aliases(doc_text);
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             // Only add if not already declared as a real property.
@@ -110,6 +113,7 @@ impl Backend {
                         extends_generics,
                         implements_generics,
                         use_generics,
+                        type_aliases,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -126,13 +130,14 @@ impl Backend {
                         Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
                     // Extract @property, @method, @mixin, @template, @extends,
-                    // @implements, and @deprecated tags from the interface-level
-                    // docblock.
+                    // @implements, @deprecated, and @phpstan-type / @psalm-type
+                    // tags from the interface-level docblock.
                     let mut mixins = Vec::new();
                     let mut template_params = Vec::new();
                     let mut extends_generics = Vec::new();
                     let mut implements_generics = Vec::new();
                     let mut use_generics = Vec::new();
+                    let mut type_aliases = std::collections::HashMap::new();
                     let mut iface_deprecated = false;
                     if let Some(ctx) = doc_ctx
                         && let Some(doc_text) =
@@ -144,6 +149,7 @@ impl Backend {
                         implements_generics =
                             docblock::extract_generics_tag(doc_text, "@implements");
                         use_generics = docblock::extract_generics_tag(doc_text, "@use");
+                        type_aliases = docblock::extract_type_aliases(doc_text);
 
                         for (name, type_str) in docblock::extract_property_tags(doc_text) {
                             if !properties.iter().any(|p| p.name == name) {
@@ -191,6 +197,7 @@ impl Backend {
                         extends_generics,
                         implements_generics,
                         use_generics,
+                        type_aliases,
                     });
                 }
                 Statement::Trait(trait_def) => {
@@ -260,6 +267,7 @@ impl Backend {
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],
+                        type_aliases: std::collections::HashMap::new(),
                     });
                 }
                 Statement::Enum(enum_def) => {
@@ -341,6 +349,7 @@ impl Backend {
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],
+                        type_aliases: std::collections::HashMap::new(),
                     });
                 }
                 Statement::Namespace(namespace) => {

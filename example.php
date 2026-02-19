@@ -398,21 +398,34 @@ $typedArrow = fn(int $x): float => $x * 1.5;
 
 // ── Multi-line @return & Broken Docblock Recovery ───────────────────────────
 
-// Try: collect([])->       ← shows map, groupBy, values, toGroupedArray
-// Try: collect([])->map(   ← map() resolves correctly despite groupBy's complex @return
-// Try: (new BrokenDocRecovery())->broken()->  ← recovers `static`, shows broken() and working()
+$collection = collect([]);
+$collection->groupBy('key');             // multi-line @return resolves correctly
+$collection->map(fn($x) => $x);         // map() works despite groupBy's complex @return
+
+$recovered = (new BrokenDocRecovery())->broken();
+$recovered->working();                   // recovers `static` from broken @return static<
 
 
 // ── Foreach over Generic Collection Classes ─────────────────────────────────
-// When a class has @extends or @implements with generic type parameters,
-// foreach automatically resolves the element type — even without an
-// inline @var annotation.
-// Open CollectionForeachDemo methods below to try completion inside them.
+// foreach resolves element types from @extends / @implements generic params.
+
+$eloquentUsers = new UserEloquentCollection();
+foreach ($eloquentUsers as $eu) {
+    $eu->getEmail();                     // resolves to User via @extends generics
+}
+
+// Open CollectionForeachDemo methods below for more examples.
 
 
-// ── parent:: Completion ─────────────────────────────────────────────────────
-// Open AdminUser's constructor and toArray() in scaffolding below for
-// parent:: examples (inherited methods, overridden methods, constants).
+// ── Type Aliases (@phpstan-type / @phpstan-import-type) ─────────────────────
+
+$aliasDemo = new TypeAliasDemo();
+$userData = $aliasDemo->getUserData();
+$userData['name'];                       // @phpstan-type UserData → array shape key completion
+
+$importDemo = new TypeAliasImportDemo();
+$imported = $importDemo->fetchUser();
+$imported['email'];                      // @phpstan-import-type UserData from TypeAliasDemo
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -858,6 +871,68 @@ class CollectionForeachDemo
         foreach ($collection as $user) {
             $user->getName();             // resolves via variable assignment scanning
         }
+    }
+}
+
+// ── Type Aliases (@phpstan-type / @phpstan-import-type) ─────────────────────
+
+/**
+ * @phpstan-type UserData array{name: string, email: string, age: int}
+ * @phpstan-type StatusInfo array{code: int, label: string}
+ */
+class TypeAliasDemo
+{
+    /** @return UserData */
+    public function getUserData(): array
+    {
+        return ['name' => 'Alice', 'email' => 'alice@example.com', 'age' => 30];
+    }
+
+    /** @return StatusInfo */
+    public function getStatus(): array
+    {
+        return ['code' => 200, 'label' => 'OK'];
+    }
+
+    public function demo(): void
+    {
+        // Try: $this->getUserData()['   ← offers name, email, age
+        $data = $this->getUserData();
+        $data['name'];                    // resolves UserData alias → array shape keys
+
+        // Try: $this->getStatus()['     ← offers code, label
+        $status = $this->getStatus();
+        $status['label'];                 // resolves StatusInfo alias → array shape keys
+    }
+}
+
+/**
+ * @phpstan-import-type UserData from TypeAliasDemo
+ * @phpstan-import-type StatusInfo from TypeAliasDemo as AliasedStatus
+ */
+class TypeAliasImportDemo
+{
+    /** @return UserData */
+    public function fetchUser(): array
+    {
+        return ['name' => 'Bob', 'email' => 'bob@example.com', 'age' => 25];
+    }
+
+    /** @return AliasedStatus */
+    public function fetchStatus(): array
+    {
+        return ['code' => 404, 'label' => 'Not Found'];
+    }
+
+    public function demo(): void
+    {
+        // Try: $this->fetchUser()['     ← offers name, email, age (imported from TypeAliasDemo)
+        $user = $this->fetchUser();
+        $user['email'];                   // resolves imported UserData → array shape keys
+
+        // Try: $this->fetchStatus()['   ← offers code, label (imported and renamed)
+        $status = $this->fetchStatus();
+        $status['code'];                  // resolves AliasedStatus → StatusInfo → array shape keys
     }
 }
 

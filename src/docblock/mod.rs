@@ -37,10 +37,10 @@ pub(crate) mod types;
 // Tags
 pub use tags::{
     extract_generics_tag, extract_method_tags, extract_mixin_tags, extract_param_raw_type,
-    extract_property_tags, extract_return_type, extract_template_params, extract_type_assertions,
-    extract_var_type, extract_var_type_with_name, find_inline_var_docblock,
-    find_iterable_raw_type_in_source, find_var_raw_type_in_source, get_docblock_text_for_node,
-    has_deprecated_tag, resolve_effective_type, should_override_type,
+    extract_property_tags, extract_return_type, extract_template_params, extract_type_aliases,
+    extract_type_assertions, extract_var_type, extract_var_type_with_name,
+    find_inline_var_docblock, find_iterable_raw_type_in_source, find_var_raw_type_in_source,
+    get_docblock_text_for_node, has_deprecated_tag, resolve_effective_type, should_override_type,
     synthesize_template_conditional,
 };
 

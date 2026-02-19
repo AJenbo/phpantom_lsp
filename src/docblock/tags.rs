@@ -2,12 +2,15 @@
 //!
 //! This submodule handles extracting type information from PHPDoc comments
 //! (`/** ... */`), specifically `@return`, `@var`, `@property`, `@method`,
-//! `@mixin`, `@deprecated`, and `@phpstan-assert` / `@psalm-assert` tags.
+//! `@mixin`, `@deprecated`, `@phpstan-assert` / `@psalm-assert`, and
+//! `@phpstan-type` / `@psalm-type` / `@phpstan-import-type` tags.
 //!
 //! It also provides a compatibility check ([`should_override_type`]) so that
 //! a docblock type only overrides a native type hint when the native hint is
 //! broad enough to be refined (e.g. `object`, `mixed`, or another class name)
 //! and is *not* a concrete scalar that could never be an object.
+
+use std::collections::HashMap;
 
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
@@ -949,6 +952,157 @@ pub fn extract_generics_tag(docblock: &str, tag: &str) -> Vec<(String, Vec<Strin
     }
 
     results
+}
+
+/// Extract type aliases from `@phpstan-type` / `@psalm-type` and
+/// `@phpstan-import-type` / `@psalm-import-type` tags in a class-level
+/// docblock.
+///
+/// Returns a map from alias name → type definition string.
+///
+/// # Supported formats
+///
+/// **Local type aliases** (`@phpstan-type` / `@psalm-type`):
+/// ```text
+/// @phpstan-type UserData array{name: string, email: string}
+/// @phpstan-type UserData = array{name: string, email: string}
+/// @psalm-type StatusCode int
+/// ```
+///
+/// **Imported type aliases** (`@phpstan-import-type` / `@psalm-import-type`):
+/// ```text
+/// @phpstan-import-type UserData from UserService
+/// @phpstan-import-type UserData from UserService as UserRecord
+/// ```
+///
+/// For imported types, the definition is stored as the raw imported name
+/// prefixed with `from:ClassName:` so that the resolver can look up the
+/// alias in the source class at resolution time.  When an `as` alias is
+/// used, the alias name in the returned map is the `as` name.
+pub fn extract_type_aliases(docblock: &str) -> HashMap<String, String> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut aliases = HashMap::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        // ── Local type alias: @phpstan-type / @psalm-type ──
+        if let Some(rest) = trimmed
+            .strip_prefix("@phpstan-type")
+            .or_else(|| trimmed.strip_prefix("@psalm-type"))
+        {
+            // Must not be `@phpstan-type-alias` or similar
+            if rest.starts_with('-') {
+                continue;
+            }
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Split into alias name and definition.
+            // Format: `AliasName = Definition` or `AliasName Definition`
+            if let Some((name, def)) = parse_local_type_alias(rest)
+                && !name.is_empty()
+                && !def.is_empty()
+            {
+                aliases.insert(name.to_string(), def.to_string());
+            }
+            continue;
+        }
+
+        // ── Imported type alias: @phpstan-import-type / @psalm-import-type ──
+        if let Some(rest) = trimmed
+            .strip_prefix("@phpstan-import-type")
+            .or_else(|| trimmed.strip_prefix("@psalm-import-type"))
+        {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Format: `TypeName from ClassName` or `TypeName from ClassName as LocalAlias`
+            if let Some((alias_name, definition)) = parse_import_type_alias(rest)
+                && !alias_name.is_empty()
+                && !definition.is_empty()
+            {
+                aliases.insert(alias_name, definition);
+            }
+        }
+    }
+
+    aliases
+}
+
+/// Parse a local `@phpstan-type` alias definition.
+///
+/// Accepts both `AliasName = Definition` and `AliasName Definition` forms.
+/// The definition may contain complex types with `{…}`, `<…>`, `(…)` nesting.
+///
+/// Returns `(alias_name, definition)` or `None` if parsing fails.
+fn parse_local_type_alias(rest: &str) -> Option<(&str, &str)> {
+    // The alias name is the first word (identifier characters).
+    let name_end = rest
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len());
+    let name = &rest[..name_end];
+    if name.is_empty() {
+        return None;
+    }
+
+    let after_name = rest[name_end..].trim_start();
+
+    // Optional `=` separator
+    let definition = after_name
+        .strip_prefix('=')
+        .unwrap_or(after_name)
+        .trim_start();
+
+    if definition.is_empty() {
+        return None;
+    }
+
+    // The definition runs to the end of the line (docblock lines are
+    // already split).  Trim trailing whitespace.
+    let definition = definition.trim_end();
+
+    Some((name, definition))
+}
+
+/// Parse an `@phpstan-import-type` alias.
+///
+/// Format: `TypeName from ClassName` or `TypeName from ClassName as LocalAlias`
+///
+/// Returns `(local_alias_name, "from:ClassName:OriginalName")` so the
+/// resolver can look up the alias in the source class.
+fn parse_import_type_alias(rest: &str) -> Option<(String, String)> {
+    // Split: TypeName from ClassName [as LocalAlias]
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+
+    // Minimum: TypeName from ClassName  (3 parts)
+    if parts.len() < 3 || parts[1] != "from" {
+        return None;
+    }
+
+    let original_name = parts[0];
+    let source_class = parts[2];
+
+    // Check for `as LocalAlias`
+    let alias_name = if parts.len() >= 5 && parts[3] == "as" {
+        parts[4].to_string()
+    } else {
+        original_name.to_string()
+    };
+
+    let definition = format!("from:{}:{}", source_class, original_name);
+
+    Some((alias_name, definition))
 }
 
 /// Attempt to synthesize a `ConditionalReturnType` from method-level

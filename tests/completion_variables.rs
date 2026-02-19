@@ -3125,6 +3125,541 @@ async fn test_completion_top_level_variable_from_function_call() {
     }
 }
 
+// ─── instanceof narrowing to interface / abstract class ─────────────────────
+
+/// When narrowing via `instanceof` to an interface that is NOT one of the
+/// existing union candidates (e.g. `mixed $x`), the interface's own
+/// declared members should be offered.
+#[tokio::test]
+async fn test_completion_instanceof_narrows_to_interface_from_mixed() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_iface.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "interface Renderable {\n",                         // 1
+        "    public function render(): string;\n",          // 2
+        "    public function format(string $f): string;\n", // 3
+        "}\n",                                              // 4
+        "function handle(mixed $x): void {\n",              // 5
+        "    if ($x instanceof Renderable) {\n",            // 6
+        "        $x->\n",                                   // 7
+        "    }\n",                                          // 8
+        "}\n",                                              // 9
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for interface members after instanceof narrowing"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"render"),
+                "Should include Renderable::render(), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"format"),
+                "Should include Renderable::format(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When narrowing via `instanceof` to an abstract class, members of the
+/// abstract class should be offered even when the variable had no prior type.
+#[tokio::test]
+async fn test_completion_instanceof_narrows_to_abstract_class_from_mixed() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_abstract.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                 // 0
+        "abstract class Shape {\n",                                // 1
+        "    abstract public function area(): float;\n",           // 2
+        "    public function describe(): string { return ''; }\n", // 3
+        "}\n",                                                     // 4
+        "function process(mixed $item): void {\n",                 // 5
+        "    if ($item instanceof Shape) {\n",                     // 6
+        "        $item->\n",                                       // 7
+        "    }\n",                                                 // 8
+        "}\n",                                                     // 9
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 7,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for abstract class members after instanceof narrowing"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"area"),
+                "Should include Shape::area(), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"describe"),
+                "Should include Shape::describe(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// instanceof narrowing to an interface with no prior type — the variable
+/// is completely untyped (no parameter hint at all).
+#[tokio::test]
+async fn test_completion_instanceof_narrows_untyped_variable_to_interface() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_untyped.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                       // 0
+        "interface Loggable {\n",                                        // 1
+        "    public function log(string $msg): void;\n",                 // 2
+        "}\n",                                                           // 3
+        "class Svc {\n",                                                 // 4
+        "    public function run(): void {\n",                           // 5
+        "        $thing = $this->getSomething();\n",                     // 6
+        "        if ($thing instanceof Loggable) {\n",                   // 7
+        "            $thing->\n",                                        // 8
+        "        }\n",                                                   // 9
+        "    }\n",                                                       // 10
+        "    private function getSomething(): mixed { return null; }\n", // 11
+        "}\n",                                                           // 12
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 20,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for Loggable members after instanceof narrowing on untyped var"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"log"),
+                "Should include Loggable::log(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// instanceof narrowing to a cross-file interface via PSR-4.
+#[tokio::test]
+async fn test_completion_instanceof_narrows_to_cross_file_interface() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Contracts/Renderable.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\Contracts;\n",
+                "interface Renderable {\n",
+                "    public function render(): string;\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///handler.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Contracts\\Renderable;\n",
+        "function handle(mixed $x): void {\n",
+        "    if ($x instanceof Renderable) {\n",
+        "        $x->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for cross-file interface after instanceof narrowing"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"render"),
+                "Should include Renderable::render(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// instanceof narrowing to an interface that has @method magic members.
+#[tokio::test]
+async fn test_completion_instanceof_narrows_to_interface_with_magic_methods() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_magic.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                 // 0
+        "/**\n",                                   // 1
+        " * @method string getName()\n",           // 2
+        " * @method void setName(string $name)\n", // 3
+        " */\n",                                   // 4
+        "interface HasName {\n",                   // 5
+        "}\n",                                     // 6
+        "function greet(mixed $x): void {\n",      // 7
+        "    if ($x instanceof HasName) {\n",      // 8
+        "        $x->\n",                          // 9
+        "    }\n",                                 // 10
+        "}\n",                                     // 11
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for interface @method members after instanceof"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include @method getName(), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"setName"),
+                "Should include @method setName(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When the variable has a union type (A|B) and instanceof narrows to an
+/// interface C that is NOT in the union, the result should be C's members only.
+#[tokio::test]
+async fn test_completion_instanceof_narrows_disjoint_union_to_interface() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///instanceof_disjoint.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                       // 0
+        "class Alpha {\n",                               // 1
+        "    public function alphaMethod(): void {}\n",  // 2
+        "}\n",                                           // 3
+        "class Beta {\n",                                // 4
+        "    public function betaMethod(): void {}\n",   // 5
+        "}\n",                                           // 6
+        "interface Serializable {\n",                    // 7
+        "    public function serialize(): string;\n",    // 8
+        "}\n",                                           // 9
+        "class Svc {\n",                                 // 10
+        "    public function run(): void {\n",           // 11
+        "        if (rand(0,1)) {\n",                    // 12
+        "            $obj = new Alpha();\n",             // 13
+        "        } else {\n",                            // 14
+        "            $obj = new Beta();\n",              // 15
+        "        }\n",                                   // 16
+        "        if ($obj instanceof Serializable) {\n", // 17
+        "            $obj->\n",                          // 18
+        "        }\n",                                   // 19
+        "    }\n",                                       // 20
+        "}\n",                                           // 21
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 18,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for Serializable after instanceof on disjoint union"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"serialize"),
+                "Should include Serializable::serialize(), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"alphaMethod"),
+                "Should NOT include Alpha::alphaMethod(), got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"betaMethod"),
+                "Should NOT include Beta::betaMethod(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Guard clause with instanceof to an interface:
+/// `if (!$x instanceof Renderable) { return; }` should narrow $x after the block.
+#[tokio::test]
+async fn test_completion_guard_clause_narrows_to_interface() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_iface.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                      // 0
+        "interface Cacheable {\n",                      // 1
+        "    public function getCacheKey(): string;\n", // 2
+        "}\n",                                          // 3
+        "function store(mixed $item): void {\n",        // 4
+        "    if (!$item instanceof Cacheable) {\n",     // 5
+        "        return;\n",                            // 6
+        "    }\n",                                      // 7
+        "    $item->\n",                                // 8
+        "}\n",                                          // 9
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for Cacheable after guard clause narrowing"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getCacheKey"),
+                "Should include Cacheable::getCacheKey(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ─── assert($var instanceof …) narrowing ────────────────────────────────────
 
 /// When `assert($var instanceof Foo)` appears before the cursor,

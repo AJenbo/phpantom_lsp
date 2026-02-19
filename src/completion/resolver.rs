@@ -1181,6 +1181,24 @@ impl Backend {
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> Vec<ClassInfo> {
+        Self::type_hint_to_classes_depth(type_hint, owning_class_name, all_classes, class_loader, 0)
+    }
+
+    /// Inner implementation of [`type_hint_to_classes`] with a recursion
+    /// depth guard to prevent infinite loops from circular type aliases.
+    fn type_hint_to_classes_depth(
+        type_hint: &str,
+        owning_class_name: &str,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        depth: u8,
+    ) -> Vec<ClassInfo> {
+        // Guard against circular / deeply nested type alias resolution.
+        const MAX_ALIAS_DEPTH: u8 = 10;
+        if depth > MAX_ALIAS_DEPTH {
+            return vec![];
+        }
+
         let hint = type_hint.strip_prefix('?').unwrap_or(type_hint);
 
         // Strip surrounding parentheses that appear in DNF types like `(A&B)|C`.
@@ -1188,6 +1206,25 @@ impl Backend {
             .strip_prefix('(')
             .and_then(|h| h.strip_suffix(')'))
             .unwrap_or(hint);
+
+        // ── Type alias resolution ──────────────────────────────────────
+        // Check if `hint` is a type alias defined on the owning class
+        // (via `@phpstan-type` / `@psalm-type` / `@phpstan-import-type`).
+        // If so, expand the alias and resolve the underlying definition.
+        //
+        // This runs before union/intersection splitting because the alias
+        // itself may expand to a union or intersection type.
+        if let Some(alias_def) =
+            Self::resolve_type_alias(hint, owning_class_name, all_classes, class_loader)
+        {
+            return Self::type_hint_to_classes_depth(
+                &alias_def,
+                owning_class_name,
+                all_classes,
+                class_loader,
+                depth + 1,
+            );
+        }
 
         // ── Union type: split on `|` at depth 0, respecting `<…>` nesting ──
         let union_parts = split_union_depth0(hint);
@@ -1200,8 +1237,13 @@ impl Backend {
                 }
                 // Recursively resolve each part (handles self/static, scalars,
                 // intersection components, etc.)
-                let resolved =
-                    Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
+                let resolved = Self::type_hint_to_classes_depth(
+                    part,
+                    owning_class_name,
+                    all_classes,
+                    class_loader,
+                    depth,
+                );
                 ClassInfo::extend_unique(&mut results, resolved);
             }
             return results;
@@ -1220,8 +1262,13 @@ impl Backend {
                 if part.is_empty() {
                     continue;
                 }
-                let resolved =
-                    Self::type_hint_to_classes(part, owning_class_name, all_classes, class_loader);
+                let resolved = Self::type_hint_to_classes_depth(
+                    part,
+                    owning_class_name,
+                    all_classes,
+                    class_loader,
+                    depth,
+                );
                 ClassInfo::extend_unique(&mut results, resolved);
             }
             return results;
@@ -1297,5 +1344,104 @@ impl Backend {
             }
             None => vec![],
         }
+    }
+
+    /// Look up a type alias by name in the owning class's `type_aliases`.
+    ///
+    /// Returns the expanded type definition string if `hint` is a known
+    /// alias, or `None` if it is not.
+    ///
+    /// For imported aliases (`from:ClassName:OriginalName`), the source
+    /// class is loaded and the original alias is resolved from its
+    /// `type_aliases` map.
+    fn resolve_type_alias(
+        hint: &str,
+        owning_class_name: &str,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        // Only bare identifiers (no `<`, `{`, `|`, `&`, `?`, `\`) can be
+        // type aliases.  Skip anything that looks like a complex type
+        // expression to avoid false matches.
+        if hint.contains('<')
+            || hint.contains('{')
+            || hint.contains('|')
+            || hint.contains('&')
+            || hint.contains('?')
+            || hint.contains('\\')
+            || hint.contains('$')
+        {
+            return None;
+        }
+
+        // Find the owning class to check its type_aliases.
+        let owning_class = all_classes.iter().find(|c| c.name == owning_class_name);
+
+        if let Some(cls) = owning_class
+            && let Some(def) = cls.type_aliases.get(hint)
+        {
+            // Handle imported type aliases: `from:ClassName:OriginalName`
+            if let Some(import_ref) = def.strip_prefix("from:") {
+                return Self::resolve_imported_type_alias(import_ref, all_classes, class_loader);
+            }
+            return Some(def.clone());
+        }
+
+        // Also check all classes in the file — the type alias might be
+        // referenced from a method inside a different class that uses the
+        // owning class's return type.  This is rare but handles the case
+        // where the owning class name is empty (top-level code) or when
+        // the type is used in a context where the owning class is not the
+        // declaring class.
+        for cls in all_classes {
+            if cls.name == owning_class_name {
+                continue; // Already checked above.
+            }
+            if let Some(def) = cls.type_aliases.get(hint) {
+                if let Some(import_ref) = def.strip_prefix("from:") {
+                    return Self::resolve_imported_type_alias(
+                        import_ref,
+                        all_classes,
+                        class_loader,
+                    );
+                }
+                return Some(def.clone());
+            }
+        }
+
+        None
+    }
+
+    /// Resolve an imported type alias reference (`ClassName:OriginalName`).
+    ///
+    /// Loads the source class and looks up the original alias in its
+    /// `type_aliases` map.
+    fn resolve_imported_type_alias(
+        import_ref: &str,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        let (source_class_name, original_name) = import_ref.split_once(':')?;
+
+        // Try to find the source class.
+        let lookup = source_class_name
+            .rsplit('\\')
+            .next()
+            .unwrap_or(source_class_name);
+        let source_class = all_classes
+            .iter()
+            .find(|c| c.name == lookup)
+            .cloned()
+            .or_else(|| class_loader(source_class_name));
+
+        let source_class = source_class?;
+        let def = source_class.type_aliases.get(original_name)?;
+
+        // Don't follow nested imports — just return the definition.
+        if def.starts_with("from:") {
+            return None;
+        }
+
+        Some(def.clone())
     }
 }

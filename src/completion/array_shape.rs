@@ -269,6 +269,9 @@ impl Backend {
         let cursor_offset = Self::position_to_offset(content, position).unwrap_or(0);
 
         // Try to find the raw type annotation for this variable.
+        // We also track which set of classes was used for resolution so
+        // that type alias expansion can consult the same set (important
+        // when the original parse fails and patched classes are used).
         let raw_type = self.resolve_variable_raw_type(
             &ctx.var_name,
             content,
@@ -282,24 +285,25 @@ impl Backend {
         // error (e.g. unclosed `$var['`) that prevented the parser from
         // recovering the class structure.  Patch the cursor line to close
         // the array access, re-parse, and retry.
-        let raw_type = match raw_type {
-            Some(t) => t,
+        let patched_classes_storage;
+        let (raw_type, effective_classes) = match raw_type {
+            Some(t) => (t, classes),
             None => {
                 let patched = patch_array_access_at_cursor(content, position);
                 if patched == content {
                     return vec![];
                 }
-                let patched_classes = self.parse_php(&patched);
+                patched_classes_storage = self.parse_php(&patched);
                 let patched_offset = Self::position_to_offset(&patched, position).unwrap_or(0);
                 match self.resolve_variable_raw_type(
                     &ctx.var_name,
                     &patched,
                     patched_offset as usize,
-                    &patched_classes,
+                    &patched_classes_storage,
                     file_use_map,
                     file_namespace,
                 ) {
-                    Some(t) => t,
+                    Some(t) => (t, patched_classes_storage.as_slice()),
                     None => return vec![],
                 }
             }
@@ -312,6 +316,17 @@ impl Backend {
             Some(t) => t,
             None => return vec![],
         };
+
+        // Expand type aliases before parsing as an array shape.
+        // The raw type might be an alias name like `UserData` that
+        // resolves to `array{name: string, email: string}`.
+        // Uses `effective_classes` which may be the patched classes when
+        // the original parse failed due to syntax errors.
+        let class_loader = |name: &str| -> Option<ClassInfo> {
+            self.resolve_class_name(name, effective_classes, file_use_map, file_namespace)
+        };
+        let effective_type =
+            Self::expand_type_alias(&effective_type, effective_classes, &class_loader);
 
         // Parse the array shape entries.
         let entries = match docblock::parse_array_shape(&effective_type) {
@@ -731,6 +746,86 @@ impl Backend {
 ///
 /// Replaces patterns like `$var['` or `$var[` at the cursor line with
 /// `$var[''];` (or `$var[];`) so the rest of the file parses correctly.
+impl Backend {
+    /// Expand a type string if it is a type alias defined on any class in
+    /// `classes`.
+    ///
+    /// This is used by the array-key completion path which works with raw
+    /// type strings rather than going through `type_hint_to_classes`.  When
+    /// the type is not an alias, the original string is returned unchanged.
+    ///
+    /// Follows up to 10 levels of alias indirection to handle aliases that
+    /// reference other aliases.  For imported type aliases (`from:Class:Name`),
+    /// the `class_loader` is used to load the source class and resolve the
+    /// original alias definition.
+    fn expand_type_alias(
+        type_str: &str,
+        classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> String {
+        let mut current = type_str.to_string();
+        for _ in 0..10 {
+            // Only bare identifiers can be aliases.
+            if current.contains('<')
+                || current.contains('{')
+                || current.contains('|')
+                || current.contains('&')
+                || current.contains('\\')
+                || current.contains('$')
+            {
+                break;
+            }
+            let mut found = false;
+            for cls in classes {
+                if let Some(def) = cls.type_aliases.get(current.as_str()) {
+                    if let Some(import_ref) = def.strip_prefix("from:") {
+                        // Imported alias: resolve from the source class.
+                        if let Some(resolved) =
+                            Self::expand_imported_type_alias(import_ref, classes, class_loader)
+                        {
+                            current = resolved;
+                            found = true;
+                        }
+                        break;
+                    }
+                    current = def.clone();
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                break;
+            }
+        }
+        current
+    }
+
+    /// Resolve an imported type alias reference (`ClassName:OriginalName`)
+    /// by loading the source class and looking up the original alias.
+    fn expand_imported_type_alias(
+        import_ref: &str,
+        classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Option<String> {
+        let (source_class_name, original_name) = import_ref.split_once(':')?;
+        let lookup = source_class_name
+            .rsplit('\\')
+            .next()
+            .unwrap_or(source_class_name);
+        let source_class = classes
+            .iter()
+            .find(|c| c.name == lookup)
+            .cloned()
+            .or_else(|| class_loader(source_class_name));
+        let source_class = source_class?;
+        let def = source_class.type_aliases.get(original_name)?;
+        if def.starts_with("from:") {
+            return None; // Don't follow nested imports.
+        }
+        Some(def.clone())
+    }
+}
+
 fn patch_array_access_at_cursor(content: &str, position: Position) -> String {
     let line_idx = position.line as usize;
     let mut result = String::with_capacity(content.len() + 4);
