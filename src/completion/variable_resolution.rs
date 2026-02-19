@@ -1816,6 +1816,53 @@ impl Backend {
                             );
                         }
                     }
+
+                    // ── Variable invocation: $fn() ──────────────────
+                    // When the callee is a variable (not a named function),
+                    // resolve the variable's type annotation for a
+                    // callable/Closure return type, or look for a
+                    // closure/arrow-function literal in the assignment.
+                    if let Expression::Variable(Variable::Direct(dv)) = func_call.function {
+                        let var_name = dv.name.to_string();
+                        let offset = expr.span().start.offset as usize;
+
+                        // 1. Try docblock annotation:
+                        //    `@var Closure(): User $fn` or
+                        //    `@param callable(int): Response $fn`
+                        if let Some(raw_type) = crate::docblock::find_iterable_raw_type_in_source(
+                            content, offset, &var_name,
+                        ) && let Some(ret) =
+                            crate::docblock::extract_callable_return_type(&raw_type)
+                        {
+                            let resolved = Self::type_hint_to_classes(
+                                &ret,
+                                current_class_name,
+                                all_classes,
+                                class_loader,
+                            );
+                            if !resolved.is_empty() {
+                                return resolved;
+                            }
+                        }
+
+                        // 2. Scan for closure literal assignment and
+                        //    extract native return type hint.
+                        if let Some(ret) = Self::extract_closure_return_type_from_assignment(
+                            &var_name,
+                            content,
+                            ctx.cursor_offset,
+                        ) {
+                            let resolved = Self::type_hint_to_classes(
+                                &ret,
+                                current_class_name,
+                                all_classes,
+                                class_loader,
+                            );
+                            if !resolved.is_empty() {
+                                return resolved;
+                            }
+                        }
+                    }
                 }
                 Call::Method(method_call) => {
                     if let Expression::Variable(Variable::Direct(dv)) = method_call.object

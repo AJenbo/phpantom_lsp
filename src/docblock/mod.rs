@@ -49,7 +49,7 @@ pub use conditional::extract_conditional_return_type;
 
 // Type utilities
 pub use types::{
-    base_class_name, clean_type, extract_array_shape_value_type, extract_generic_key_type,
-    extract_generic_value_type, extract_object_shape_property_type, is_object_shape,
-    parse_array_shape, parse_object_shape, split_intersection_depth0,
+    base_class_name, clean_type, extract_array_shape_value_type, extract_callable_return_type,
+    extract_generic_key_type, extract_generic_value_type, extract_object_shape_property_type,
+    is_object_shape, parse_array_shape, parse_object_shape, split_intersection_depth0,
 };

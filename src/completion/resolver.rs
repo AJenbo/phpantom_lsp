@@ -1041,6 +1041,101 @@ impl Backend {
         docblock::extract_return_type(docblock)
     }
 
+    /// Scan backward through `content` for a closure or arrow-function
+    /// literal assigned to `var_name` and extract the native return type
+    /// hint from the source text.
+    ///
+    /// Matches patterns like:
+    ///   - `$fn = function(): User { … }`
+    ///   - `$fn = fn(): User => …`
+    ///   - `$fn = function(): ?Response { … }`
+    ///
+    /// Returns the return type string (e.g. `"User"`, `"?Response"`) or
+    /// `None` if no closure assignment is found or it has no return type.
+    pub(super) fn extract_closure_return_type_from_assignment(
+        var_name: &str,
+        content: &str,
+        cursor_offset: u32,
+    ) -> Option<String> {
+        let search_area = content.get(..cursor_offset as usize)?;
+
+        // Look for `$fn = function` or `$fn = fn` assignment.
+        let assign_prefix = format!("{} = ", var_name);
+        let assign_pos = search_area.rfind(&assign_prefix)?;
+        let rhs_start = assign_pos + assign_prefix.len();
+        let rhs = search_area.get(rhs_start..)?.trim_start();
+
+        // Match `function(…): ReturnType` or `fn(…): ReturnType => …`
+        let is_closure = rhs.starts_with("function") && rhs[8..].trim_start().starts_with('(');
+        let is_arrow = rhs.starts_with("fn") && rhs[2..].trim_start().starts_with('(');
+
+        if !is_closure && !is_arrow {
+            return None;
+        }
+
+        // Find the opening `(` of the parameter list.
+        let paren_open = rhs.find('(')?;
+        // Find the matching `)` by tracking depth.
+        let mut depth = 0i32;
+        let mut paren_close = None;
+        for (i, c) in rhs[paren_open..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        paren_close = Some(paren_open + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let paren_close = paren_close?;
+
+        // After `)`, look for `: ReturnType`.
+        let after_paren = rhs.get(paren_close + 1..)?.trim_start();
+        // For closures there may be a `use (…)` clause before the return type.
+        let after_use = if after_paren.starts_with("use") {
+            let use_paren = after_paren.find('(')?;
+            let mut udepth = 0i32;
+            let mut use_close = None;
+            for (i, c) in after_paren[use_paren..].char_indices() {
+                match c {
+                    '(' => udepth += 1,
+                    ')' => {
+                        udepth -= 1;
+                        if udepth == 0 {
+                            use_close = Some(use_paren + i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            after_paren.get(use_close? + 1..)?.trim_start()
+        } else {
+            after_paren
+        };
+
+        // Expect `: ReturnType`
+        let after_colon = after_use.strip_prefix(':')?.trim_start();
+        if after_colon.is_empty() {
+            return None;
+        }
+
+        // Extract the return type token — stop at `{`, `=>`, or whitespace.
+        let end = after_colon
+            .find(|c: char| c == '{' || c == '=' || c.is_whitespace())
+            .unwrap_or(after_colon.len());
+        let ret_type = after_colon[..end].trim();
+        if ret_type.is_empty() {
+            return None;
+        }
+
+        Some(ret_type.to_string())
+    }
+
     /// Resolve a call expression to the class of its return type.
     ///
     /// `call_body` is the subject without the trailing `()`, for example:
@@ -1268,6 +1363,44 @@ impl Backend {
             }
             if let Some(ref ret) = func_info.return_type {
                 return Self::type_hint_to_classes(ret, "", all_classes, class_loader);
+            }
+        }
+
+        // ── Variable invocation: $fn() ──────────────────────────────────
+        // When the call body is a bare variable (e.g. `$fn`), the variable
+        // holds a closure or callable.  Resolve the variable's type
+        // annotation and extract the callable return type, or look for a
+        // closure/arrow-function literal assignment and extract the native
+        // return type hint from the source text.
+        if call_body.starts_with('$') {
+            let content = ctx.content;
+            let cursor_offset = ctx.cursor_offset;
+
+            // 1. Try docblock annotation: `@var Closure(): User $fn` or
+            //    `@param callable(int): Response $fn`.
+            if let Some(raw_type) = crate::docblock::find_iterable_raw_type_in_source(
+                content,
+                cursor_offset as usize,
+                call_body,
+            ) && let Some(ret) = crate::docblock::extract_callable_return_type(&raw_type)
+            {
+                let classes = Self::type_hint_to_classes(&ret, "", all_classes, class_loader);
+                if !classes.is_empty() {
+                    return classes;
+                }
+            }
+
+            // 2. Scan backward for a closure/arrow-function literal
+            //    assignment: `$fn = function(): User { … }` or
+            //    `$fn = fn(): User => …`.  Extract the native return
+            //    type hint from the source text.
+            if let Some(ret) =
+                Self::extract_closure_return_type_from_assignment(call_body, content, cursor_offset)
+            {
+                let classes = Self::type_hint_to_classes(&ret, "", all_classes, class_loader);
+                if !classes.is_empty() {
+                    return classes;
+                }
             }
         }
 

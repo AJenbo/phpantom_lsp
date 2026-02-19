@@ -21,6 +21,7 @@ pub(crate) const SCALAR_TYPES: &[&str] = &[
 pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
     let mut angle_depth = 0i32;
     let mut brace_depth = 0i32;
+    let mut paren_depth = 0i32;
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut prev_char = '\0';
@@ -51,8 +52,8 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
             '>' if angle_depth > 0 => {
                 angle_depth -= 1;
                 // If we just closed the outermost `<`, the type ends here
-                // (but only when we're not also inside braces).
-                if angle_depth == 0 && brace_depth == 0 {
+                // (but only when we're not also inside braces or parens).
+                if angle_depth == 0 && brace_depth == 0 && paren_depth == 0 {
                     let end = i + c.len_utf8();
                     return (&s[..end], &s[end..]);
                 }
@@ -61,13 +62,44 @@ pub(crate) fn split_type_token(s: &str) -> (&str, &str) {
             '}' => {
                 brace_depth -= 1;
                 // If we just closed the outermost `{`, the type ends here
-                // (but only when we're not also inside angle brackets).
-                if brace_depth == 0 && angle_depth == 0 {
+                // (but only when we're not also inside angle brackets or parens).
+                if brace_depth == 0 && angle_depth == 0 && paren_depth == 0 {
                     let end = i + c.len_utf8();
                     return (&s[..end], &s[end..]);
                 }
             }
-            c if c.is_whitespace() && angle_depth == 0 && brace_depth == 0 => {
+            '(' => paren_depth += 1,
+            ')' => {
+                paren_depth -= 1;
+                // After closing the outermost `(…)`, check whether a
+                // callable return-type follows (`: ReturnType`).  If so,
+                // consume the `: ` and the return-type token as part of
+                // this token.
+                if paren_depth == 0 && angle_depth == 0 && brace_depth == 0 {
+                    let after_paren = i + c.len_utf8();
+                    let rest = &s[after_paren..];
+                    let rest_trimmed = rest.trim_start();
+                    if let Some(after_colon) = rest_trimmed.strip_prefix(':') {
+                        let after_colon = after_colon.trim_start();
+                        if !after_colon.is_empty() {
+                            // Consume the return-type token.
+                            let (ret_tok, _remainder) = split_type_token(after_colon);
+                            // Compute the end offset: start of `after_colon`
+                            // relative to `s` + length of ret_tok.
+                            let colon_start_in_s =
+                                s.len() - rest.len() + (rest.len() - rest_trimmed.len()) + 1;
+                            let ret_start_in_s = colon_start_in_s
+                                + (after_colon.as_ptr() as usize
+                                    - s[colon_start_in_s..].as_ptr() as usize);
+                            let end = ret_start_in_s + ret_tok.len();
+                            return (&s[..end], &s[end..]);
+                        }
+                    }
+                    // No return type — the token ends here (e.g. bare `callable(int)`).
+                    return (&s[..after_paren], &s[after_paren..]);
+                }
+            }
+            c if c.is_whitespace() && angle_depth == 0 && brace_depth == 0 && paren_depth == 0 => {
                 return (&s[..i], &s[i..]);
             }
             _ => {}
@@ -892,6 +924,75 @@ pub fn parse_object_shape(type_str: &str) -> Option<Vec<ArrayShapeEntry>> {
 ///
 /// Returns `true` for `"object{foo: int}"`, `"?object{bar: string}"`,
 /// and `"\object{baz: bool}"`.  Returns `false` for bare `"object"`.
+/// Extract the return type from a callable/Closure type annotation.
+///
+/// Handles the PHPStan/Psalm callable type syntax:
+///   - `Closure(): User`              → `Some("User")`
+///   - `callable(int, string): bool`  → `Some("bool")`
+///   - `\Closure(Type): Response`     → `Some("Response")`
+///   - `Closure(): User|null`         → `Some("User|null")`
+///   - `Closure`                      → `None` (no return type info)
+///   - `callable`                     → `None`
+///
+/// Returns `None` if the type is not a callable/Closure type or has no
+/// return type annotation.
+pub fn extract_callable_return_type(type_str: &str) -> Option<String> {
+    let s = type_str.strip_prefix('\\').unwrap_or(type_str);
+    let s = s.strip_prefix('?').unwrap_or(s);
+
+    // Must start with `Closure` or `callable` (case-sensitive for Closure,
+    // case-insensitive for callable to match PHP semantics).
+    let rest = if let Some(r) = s.strip_prefix("Closure") {
+        r
+    } else if let Some(r) = s.strip_prefix("callable") {
+        r
+    } else {
+        return None;
+    };
+
+    // Must have a parameter list starting with `(`.
+    let rest = rest.strip_prefix('(')?;
+
+    // Find the matching closing `)`, tracking nested parens.
+    let mut depth = 1i32;
+    let mut close_pos = None;
+    for (i, c) in rest.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close_pos = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let close = close_pos?;
+    let after_paren = &rest[close + 1..];
+
+    // Expect `: ReturnType` after the closing paren.
+    let after_colon = after_paren.trim_start().strip_prefix(':')?;
+    let ret_type = after_colon.trim_start();
+
+    if ret_type.is_empty() {
+        return None;
+    }
+
+    // The return type extends to the end of the type token (it may be a
+    // union like `User|null`).  Use `split_type_token` to extract it
+    // properly, but since this is already the tail of a single type token,
+    // we can take everything up to the first whitespace at depth 0.
+    let (ret_tok, _) = split_type_token(ret_type);
+    if ret_tok.is_empty() {
+        return None;
+    }
+
+    Some(ret_tok.to_string())
+}
+
 pub fn is_object_shape(type_str: &str) -> bool {
     let s = type_str.strip_prefix('\\').unwrap_or(type_str);
     let s = s.strip_prefix('?').unwrap_or(s);

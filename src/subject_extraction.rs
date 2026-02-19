@@ -332,6 +332,12 @@ pub(crate) fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<S
     while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '\\') {
         i -= 1;
     }
+    // Include the `$` prefix for variable function calls (`$fn()`,
+    // `$callback()`, etc.) so that the resolver can distinguish them
+    // from named function calls.
+    if i > 0 && chars[i - 1] == '$' {
+        i -= 1;
+    }
     if i == open {
         // No identifier before `(` — check if the contents inside the
         // balanced parens form a `(new ClassName(...))` expression.

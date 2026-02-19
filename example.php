@@ -396,6 +396,41 @@ $typedClosure = function(User $u): string { return $u->getName(); };
 $typedArrow = fn(int $x): float => $x * 1.5;
 
 
+// ── Callable / Closure Variable Invocation ──────────────────────────────────
+// When a variable holds a closure or callable, invoking it resolves the
+// return type for completion.
+
+// Closure literal with native return type hint:
+$makeUser = function(): User { return new User('test', 'test@example.com'); };
+$makeUser()->getEmail();                  // resolves User from closure return type
+
+// Arrow function literal:
+$makeProfile = fn(): UserProfile => new UserProfile(new User('x', 'x@x.com'));
+$makeProfile()->getDisplayName();         // resolves UserProfile from arrow fn return type
+
+// Closure with `use` clause:
+$name = 'Alice';
+$factory = function() use ($name): User { return new User($name, 'a@b.com'); };
+$factory()->getEmail();                   // `use` clause doesn't interfere
+
+// Docblock callable return type annotation:
+/** @var \Closure(): Response $responder */
+$responder = getUnknownValue();
+$responder()->getBody();                  // resolves Response from @var Closure(): Response
+
+/** @var callable(string): User $loader */
+$loader = getUnknownValue();
+$loader('test')->getEmail();              // resolves User from callable(string): User
+
+// Chaining after callable invocation:
+$builder = function(): User { return new User('x', 'x@x.com'); };
+$builder()->setName('Bob')->getEmail();   // chain works after $fn()
+
+// Variable assigned from callable invocation:
+$fromClosure = $makeUser();
+$fromClosure->getEmail();                 // $result = $fn() resolves return type
+
+
 // ── Multi-line @return & Broken Docblock Recovery ───────────────────────────
 
 $collection = collect([]);
