@@ -699,24 +699,87 @@ impl Backend {
     pub fn find_definition_position(content: &str, class_name: &str) -> Option<Position> {
         let keywords = ["class", "interface", "trait", "enum"];
 
+        // Track whether we are inside a `/* … */` block comment.
+        let mut in_block_comment = false;
+
         for (line_idx, line) in content.lines().enumerate() {
+            // ── Block-comment tracking ──────────────────────────────────
+            // Walk through the line handling `/*` and `*/` toggles so we
+            // know whether the keyword match is inside a comment.
+            let mut effective_line = String::new();
+            let line_bytes = line.as_bytes();
+            let mut i = 0;
+            while i < line_bytes.len() {
+                if in_block_comment {
+                    // Look for closing `*/`.
+                    if i + 1 < line_bytes.len()
+                        && line_bytes[i] == b'*'
+                        && line_bytes[i + 1] == b'/'
+                    {
+                        in_block_comment = false;
+                        // Replace the `*/` with spaces to preserve column offsets.
+                        effective_line.push(' ');
+                        effective_line.push(' ');
+                        i += 2;
+                    } else {
+                        effective_line.push(' ');
+                        i += 1;
+                    }
+                } else if i + 1 < line_bytes.len()
+                    && line_bytes[i] == b'/'
+                    && line_bytes[i + 1] == b'*'
+                {
+                    // Opening `/*` — rest of line (until `*/`) is a comment.
+                    in_block_comment = true;
+                    effective_line.push(' ');
+                    effective_line.push(' ');
+                    i += 2;
+                } else if i + 1 < line_bytes.len()
+                    && line_bytes[i] == b'/'
+                    && line_bytes[i + 1] == b'/'
+                {
+                    // Line comment `//` — blank out the rest of the line.
+                    while i < line_bytes.len() {
+                        effective_line.push(' ');
+                        i += 1;
+                    }
+                } else if line_bytes[i] == b'#' {
+                    // Line comment `#` — blank out the rest of the line.
+                    while i < line_bytes.len() {
+                        effective_line.push(' ');
+                        i += 1;
+                    }
+                } else {
+                    effective_line.push(line_bytes[i] as char);
+                    i += 1;
+                }
+            }
+
             for keyword in &keywords {
                 // Search for `keyword ClassName` making sure ClassName is
                 // followed by a word boundary (whitespace, `{`, `:`, end of
                 // line) so we don't match partial names.
                 let pattern = format!("{} {}", keyword, class_name);
-                if let Some(col) = line.find(&pattern) {
+                if let Some(col) = effective_line.find(&pattern) {
                     // Verify word boundary before the keyword: either start
                     // of line or preceded by whitespace / non-alphanumeric.
                     let before_ok = col == 0 || {
-                        let prev = line.as_bytes().get(col - 1).copied().unwrap_or(b' ');
+                        let prev = effective_line
+                            .as_bytes()
+                            .get(col - 1)
+                            .copied()
+                            .unwrap_or(b' ');
                         !(prev as char).is_alphanumeric() && prev != b'_'
                     };
 
                     // Verify word boundary after the class name.
                     let after_pos = col + pattern.len();
-                    let after_ok = after_pos >= line.len() || {
-                        let next = line.as_bytes().get(after_pos).copied().unwrap_or(b' ');
+                    let after_ok = after_pos >= effective_line.len() || {
+                        let next = effective_line
+                            .as_bytes()
+                            .get(after_pos)
+                            .copied()
+                            .unwrap_or(b' ');
                         !(next as char).is_alphanumeric() && next != b'_'
                     };
 

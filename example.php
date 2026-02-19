@@ -360,6 +360,38 @@ $typed = getUnknownValue();
 echo $typed;                              // Ctrl+Click on $typed → jumps to assignment
 
 
+// ── Type Hint Go-to-Definition ──────────────────────────────────────────────
+// Ctrl+Click on any class/interface name used as a type hint — in parameters,
+// return types, property types, catch blocks, and even inside docblock
+// annotations — to jump to its definition.
+
+// Parameter type hints (simple, nullable, union, intersection):
+function typeHintGtdParam(User $u): void {}                       // Ctrl+Click User
+function typeHintGtdNullable(?User $u): void {}                   // Ctrl+Click User after ?
+function typeHintGtdUnion(User|AdminUser $u): void {}             // Ctrl+Click either type
+function typeHintGtdIntersection(Renderable&Loggable $x): void {} // Ctrl+Click either type
+
+// Return type hints:
+function typeHintGtdReturn(): Response { return new Response(200); } // Ctrl+Click Response
+
+// Catch block exception types — Ctrl+Click NotFoundException or ValidationException:
+try { typeHintGtdParam(new User('', '')); } catch (NotFoundException|ValidationException $e) {}
+
+// Extends / implements — Ctrl+Click User, Renderable, or Loggable in scaffolding below.
+
+// Docblock type references — Ctrl+Click class names inside these annotations:
+/**
+ * @param TypedCollection<int, User> $items   Ctrl+Click User or TypedCollection
+ * @return Response                           Ctrl+Click Response
+ * @throws NotFoundException                  Ctrl+Click NotFoundException
+ */
+function typeHintGtdDocblock($items) { return new Response(200); }
+
+/** @var User $docblockVar */
+$docblockVar = getUnknownValue();
+$docblockVar->getEmail();                 // Ctrl+Click User in the @var above
+
+
 // ── Callable Snippet Insertion ──────────────────────────────────────────────
 // Completion inserts snippets with tab-stops for required params:
 

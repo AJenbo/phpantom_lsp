@@ -257,6 +257,116 @@ fn test_find_definition_position_no_partial_match() {
 }
 
 #[test]
+fn test_find_definition_position_skips_line_comment() {
+    let content = concat!(
+        "<?php\n",
+        "// class AdminUser extends Model\n",
+        "\n",
+        "class AdminUser {\n",
+        "}\n",
+    );
+    let pos = Backend::find_definition_position(content, "AdminUser");
+    assert!(pos.is_some());
+    let pos = pos.unwrap();
+    assert_eq!(pos.line, 3, "Should skip the commented-out class on line 1");
+    assert_eq!(pos.character, 0);
+}
+
+#[test]
+fn test_find_definition_position_skips_hash_comment() {
+    let content = concat!(
+        "<?php\n",
+        "# class Foo extends Bar\n",
+        "\n",
+        "class Foo {\n",
+        "}\n",
+    );
+    let pos = Backend::find_definition_position(content, "Foo");
+    assert!(pos.is_some());
+    assert_eq!(
+        pos.unwrap().line,
+        3,
+        "Should skip the #-commented class on line 1"
+    );
+}
+
+#[test]
+fn test_find_definition_position_skips_block_comment() {
+    let content = concat!(
+        "<?php\n",
+        "/* class Widget {} */\n",
+        "\n",
+        "class Widget {\n",
+        "}\n",
+    );
+    let pos = Backend::find_definition_position(content, "Widget");
+    assert!(pos.is_some());
+    assert_eq!(
+        pos.unwrap().line,
+        3,
+        "Should skip the block-commented class on line 1"
+    );
+}
+
+#[test]
+fn test_find_definition_position_skips_multiline_block_comment() {
+    let content = concat!(
+        "<?php\n",
+        "/*\n",
+        " * class Order extends Model\n",
+        " */\n",
+        "\n",
+        "class Order {\n",
+        "}\n",
+    );
+    let pos = Backend::find_definition_position(content, "Order");
+    assert!(pos.is_some());
+    assert_eq!(pos.unwrap().line, 5, "Should skip multi-line block comment");
+}
+
+#[test]
+fn test_find_definition_position_skips_docblock() {
+    let content = concat!(
+        "<?php\n",
+        "/**\n",
+        " * class Response extends BaseResponse\n",
+        " */\n",
+        "\n",
+        "class Response {\n",
+        "}\n",
+    );
+    let pos = Backend::find_definition_position(content, "Response");
+    assert!(pos.is_some());
+    assert_eq!(pos.unwrap().line, 5, "Should skip docblock comment");
+}
+
+#[test]
+fn test_find_definition_position_inline_comment_after_code() {
+    // The class declaration is real code; the comment is after it.
+    let content = concat!("<?php\n", "class Config { // class Settings\n", "}\n",);
+    let pos = Backend::find_definition_position(content, "Config");
+    assert!(pos.is_some());
+    assert_eq!(pos.unwrap().line, 1);
+
+    // "Settings" appears only inside the comment — should not match.
+    let pos2 = Backend::find_definition_position(content, "Settings");
+    assert!(
+        pos2.is_none(),
+        "Should not match class name inside trailing comment"
+    );
+}
+
+#[test]
+fn test_find_definition_position_only_in_comment_returns_none() {
+    let content = concat!("<?php\n", "// class Ghost extends Model\n",);
+    let pos = Backend::find_definition_position(content, "Ghost");
+    assert!(
+        pos.is_none(),
+        "Should return None when class only exists in a comment"
+    );
+}
+
+#[test]
 fn test_find_definition_position_with_namespace() {
     let content = concat!(
         "<?php\n",
