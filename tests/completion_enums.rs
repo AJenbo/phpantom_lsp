@@ -2827,3 +2827,81 @@ async fn test_completion_self_referential_assignment_backed_enum_value() {
         "Completion request should not hang on self-referential assignment"
     );
 }
+
+/// Go-to-definition on `$value->value` after `instanceof BackedEnum` should
+/// resolve to the `$value` property on the `BackedEnum` interface stub, NOT
+/// to a standalone function named `value()`.
+///
+/// When member resolution fails (e.g. because the subject can't be resolved
+/// or the property isn't found on the resolved class), the definition handler
+/// falls through to global function lookup — which may find an unrelated
+/// `value()` helper function.
+#[tokio::test]
+async fn test_goto_definition_backed_enum_value_property_not_function() {
+    let backend = create_test_backend_with_stubs();
+
+    let uri = Url::parse("file:///goto_enum_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // 0
+        "function value($value, ...$args) { return $value; }\n",     // 1
+        "\n",                                                        // 2
+        "class ConvertHelper {\n",                                   // 3
+        "    public static function toBool(mixed $value): bool {\n", // 4
+        "        if ($value instanceof \\BackedEnum) {\n",           // 5
+        "            $value = $value->value;\n",                     // 6
+        "        }\n",                                               // 7
+        "        return (bool) $value;\n",                           // 8
+        "    }\n",                                                   // 9
+        "}\n",                                                       // 10
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Click on "value" in `$value->value` on line 6 (character ~33)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 6,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve goto-definition for BackedEnum->value property"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            // Must point into the BackedEnum stub, not the current file.
+            assert!(
+                location.uri.as_str().contains("phpantom-stub://"),
+                "Should resolve to the BackedEnum stub, not the current file. Got uri: {}",
+                location.uri
+            );
+            // The `$value` property is on line 5 of the stub (after two
+            // method declarations with `$value` parameters on lines 3–4).
+            assert_eq!(
+                location.range.start.line, 5,
+                "Should point to the `$value` property declaration (line 5 of stub), \
+                 not a method parameter. Got line: {}",
+                location.range.start.line
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

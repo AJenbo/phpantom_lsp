@@ -593,6 +593,11 @@ impl Backend {
         // Get the file content.
         let file_content = if uri == current_uri {
             current_content.to_string()
+        } else if uri.starts_with("phpantom-stub://") {
+            // Embedded stubs are stored under synthetic URIs and have no
+            // on-disk file.  Retrieve the raw stub source from the
+            // stub_index instead.
+            self.stub_index.get(class_name).map(|s| s.to_string())?
         } else {
             // Try open files first, then read from disk.
             let from_open = self
@@ -690,26 +695,41 @@ impl Backend {
 
                         if after_ok {
                             let trimmed = line.trim_start();
-                            let is_declaration = trimmed.starts_with("public")
-                                || trimmed.starts_with("protected")
-                                || trimmed.starts_with("private")
-                                || trimmed.starts_with("var ")
-                                || trimmed.starts_with("readonly")
-                                || trimmed.starts_with("static");
+                            // A line starting with a visibility keyword is a
+                            // property declaration UNLESS it also contains
+                            // `function` before the `$` — in that case it is
+                            // a method whose parameter happens to share the
+                            // property name (e.g.
+                            // `public static function from(int|string $value)`
+                            // vs `public readonly int|string $value;`).
+                            let prefix = &line[..col];
+                            let is_method_param = prefix.contains("function");
+                            let is_declaration = !is_method_param
+                                && (trimmed.starts_with("public")
+                                    || trimmed.starts_with("protected")
+                                    || trimmed.starts_with("private")
+                                    || trimmed.starts_with("var ")
+                                    || trimmed.starts_with("readonly")
+                                    || trimmed.starts_with("static"));
 
                             // Also detect promoted constructor properties:
                             // `public function __construct(private Type $prop)`
                             // In this case the visibility keyword appears
                             // inside the parameter list on the same line.
-                            let is_promoted = !is_declaration && {
-                                // Check if visibility keyword appears before
-                                // the `$prop` on the same line (inside parens).
-                                let before = &line[..col];
-                                before.contains("public")
-                                    || before.contains("protected")
-                                    || before.contains("private")
-                                    || before.contains("readonly")
-                            };
+                            // Only applies to `__construct` — regular method
+                            // parameters like `function from(int|string $value)`
+                            // must not be mistaken for property declarations.
+                            let is_promoted = !is_declaration
+                                && !is_method_param
+                                && prefix.contains("__construct")
+                                && {
+                                    // Check if visibility keyword appears before
+                                    // the `$prop` on the same line (inside parens).
+                                    prefix.contains("public")
+                                        || prefix.contains("protected")
+                                        || prefix.contains("private")
+                                        || prefix.contains("readonly")
+                                };
 
                             if is_declaration || is_promoted {
                                 // Place the cursor on the first letter after
