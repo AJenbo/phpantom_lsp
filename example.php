@@ -3,8 +3,13 @@
 /**
  * PHPantomLSP — Feature Showcase
  *
- * A single-file demo of every completion and go-to-definition feature.
- * Open this in your editor to try each one interactively.
+ * A single-file playground for every completion and go-to-definition feature.
+ * Trigger completion after -> / :: / $, or Ctrl+Click for go-to-definition.
+ *
+ * Layout:
+ *   1. PLAYGROUND  — try completion and go-to-definition here
+ *   2. DEMO CLASSES — features that require class / method context
+ *   3. SCAFFOLDING  — supporting definitions (scroll past these)
  */
 
 namespace Demo;
@@ -12,6 +17,646 @@ namespace Demo;
 use Exception;
 use Stringable;
 use Demo\UserProfile as Profile;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PLAYGROUND — try completion and go-to-definition here
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+// ── Instance Completion ─────────────────────────────────────────────────────
+
+$user = new User('Alice', 'alice@example.com');
+$user->getEmail();           // own method
+$user->email;                // own property
+$user->age;                  // constructor-promoted property
+$user->uuid;                 // readonly promoted (from Model)
+$user->getCreatedAt();       // trait method (HasTimestamps)
+$user->generateSlug('Hi');   // trait method (HasSlug)
+$user->getName();            // inherited from Model
+$user->displayName;          // @property magic
+$user->hasPermission('x');   // @method magic
+$user->output;               // @property-read (Renderable interface)
+$user->render();             // @method (Renderable interface)
+
+
+// ── Static & Enum Completion ────────────────────────────────────────────────
+
+User::$defaultRole;          // static property
+User::TYPE_ADMIN;            // class constant
+User::findByEmail('a@b.c');  // static method
+User::make('Bob');           // inherited static (Model)
+User::query();               // @mixin Builder (Model)
+
+Status::Active;              // backed enum case
+Status::Active->label();     // enum method
+Priority::High;              // int-backed enum
+Mode::Manual;                // unit enum
+
+
+// ── Method & Property Chaining ──────────────────────────────────────────────
+
+$user->setName('Bob')->setStatus(Status::Active)->getEmail();
+$user->getProfile()->getDisplayName();   // return type chain
+$profile = $user->getProfile();
+$profile->getUser()->getEmail();         // variable → method chain
+
+$order = new Order(new Customer('a@b.com', new Address()), 42.0);
+$order->customer->address->city;         // deep property chain
+$order->customer->address->format();
+
+$maybe = User::find(1);                  // null-safe chaining
+$maybe?->getProfile()?->getDisplayName();
+
+
+// ── Return Type Resolution ──────────────────────────────────────────────────
+
+$made = User::make('Charlie');            // static return type
+$made->getEmail();
+
+$created = createUser('Dana', 'dana@example.com');
+$created->getName();                      // function return type
+
+$container = new Container();
+$resolved = $container->make(User::class);
+$resolved->getEmail();                    // conditional return: class-string<T> → T
+
+$appUser = app(User::class);              // conditional on standalone function
+$appUser->getEmail();
+
+$found = findOrFail(1);                   // User|AdminUser union
+$found->getName();                        // available on both types
+
+function handleIntersection(User&Loggable $entity): void {
+    $entity->getEmail();                  // from User
+    $entity->log('saved');                // from Loggable
+}
+
+
+// ── Class Alias ─────────────────────────────────────────────────────────────
+
+$p = new Profile(new User('Eve', 'eve@example.com'));
+$p->getDisplayName();                     // Profile → UserProfile via `use ... as`
+
+
+// ── @var Docblock Override ──────────────────────────────────────────────────
+
+/** @var User $hinted */
+$hinted = getUnknownValue();
+$hinted->getEmail();                      // type from @var, not mixed
+
+/** @var AdminUser $inlineHinted */
+$inlineHinted = getUnknownValue();
+$inlineHinted->grantPermission('write');
+
+
+// ── Ambiguous Variables ─────────────────────────────────────────────────────
+
+if (rand(0, 1)) {
+    $ambiguous = new Container();
+} else {
+    $ambiguous = new AdminUser('Y', 'y@example.com');
+}
+$ambiguous->getStatus();                  // available on both branches
+
+
+// ── Type Narrowing ──────────────────────────────────────────────────────────
+
+$a = findOrFail(1);                       // User|AdminUser
+if ($a instanceof AdminUser) {
+    $a->grantPermission('x');             // narrowed to AdminUser
+} else {
+    $a->getEmail();                       // narrowed to User
+}
+
+if (!$a instanceof AdminUser) {
+    $a->getEmail();                       // negated instanceof
+}
+
+$c = getUnknownValue();
+if (is_a($c, AdminUser::class)) {
+    $c->grantPermission('edit');          // is_a() narrowing
+}
+
+$d = findOrFail(1);
+if (get_class($d) === User::class) {
+    $d->getEmail();                       // get_class() identity
+}
+
+$e = findOrFail(1);
+if ($e::class === AdminUser::class) {
+    $e->grantPermission('x');             // ::class identity
+}
+
+$f = getUnknownValue();
+assert($f instanceof User);
+$f->getEmail();                           // assert() narrowing
+
+$g = getUnknownValue();
+$narrowed = match (true) {
+    $g instanceof AdminUser => $g->grantPermission('approve'),
+    is_a($g, User::class)  => $g->getEmail(),
+    default                 => null,
+};
+
+
+// ── Custom Assert Narrowing ─────────────────────────────────────────────────
+
+$i = getUnknownValue();
+assertUser($i);                           // @phpstan-assert User $value
+$i->getEmail();
+
+$j = findOrFail(1);
+if (isAdmin($j)) {                        // @phpstan-assert-if-true AdminUser
+    $j->grantPermission('sudo');
+} else {
+    $j->getEmail();
+}
+
+$k = findOrFail(1);
+if (isRegularUser($k)) {                  // @phpstan-assert-if-false AdminUser
+    $k->getEmail();
+} else {
+    $k->grantPermission('x');
+}
+
+
+// ── Ternary Narrowing ──────────────────────────────────────────────────────
+
+$model = findOrFail(1);
+$email = $model instanceof User ? $model->getEmail() : 'unknown';
+
+
+// ── Generics (@template / @extends) ────────────────────────────────────────
+
+$repo = new UserRepository();
+$repo->find(1)->getEmail();               // Repository<User>::find() → User
+$repo->first()->getName();
+$repo->findOrNull(1)?->getEmail();        // ?User
+
+$users = new UserCollection();            // TypedCollection<int, User>
+$users->first()->getEmail();
+$users->adminsOnly();                     // own method
+
+$cachingRepo = new CachingUserRepository();
+$cachingRepo->find(1)->getEmail();        // grandparent generics
+
+$responses = new ResponseCollection();    // @phpstan-extends variant
+$responses->first()->getStatusCode();
+
+
+// ── Method-Level @template ──────────────────────────────────────────────────
+
+$locator = new ServiceLocator();
+$locator->get(User::class)->getEmail();           // class-string<T> → T
+$locator->get(UserProfile::class)->setBio('hi');
+
+Factory::create(User::class)->getEmail();         // static @template
+resolve(AdminUser::class)->grantPermission('x');  // function @template
+
+
+// ── Trait Generic Substitution ──────────────────────────────────────────────
+
+Product::factory()->create();             // @use HasFactory<UserFactory> → UserFactory
+Product::factory()->count(5);
+
+$idx = new UserIndex();                   // @use Indexable<int, User>
+$idx->get()->getEmail();                  // TValue → User
+
+
+// ── Foreach & Array Access ──────────────────────────────────────────────────
+
+/** @var list<User> $members */
+$members = getUnknownValue();
+foreach ($members as $member) {
+    $member->getEmail();                  // element type from list<User>
+}
+$members[0]->getName();                   // array access element type
+
+/** @var array<int, AdminUser> $admins */
+$admins = getUnknownValue();
+foreach ($admins as $admin) {
+    $admin->grantPermission('x');
+}
+$admins[0]->grantPermission('y');         // variable key works too
+
+
+// ── Array Destructuring ────────────────────────────────────────────────────
+
+/** @var list<User> */
+[$first, $second] = getUnknownValue();
+$first->getEmail();                       // destructured element type
+
+
+// ── Array Shapes ────────────────────────────────────────────────────────────
+
+$config = ['host' => 'localhost', 'port' => 3306, 'author' => new User('', '')];
+$config[''];                              // key completion: host, port, author
+$config['author']->getEmail();            // value type → User
+
+$bag = ['status' => 'ok'];
+$bag['user'] = new User('', '');          // incremental assignment
+$bag[''];                                 // keys: status, user
+$bag['user']->getEmail();
+
+/** @var array{first: User, second: AdminUser} $pair */
+$pair = getUnknownValue();
+$pair['first']->getName();
+$pair['second']->grantPermission('admin');
+
+$collected = [];                          // push-style inference
+$collected[] = new User('', '');
+$collected[] = new AdminUser('', '');
+$collected[0]->getName();
+
+$cfg = getAppConfig();
+$cfg['logger']->getEmail();               // shape from function return
+
+
+// ── Object Shapes ───────────────────────────────────────────────────────────
+
+/** @var object{title: string, score: float} $item */
+$item = getUnknownValue();
+$item->title;                             // object shape property
+$item->score;
+
+/** @var object{name: string, value: int}&\stdClass $obj */
+$obj = getUnknownValue();
+$obj->name;                               // intersected with \stdClass
+
+
+// ── $_SERVER Superglobal ────────────────────────────────────────────────────
+
+$_SERVER['REQUEST_METHOD'];               // known key completion
+$_SERVER['HTTP_HOST'];
+$_SERVER['REMOTE_ADDR'];
+
+
+// ── Clone Expression ────────────────────────────────────────────────────────
+
+$copy = clone $user;
+$copy->getEmail();                        // preserves User type
+
+$immutable = new Immutable(42);
+$cloned = clone $immutable;
+$cloned->getValue();
+
+
+// ── Constants (Go-to-Definition) ────────────────────────────────────────────
+
+define('APP_VERSION', '1.0.0');
+define('MAX_RETRIES', 3);
+echo APP_VERSION;                         // Ctrl+Click → jumps to define()
+$retries = MAX_RETRIES;
+
+
+// ── Variable Go-to-Definition ───────────────────────────────────────────────
+
+$typed = getUnknownValue();
+echo $typed;                              // Ctrl+Click on $typed → jumps to assignment
+
+
+// ── Callable Snippet Insertion ──────────────────────────────────────────────
+// Completion inserts snippets with tab-stops for required params:
+
+$user->setName('Bob');                    // → setName(${1:$name})
+$user->toArray();                         // → toArray()  (no params)
+$user->addRoles();                        // → addRoles() (variadic)
+User::findByEmail('a@b.c');               // → findByEmail(${1:$email})
+$r = new Response(200);                   // → Response(${1:$statusCode})
+
+
+// ── parent:: Completion ─────────────────────────────────────────────────────
+// Open AdminUser's constructor and toArray() in scaffolding below for
+// parent:: examples (inherited methods, overridden methods, constants).
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DEMO CLASSES — features that require class / method context
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  Open these methods and trigger completion inside them.
+
+
+// ── Property Chains on $this and Parameters ─────────────────────────────────
+
+class PropertyChainDemo
+{
+    public Order $order;
+
+    public function __construct(Order $order)
+    {
+        $this->order = $order;
+    }
+
+    public function simpleChain(): void
+    {
+        $customer = new Customer('test@example.com', new Address());
+        $customer->address->city;         // Address::$city
+        $customer->address->format();     // Address::format()
+    }
+
+    public function deepChain(): void
+    {
+        $order = new Order(new Customer('a@b.com', new Address()), 99.99);
+        $order->customer->address->zip;   // Address::$zip
+        $order->customer->email;          // Customer::$email
+    }
+
+    public function mixedThisAndVar(): void
+    {
+        $this->order->customer->email;    // via $this
+        $local = new Order(new Customer('x@y.com', new Address()), 50.0);
+        $local->customer->address->format(); // via local variable
+    }
+}
+
+
+// ── Match / Ternary / Null-Coalescing Type Accumulation ─────────────────────
+
+class ExpressionTypeDemo
+{
+    private Response $response;
+    private ?Container $container;
+
+    public function matchExpr(string $name): void
+    {
+        $service = match ($name) {
+            'reviews' => new ElasticProductReviewIndexService(),
+            'brands'  => new ElasticBrandIndexService(),
+            default   => null,
+        };
+        $service->index();                // on both classes
+        $service->reindex();              // ElasticProductReviewIndexService only
+        $service->bulkDelete([]);         // ElasticBrandIndexService only
+    }
+
+    public function ternaryExpr(bool $flag): void
+    {
+        $svc = $flag
+            ? new ElasticProductReviewIndexService()
+            : new ElasticBrandIndexService();
+        $svc->index();                    // on both
+        $svc->reindex();                  // only one branch
+    }
+
+    public function nullCoalescing(): void
+    {
+        $svc = $this->container ?? $this->response;
+        $svc->make();                     // Container::make()
+        $svc->getStatusCode();            // Response::getStatusCode()
+    }
+}
+
+
+// ── Foreach, Key Types, and Destructuring ───────────────────────────────────
+
+class IterationDemo
+{
+    /** @var list<User> */
+    public array $users;
+
+    /** @return list<User> */
+    public function getUsers(): array { return []; }
+
+    /** @return array<Request, HttpResponse> */
+    public function getMapping(): array { return []; }
+
+    public function foreachFromMethod(): void
+    {
+        foreach ($this->getUsers() as $user) {
+            $user->getEmail();            // list<User> → User
+        }
+    }
+
+    public function foreachFromProperty(): void
+    {
+        foreach ($this->users as $user) {
+            $user->getEmail();            // list<User> → User
+        }
+    }
+
+    public function keyTypes(): void
+    {
+        foreach ($this->getMapping() as $req => $res) {
+            $req->getUri();               // Request (key type)
+            $res->getBody();              // HttpResponse (value type)
+        }
+    }
+
+    public function weakMapKeys(): void
+    {
+        /** @var \WeakMap<User, UserProfile> $profiles */
+        $profiles = new \WeakMap();
+        foreach ($profiles as $user => $profile) {
+            $user->getEmail();            // key: User
+            $profile->getDisplayName();   // value: UserProfile
+        }
+    }
+
+    public function destructuring(): void
+    {
+        [$a, $b] = $this->getUsers();
+        $a->getEmail();                   // destructured element type
+        $b->getName();
+    }
+}
+
+
+// ── Array & Object Shapes in Methods ────────────────────────────────────────
+
+class ShapeDemo
+{
+    /**
+     * @return array{user: User, profile: UserProfile, active: bool}
+     */
+    public function getUserData(): array { return []; }
+
+    /**
+     * @return object{name: string, age: int, active: bool}
+     */
+    public function getProfile(): object { return (object) []; }
+
+    /**
+     * @return object{user: User, meta: object{page: int, total: int}}
+     */
+    public function getResult(): object { return (object) []; }
+
+    /**
+     * @param array{host: string, port: int, credentials: User} $config
+     */
+    public function fromParam(array $config): void
+    {
+        $config['host'];                  // string
+        $config['credentials']->getEmail(); // User
+    }
+
+    public function fromReturnType(): void
+    {
+        $data = $this->getUserData();
+        $data['user']->getName();         // User
+        $data['profile']->setBio('');     // UserProfile
+    }
+
+    public function nestedShapes(): void
+    {
+        /** @var array{meta: array{page: int, total: int}, items: list<User>} $response */
+        $response = getUnknownValue();
+        $response['meta']['page'];        // nested shape key
+        $response['items'][0]->getName(); // list element type
+    }
+
+    public function objectShapes(): void
+    {
+        $profile = $this->getProfile();
+        $profile->name;                   // object{name: string, ...}
+        $profile->age;
+
+        $result = $this->getResult();
+        $result->user->getEmail();        // nested object → User
+        $result->meta->page;              // nested object shape
+    }
+}
+
+
+// ── Generic Context Preservation ────────────────────────────────────────────
+
+class GiftShop
+{
+    /** @var Box<Gift> */
+    public $giftBox;
+
+    /** @return TypedCollection<int, Gift> */
+    public function getGifts(): TypedCollection { return new TypedCollection(); }
+
+    public function demo(): void
+    {
+        // Property with generic @var — Box<Gift>::unwrap() → Gift
+        $this->giftBox->unwrap()->open();
+        $this->giftBox->unwrap()->getTag();
+
+        // Method with generic @return — TypedCollection<int, Gift>::first() → Gift
+        $this->getGifts()->first()->open();
+        $this->getGifts()->first()->getTag();
+    }
+}
+
+
+// ── @throws Completion and Catch Variable Types ─────────────────────────────
+
+class ExceptionDemo
+{
+    /**
+     * Typing `@` in this docblock suggests @throws for each uncaught exception.
+     *
+     * @throws NotFoundException
+     * @throws ValidationException
+     */
+    public function findOrFail(int $id): array
+    {
+        if ($id < 0) {
+            throw new ValidationException('ID must be positive');
+        }
+        $result = $this->lookup($id);
+        if ($result === null) {
+            throw new NotFoundException('Record not found');
+        }
+        return $result;
+    }
+
+    /**
+     * Caught exceptions are filtered out of @throws suggestions.
+     *
+     * @throws AuthorizationException
+     */
+    public function safeOperation(): void
+    {
+        try {
+            throw new \RuntimeException('transient error');
+        } catch (\RuntimeException $e) {
+            // caught — not suggested
+        }
+        throw new AuthorizationException('Forbidden');
+    }
+
+    /**
+     * Called method's @throws propagate to the caller.
+     *
+     * @throws AuthorizationException
+     */
+    public function delegatedWork(): void
+    {
+        $this->safeOperation();
+    }
+
+    /**
+     * Catch variable resolves to the caught exception type.
+     */
+    public function catchVariable(): void
+    {
+        try {
+            $this->riskyOperation();
+        } catch (ValidationException $e) {
+            $e->getMessage();             // ValidationException members
+        }
+    }
+
+    /**
+     * Narrower catch (RuntimeException) doesn't handle broader Exception,
+     * so Exception escapes as a propagated @throws.
+     *
+     * @throws \Exception
+     */
+    public function propagatedWithCatchFilter(): void
+    {
+        try {
+            $this->throwsException();
+        } catch (\RuntimeException $e) {
+            // catches RuntimeException, NOT Exception
+        }
+    }
+
+    private function lookup(int $id): ?array { return null; }
+    private function riskyOperation(): void {}
+
+    /** @throws \Exception */
+    private function throwsException(): void { throw new \Exception('error'); }
+}
+
+
+// ── Constructor @param → Promoted Property Override ─────────────────────────
+
+class ParamOverrideDemo
+{
+    /**
+     * @param list<Ingredient> $ingredients
+     * @param Recipe $recipe
+     */
+    public function __construct(
+        public array $ingredients,          // @param overrides to list<Ingredient>
+        public object $recipe,              // @param overrides to Recipe
+    ) {}
+
+    public function demo(): void
+    {
+        // $this->ingredients is list<Ingredient> from @param, not just array
+        foreach ($this->ingredients as $ingredient) {
+            $ingredient->name;              // Ingredient::$name
+            $ingredient->format();          // Ingredient::format()
+        }
+
+        // $this->recipe is Recipe from @param, not just object
+        $this->recipe->title;               // Recipe::$title
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+// ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
+// ┃  Everything below exists to support the playground above.           ┃
+// ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+// ═══════════════════════════════════════════════════════════════════════════
+
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -55,6 +700,28 @@ trait HasSlug
     }
 }
 
+/**
+ * @template TFactory
+ */
+trait HasFactory
+{
+    /** @return TFactory */
+    public static function factory() {}
+}
+
+/**
+ * @template TKey
+ * @template TValue
+ */
+trait Indexable
+{
+    /** @return TValue */
+    public function get() {}
+
+    /** @return TKey */
+    public function key() {}
+}
+
 // ─── Enums ──────────────────────────────────────────────────────────────────
 
 enum Status: string
@@ -66,9 +733,9 @@ enum Status: string
     public function label(): string
     {
         return match ($this) {
-            self::Active => 'Active',
+            self::Active   => 'Active',
             self::Inactive => 'Inactive',
-            self::Pending => 'Pending',
+            self::Pending  => 'Pending',
         };
     }
 
@@ -165,7 +832,7 @@ abstract class Model
     }
 }
 
-// ─── Concrete Class ─────────────────────────────────────────────────────────
+// ─── Concrete Classes ───────────────────────────────────────────────────────
 
 /**
  * @property string $displayName
@@ -180,9 +847,7 @@ class User extends Model implements Renderable
     public string $email;
     protected Status $status;
     private array $roles = [];
-
     public static string $defaultRole = 'user';
-
     public const string TYPE_ADMIN = 'admin';
     public const string TYPE_USER = 'user';
 
@@ -255,8 +920,6 @@ class User extends Model implements Renderable
 
     private function secretInternalMethod(): void {}
 }
-
-// ─── Related Classes ────────────────────────────────────────────────────────
 
 class UserProfile
 {
@@ -331,9 +994,6 @@ class Response
 // ─── Generics (@template / @extends) ───────────────────────────────────────
 
 /**
- * A generic repository — the base class declares template parameters
- * that child classes fill in with concrete types via @extends.
- *
  * @template T
  */
 class Repository
@@ -360,12 +1020,7 @@ class Repository
     }
 }
 
-/**
- * Concrete repository: @extends tells the engine that T = User.
- * All inherited methods now return User instead of the abstract T.
- *
- * @extends Repository<User>
- */
+/** @extends Repository<User> */
 class UserRepository extends Repository
 {
     public function findByEmail(string $email): ?User
@@ -374,9 +1029,12 @@ class UserRepository extends Repository
     }
 }
 
+class CachingUserRepository extends UserRepository
+{
+    public function clearCache(): void {}
+}
+
 /**
- * A generic collection with two template parameters.
- *
  * @template TKey of array-key
  * @template-covariant TValue
  */
@@ -401,11 +1059,7 @@ class TypedCollection
     public function all(): array { return $this->items; }
 }
 
-/**
- * A user collection — TKey = int, TValue = User.
- *
- * @extends TypedCollection<int, User>
- */
+/** @extends TypedCollection<int, User> */
 class UserCollection extends TypedCollection
 {
     public function adminsOnly(): self
@@ -414,23 +1068,8 @@ class UserCollection extends TypedCollection
     }
 }
 
-/**
- * Chained generics: this extends UserRepository, which extends
- * Repository<User>.  Grandparent methods resolve through the chain.
- */
-class CachingUserRepository extends UserRepository
-{
-    public function clearCache(): void {}
-}
-
-/**
- * Demonstrates @phpstan-extends (the PHPStan-prefixed variant).
- *
- * @phpstan-extends TypedCollection<string, Response>
- */
-class ResponseCollection extends TypedCollection
-{
-}
+/** @phpstan-extends TypedCollection<string, Response> */
+class ResponseCollection extends TypedCollection {}
 
 // ─── Container (conditional return types) ───────────────────────────────────
 
@@ -463,6 +1102,190 @@ class Container
     }
 }
 
+// ─── Method-Level @template Classes ─────────────────────────────────────────
+
+class ServiceLocator
+{
+    /**
+     * @template T
+     * @param class-string<T> $id
+     * @return T
+     */
+    public function get(string $id): object
+    {
+        return new \stdClass();
+    }
+}
+
+class Factory
+{
+    /**
+     * @template T
+     * @param class-string<T> $class
+     * @return T
+     */
+    public static function create(string $class): object
+    {
+        return new $class();
+    }
+}
+
+// ─── Generic Wrapper ────────────────────────────────────────────────────────
+
+/**
+ * @template T
+ */
+class Box
+{
+    /** @var T */
+    public $value;
+
+    /** @return T */
+    public function unwrap() { return $this->value; }
+}
+
+class Gift
+{
+    public function open(): string { return 'surprise!'; }
+    public function getTag(): string { return 'birthday'; }
+}
+
+class Immutable
+{
+    public function __construct(private int $value) {}
+
+    public function getValue(): int
+    {
+        return $this->value;
+    }
+
+    public function withValue(int $v): self
+    {
+        $clone = clone $this;
+        return $clone;
+    }
+}
+
+// ─── Expression Type Support Classes ────────────────────────────────────────
+
+class ElasticProductReviewIndexService
+{
+    public function index(array $markets = []): void {}
+    public function reindex(): void {}
+}
+
+class ElasticBrandIndexService
+{
+    public function index(array $markets = []): void {}
+    public function bulkDelete(array $ids): void {}
+}
+
+// ─── Property Chain Support Classes ─────────────────────────────────────────
+
+class Address
+{
+    public string $city = '';
+    public string $zip = '';
+    public string $country = '';
+
+    public function format(): string
+    {
+        return "{$this->city}, {$this->zip}, {$this->country}";
+    }
+}
+
+class Customer
+{
+    public Address $address;
+    public string $email;
+
+    public function __construct(string $email, Address $address)
+    {
+        $this->email = $email;
+        $this->address = $address;
+    }
+}
+
+class Order
+{
+    public Customer $customer;
+    public float $total;
+
+    public function __construct(Customer $customer, float $total)
+    {
+        $this->customer = $customer;
+        $this->total = $total;
+    }
+}
+
+class Ingredient
+{
+    public string $name = '';
+    public float $quantity = 0.0;
+
+    public function format(): string
+    {
+        return "{$this->quantity}x {$this->name}";
+    }
+}
+
+class Recipe
+{
+    /**
+     * @param list<Ingredient> $ingredients
+     */
+    public function __construct(
+        public array $ingredients = [],
+        public string $title = '',
+    ) {}
+}
+
+// ─── Foreach Key Type Support Classes ───────────────────────────────────────
+
+class Request
+{
+    public string $method = 'GET';
+    public string $path = '/';
+
+    public function getUri(): string { return $this->path; }
+}
+
+class HttpResponse
+{
+    public int $statusCode = 200;
+
+    public function getBody(): string { return ''; }
+}
+
+// ─── Trait Generic Support Classes ──────────────────────────────────────────
+
+class UserFactory
+{
+    public function create(): User { return new User('', ''); }
+    public function count(int $n): static { return $this; }
+    public function make(): User { return new User('', ''); }
+}
+
+/** @use HasFactory<UserFactory> */
+class Product
+{
+    use HasFactory;
+
+    public function getPrice(): float { return 0.0; }
+}
+
+/** @use Indexable<int, User> */
+class UserIndex
+{
+    use Indexable;
+}
+
+// ─── Exception Classes ──────────────────────────────────────────────────────
+
+class NotFoundException extends \RuntimeException {}
+class ValidationException extends \RuntimeException {}
+class AuthorizationException extends \RuntimeException {}
+
 // ─── Standalone Functions ───────────────────────────────────────────────────
 
 /**
@@ -494,7 +1317,20 @@ function getUnknownValue(): mixed
     return new AdminUser('', '');
 }
 
-// ─── Custom Assert Functions ────────────────────────────────────────────────
+/**
+ * @template T
+ * @param class-string<T> $class
+ * @return T
+ */
+function resolve(string $class): object
+{
+    return new $class();
+}
+
+/**
+ * @return array{logger: User, debug: bool}
+ */
+function getAppConfig(): array { return []; }
 
 /** @phpstan-assert User $value */
 function assertUser(mixed $value): void
@@ -514,1815 +1350,4 @@ function isAdmin(mixed $value): bool
 function isRegularUser(mixed $value): bool
 {
     return !$value instanceof AdminUser;
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Usage Examples — try completion (→) and go-to-definition (⌘-click) here
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ── Instance Completion (→) ─────────────────────────────────────────────────
-
-$user = new User('Alice', 'alice@example.com');
-$user->getEmail();           // own method
-$user->email;                // own property
-$user->age;                  // constructor-promoted property
-$user->uuid;                 // readonly promoted property from Model
-$user->getCreatedAt();       // from HasTimestamps trait
-$user->generateSlug('Hi');   // from HasSlug trait
-$user->getName();            // inherited from Model
-$user->displayName;          // @property magic member
-$user->hasPermission('x');   // @method magic member
-
-
-// ── Static Completion (::) ──────────────────────────────────────────────────
-
-User::$defaultRole;         // static property
-User::TYPE_ADMIN;           // class constant
-User::findByEmail('a@b.c'); // static method
-User::make('Bob');          // inherited static from Model
-User::query();              // from @mixin Builder on Model (inherited)
-
-
-// ── Enum Completion ─────────────────────────────────────────────────────────
-
-Status::Active;              // enum case
-Status::Active->label();     // method on backed enum
-Priority::High;              // int-backed enum case
-Mode::Manual;                // unit enum case
-
-
-// ── Method Chaining ─────────────────────────────────────────────────────────
-
-$user->setName('Bob')->setStatus(Status::Active)->getEmail();
-
-
-// ── Property Chain Resolution ───────────────────────────────────────────────
-
-$user->getProfile()->getDisplayName();
-$profile = $user->getProfile();
-$profile->getUser()->getEmail();
-
-
-// ── Null-Safe Chaining ──────────────────────────────────────────────────────
-
-$maybe = User::find(1);
-$maybe?->getProfile()?->getDisplayName();
-
-
-// ── Static Return Type Resolution ───────────────────────────────────────────
-
-$made = User::make('Charlie');
-$made->getEmail();
-
-
-// ── Function Return Type Resolution ─────────────────────────────────────────
-
-$u = createUser('Dana', 'dana@example.com');
-$u->getName();               // resolves via createUser() return type
-
-
-// ── Conditional Return Types ────────────────────────────────────────────────
-
-$container = new Container();
-$resolved = $container->make(User::class);
-$resolved->getEmail();       // conditional return resolves to User
-
-$appContainer = app();               // no arg → returns Container
-$appContainer->getStatus();
-$appUser = app(User::class);         // class-string arg → returns User
-$appUser->getEmail();
-
-
-// ── Union Return Types ──────────────────────────────────────────────────────
-
-$found = findOrFail(1);     // User|AdminUser
-$found->getName();           // available on both types
-
-
-// ── Intersection Types ──────────────────────────────────────────────────────
-
-function handleIntersection(User&Loggable $entity): void
-{
-    $entity->getEmail();     // from User
-    $entity->log('saved');   // from Loggable
-}
-
-
-// ── use ... as ... (Class Alias) ────────────────────────────────────────────
-
-$p = new Profile(new User('Eve', 'eve@example.com'));
-$p->getDisplayName();        // Profile resolves to Demo\UserProfile via alias
-
-
-
-// ── Variable Go-To-Definition ───────────────────────────────────────────────
-
-$typed = getUnknownValue();
-echo $typed;               // go-to-def on $typed jumps to its assignment above
-
-
-// ── @var Docblock Type Override ─────────────────────────────────────────────
-
-/** @var User $hinted */
-$hinted = getUnknownValue();
-$hinted->getEmail();         // type comes from @var docblock
-
-/** @var AdminUser $inlineHinted */
-$inlineHinted = getUnknownValue();
-$inlineHinted->grantPermission('write');
-
-
-// ── Ambiguous Variables (Conditional Branches) ──────────────────────────────
-
-if (rand(0, 1)) {
-    $ambiguous = new Container();
-} else {
-    $ambiguous = new AdminUser('Y', 'y@example.com');
-}
-$ambiguous->getStatus();     // available on both Container and AdminUser
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Type Narrowing — completion adapts to runtime type checks
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ── instanceof ──────────────────────────────────────────────────────────────
-
-$a = findOrFail(1);          // User|AdminUser
-if ($a instanceof AdminUser) {
-    $a->grantPermission('x');    // narrowed to AdminUser
-} else {
-    $a->getEmail();              // narrowed to User
-}
-
-// negated instanceof
-$b = findOrFail(1);
-if (!$b instanceof AdminUser) {
-    $b->getEmail();              // narrowed to User
-}
-
-
-// ── is_a() ──────────────────────────────────────────────────────────────────
-
-$c = getUnknownValue();
-if (is_a($c, AdminUser::class)) {
-    $c->grantPermission('edit'); // narrowed to AdminUser
-}
-
-
-// ── get_class() / ::class Identity ──────────────────────────────────────────
-
-$d = findOrFail(1);
-if (get_class($d) === User::class) {
-    $d->getEmail();              // narrowed to exactly User
-}
-
-$e = findOrFail(1);
-if ($e::class === AdminUser::class) {
-    $e->grantPermission('x');    // narrowed to AdminUser
-}
-
-
-// ── assert() ────────────────────────────────────────────────────────────────
-
-$f = getUnknownValue();
-assert($f instanceof User);
-$f->getEmail();                  // narrowed unconditionally
-
-
-// ── match(true) ─────────────────────────────────────────────────────────────
-
-$g = getUnknownValue();
-$result = match (true) {
-    $g instanceof AdminUser => $g->grantPermission('approve'),
-    is_a($g, User::class)  => $g->getEmail(),
-    default                 => null,
-};
-
-
-// ── while Loop Narrowing ────────────────────────────────────────────────────
-
-$h = getUnknownValue();
-while ($h instanceof User) {
-    $h->getEmail();              // narrowed inside loop body
-    break;
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Custom Assert Narrowing (@phpstan-assert / @psalm-assert)
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ── Unconditional (@phpstan-assert) ─────────────────────────────────────────
-
-$i = getUnknownValue();
-assertUser($i);
-$i->getEmail();                  // narrowed to User after assertion
-
-
-// ── Conditional True (@phpstan-assert-if-true) ──────────────────────────────
-
-$j = findOrFail(1);
-if (isAdmin($j)) {
-    $j->grantPermission('sudo'); // then-branch: AdminUser
-} else {
-    $j->getEmail();              // else-branch: User
-}
-
-
-// ── Conditional False (@phpstan-assert-if-false) ────────────────────────────
-
-$k = findOrFail(1);
-if (isRegularUser($k)) {
-    $k->getEmail();              // then-branch: User (AdminUser excluded)
-} else {
-    $k->grantPermission('x');    // else-branch: AdminUser
-}
-
-
-// ── Negated Condition ───────────────────────────────────────────────────────
-
-$l = findOrFail(1);
-if (!isAdmin($l)) {
-    $l->getEmail();              // negated → User
-} else {
-    $l->grantPermission('y');    // negated else → AdminUser
-}
-
-
-// ── Generics / Foreach Element Types ────────────────────────────────────────
-
-/** @var list<User> $users */
-$users = getUnknownValue();
-foreach ($users as $user) {
-    $user->getEmail();           // $user resolved to User via list<User>
-    $user->getName();
-}
-
-/** @var User[] $members */
-$members = getUnknownValue();
-foreach ($members as $member) {
-    $member->getStatus();        // $member resolved to User via User[]
-}
-
-/** @var array<int, AdminUser> $admins */
-$admins = getUnknownValue();
-foreach ($admins as $admin) {
-    $admin->grantPermission('x'); // $admin resolved to AdminUser via array<int, AdminUser>
-}
-
-
-// ── Array Access Element Types ──────────────────────────────────────────────
-
-/** @var list<User> $users */
-$users = getUnknownValue();
-$users[0]->getEmail();           // element resolved to User via list<User>
-
-/** @var User[] $members */
-$members = getUnknownValue();
-$members[0]->getName();          // element resolved to User via User[]
-
-/** @var array<int, AdminUser> $admins */
-$admins = getUnknownValue();
-$admins[0]->grantPermission('x'); // element resolved to AdminUser via array<int, AdminUser>
-$key = 0;
-$admins[$key]->grantPermission('y'); // variable key works too
-
-$admin = $admins[0];
-$admin->grantPermission('z');    // assigned from array access → AdminUser
-
-$user = $users[0];
-$user->getEmail();               // assigned from array access → User
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Generics — @template / @extends type resolution
-// ═══════════════════════════════════════════════════════════════════════════
-//
-//  When a parent class declares @template parameters and a child class
-//  provides concrete types via @extends, all inherited methods and
-//  properties have their template types replaced with the real types.
-
-
-// ── Basic @extends — Repository<User> ───────────────────────────────────────
-
-$repo = new UserRepository();
-$repo->find(1)->getEmail();      // find() returns T → User
-$repo->first()->getName();       // first() returns T → User
-$repo->findOrNull(1)?->getEmail(); // findOrNull() returns ?T → ?User
-$repo->findByEmail('a@b.c');     // own method still works
-
-
-// ── Two Template Parameters — TypedCollection<int, User> ────────────────────
-
-$users = new UserCollection();
-$users->first()->getEmail();     // first() returns TValue → User
-$users->last()?->getName();      // last() returns ?TValue → ?User
-$users->adminsOnly();            // own method returns self
-$users->filter(fn($u) => true); // filter() returns static → UserCollection
-$users->count();                 // count() returns int (non-template, unchanged)
-
-
-// ── Chained / Grandparent Generics ──────────────────────────────────────────
-
-$cachingRepo = new CachingUserRepository();
-$cachingRepo->find(1)->getEmail();    // grandparent Repository<User>::find() → User
-$cachingRepo->first()->getName();     // grandparent first() → User
-$cachingRepo->clearCache();           // own method
-
-
-// ── @phpstan-extends Variant ────────────────────────────────────────────────
-
-$responses = new ResponseCollection();
-$responses->first()->getStatusCode(); // first() returns TValue → Response
-$responses->last()?->getBody();       // last() returns ?TValue → ?Response
-
-
-// ── Property Type Substitution ──────────────────────────────────────────────
-//  Inherited properties with template types are also substituted.
-
-class PropertyDemo extends UserRepository {
-    function test() {
-        $this->cached->getEmail();   // $cached has type T → User
-    }
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Method-Level @template Support
-// ═══════════════════════════════════════════════════════════════════════════
-//
-// PHPantomLSP resolves method-level @template parameters from call-site
-// arguments.  The canonical pattern:
-//
-//   @template T
-//   @param class-string<T> $class
-//   @return T
-//
-// When you call such a method with `SomeClass::class`, the return type
-// is resolved to `SomeClass` — enabling full completion on the result.
-
-// ── Service Locator / DI Container Pattern ──────────────────────────────────
-
-class ServiceLocator {
-    /**
-     * @template T
-     * @param class-string<T> $id
-     * @return T
-     */
-    public function get(string $id): object
-    {
-        // ...
-    }
-}
-
-$locator = new ServiceLocator();
-$locator->get(User::class)->getEmail();          // Resolved: User
-$locator->get(UserProfile::class)->setBio('hi'); // Resolved: UserProfile
-
-
-// ── Entity Manager / Repository Pattern ─────────────────────────────────────
-
-class EntityManager {
-    /**
-     * @template TEntity
-     * @param class-string<TEntity> $entityClass
-     * @return TEntity
-     */
-    public function find(string $entityClass): object
-    {
-        // ...
-    }
-
-    /**
-     * @template TEntity
-     * @param class-string<TEntity> $entityClass
-     * @return TEntity|null
-     */
-    public function findOrNull(string $entityClass): ?object
-    {
-        // ...
-    }
-}
-
-$em = new EntityManager();
-$em->find(User::class)->getName();               // Resolved: User
-$em->find(AdminUser::class)->grantPermission(''); // Resolved: AdminUser
-$em->findOrNull(Response::class)?->getBody();    // Resolved: ?Response
-
-// Inline chain (no intermediate variable):
-$em->find(UserProfile::class)->getDisplayName(); // Resolved: UserProfile
-
-
-// ── Static Method with @template ────────────────────────────────────────────
-
-class Factory {
-    /**
-     * @template T
-     * @param class-string<T> $class
-     * @return T
-     */
-    public static function create(string $class): object
-    {
-        return new $class();
-    }
-}
-
-Factory::create(User::class)->getEmail();        // Resolved: User
-
-
-// ── Standalone Function with @template ──────────────────────────────────────
-
-/**
- * @template T
- * @param class-string<T> $class
- * @return T
- */
-function resolve(string $class): object
-{
-    return new $class();
-}
-
-resolve(AdminUser::class)->grantPermission('x'); // Resolved: AdminUser
-$user = resolve(User::class);
-$user->getEmail();                               // Resolved: User
-
-
-// ── @template with $this-> context ──────────────────────────────────────────
-
-class AbstractRepository2 {
-    /**
-     * @template T
-     * @param class-string<T> $class
-     * @return T
-     */
-    public function load(string $class): object { return new $class(); }
-
-    public function demo(): void {
-        $this->load(User::class)->getEmail();    // Resolved: User
-    }
-}
-
-// ─── Generic Context Preservation ───────────────────────────────────────────
-//
-// When a property or method return type carries generic parameters
-// (e.g. `Collection<int, User>`), the generic context is preserved so
-// that template parameters are substituted on the resolved class.
-// This enables full type inference through chained access.
-
-/**
- * A generic wrapper with a single template parameter.
- *
- * @template T
- */
-class Box
-{
-    /** @var T */
-    public $value;
-
-    /** @return T */
-    public function unwrap() { return $this->value; }
-}
-
-class Gift
-{
-    public function open(): string { return 'surprise!'; }
-    public function getTag(): string { return 'birthday'; }
-}
-
-class GiftShop
-{
-    /** @var Box<Gift> */
-    public $giftBox;
-
-    /** @return TypedCollection<int, Gift> */
-    public function getGifts(): TypedCollection { return new TypedCollection(); }
-
-    public function demo(): void {
-        // ── Property with generic @var ──
-        // $this->giftBox is Box<Gift>, so unwrap() returns Gift.
-        $this->giftBox->unwrap()->open();        // Resolved: Gift::open()
-        $this->giftBox->unwrap()->getTag();       // Resolved: Gift::getTag()
-
-        // ── Method with generic @return ──
-        // getGifts() returns TypedCollection<int, Gift>, so first() returns Gift.
-        $this->getGifts()->first()->open();       // Resolved: Gift::open()
-        $this->getGifts()->first()->getTag();     // Resolved: Gift::getTag()
-
-        // ── Property chain: $this->prop->method() ──
-        // The subject extraction now captures the full chain so that
-        // $this->giftBox->unwrap() correctly resolves through the property.
-        $box = $this->giftBox;
-        $box->unwrap()->open();                   // Resolved: Gift::open()
-
-        // ── Nullable union with generics ──
-        // `Box<Gift>|null` strips |null but preserves <Gift>.
-        /** @var Box<Gift>|null $maybeBox */
-        $maybeBox = null;
-        $maybeBox->unwrap()->getTag();            // Resolved: Gift::getTag()
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 18. Match expression type resolution
-// ═══════════════════════════════════════════════════════════════════
-// When a variable is assigned from a `match` expression, PHPantomLSP
-// collects the types from ALL arms, producing a union of possible types.
-// The `default => null` arm (or any scalar arm) is gracefully skipped.
-
-class ElasticProductReviewIndexService {
-    public function index(array $markets = []): void {}
-    public function reindex(): void {}
-}
-
-class ElasticBrandIndexService {
-    public function index(array $markets = []): void {}
-    public function bulkDelete(array $ids): void {}
-}
-
-class MatchExpressionDemo {
-    private Response $response;
-    private Container $container;
-
-    public function matchWithInstantiations(string $indexName): void {
-        // ── Match with new instantiations ──
-        // $service resolves to ElasticProductReviewIndexService | ElasticBrandIndexService
-        $service = match ($indexName) {
-            'product-reviews' => new ElasticProductReviewIndexService(),
-            'brands'          => new ElasticBrandIndexService(),
-            default           => null,
-        };
-        $service->index();       // Resolved: shows index() from both classes
-        $service->reindex();     // Resolved: ElasticProductReviewIndexService::reindex()
-        $service->bulkDelete();  // Resolved: ElasticBrandIndexService::bulkDelete()
-    }
-
-    public function matchWithMethodCalls(string $type): void {
-        // ── Match with $this->method() calls ──
-        // Each arm's return type contributes to the union.
-        $result = match ($type) {
-            'response'  => $this->response,
-            'container' => $this->container,
-        };
-        $result->getStatusCode();  // Resolved: Response::getStatusCode()
-        $result->make();           // Resolved: Container::make()
-    }
-
-    public function matchWithStaticCalls(string $source): void {
-        // ── Match with static method calls ──
-        $model = match ($source) {
-            'find' => User::find(1),
-            'make' => User::make('test'),
-        };
-        $model->getEmail();  // Resolved: User::getEmail()
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 19. Ternary and null-coalescing type resolution
-// ═══════════════════════════════════════════════════════════════════
-// When a variable is assigned from a ternary (`?:`) or null-coalescing
-// (`??`) expression, PHPantomLSP collects types from both branches.
-// Short ternary (`$a ?: $b`) and chained coalescing (`$a ?? $b ?? $c`)
-// are also supported.  These compose with match expressions too.
-
-class TernaryDemo {
-    /** @var Response */
-    private Response $response;
-    /** @var Container|null */
-    private ?Container $container;
-
-    public function ternaryWithInstantiations(bool $useReal): void {
-        // ── Ternary with new instantiations ──
-        // $mailer resolves to ElasticProductReviewIndexService | ElasticBrandIndexService
-        $mailer = $useReal
-            ? new ElasticProductReviewIndexService()
-            : new ElasticBrandIndexService();
-        $mailer->index();       // Resolved: shows index() from both classes
-        $mailer->reindex();     // Resolved: ElasticProductReviewIndexService::reindex()
-        $mailer->bulkDelete();  // Resolved: ElasticBrandIndexService::bulkDelete()
-    }
-
-    public function nullCoalescingWithFallback(): void {
-        // ── Null-coalescing with property and fallback ──
-        // $svc resolves to Container | Response
-        $svc = $this->container ?? $this->response;
-        $svc->make();           // Resolved: Container::make()
-        $svc->getStatusCode();  // Resolved: Response::getStatusCode()
-    }
-
-    public function mixedTernaryAndMatch(bool $simple, int $mode): void {
-        // ── Ternary with match in else branch ──
-        // All branch types accumulate: Response + Container + ElasticBrandIndexService
-        $handler = $simple
-            ? $this->response
-            : match ($mode) {
-                1 => $this->container ?? new ElasticBrandIndexService(),
-                2 => new ElasticProductReviewIndexService(),
-            };
-        $handler->getStatusCode();  // Resolved: Response::getStatusCode()
-        $handler->make();           // Resolved: Container::make()
-        $handler->reindex();        // Resolved: ElasticProductReviewIndexService::reindex()
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 19b. instanceof narrowing in ternary expressions
-// ═══════════════════════════════════════════════════════════════════
-// When a ternary condition checks `$var instanceof ClassName`, the
-// variable is narrowed in the then-branch and excluded in the
-// else-branch — just like `if`/`else`.  Negated conditions flip
-// the polarity.  Nested ternaries are also supported.
-
-class TernaryInstanceofDemo
-{
-    public function thenBranch(Model $item): void
-    {
-        // ── Then-branch narrowing ──
-        // $item is narrowed to User inside the then-branch:
-        $name = $item instanceof User ? $item->getEmail() : 'unknown';
-        //                               ↑ shows User methods (getEmail, getStatus, etc.)
-    }
-
-    public function elseBranch(Model $item): void
-    {
-        // ── Else-branch exclusion ──
-        // When $item is NOT User in the else-branch, User is excluded:
-        /** @param User|AdminUser $item */
-        $x = $item instanceof User ? null : $item->grantPermission();
-        //                                   ↑ shows AdminUser methods only
-    }
-
-    public function negated(Model $item): void
-    {
-        // ── Negated condition ──
-        // `!$item instanceof User` excludes User in the then-branch:
-        /** @param User|AdminUser $item */
-        $x = !$item instanceof User ? $item->grantPermission() : null;
-        //                             ↑ shows AdminUser methods only
-    }
-
-    public function inAssignment(Model $item): void
-    {
-        // ── Inside assignment RHS ──
-        // Works when the ternary is the RHS of an assignment to a
-        // *different* variable:
-        $result = $item instanceof User ? $item->getEmail() : 'fallback';
-        //                                 ↑ shows User methods
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// §14  Property Chains on Non-$this Variables
-// ═══════════════════════════════════════════════════════════════════════
-// Previously only `$this->prop->` chains worked.  Now `$var->prop->`
-// also resolves the property type and offers completions.
-
-class Address {
-    public string $city;
-    public string $zip;
-    public string $country;
-
-    public function format(): string {
-        return "{$this->city}, {$this->zip}, {$this->country}";
-    }
-}
-
-class Customer {
-    public Address $address;
-    public string $email;
-
-    public function __construct(string $email, Address $address) {
-        $this->email = $email;
-        $this->address = $address;
-    }
-}
-
-class Order {
-    public Customer $customer;
-    public float $total;
-
-    public function __construct(Customer $customer, float $total) {
-        $this->customer = $customer;
-        $this->total = $total;
-    }
-}
-
-class PropertyChainDemo {
-    public Order $order;
-
-    public function __construct(Order $order) {
-        $this->order = $order;
-    }
-
-    // ── Simple: $var->prop-> ──
-    // Variable assigned via `new`, then chain through its property.
-    public function simpleChain(): void {
-        $customer = new Customer('test@example.com', new Address());
-        $customer->address->city;     // Resolved: Address::$city
-        $customer->address->format(); // Resolved: Address::format()
-    }
-
-    // ── Deep: $var->prop->subprop-> ──
-    // Two levels of property chain resolution.
-    public function deepChain(): void {
-        $order = new Order(new Customer('a@b.com', new Address()), 99.99);
-        $order->customer->address->zip;      // Resolved: Address::$zip
-        $order->customer->address->format();  // Resolved: Address::format()
-        $order->customer->email;              // Resolved: Customer::$email
-    }
-
-    // ── Parameter type hint ──
-    // Function parameter types drive property chain resolution.
-    public function fromParameter(Customer $cust): void {
-        $cust->address->country;  // Resolved: Address::$country
-        $cust->address->format(); // Resolved: Address::format()
-    }
-
-    // ── @var annotation ──
-    // Docblock annotations also drive property chain resolution.
-    public function fromDocblock(): void {
-        /** @var Order $o */
-        $o = loadOrder();
-        $o->customer->address->city; // Resolved: Address::$city
-    }
-
-    // ── Nullsafe operator ──
-    // `$var?->prop->` resolves the same as `$var->prop->`.
-    public function nullsafeChain(?Customer $cust): void {
-        $cust?->address->city; // Resolved: Address::$city
-    }
-
-    // ── Method return + property chain ──
-    // Method return type feeds into property chain.
-    public function methodThenProperty(): void {
-        $repo = new UserRepository();
-        $user = $repo->findByEmail('test@example.com');
-        // $user is User, so $user->... shows User members
-        // (deeper chains work when the property type is a class)
-    }
-
-    // ── Mixed with $this ──
-    // $this->prop chains still work alongside $var->prop chains.
-    public function mixedThisAndVar(): void {
-        $this->order->customer->email;        // Resolved: Customer::$email via $this
-        $local = new Order(new Customer('x@y.com', new Address()), 50.0);
-        $local->customer->address->format();  // Resolved: Address::format() via $local
-    }
-}
-
-// ── Top-level code ──
-// Property chains work in top-level code too (outside any class).
-$myOrder = new Order(new Customer('hello@world.com', new Address()), 42.0);
-$myOrder->customer->address->city;    // Resolved: Address::$city
-$myOrder->customer->address->format(); // Resolved: Address::format()
-
-// ═══════════════════════════════════════════════════════════════════════
-// §15  Constructor @param → Promoted Property Override
-// ═══════════════════════════════════════════════════════════════════════
-// Promoted constructor properties now check `@param` docblock annotations
-// for a more specific type than the native hint.  For example,
-// `@param list<User> $users` overrides native `array $users`.
-
-class Ingredient {
-    public string $name;
-    public float $quantity;
-
-    public function format(): string {
-        return "{$this->quantity}x {$this->name}";
-    }
-}
-
-class Recipe {
-    /**
-     * @param list<Ingredient> $ingredients
-     * @param Collection<int, string> $tags
-     */
-    public function __construct(
-        public array $ingredients,     // Overridden to list<Ingredient>
-        public object $tags,           // Overridden to Collection<int, string>
-        public string $title,          // No override — scalar stays scalar
-    ) {}
-
-    public function demo(): void {
-        // $this->ingredients has type `list<Ingredient>` from @param,
-        // not just `array` from the native hint.
-        // This means foreach + property chain works:
-        foreach ($this->ingredients as $ingredient) {
-            $ingredient->name;      // Resolved: Ingredient::$name
-            $ingredient->format();  // Resolved: Ingredient::format()
-        }
-    }
-}
-
-class Kitchen {
-    /**
-     * @param Recipe $recipe
-     */
-    public function __construct(
-        public object $recipe,  // Overridden to Recipe via @param
-    ) {}
-
-    public function cook(): void {
-        // $this->recipe is Recipe (not object) thanks to @param override.
-        $this->recipe->title;           // Resolved: Recipe::$title
-        $this->recipe->ingredients;     // Resolved: Recipe::$ingredients
-    }
-}
-
-// Property chains on non-$this variables also benefit:
-function prepareKitchen(): void {
-    $kitchen = new Kitchen(new Recipe([], new \stdClass(), 'Pasta'));
-    $kitchen->recipe->title;  // Resolved: Recipe::$title via @param override + $var chain
-}
-
-// ─── Trait Generic Substitution (@use) ──────────────────────────────────────
-//
-// When a trait declares @template parameters and a class uses the trait
-// with @use TraitName<ConcreteType>, the template parameters are substituted
-// with concrete types in the trait's methods and properties.
-// This mirrors the same mechanism used for @extends on parent classes.
-
-/**
- * @template TFactory
- */
-trait HasFactory {
-    /** @return TFactory */
-    public static function factory() {}
-}
-
-class UserFactory {
-    public function create(): User { return new User('', '', new UserProfile(''), Status::Active); }
-    public function count(int $n): static { return $this; }
-    public function make(): User { return new User('', '', new UserProfile(''), Status::Active); }
-}
-
-/**
- * A trait with two template parameters for key/value lookups.
- *
- * @template TKey
- * @template TValue
- */
-trait Indexable {
-    /** @return TValue */
-    public function get() {}
-    /** @return TKey */
-    public function key() {}
-}
-
-/**
- * @use HasFactory<UserFactory>
- */
-class Product {
-    use HasFactory;
-
-    public function getPrice(): float { return 0.0; }
-}
-
-/**
- * @use Indexable<int, User>
- */
-class UserIndex {
-    use Indexable;
-}
-
-// Try these completions:
-//
-// Product::factory()->         → shows UserFactory methods: create(), count(), make()
-// Product::factory()->create()->  → shows User methods (factory returns UserFactory, create returns User)
-//
-// $idx = new UserIndex();
-// $idx->get()->               → shows User methods (TValue resolved to User)
-//
-// @phpstan-use variant also works:
-// /** @phpstan-use HasFactory<UserFactory> */
-// class AnotherModel { use HasFactory; }
-// AnotherModel::factory()->   → shows UserFactory methods
-
-function traitGenericDemo(): void {
-    // Static method on a class using a generic trait
-    Product::factory()->create();   // Resolved: UserFactory::create() → User
-    Product::factory()->count(5);   // Resolved: UserFactory::count()
-    Product::factory()->make();     // Resolved: UserFactory::make() → User
-
-    // Two-param trait substitution
-    $idx = new UserIndex();
-    $idx->get()->getEmail();        // Resolved: TValue → User → User::getEmail()
-}
-
-// ─── Foreach Key Type Resolution ────────────────────────────────────
-//
-// When iterating over a generic type with two type parameters
-// (e.g. SplObjectStorage<K, V>, WeakMap<K, V>, array<K, V>),
-// the foreach key variable resolves to the first type parameter
-// and the value variable resolves to the second.
-//
-// This is most useful when the key type is a class (not a scalar
-// like int or string), for example with SplObjectStorage or WeakMap.
-
-class Request {
-    public string $method;
-    public string $path;
-    public function getUri(): string { return $this->path; }
-}
-
-class HttpResponse {
-    public int $statusCode;
-    public function getBody(): string { return ''; }
-}
-
-class ForeachKeyDemo {
-    /**
-     * @
-     */
-    public function objectKeys(\SplObjectStorage $storage): void {
-        throw new MyCoolExceptionThatsInTheFunction();
-    }
-
-    public function weakMapKeys(): void {
-        /** @var \WeakMap<User, UserProfile> $profiles */
-        $profiles = new \WeakMap();
-        foreach ($profiles as $user => $profile) {
-            $user->getEmail();          // Resolved: User::getEmail()
-            $profile->getDisplayName(); // Resolved: UserProfile::getDisplayName()
-        }
-    }
-
-    /**
-     * Scalar keys (int, string) don't produce completions — correct,
-     * since you can't call methods on scalars.
-     *
-     * @param array<int, User> $users
-     */
-    public function scalarKeys(array $users): void {
-        foreach ($users as $key => $user) {
-            // $key is int — no completions on $key->
-            $user->getEmail();  // Resolved: User::getEmail()
-        }
-    }
-}
-
-// ─── Foreach over Method Calls / Property Access / Static Calls ─────
-//
-// When the foreach expression is a method call, property access, or
-// static method call, the element type is inferred from the return
-// type / property type annotation.
-
-class ForeachExpressionDemo {
-    /** @var list<User> */
-    public array $users;
-
-    /** @return list<User> */
-    public function getUsers(): array { return []; }
-
-    /** @return array<Request, HttpResponse> */
-    public function getMapping(): array { return []; }
-
-    /** @return list<AdminUser> */
-    public static function getAllAdmins(): array { return []; }
-
-    public function methodCallOnThis(): void {
-        // $this->getUsers() returns list<User> → $user is User
-        foreach ($this->getUsers() as $user) {
-            $user->getEmail();       // Resolved: User::getEmail()
-            $user->getName();        // Resolved: User::getName()
-        }
-    }
-
-    public function propertyAccessOnThis(): void {
-        // $this->users is list<User> → $user is User
-        foreach ($this->users as $user) {
-            $user->getEmail();       // Resolved: User::getEmail()
-        }
-    }
-
-    public function staticMethodCall(): void {
-        // ForeachExpressionDemo::getAllAdmins() returns list<AdminUser>
-        foreach (ForeachExpressionDemo::getAllAdmins() as $admin) {
-            $admin->grantPermission('x'); // Resolved: AdminUser::grantPermission()
-        }
-    }
-
-    public function selfStaticCall(): void {
-        // self::getAllAdmins() returns list<AdminUser>
-        foreach (self::getAllAdmins() as $admin) {
-            $admin->grantPermission('x'); // Resolved: AdminUser::grantPermission()
-        }
-    }
-
-    public function methodCallOnVariable(): void {
-        $service = new ForeachExpressionDemo();
-        // $service->getUsers() returns list<User> → $user is User
-        foreach ($service->getUsers() as $user) {
-            $user->getEmail();       // Resolved: User::getEmail()
-        }
-    }
-
-    public function propertyAccessOnVariable(): void {
-        $service = new ForeachExpressionDemo();
-        // $service->users is list<User> → $user is User
-        foreach ($service->users as $user) {
-            $user->getEmail();       // Resolved: User::getEmail()
-        }
-    }
-
-    public function keyTypeFromMethodCall(): void {
-        // $this->getMapping() returns array<Request, HttpResponse>
-        // → $req is Request (key), $res is HttpResponse (value)
-        foreach ($this->getMapping() as $req => $res) {
-            $req->getUri();          // Resolved: Request::getUri()
-            $res->getBody();         // Resolved: HttpResponse::getBody()
-        }
-    }
-}
-
-// ─── Array Destructuring ────────────────────────────────────────────
-//
-// When the LHS of an assignment is `[$a, $b]` (short syntax) or
-// `list($a, $b)` (legacy syntax), the element type is inferred from
-// the RHS's generic iterable annotation.
-//
-// Supported RHS patterns:
-//   - Function calls with @return annotations
-//   - Method / static method calls
-//   - Variables with @var / @param annotations
-//   - Property access with generic type hints
-//   - Inline /** @var */ annotations before the destructuring
-
-class DestructuringDemo {
-    /** @var list<User> */
-    public array $users;
-
-    /** @return list<User> */
-    public function getUsers(): array { return []; }
-
-    /** @return array<int, Order> */
-    public static function loadOrders(): array { return []; }
-
-    public function fromMethodCall(): void {
-        // Both $a and $b resolve to User
-        [$a, $b] = $this->getUsers();
-        $a->getEmail();     // Resolved: User::getEmail()
-        $b->getEmail();     // Resolved: User::getEmail()
-    }
-
-    public function fromStaticCall(): void {
-        // list() syntax works the same way
-        list($first, $second) = self::loadOrders();
-        $first->customer->address;    // Resolved: Order (via Model)
-    }
-
-    public function fromProperty(): void {
-        // Destructuring from a typed property
-        [$one, $two] = $this->users;
-        $one->getEmail();   // Resolved: User::getEmail()
-    }
-
-    /**
-     * @param list<User> $users
-     */
-    public function fromParam(array $users): void {
-        // Destructuring from a @param-annotated parameter
-        [$first, $second] = $users;
-        $first->getEmail(); // Resolved: User::getEmail()
-    }
-
-    public function withInlineVar(): void {
-        // Inline @var annotation on the destructuring itself
-        /** @var list<User> */
-        [$x, $y] = unknownSource();
-        $x->getEmail();     // Resolved: User::getEmail()
-    }
-}
-
-// ─── Array Shapes ───────────────────────────────────────────────────────────
-//
-// PHPStan/Psalm array shape types describe the exact structure of an array,
-// including named keys and their value types.  PHPantomLSP supports:
-//
-//   1. Key completion: typing `$arr['` suggests known keys from the shape.
-//   2. Value type resolution: `$arr['key']->` offers members of the value type.
-//
-// Supported annotation sources:
-//   - @var array{key: Type, ...} $var
-//   - @param array{key: Type, ...} $param
-//   - @return array{key: Type, ...}  (followed through assignments)
-//   - Property types with array shapes
-
-class ArrayShapeDemo {
-
-    /**
-     * @return array{user: User, profile: UserProfile, active: bool}
-     */
-    public function getUserData(): array {
-        return [];
-    }
-
-    /**
-     * @param array{host: string, port: int, credentials: User} $config
-     */
-    public function connect(array $config): void {
-        // Key completion: typing $config[' suggests: host, port, credentials
-        $config['host'];        // Resolved: string
-        $config['port'];        // Resolved: int
-        $config['credentials']; // Resolved: User
-
-        // Value type chaining: $config['credentials']-> shows User members
-        $config['credentials']->getEmail();  // Resolved: User::getEmail()
-    }
-
-    public function fromReturnType(): void {
-        // Array shape flows through method return types
-        $data = $this->getUserData();
-
-        // Key completion on $data[' suggests: user, profile, active
-        $data['user']->getName();       // Resolved: User::getName()
-        $data['profile']->setBio('');   // Resolved: UserProfile::setBio()
-    }
-
-    public function fromInlineVar(): void {
-        /** @var array{address: Address, customer: Customer} $order */
-        $order = getUnknownValue();
-
-        // Key completion on $order[' suggests: address, customer
-        $order['address']->format();           // Resolved: Address::format()
-        $order['customer']->getFirstName();    // Resolved: Customer members
-    }
-
-    public function optionalKeys(): void {
-        /** @var array{name: string, age?: int, email?: string} $profile */
-        $profile = getUnknownValue();
-
-        // All keys shown — optional ones marked with ? in the detail
-        $profile['name'];   // Detail: "name: string"
-        $profile['age'];    // Detail: "age?: int"
-        $profile['email'];  // Detail: "email?: string"
-    }
-
-    public function nestedShapes(): void {
-        /** @var array{meta: array{page: int, total: int}, items: list<User>} $response */
-        $response = getUnknownValue();
-
-        // Key completion shows: meta, items
-        // Nested generic types are preserved in the detail
-        $response['meta'];   // Detail: "meta: array{page: int, total: int}"
-        $response['items'];  // Detail: "items: list<User>"
-
-        // Nested shape key completion:
-        // Typing $response['meta'][' suggests keys from the inner shape
-        $response['meta']['page'];   // Resolved: int
-        $response['meta']['total'];  // Resolved: int
-
-        // Chained array shape + list element access:
-        // $response['items'][0]-> offers User members (name, getEmail, …)
-        $response['items'][0]->getName();    // Resolved: User::getName()
-        $response['items'][0]->getEmail();   // Resolved: User::getEmail()
-    }
-
-    public function methodReturnShapeKeys(): void {
-        // Array shape keys flow through method return types.
-        // $data = $this->getUserData(); $data[' suggests: user, profile, active
-        $data = $this->getUserData();
-        $data['user'];       // Resolved: User
-        $data['profile'];    // Resolved: UserProfile
-        $data['active'];     // Resolved: bool
-    }
-}
-
-// ─── Array Shape Inference from Literal Arrays ─────────────────────────────
-//
-// PHPantomLSP can infer array shapes from literal array construction
-// and incremental key assignments — no @var annotation needed.
-
-// Literal array with string keys:
-$config = ['host' => 'localhost', 'port' => 3306, 'ssl' => true, 'author' => new User()];
-$config[''];  // Key completion suggests: host, port, ssl, author
-              // Details: host: string, port: int, ssl: bool, author: User
-
-// Incremental key assignments are merged into the shape:
-$result = ['status' => 'ok'];
-$result['code'] = 200;
-$result['user'] = new User();
-$result[''];  // Key completion suggests: status, code, user
-              // Details: status: string, code: int, user: User
-
-// ─── Push-Style List Type Inference ────────────────────────────────────────
-//
-// PHPantomLSP infers list<Type> from push-style array construction:
-//   $arr = [];
-//   $arr[] = new User();        // Infers list<User>
-//   $arr[] = new AdminUser();   // Infers list<User|AdminUser>
-//
-// Element access resolves through the inferred generic type:
-//   $arr[0]->  offers members from User and AdminUser
-
-$users = [];
-$users[] = new User();
-$users[] = new AdminUser();
-$users[0]->getName();           // Resolved: User::getName() and AdminUser members
-$users[0]->grantPermission(''); // Resolved: AdminUser::grantPermission()
-
-// ─── Literal Array Value Type → Member Access ──────────────────────────────
-//
-// When the value type of an array shape key is a class, member access
-// through `$var['key']->` resolves to that class and offers completions.
-// This works for both inline literal arrays and incremental assignments.
-
-$result['user']->getEmail();  // Resolved: User::getEmail()
-$result['user']->getName();   // Resolved: User::getName() (inherited from Model)
-
-$services = ['logger' => new User(), 'count' => 42];
-$services['logger']->getEmail();  // Resolved: User::getEmail()
-// $services['count']->  // No member completions — int is scalar
-
-// ─── Scope-Aware Annotation Resolution ─────────────────────────────────────
-//
-// Annotations inside class methods do NOT leak to file-scope code.
-// If a class has `@param array{host: string, credentials: User} $config`
-// and file-scope code also uses `$config`, completions at file scope
-// come from the literal assignment, NOT the method parameter.
-//
-// Example: the ArrayShapeDemo::connect() method above has
-//   @param array{host: string, port: int, credentials: User} $config
-// but the file-scope $config below gets its own keys from the literal:
-$outerConfig = ['host' => 'localhost', 'port' => 3306, 'ssl' => true];
-$outerConfig[''];  // Suggests: host, port, ssl (NOT credentials from the class)
-
-// Works with empty initial array too:
-$data = [];
-$data['name'] = 'Alice';
-$data['age'] = 30;
-$data[''];  // Key completion suggests: name, age
-
-// Old-style array() syntax is also supported:
-$opts = array('driver' => 'mysql', 'charset' => 'utf8');
-$opts[''];  // Key completion suggests: driver, charset
-
-// Note: @var annotations take priority over literal inference.
-// If both exist, only the annotation keys are offered.
-
-/**
- * Top-level array shape usage.
- *
- * @return array{logger: User, debug: bool}
- */
-function getAppConfig(): array { return []; }
-
-// Array shapes work in top-level code too
-$cfg = getAppConfig();
-$cfg['logger']->getEmail(); // Resolved: User::getEmail()
-
-// Direct @var annotation
-/** @var array{first: User, second: AdminUser} $pair */
-$pair = getUnknownValue();
-$pair['first']->getName();          // Resolved: User::getName()
-$pair['second']->grantPermission('admin'); // Resolved: AdminUser::grantPermission()
-
-// ─── $_SERVER Superglobal Key Completion ────────────────────────────────────
-//
-// PHPantomLSP provides key completion for the $_SERVER superglobal.
-// Typing $_SERVER[' or $_SERVER[ suggests all well-known server keys
-// such as REQUEST_METHOD, HTTP_HOST, REMOTE_ADDR, etc.
-//
-// Each key includes a detail string showing the type and description.
-// Partial filtering works too: $_SERVER['REQ narrows to REQUEST_METHOD,
-// REQUEST_TIME, REQUEST_TIME_FLOAT, REQUEST_URI.
-
-$_SERVER['REQUEST_METHOD'];  // Detail: "string — Request method (GET, POST, …)"
-$_SERVER['HTTP_HOST'];       // Detail: "string — Host header"
-$_SERVER['REMOTE_ADDR'];     // Detail: "string — Client IP address"
-$_SERVER['REQUEST_URI'];     // Detail: "string — URI used to access the page"
-$_SERVER['SERVER_PORT'];     // Detail: "string — Server port"
-
-// ─── Auto-Close Handling ────────────────────────────────────────────────────
-//
-// When the IDE auto-inserts closing brackets/quotes, PHPantomLSP uses
-// text_edit ranges that cover the trailing characters, preventing
-// duplicates like $config['host']] or $config['host']'].
-//
-// Examples of what works correctly:
-//   $config[]    — cursor between [ and ], ] is auto-inserted
-//                  → selecting 'host' produces $config['host']
-//   $config['']  — cursor between quotes, '] is auto-inserted
-//                  → selecting 'host' produces $config['host']
-
-// ─── Object Shape Completion ────────────────────────────────────────────────
-//
-// PHPStan object shapes describe anonymous objects with typed properties:
-//
-//   object{foo: int, bar: string}
-//   object{foo: int, bar?: string}        — bar is optional
-//   object{'foo': int, "bar": string}     — quoted property names
-//   object{foo: int}&\stdClass            — intersected with stdClass
-//
-// PHPantomLSP resolves object shapes from @return, @param, and @var
-// annotations and offers property completions via `->`.
-
-class ObjectShapeDemo {
-    /**
-     * @return object{name: string, age: int, active: bool}
-     */
-    public function getProfile(): object {
-        return (object) [];
-    }
-
-    /**
-     * @return object{user: User, meta: object{page: int, total: int}}
-     */
-    public function getResult(): object {
-        return (object) [];
-    }
-
-    /**
-     * @param object{host: string, port: int, ssl: bool} $config
-     */
-    public function connect(object $config): void {
-        $config->host;    // Resolved: string
-        $config->port;    // Resolved: int
-        $config->ssl;     // Resolved: bool
-    }
-
-    public function demo(): void {
-        // Basic object shape — property completions
-        $profile = $this->getProfile();
-        $profile->name;    // Resolved: string
-        $profile->age;     // Resolved: int
-        $profile->active;  // Resolved: bool
-
-        // Chained access — object shape value type resolves to a class
-        $result = $this->getResult();
-        $result->user->getEmail();   // Resolved: User::getEmail()
-        $result->user->getName();    // Resolved: User::getName()
-
-        // Nested object shapes — chain through inner object shape
-        $result->meta->page;    // Resolved: int
-        $result->meta->total;   // Resolved: int
-    }
-}
-
-// Object shapes work with @var annotations too
-/** @var object{title: string, score: float} $item */
-$item = getUnknownValue();
-$item->title;   // Resolved: string
-$item->score;   // Resolved: float
-
-// Nullable object shapes work in union types
-/** @var object{status: string, code: int}|null $response */
-$response = getUnknownValue();
-$response->status;  // Resolved: string
-$response->code;    // Resolved: int
-
-// ─── Smart @throws Completion ───────────────────────────────────────────────
-//
-// When typing `@` inside a docblock for a function/method, PHPantomLSP
-// analyses the function body for `throw new ExceptionType(…)` statements
-// that are NOT caught by an enclosing try/catch block.  It then suggests:
-//
-//   @throws ExceptionType
-//
-// for each uncaught exception, filtering out types already documented.
-// If the exception class isn't imported, an auto-import `use` statement
-// is added as an additional edit.
-
-class NotFoundException extends \RuntimeException {}
-class ValidationException extends \RuntimeException {}
-class AuthorizationException extends \RuntimeException {}
-
-class ThrowsCompletionDemo
-{
-    /**
-     * Smart @throws: both exceptions are uncaught, so both are suggested.
-     * But only if they are not already hinted.
-     *
-     * @param int $id
-     * @return array
-     * @throws NotFoundException
-     * @throws ValidationException
-     */
-    public function findOrFail(int $id): array
-    {
-        if ($id < 0) {
-            throw new ValidationException('ID must be positive');
-        }
-        $result = $this->lookup($id);
-        if ($result === null) {
-            throw new NotFoundException('Record not found');
-        }
-        return $result;
-    }
-
-    /**
-     * Caught exceptions are excluded: RuntimeException is caught,
-     * so only AuthorizationException is suggested.
-     *
-     * @throws AuthorizationException
-     */
-    public function safeOperation(): void
-    {
-        $this->checkPermissions(); // may throw AuthorizationException
-
-        try {
-            throw new \RuntimeException('transient error');
-        } catch (\RuntimeException $e) {
-            // handled — not suggested in @throws
-        }
-
-        if (!$this->isAuthorized()) {
-            throw new AuthorizationException('Forbidden');
-        }
-    }
-
-    /**
-     * Multi-catch: both InvalidArgumentException and RuntimeException
-     * are caught, so only LogicException is suggested.
-     *
-     * @throws \LogicException
-     */
-    public function multiCatchDemo(): void
-    {
-        try {
-            throw new \InvalidArgumentException('bad');
-            throw new \RuntimeException('runtime');
-        } catch (\InvalidArgumentException | \RuntimeException $e) {
-            // both caught
-        }
-
-        throw new \LogicException('uncaught');
-    }
-
-    // ── Propagated @throws from called methods ──────────────────────
-
-    /**
-     * Calling $this->safeOperation() propagates its @throws tag.
-     * Typing `@` here suggests:
-     *
-     * @throws AuthorizationException
-     */
-    public function delegatedWork(): void
-    {
-        $this->safeOperation();
-    }
-
-    /**
-     * Multiple called methods propagate their @throws independently.
-     *
-     * @throws AuthorizationException (propagated from lookup via findOrFail's body)
-     * @throws NotFoundException      (propagated from safeOperation)
-     */
-    public function fullProcess(int $id): void
-    {
-        $this->safeOperation();
-        $result = $this->lookup($id);
-        if ($result === null) {
-            throw new NotFoundException('not found');
-        }
-    }
-
-    // ── throw $this->method() — return type detection ───────────────
-
-    /**
-     * `throw $this->makeException()` detects the return type of the
-     * called method and suggests it as @throws.
-     *
-     * @throws ValidationException
-     */
-    public function throwExpression(): void
-    {
-        throw $this->makeException();
-    }
-
-    /**
-     * @return ValidationException
-     */
-    private function makeException(): ValidationException
-    {
-        return new ValidationException('factory-produced error');
-    }
-
-    /**
-     * `throw self::createError()` also works with static calls.
-     * Typing `@` here suggests:
-     *   @throws AuthorizationException   (return type of createError)
-     *
-     * @throws AuthorizationException
-     */
-    public function throwStaticExpression(): void
-    {
-        throw self::createError();
-    }
-
-    private static function createError(): AuthorizationException
-    {
-        return new AuthorizationException('static factory');
-    }
-
-    private function lookup(int $id): ?array { return null; }
-    private function checkPermissions(): void {}
-    private function isAuthorized(): bool { return true; }
-
-    // ── @return void smart completion ────────────────────────────────
-
-    /**
-     * Typing `@` here suggests `@return void` because the function
-     * is declared `: void` and has no return statements.
-     *
-     * @return void
-     */
-    public function fireAndForget(): void
-    {
-        $this->checkPermissions();
-    }
-
-    /**
-     * Typing `@` here does NOT suggest `@return void` because the
-     * body contains `return $value;` — the void hint is likely wrong.
-     * (In real code the type hint would not be void, but the LSP
-     * detects this mismatch and withholds the `@return void` suggestion.)
-     */
-    public function fetchData(): ?array
-    {
-        return $this->lookup(1);
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// §  Catch Variable Type Resolution
-// ═══════════════════════════════════════════════════════════════════
-// The catch clause's type hint(s) are used to resolve the variable's
-// type, so `$e->` offers completions from the caught exception class.
-
-class CatchVariableDemo
-{
-    /**
-     * Single catch type: `$e` resolves to `ValidationException`.
-     * Typing `$e->` suggests getMessage(), getField(), etc.
-     */
-    public function singleCatch(): void
-    {
-        try {
-            $this->riskyOperation();
-        } catch (ValidationException $e) {
-            // $e-> completes with ValidationException members
-            $e->getMessage(); // → string (inherited from RuntimeException)
-        }
-    }
-
-    /**
-     * Multi-catch (union): `$e` resolves to both NotFoundException
-     * and AuthorizationException.  Typing `$e->` suggests members
-     * from both classes.
-     */
-    public function multiCatch(): void
-    {
-        try {
-            $this->riskyOperation();
-        } catch (NotFoundException | AuthorizationException $e) {
-            // $e-> completes with members from both exception types
-            $e->getMessage(); // → string (common to both)
-        }
-    }
-
-    private function riskyOperation(): void {}
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// §  @throws Completion — Propagated Throws with Catch Filtering
-// ═══════════════════════════════════════════════════════════════════
-// When a called method declares `@throws`, those exceptions propagate
-// to the caller.  If the call is inside a try/catch, only exceptions
-// NOT handled by the catch clause appear as `@throws` suggestions.
-//
-// Catch filtering uses these rules:
-//   - Exact match: catch(RuntimeException) catches RuntimeException
-//   - Broader catch: catch(Exception) catches RuntimeException
-//   - catch(Throwable) catches everything
-//   - Narrower catch does NOT catch parent: catch(RuntimeException)
-//     does NOT catch Exception
-
-class PropagatedThrowsDemo
-{
-    /**
-     * Typing `@` here suggests `@throws \Exception` because
-     * the catch only handles RuntimeException (a subclass of
-     * Exception), so the broader Exception escapes uncaught.
-     *
-     * @throws \Exception
-     */
-    public function narrowCatchLetsParentEscape(): void
-    {
-        try {
-            $this->throwsException();
-        } catch (\RuntimeException $e) {
-            // Only catches RuntimeException, not Exception
-        }
-    }
-
-    /**
-     * No `@throws` suggested here — catch(Exception) is broad
-     * enough to handle the propagated RuntimeException.
-     */
-    public function broadCatchHandlesChild(): void
-    {
-        try {
-            $this->throwsRuntimeException();
-        } catch (\Exception $e) {
-            // Exception catches RuntimeException (child class)
-        }
-    }
-
-    /**
-     * Mixed: riskyA() throws RuntimeException (caught),
-     * riskyB() throws \Exception (uncaught).
-     * Only `@throws \Exception` is suggested.
-     *
-     * @throws \Exception
-     */
-    public function partialCatch(): void
-    {
-        try {
-            $this->throwsRuntimeException();
-            $this->throwsException();
-        } catch (\RuntimeException $e) {
-            // Catches RuntimeException but not Exception
-        }
-    }
-
-    /**
-     * Call outside try/catch — propagated throws always appear.
-     *
-     * @throws \Exception
-     */
-    public function outsideTryBlock(): void
-    {
-        $this->throwsException();
-    }
-
-    /** @throws \Exception */
-    private function throwsException(): void
-    {
-        throw new \Exception('error');
-    }
-
-    /** @throws \RuntimeException */
-    private function throwsRuntimeException(): void
-    {
-        throw new \RuntimeException('runtime error');
-    }
-}
-
-// Intersection with \stdClass (makes properties writable)
-/** @var object{name: string, value: int}&\stdClass $obj */
-$obj = getUnknownValue();
-$obj->name;   // Resolved: string
-$obj->value;  // Resolved: int
-
-// ─── Clone Expression Type Preservation ─────────────────────────────────────
-// `clone $expr` preserves the type of the original expression, so the cloned
-// variable gets full completion support.
-
-class Immutable
-{
-    private int $value;
-
-    public function __construct(int $value)
-    {
-        $this->value = $value;
-    }
-
-    public function getValue(): int
-    {
-        return $this->value;
-    }
-
-    public function withValue(int $v): self
-    {
-        // clone $this → resolved as Immutable
-        $clone = clone $this;
-        $clone->getValue(); // Resolved: int
-        return $clone;
-    }
-}
-
-class CloneDemo
-{
-    public function fromNewInstance(): void
-    {
-        $original = new User('clone', 'clone@example.com');
-        // clone $original → resolved as User
-        $copy = clone $original;
-        $copy->getEmail();  // Resolved: string
-        $copy->getName();   // Resolved: string (inherited from Model)
-    }
-
-    public function fromParameter(User $user): void
-    {
-        // clone $user → resolved as User (from parameter type hint)
-        $snapshot = clone $user;
-        $snapshot->getStatus(); // Resolved: Status
-    }
-
-    public function fromMethodReturn(): void
-    {
-        $config = new Response(200, 'OK');
-        // clone of method return → resolved as Response
-        $copy = clone $config;
-        $copy->getStatusCode(); // Resolved: int
-        $copy->getBody();       // Resolved: string
-    }
-
-    public function inTernary(User $user, bool $flag): void
-    {
-        // clone inside ternary → union resolved correctly
-        $result = $flag ? clone $user : new AdminUser('admin', 'a@b.com', 1);
-        $result->getEmail(); // Resolved: string (both User and AdminUser have it)
-    }
-}
-
-// ─── Standalone Constant Go-to-Definition ───────────────────────────────────
-//
-// Go-to-definition now works for standalone constants defined via `define()`.
-// Clicking on a constant name jumps to the `define('NAME', ...)` call site,
-// whether it's in the same file or a different file.
-
-define('APP_VERSION', '1.0.0');
-define('MAX_RETRIES', 3);
-define('DEFAULT_TIMEOUT', 30);
-
-// Ctrl+Click / Go-to-definition on any of these constant names jumps to
-// the corresponding define() call above:
-echo APP_VERSION;       // → jumps to define('APP_VERSION', ...)
-$retries = MAX_RETRIES; // → jumps to define('MAX_RETRIES', ...)
-
-function getTimeout(): int
-{
-    // Works inside function bodies too
-    return DEFAULT_TIMEOUT; // → jumps to define('DEFAULT_TIMEOUT', ...)
-}
-
-// Constants used in expressions, comparisons, and array indices:
-if (MAX_RETRIES > 0) {  // → jumps to define('MAX_RETRIES', ...)
-    echo APP_VERSION;   // → jumps to define('APP_VERSION', ...)
-}
-
-// ─── Callable Snippet Insertion ─────────────────────────────────────────────
-//
-// When completing methods, functions, or `new ClassName`, the LSP inserts
-// a snippet with parentheses and tab-stops for each **required** parameter.
-// Optional and variadic parameters are omitted — use signature help to
-// fill those in.
-//
-// Method examples:
-//   $user->setName(|)         — setName(string $name) → snippet: setName(${1:\$name})
-//   $user->toArray()          — toArray() has no params → snippet: toArray()
-//   $user->addRoles(|)        — addRoles(string ...$roles) variadic → snippet: addRoles()
-//
-// Function examples:
-//   createUser(|)             — createUser(string $name, …) → snippet: createUser(${1:\$name})
-//   Built-in stubs like json_decode get empty parens: json_decode()
-//
-// `new ClassName` examples (same-namespace classes get full constructor params):
-//   new User(|,|)             — __construct(string $name, string $email) → User(${1:\$name}, ${2:\$email})
-//   new Response(|)           — __construct(int $statusCode, …) → Response(${1:\$statusCode})
-//   Classes from classmap/stubs just get empty parens: new DateTime()
-
-class CallableSnippetDemo
-{
-    public function methodSnippets(User $user, Response $response): void
-    {
-        // Try completing after `->` — each inserts a snippet with required params:
-        $user->setName($name);   // Inserted: setName(${1:$name})        — 1 required param
-        $user->toArray();        // Inserted: toArray()                  — no params
-        $user->addRoles();       // Inserted: addRoles()                 — variadic only
-        $response->getBody();    // Inserted: getBody()                  — no params
-    }
-
-    public function staticSnippets(): void
-    {
-        // Static method calls also get snippets:
-        User::findByEmail($email);    // Inserted: findByEmail(${1:$email})   — 1 required param
-        Model::find($id);             // Inserted: find(${1:$id})             — 1 required param
-    }
-
-    public function newSnippets(): void
-    {
-        // `new` inserts class name + constructor params as snippet:
-        $u = new User($name, $email);         // Inserted: User(${1:$name}, ${2:$email}) — 2 required
-        $r = new Response($statusCode);       // Inserted: Response(${1:$statusCode})    — 1 required
-        $a = new AdminUser($name, $email);    // Inserted: AdminUser(${1:$name}, ${2:$email}, ${3:$role})
-        // After `new`, only class names are suggested — no constants
-        // or functions.  Loaded interfaces, traits, enums, and abstract
-        // classes are excluded.  Unloaded names like AbstractHandler or
-        // LoggerInterface are demoted in the sort order.
-    }
-
-    public function parentConstructorSnippet(): void
-    {
-        // parent::__construct also gets snippets when inside a subclass.
-        // See AdminUser::__construct for an example:
-        //   parent::__construct(${1:$name}, ${2:$email})
-    }
 }
