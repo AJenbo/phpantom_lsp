@@ -1431,3 +1431,148 @@ async fn test_goto_definition_method_on_static_call_with_nested_call_arg() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Regression: member access must not fall through to standalone function ──
+
+/// When the cursor is on `map` in `collect($x)->map(`, go-to-definition
+/// must NOT resolve `map` as a standalone function.  If the owning class
+/// can be determined, it should jump to `Collection::map()`.  If it
+/// cannot (e.g. `collect` isn't indexed), the result should be `None` —
+/// never a fallback to a global `map()` function.
+///
+/// This is the general pattern: any word on the right side of `->`,
+/// `?->`, or `::` is a *member name*, not a standalone symbol.
+#[tokio::test]
+async fn test_goto_definition_member_does_not_fallthrough_to_function() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///fallthrough.php").unwrap();
+    // `map` exists both as a method on Collection AND as a standalone
+    // function.  Go-to-definition on the `->map` call must resolve to
+    // the method, not the function.
+    let text = concat!(
+        "<?php\n",
+        "class Collection {\n",
+        "    public function map(callable $cb): static {}\n",
+        "    public function values(): static {}\n",
+        "}\n",
+        "\n",
+        "/** @return Collection */\n",
+        "function collect($v): Collection { return new Collection(); }\n",
+        "\n",
+        "/** Standalone map function — must NOT be the target. */\n",
+        "function map(array $arr, callable $cb): array { return []; }\n",
+        "\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $result = collect([])->map(fn ($x) => $x);\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on `map` in `collect([])->map(` on line 14
+    // Line 14: "        $result = collect([])->map(fn ($x) => $x);\n"
+    //                                         ^ cursor on 'm' of 'map'
+    let line_text = "        $result = collect([])->map(fn ($x) => $x);";
+    let map_col = line_text.find("->map(").unwrap() + 2; // position of 'm'
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 14,
+                character: map_col as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    match result {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            // Must point to Collection::map on line 2, NOT the standalone
+            // `function map(...)` on line 10.
+            assert_eq!(
+                location.range.start.line, 2,
+                "Expected Collection::map on line 2, got line {}",
+                location.range.start.line,
+            );
+        }
+        None => {
+            // Acceptable: subject resolution couldn't find Collection.
+            // The important thing is that we did NOT jump to the
+            // standalone `map()` function on line 10.
+        }
+        other => panic!(
+            "Expected Scalar location pointing to Collection::map or None, got: {:?}",
+            other
+        ),
+    }
+}
+
+/// When the owning class truly can't be resolved (unknown function in the
+/// chain), go-to-definition on the member should return None — not jump
+/// to a standalone function with the same name.
+#[tokio::test]
+async fn test_goto_definition_unresolvable_member_returns_none() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///unresolvable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/** Standalone values function — must NOT be the target. */\n",
+        "function values(): array { return []; }\n",
+        "\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        unknown_function()->values();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on `values` in `unknown_function()->values()` on line 6
+    let line_text = "        unknown_function()->values();";
+    let val_col = line_text.find("->values(").unwrap() + 2; // position of 'v'
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 6,
+                character: val_col as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    // Must be None — we must NOT fall through to the standalone `values()`.
+    assert!(
+        result.is_none(),
+        "Expected None when owning class is unresolvable, but got: {:?}. \
+         This means the member name fell through to standalone function lookup.",
+        result,
+    );
+}

@@ -62,11 +62,27 @@ impl Backend {
             return None;
         }
 
-        // ── NEW: Try member access resolution (::, ->, ?->) ──
+        // ── Member access resolution (::, ->, ?->) ──
         // If the cursor is on a member name (right side of an operator),
         // resolve the owning class and jump to the member declaration.
+        //
+        // When a member-access operator IS detected but resolution fails
+        // (e.g. the owning class couldn't be determined because a helper
+        // function like `collect()` isn't indexed), we must return early
+        // so that the member name (e.g. `map`) is NOT misinterpreted as
+        // a standalone function / class / constant.  Without this guard,
+        // `collect($x)->map(` would fall through and resolve `map` to a
+        // global `map()` helper function — or even crash while trying.
+        let is_member_access = Self::is_member_access_context(content, position);
         if let Some(location) = self.resolve_member_definition(uri, content, position, &word) {
             return Some(location);
+        }
+        if is_member_access {
+            // The cursor is on the RHS of `->`, `?->`, or `::` but we
+            // couldn't resolve the owning class.  Don't fall through to
+            // standalone symbol resolution — there is no standalone
+            // symbol named `map`, `getName`, etc.
+            return None;
         }
 
         // ── Handle `self`, `static`, `parent` keywords ──

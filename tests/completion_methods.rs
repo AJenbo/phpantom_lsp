@@ -4,6 +4,143 @@ use common::create_test_backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
+/// Regression test: completion on `collect($var)->` resolves Collection members.
+///
+/// The `collect()` helper returns `Collection` and the cursor is right
+/// after `->` — the subject is `collect($paymentOptions)` which is a
+/// standalone function call whose return type is a class.
+#[tokio::test]
+async fn test_completion_on_function_call_arrow() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///collect_map.php").unwrap();
+    let text = r#"<?php
+
+class Collection {
+    /** @return static */
+    public function map(callable $callback): static {}
+
+    /** @return static */
+    public function values(): static {}
+
+    /** @return mixed */
+    public function first(): mixed {}
+}
+
+/**
+ * @return Collection
+ */
+function collect($value = []): Collection
+{
+    return new Collection($value);
+}
+
+class PaymentOptionLocale {
+    public bool $tokens_enabled;
+}
+
+class PaymentService {
+    public function getOptions(array $paymentOptions): void {
+        $formattedOptions = collect($paymentOptions)->map(function (PaymentOptionLocale $optionLocale) {
+            return [
+                'tokens_enabled' => $optionLocale->tokens_enabled,
+            ];
+        })->values();
+        $formattedOptions->
+    }
+}
+"#;
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // ── Test 1: completion after `$formattedOptions->` ──
+    let target_line = text
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim() == "$formattedOptions->")
+        .map(|(i, _)| i)
+        .expect("should find $formattedOptions-> line");
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: target_line as u32,
+                character: 28,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("map")),
+        "Expected 'map' in completions for Collection, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("values")),
+        "Expected 'values' in completions for Collection, got: {:?}",
+        labels
+    );
+
+    // ── Test 2: completion after `collect($paymentOptions)->` ──
+    // The cursor is right after `->` before `map` on the chained call line.
+    let chain_line = text
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("collect($paymentOptions)->map("))
+        .map(|(i, _)| i)
+        .expect("should find collect()->map( line");
+
+    let chain_line_text = text.lines().nth(chain_line).unwrap();
+    let arrow_col = chain_line_text.find("->map(").unwrap() as u32 + 2; // after `->`
+
+    let completion_params2 = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: chain_line as u32,
+                character: arrow_col + 3, // after `->map`
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    // Must not crash and should offer Collection members
+    let result2 = backend.completion(completion_params2).await.unwrap();
+    let items2 = match result2 {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+    let labels2: Vec<&str> = items2.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels2.iter().any(|l| l.starts_with("map")),
+        "Expected 'map' in completions on chained collect()->, got: {:?}",
+        labels2
+    );
+}
+
 // ─── Method Insert Text with Parameters ─────────────────────────────────────
 
 #[tokio::test]

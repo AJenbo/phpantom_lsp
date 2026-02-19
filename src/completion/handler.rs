@@ -10,6 +10,7 @@
 /// are also housed here because they are exclusively used by the
 /// completion handler.
 use std::collections::HashMap;
+use std::panic;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -363,22 +364,35 @@ impl Backend {
                 let suppress =
                     target.subject == "static" && current_class.is_some_and(|cc| cc.is_final);
 
-                let candidates = if suppress {
-                    vec![]
-                } else {
-                    Self::resolve_target_classes(
-                        &target.subject,
-                        target.access_kind,
-                        current_class,
-                        &classes,
-                        &content,
-                        cursor_offset.unwrap_or(0),
-                        &class_loader,
-                        Some(&function_loader),
-                    )
-                };
+                // Wrap resolution + inheritance merging in catch_unwind so
+                // that a stack overflow (e.g. from deep trait/inheritance
+                // resolution when the subject is a call expression like
+                // `collect($x)->`) doesn't crash the LSP server process.
+                // The variable-resolution path already has its own
+                // catch_unwind, but the direct call-expression path
+                // (resolve_call_return_types → type_hint_to_classes →
+                // class_loader → find_or_load_class → parse_php →
+                // resolve_class_with_inheritance) does not.
+                let member_items_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                    let candidates = if suppress {
+                        vec![]
+                    } else {
+                        Self::resolve_target_classes(
+                            &target.subject,
+                            target.access_kind,
+                            current_class,
+                            &classes,
+                            &content,
+                            cursor_offset.unwrap_or(0),
+                            &class_loader,
+                            Some(&function_loader),
+                        )
+                    };
 
-                if !candidates.is_empty() {
+                    if candidates.is_empty() {
+                        return vec![];
+                    }
+
                     // `parent::`, `self::`, and `static::` are syntactically
                     // `::` but semantically different from external static
                     // access: they show both static and instance members
@@ -449,9 +463,20 @@ impl Backend {
                             }
                         }
                     }
-                    if !all_items.is_empty() {
+                    all_items
+                }));
+
+                match member_items_result {
+                    Ok(all_items) if !all_items.is_empty() => {
                         return Ok(Some(CompletionResponse::Array(all_items)));
                     }
+                    Err(_) => {
+                        log::error!(
+                            "PHPantomLSP: panic during member-access completion for '{}'",
+                            target.subject
+                        );
+                    }
+                    _ => {}
                 }
             }
 

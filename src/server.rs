@@ -238,10 +238,30 @@ impl LanguageServer for Backend {
             None
         };
 
-        if let Some(content) = content
-            && let Some(location) = self.resolve_definition(&uri, &content, position)
-        {
-            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+        if let Some(content) = content {
+            // Wrap in catch_unwind so that a stack overflow (e.g. from
+            // deep trait/inheritance resolution when the subject is a
+            // call expression like `collect($x)->map(`) doesn't crash
+            // the LSP server process.
+            let uri_owned = uri.clone();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.resolve_definition(&uri_owned, &content, position)
+            }));
+
+            match result {
+                Ok(Some(location)) => {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    log::error!(
+                        "PHPantomLSP: panic during goto_definition at {}:{}:{}",
+                        uri,
+                        position.line,
+                        position.character
+                    );
+                }
+            }
         }
 
         Ok(None)

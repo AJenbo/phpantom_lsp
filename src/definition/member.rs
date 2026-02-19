@@ -177,6 +177,19 @@ impl Backend {
 
     // ─── Member Access Context Extraction ───────────────────────────────────
 
+    /// Check whether the cursor is on the right-hand side of a member
+    /// access operator (`->`, `?->`, or `::`).
+    ///
+    /// Returns `true` when the word under the cursor is preceded by one
+    /// of these operators — meaning the word is a member name, NOT a
+    /// standalone function / class / constant.  This is used by
+    /// [`resolve_definition`](super::resolve) to prevent falling through
+    /// to standalone symbol resolution when member resolution fails
+    /// (e.g. because the owning class couldn't be determined).
+    pub(super) fn is_member_access_context(content: &str, position: Position) -> bool {
+        Self::extract_member_access_context(content, position).is_some()
+    }
+
     /// Detect the access operator (`::`, `->`, `?->`) immediately before the
     /// word under the cursor and extract the subject to its left.
     ///
