@@ -1274,6 +1274,93 @@ fn generic_value_type_empty_angle_brackets_returns_none() {
     assert_eq!(extract_generic_value_type("list<>"), None);
 }
 
+// ─── extract_generic_value_type — Generator ─────────────────────────
+
+#[test]
+fn generic_value_type_generator_two_params() {
+    // Generator<TKey, TValue> — value is the 2nd param.
+    assert_eq!(
+        extract_generic_value_type("Generator<int, User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_single_param() {
+    // Generator<TValue> — single param treated as value type.
+    assert_eq!(
+        extract_generic_value_type("Generator<User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_four_params() {
+    // Generator<TKey, TValue, TSend, TReturn> — value is always 2nd.
+    assert_eq!(
+        extract_generic_value_type("Generator<int, User, mixed, void>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_three_params() {
+    // Generator<TKey, TValue, TSend> — value is 2nd.
+    assert_eq!(
+        extract_generic_value_type("Generator<int, User, mixed>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_fqn_prefix() {
+    // Leading `\` should be stripped before checking the base type name.
+    assert_eq!(
+        extract_generic_value_type("\\Generator<int, User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_nullable() {
+    assert_eq!(
+        extract_generic_value_type("?Generator<int, User>"),
+        Some("User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_nested_generic_value() {
+    // Generator<int, Collection<string, Order>> — value is Collection<string, Order>.
+    assert_eq!(
+        extract_generic_value_type("Generator<int, Collection<string, Order>>"),
+        Some("Collection<string, Order>".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_fqn_value() {
+    assert_eq!(
+        extract_generic_value_type("Generator<int, \\App\\Models\\User>"),
+        Some("App\\Models\\User".to_string())
+    );
+}
+
+#[test]
+fn generic_value_type_generator_scalar_value_returns_none() {
+    // When the value type is scalar, return None.
+    assert_eq!(extract_generic_value_type("Generator<int, string>"), None);
+}
+
+#[test]
+fn generic_value_type_generator_four_params_class_return() {
+    // Even though TReturn (4th param) is a class, we extract TValue (2nd).
+    assert_eq!(
+        extract_generic_value_type("Generator<int, User, mixed, Response>"),
+        Some("User".to_string())
+    );
+}
+
 // ─── extract_generic_key_type ───────────────────────────────────────
 
 #[test]
@@ -1372,4 +1459,44 @@ fn generic_key_type_plain_class_returns_none() {
 #[test]
 fn generic_key_type_empty_angle_brackets_returns_none() {
     assert_eq!(extract_generic_key_type("list<>"), None);
+}
+
+// ─── extract_generic_key_type — Generator ───────────────────────────
+
+#[test]
+fn generic_key_type_generator_two_params() {
+    // Generator<TKey, TValue> — key is the 1st param (scalar int → None).
+    assert_eq!(extract_generic_key_type("Generator<int, User>"), None);
+}
+
+#[test]
+fn generic_key_type_generator_class_key() {
+    // Generator<Request, Response> — key is Request (non-scalar).
+    assert_eq!(
+        extract_generic_key_type("Generator<Request, Response>"),
+        Some("Request".to_string())
+    );
+}
+
+#[test]
+fn generic_key_type_generator_four_params_scalar_key() {
+    // Generator<int, User, mixed, void> — key is int (scalar → None).
+    assert_eq!(
+        extract_generic_key_type("Generator<int, User, mixed, void>"),
+        None
+    );
+}
+
+#[test]
+fn generic_key_type_generator_single_param_returns_none() {
+    // Single-parameter Generator has no explicit key type.
+    assert_eq!(extract_generic_key_type("Generator<User>"), None);
+}
+
+#[test]
+fn generic_key_type_generator_fqn_prefix() {
+    assert_eq!(
+        extract_generic_key_type("\\Generator<Request, User>"),
+        Some("Request".to_string())
+    );
 }

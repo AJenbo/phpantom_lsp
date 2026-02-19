@@ -401,6 +401,12 @@ pub(crate) fn is_scalar(type_name: &str) -> bool {
 ///   - `Collection<int, User>`   → `Some("User")` (any generic class)
 ///   - `?list<User>`             → `Some("User")` (nullable)
 ///   - `\Foo\Bar[]`              → `Some("Bar")`
+///   - `Generator<int, User>`    → `Some("User")` (TValue = 2nd param)
+///   - `Generator<int, User, mixed, void>` → `Some("User")` (TValue = 2nd param)
+///
+/// For PHP's `Generator<TKey, TValue, TSend, TReturn>`, the **value** (yield)
+/// type is always the second generic parameter regardless of how many params
+/// are provided.  For all other generic types the last parameter is used.
 ///
 /// Returns `None` if the type is not a recognised generic iterable or the
 /// element type is a scalar (e.g. `list<int>`).
@@ -421,15 +427,24 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
 
     // ── Handle `GenericType<…>` ─────────────────────────────────────────
     let angle_pos = s.find('<')?;
+    let base_type = &s[..angle_pos];
     let inner = s.get(angle_pos + 1..)?.strip_suffix('>')?.trim();
     if inner.is_empty() {
         return None;
     }
 
-    // Split the generic parameters on `,` while respecting `<…>` nesting
-    // so that `array<int, Collection<string, User>>` splits correctly into
-    // `["int", "Collection<string, User>"]`.
-    let value_part = split_last_generic_param(inner);
+    // ── Special-case `Generator<TKey, TValue, TSend, TReturn>` ──────────
+    // The yield/value type is always the **second** generic parameter
+    // (index 1).  When only one param is given (`Generator<User>`), it is
+    // treated as the value type (consistent with single-param behaviour).
+    let value_part = if base_type == "Generator" {
+        split_second_generic_param(inner).unwrap_or_else(|| split_last_generic_param(inner))
+    } else {
+        // Default: use the last generic parameter (works for array, list,
+        // iterable, Collection, etc.).
+        split_last_generic_param(inner)
+    };
+
     let cleaned = clean_type(value_part.trim());
     let base_name = strip_generics(&cleaned);
 
@@ -446,9 +461,15 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
 ///   - `array<string, User>`     → `Some("string")`
 ///   - `iterable<string, User>`  → `Some("string")`
 ///   - `Collection<User, Order>` → `Some("User")` (first param of 2+ param generic)
+///   - `Generator<int, User>`    → `None` (key is `int`, scalar)
+///   - `Generator<Request, User, mixed, void>` → `Some("Request")` (TKey = 1st param)
 ///   - `list<User>`              → `None` (single-param list → key is always `int`, scalar)
 ///   - `User[]`                  → `None` (shorthand → key is always `int`, scalar)
 ///   - `array<User>`             → `None` (single-param array → key is `int`, scalar)
+///
+/// For PHP's `Generator<TKey, TValue, TSend, TReturn>`, the key type is the
+/// first generic parameter — which is the same as the default behaviour, so
+/// no special-casing is needed.
 ///
 /// Returns `None` if the type is not a recognised generic iterable with an
 /// explicit key type, or if the key type is a scalar (e.g. `int`, `string`).
@@ -505,6 +526,43 @@ fn split_first_generic_param(s: &str) -> Option<&str> {
     }
     // No comma at depth 0 → single parameter.
     None
+}
+
+/// Split a comma-separated generic parameter list and return the **second**
+/// parameter (index 1), but only when there are at least two parameters.
+/// Respects `<…>` and `{…}` nesting.
+///
+/// This is used for `Generator<TKey, TValue, …>` where the value type is
+/// always the second parameter.
+///
+/// - `"int, User"`                      → `Some("User")`
+/// - `"int, User, mixed, void"`         → `Some("User")`
+/// - `"int, Collection<string, Order>"` → `Some("Collection<string, Order>")`
+/// - `"User"`                           → `None` (single param)
+fn split_second_generic_param(s: &str) -> Option<&str> {
+    let mut depth_angle = 0i32;
+    let mut depth_brace = 0i32;
+    let mut first_comma: Option<usize> = None;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' => depth_angle += 1,
+            '>' => depth_angle -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ',' if depth_angle == 0 && depth_brace == 0 => {
+                if let Some(first) = first_comma {
+                    // Found second comma — everything between first and
+                    // second comma is the 2nd parameter.
+                    return Some(s[first + 1..i].trim());
+                } else {
+                    first_comma = Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    // If we found exactly one comma, everything after it is the 2nd param.
+    first_comma.map(|pos| s[pos + 1..].trim())
 }
 
 /// Split a comma-separated generic parameter list and return the **last**

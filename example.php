@@ -532,6 +532,91 @@ class IterationDemo
     }
 }
 
+// ── Generator / Iterable Yield Type Resolution ─────────────────────────────
+
+class GeneratorDemo
+{
+    /** @return \Generator<int, User> */
+    public function getUsers(): \Generator
+    {
+        yield new User('Alice', 'alice@example.com');
+        yield new User('Bob', 'bob@example.com');
+    }
+
+    /** @return \Generator<int, Order, mixed, Response> */
+    public function processOrders(): \Generator
+    {
+        yield new Order(new Customer('Test', new Address('Main St', 'NYC', '10001')));
+    }
+
+    /** @return iterable<User> */
+    public function iterableUsers(): iterable
+    {
+        return [];
+    }
+
+    public function foreachGeneratorTwoParams(): void
+    {
+        // Generator<int, User> — value is 2nd param (User)
+        foreach ($this->getUsers() as $user) {
+            $user->getEmail();            // resolves to User
+            $user->getName();             // resolves to User
+        }
+    }
+
+    public function foreachGeneratorFourParams(): void
+    {
+        // Generator<int, Order, mixed, Response> — value is still 2nd param (Order)
+        foreach ($this->processOrders() as $order) {
+            $order->getId();              // resolves to Order (2nd param), not Response (4th)
+        }
+    }
+
+    public function foreachGeneratorVarAnnotation(): void
+    {
+        /** @var \Generator<int, User> $gen */
+        $gen = $this->getUsers();
+        foreach ($gen as $user) {
+            $user->getEmail();            // Generator<int, User> → User
+        }
+    }
+
+    public function foreachGeneratorFourParamsVar(): void
+    {
+        /** @var \Generator<int, User, mixed, Response> $gen */
+        $gen = $this->processOrders();
+        foreach ($gen as $item) {
+            $item->getEmail();            // 2nd param: User (not Response)
+        }
+    }
+
+    public function foreachIterableSingleParam(): void
+    {
+        // iterable<User> — single param is the value type
+        foreach ($this->iterableUsers() as $user) {
+            $user->getEmail();            // resolves to User
+        }
+    }
+
+    public function foreachGeneratorPropertyChain(): void
+    {
+        foreach ($this->getUsers() as $user) {
+            $user->getProfile()->getDisplayName();  // User → UserProfile → string
+        }
+    }
+
+    /**
+     * @param \Generator<int, Customer> $customers
+     */
+    public function foreachGeneratorParam(\Generator $customers): void
+    {
+        // @param annotation overrides native \Generator type
+        foreach ($customers as $customer) {
+            $customer->getName();         // resolves to Customer
+        }
+    }
+}
+
 
 // ── Array & Object Shapes in Methods ────────────────────────────────────────
 
