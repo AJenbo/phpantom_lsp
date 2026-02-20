@@ -297,7 +297,7 @@ pub(crate) fn parse_generic_args(type_str: &str) -> (&str, Vec<&str>) {
     let close_pos = find_matching_close(rest);
     let inner = &rest[..close_pos];
 
-    let args = split_generic_params(inner);
+    let args = split_generic_args(inner);
     (base, args)
 }
 
@@ -370,7 +370,11 @@ fn find_matching_brace_close(s: &str) -> usize {
 
 /// Split generic arguments on commas at depth 0, respecting `<…>`,
 /// `(…)`, and `{…}` nesting.
-fn split_generic_params(s: &str) -> Vec<&str> {
+///
+/// Returns trimmed, non-empty segments. This is the single shared
+/// implementation used by `parse_generic_args`, `extract_generics_tag`,
+/// `apply_substitution`, and the generic-key/value extraction helpers.
+pub(crate) fn split_generic_args(s: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth_angle = 0i32;
     let mut depth_paren = 0i32;
@@ -469,12 +473,16 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
     // The yield/value type is always the **second** generic parameter
     // (index 1).  When only one param is given (`Generator<User>`), it is
     // treated as the value type (consistent with single-param behaviour).
+    let args = split_generic_args(inner);
     let value_part = if base_type == "Generator" {
-        split_second_generic_param(inner).unwrap_or_else(|| split_last_generic_param(inner))
+        // The yield/value type is always the **second** generic parameter
+        // (index 1).  When only one param is given (`Generator<User>`), it is
+        // treated as the value type (consistent with single-param behaviour).
+        args.get(1).or(args.last()).copied().unwrap_or(inner)
     } else {
         // Default: use the last generic parameter (works for array, list,
         // iterable, Collection, etc.).
-        split_last_generic_param(inner)
+        args.last().copied().unwrap_or(inner)
     };
 
     let cleaned = clean_type(value_part.trim());
@@ -528,7 +536,8 @@ pub fn extract_iterable_element_type(raw_type: &str) -> Option<String> {
         return None;
     }
 
-    let last = split_last_generic_param(inner).trim();
+    let args = split_generic_args(inner);
+    let last = args.last().copied().unwrap_or("").trim();
     if last.is_empty() {
         return None;
     }
@@ -573,7 +582,11 @@ pub fn extract_generic_key_type(raw_type: &str) -> Option<String> {
     // Only two-or-more-parameter generics have an explicit key type.
     // Single-parameter generics (e.g. `list<User>`, `array<User>`) have
     // an implicit `int` key which is scalar — nothing to resolve.
-    let key_part = split_first_generic_param(inner)?;
+    let args = split_generic_args(inner);
+    if args.len() < 2 {
+        return None;
+    }
+    let key_part = args[0];
     let cleaned = clean_type(key_part.trim());
     let base_name = strip_generics(&cleaned);
 
@@ -581,95 +594,6 @@ pub fn extract_generic_key_type(raw_type: &str) -> Option<String> {
         return None;
     }
     Some(cleaned)
-}
-
-/// Split a comma-separated generic parameter list and return the **first**
-/// parameter, but only when there are at least two parameters.
-/// Respects `<…>` nesting.
-///
-/// - `"int, User"`             → `Some("int")`
-/// - `"Request, Response"`     → `Some("Request")`
-/// - `"User"`                  → `None` (single param)
-/// - `"int, list<User>"`       → `Some("int")`
-/// - `"Collection<A, B>, User"` → `Some("Collection<A, B>")`
-fn split_first_generic_param(s: &str) -> Option<&str> {
-    let mut depth = 0i32;
-    for (i, c) in s.char_indices() {
-        match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            ',' if depth == 0 => {
-                // Found the first comma at depth 0 → there are 2+ params.
-                return Some(s[..i].trim());
-            }
-            _ => {}
-        }
-    }
-    // No comma at depth 0 → single parameter.
-    None
-}
-
-/// Split a comma-separated generic parameter list and return the **second**
-/// parameter (index 1), but only when there are at least two parameters.
-/// Respects `<…>` and `{…}` nesting.
-///
-/// This is used for `Generator<TKey, TValue, …>` where the value type is
-/// always the second parameter.
-///
-/// - `"int, User"`                      → `Some("User")`
-/// - `"int, User, mixed, void"`         → `Some("User")`
-/// - `"int, Collection<string, Order>"` → `Some("Collection<string, Order>")`
-/// - `"User"`                           → `None` (single param)
-fn split_second_generic_param(s: &str) -> Option<&str> {
-    let mut depth_angle = 0i32;
-    let mut depth_brace = 0i32;
-    let mut first_comma: Option<usize> = None;
-    for (i, c) in s.char_indices() {
-        match c {
-            '<' => depth_angle += 1,
-            '>' => depth_angle -= 1,
-            '{' => depth_brace += 1,
-            '}' => depth_brace -= 1,
-            ',' if depth_angle == 0 && depth_brace == 0 => {
-                if let Some(first) = first_comma {
-                    // Found second comma — everything between first and
-                    // second comma is the 2nd parameter.
-                    return Some(s[first + 1..i].trim());
-                } else {
-                    first_comma = Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    // If we found exactly one comma, everything after it is the 2nd param.
-    first_comma.map(|pos| s[pos + 1..].trim())
-}
-
-/// Split a comma-separated generic parameter list and return the **last**
-/// parameter, respecting `<…>` and `{…}` nesting.
-///
-/// - `"User"`             → `"User"`
-/// - `"int, User"`        → `"User"`
-/// - `"int, list<User>"`  → `"list<User>"`
-fn split_last_generic_param(s: &str) -> &str {
-    let mut depth_angle = 0i32;
-    let mut depth_brace = 0i32;
-    let mut last_comma = None;
-    for (i, c) in s.char_indices() {
-        match c {
-            '<' => depth_angle += 1,
-            '>' => depth_angle -= 1,
-            '{' => depth_brace += 1,
-            '}' => depth_brace -= 1,
-            ',' if depth_angle == 0 && depth_brace == 0 => last_comma = Some(i),
-            _ => {}
-        }
-    }
-    match last_comma {
-        Some(pos) => &s[pos + 1..],
-        None => s,
-    }
 }
 
 // ─── Array Shape Parsing ────────────────────────────────────────────────────

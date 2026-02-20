@@ -37,6 +37,7 @@ use std::collections::HashMap;
 use crate::Backend;
 use crate::composer;
 use crate::types::{ClassInfo, FunctionInfo};
+use crate::util::short_name;
 
 impl Backend {
     /// Try to find a class by name across all cached files in the ast_map,
@@ -54,7 +55,7 @@ impl Backend {
 
         // The class name stored in ClassInfo is just the short name (e.g. "Customer"),
         // so we match against the last segment of the namespace-qualified name.
-        let last_segment = name.rsplit('\\').next().unwrap_or(name);
+        let last_segment = short_name(name);
 
         // Extract the expected namespace prefix (if any).
         // For "Demo\\PDO" → expected_ns = Some("Demo")
@@ -330,7 +331,7 @@ impl Backend {
                 return self.find_or_load_class(fqn);
             }
             // Check local classes (same-file shortcut).
-            let lookup = name.rsplit('\\').next().unwrap_or(name);
+            let lookup = short_name(name);
             if let Some(cls) = local_classes.iter().find(|c| c.name == lookup) {
                 return Some(cls.clone());
             }

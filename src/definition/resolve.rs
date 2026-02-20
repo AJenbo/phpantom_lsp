@@ -16,6 +16,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
+use crate::util::short_name;
 
 impl Backend {
     /// Handle a "go to definition" request.
@@ -146,9 +147,9 @@ impl Backend {
                 {
                     // 6. Read the target file and find the definition line.
                     if let Ok(target_content) = std::fs::read_to_string(&file_path) {
-                        let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                        let sn = short_name(fqn);
                         if let Some(target_position) =
-                            Self::find_definition_position(&target_content, short_name)
+                            Self::find_definition_position(&target_content, sn)
                             && let Ok(target_uri) = Url::from_file_path(&file_path)
                         {
                             return Some(Location {
@@ -519,7 +520,7 @@ impl Backend {
         content: &str,
         uri: &str,
     ) -> Option<Location> {
-        let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+        let short_name = short_name(fqn);
 
         let classes = self
             .ast_map
@@ -645,10 +646,9 @@ impl Backend {
         let fqn = Self::resolve_to_fqn(parent_name, &file_use_map, &file_namespace);
 
         // Try class_index / ast_map lookup via find_class_file_content.
-        let short_name = fqn.rsplit('\\').next().unwrap_or(&fqn);
-        if let Some((class_uri, class_content)) =
-            self.find_class_file_content(short_name, uri, content)
-            && let Some(pos) = Self::find_definition_position(&class_content, short_name)
+        let sn = short_name(&fqn);
+        if let Some((class_uri, class_content)) = self.find_class_file_content(sn, uri, content)
+            && let Some(pos) = Self::find_definition_position(&class_content, sn)
             && let Ok(parsed_uri) = Url::parse(&class_uri)
         {
             return Some(Location {
@@ -676,7 +676,7 @@ impl Backend {
                     composer::resolve_class_path(&mappings, &workspace_root, candidate)
                     && let Ok(target_content) = std::fs::read_to_string(&file_path)
                 {
-                    let name = candidate.rsplit('\\').next().unwrap_or(candidate);
+                    let name = short_name(candidate);
                     if let Some(target_position) =
                         Self::find_definition_position(&target_content, name)
                         && let Ok(target_uri) = Url::from_file_path(&file_path)

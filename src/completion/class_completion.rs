@@ -14,6 +14,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::types::*;
+use crate::util::short_name;
 
 use super::builder::{build_callable_snippet, build_use_edit, find_use_insert_position};
 
@@ -353,7 +354,7 @@ impl Backend {
         // ── 3. class_index (discovered / interacted-with classes) ───
         if let Ok(idx) = self.class_index.lock() {
             for fqn in idx.keys() {
-                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                let short_name = short_name(fqn);
                 if !short_name.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }
@@ -395,7 +396,7 @@ impl Backend {
         // ── 4. Composer classmap (all autoloaded classes) ───────────
         if let Ok(cmap) = self.classmap.lock() {
             for fqn in cmap.keys() {
-                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                let short_name = short_name(fqn);
                 if !short_name.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }
@@ -430,7 +431,7 @@ impl Backend {
 
         // ── 5. Built-in PHP classes from stubs (lowest priority) ────
         for &name in self.stub_index.keys() {
-            let short_name = name.rsplit('\\').next().unwrap_or(name);
+            let short_name = short_name(name);
             if !short_name.to_lowercase().contains(&prefix_lower) {
                 continue;
             }
@@ -497,7 +498,7 @@ impl Backend {
         }
 
         let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
-        let short = normalized.rsplit('\\').next().unwrap_or(normalized);
+        let short = short_name(normalized);
 
         // These three types form the root of PHP's exception hierarchy.
         if matches!(short, "Throwable" | "Exception" | "Error") {
@@ -505,7 +506,7 @@ impl Backend {
         }
 
         // Look up ClassInfo from ast_map (no disk I/O).
-        let last_segment = normalized.rsplit('\\').next().unwrap_or(normalized);
+        let last_segment = short_name(normalized);
         let expected_ns: Option<&str> = if normalized.contains('\\') {
             Some(&normalized[..normalized.len() - last_segment.len() - 1])
         } else {
@@ -557,7 +558,7 @@ impl Backend {
     /// disk I/O.
     fn is_instantiable_or_unloaded(&self, class_name: &str) -> bool {
         let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
-        let last_segment = normalized.rsplit('\\').next().unwrap_or(normalized);
+        let last_segment = short_name(normalized);
         let expected_ns: Option<&str> = if normalized.contains('\\') {
             Some(&normalized[..normalized.len() - last_segment.len() - 1])
         } else {
@@ -595,7 +596,7 @@ impl Backend {
     /// disk I/O.
     fn is_concrete_class_in_ast_map(&self, class_name: &str) -> bool {
         let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
-        let last_segment = normalized.rsplit('\\').next().unwrap_or(normalized);
+        let last_segment = short_name(normalized);
         let expected_ns: Option<&str> = if normalized.contains('\\') {
             Some(&normalized[..normalized.len() - last_segment.len() - 1])
         } else {
@@ -787,7 +788,7 @@ impl Backend {
         // ── 1c. class_index (must be concrete + Throwable) ──────────
         if let Ok(idx) = self.class_index.lock() {
             for fqn in idx.keys() {
-                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                let short_name = short_name(fqn);
                 if !short_name.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }
@@ -829,7 +830,7 @@ impl Backend {
                 if loaded_fqns.contains(fqn) {
                     continue;
                 }
-                let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                let short_name = short_name(fqn);
                 if !short_name.to_lowercase().contains(&prefix_lower) {
                     continue;
                 }
@@ -866,7 +867,7 @@ impl Backend {
             if loaded_fqns.contains(name) {
                 continue;
             }
-            let short_name = name.rsplit('\\').next().unwrap_or(name);
+            let short_name = short_name(name);
             if !short_name.to_lowercase().contains(&prefix_lower) {
                 continue;
             }

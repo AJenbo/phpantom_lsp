@@ -128,7 +128,7 @@ and update its tracking accordingly.
 ### 20. Non-`$this` property access in text-based assignment path
 **Priority: Low**
 
-In `extract_raw_type_from_assignment_text` (`completion/resolver.rs`),
+In `extract_raw_type_from_assignment_text` (`completion/text_resolution.rs`),
 property access on the RHS is only handled for `$this->propName`.  When
 the RHS is `$otherVar->propName`, it falls through to `None`:
 

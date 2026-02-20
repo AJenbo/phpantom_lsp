@@ -12,6 +12,226 @@
 /// expressions, etc.) live in [`crate::subject_extraction`].
 use tower_lsp::lsp_types::*;
 
+/// Extract the short (unqualified) class name from a potentially
+/// fully-qualified name.
+///
+/// For example, `"Illuminate\\Support\\Collection"` → `"Collection"`,
+/// and `"Collection"` → `"Collection"`.
+pub(crate) fn short_name(name: &str) -> &str {
+    name.rsplit('\\').next().unwrap_or(name)
+}
+
+/// Find the first `;` in `s` that is not nested inside `()`, `[]`,
+/// `{}`, or string literals.
+///
+/// Returns the byte offset of the semicolon, or `None` if no
+/// top-level semicolon exists.  Used by multiple completion modules
+/// to delimit the right-hand side of assignment statements.
+pub(crate) fn find_semicolon_balanced(s: &str) -> Option<usize> {
+    let mut depth_paren = 0i32;
+    let mut depth_bracket = 0i32;
+    let mut depth_brace = 0i32;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut prev_char = '\0';
+
+    for (i, ch) in s.char_indices() {
+        if in_single_quote {
+            if ch == '\'' && prev_char != '\\' {
+                in_single_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        if in_double_quote {
+            if ch == '"' && prev_char != '\\' {
+                in_double_quote = false;
+            }
+            prev_char = ch;
+            continue;
+        }
+        match ch {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '(' => depth_paren += 1,
+            ')' => depth_paren -= 1,
+            '[' => depth_bracket += 1,
+            ']' => depth_bracket -= 1,
+            '{' => depth_brace += 1,
+            '}' => depth_brace -= 1,
+            ';' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
+                return Some(i);
+            }
+            _ => {}
+        }
+        prev_char = ch;
+    }
+    None
+}
+
+/// Known array functions whose output preserves the input array's
+/// element type (the first positional argument).
+pub(crate) const ARRAY_PRESERVING_FUNCS: &[&str] = &[
+    "array_filter",
+    "array_values",
+    "array_unique",
+    "array_reverse",
+    "array_slice",
+    "array_splice",
+    "array_chunk",
+    "array_diff",
+    "array_intersect",
+    "array_merge",
+];
+
+/// Known array functions that extract a single element from the input
+/// array (the element type is the output type, not wrapped in an array).
+pub(crate) const ARRAY_ELEMENT_FUNCS: &[&str] = &[
+    "array_pop",
+    "array_shift",
+    "current",
+    "end",
+    "reset",
+    "next",
+    "prev",
+];
+
+/// Find the position of the closing delimiter that matches the opening
+/// delimiter at `open_pos`, scanning forward.
+///
+/// `open` and `close` are the opening and closing byte values (e.g.
+/// `b'{'` / `b'}'` or `b'('` / `b')'`).  The scan is aware of string
+/// literals (`'…'` and `"…"` with backslash escaping) and both styles
+/// of PHP comment (`// …` and `/* … */`), so delimiters inside strings
+/// or comments are not counted.
+pub(crate) fn find_matching_forward(
+    text: &str,
+    open_pos: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    if open_pos >= len || bytes[open_pos] != open {
+        return None;
+    }
+    let mut depth = 1u32;
+    let mut pos = open_pos + 1;
+    let mut in_single = false;
+    let mut in_double = false;
+    while pos < len && depth > 0 {
+        let b = bytes[pos];
+        if in_single {
+            if b == b'\\' {
+                pos += 1;
+            } else if b == b'\'' {
+                in_single = false;
+            }
+        } else if in_double {
+            if b == b'\\' {
+                pos += 1;
+            } else if b == b'"' {
+                in_double = false;
+            }
+        } else {
+            match b {
+                b'\'' => in_single = true,
+                b'"' => in_double = true,
+                b if b == open => depth += 1,
+                b if b == close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(pos);
+                    }
+                }
+                b'/' if pos + 1 < len => {
+                    if bytes[pos + 1] == b'/' {
+                        // Line comment — skip to end of line
+                        while pos < len && bytes[pos] != b'\n' {
+                            pos += 1;
+                        }
+                        continue;
+                    }
+                    if bytes[pos + 1] == b'*' {
+                        // Block comment — skip to `*/`
+                        pos += 2;
+                        while pos + 1 < len {
+                            if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                                pos += 1;
+                                break;
+                            }
+                            pos += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        pos += 1;
+    }
+    None
+}
+
+/// Find the position of the opening delimiter that matches the closing
+/// delimiter at `close_pos`, scanning backward.
+///
+/// `open` and `close` are the opening and closing byte values (e.g.
+/// `b'{'` / `b'}'` or `b'('` / `b')'`).  The scan skips over string
+/// literals (`'…'` and `"…"`) by counting preceding backslashes to
+/// distinguish escaped from unescaped quotes.
+pub(crate) fn find_matching_backward(
+    text: &str,
+    close_pos: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if close_pos >= bytes.len() || bytes[close_pos] != close {
+        return None;
+    }
+
+    let mut depth = 1i32;
+    let mut pos = close_pos;
+
+    while pos > 0 {
+        pos -= 1;
+        match bytes[pos] {
+            b if b == close => depth += 1,
+            b if b == open => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(pos);
+                }
+            }
+            // Skip string literals by walking backward to the opening quote.
+            b'\'' | b'"' => {
+                let quote = bytes[pos];
+                if pos > 0 {
+                    pos -= 1;
+                    while pos > 0 {
+                        if bytes[pos] == quote {
+                            // Check for escape — count preceding backslashes
+                            let mut bs = 0;
+                            let mut check = pos;
+                            while check > 0 && bytes[check - 1] == b'\\' {
+                                bs += 1;
+                                check -= 1;
+                            }
+                            if bs % 2 == 0 {
+                                break; // unescaped quote — string start
+                            }
+                        }
+                        pos -= 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 use crate::Backend;
 use crate::types::ClassInfo;
 

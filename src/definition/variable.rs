@@ -19,6 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
+use crate::util::short_name;
 
 impl Backend {
     // ──────────────────────────────────────────────────────────────────────
@@ -295,9 +296,9 @@ impl Backend {
                     composer::resolve_class_path(&mappings, &workspace_root, fqn)
                     && let Ok(target_content) = std::fs::read_to_string(&file_path)
                 {
-                    let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
+                    let sn = short_name(fqn);
                     if let Some(target_position) =
-                        Self::find_definition_position(&target_content, short_name)
+                        Self::find_definition_position(&target_content, sn)
                         && let Ok(target_uri) = Url::from_file_path(&file_path)
                     {
                         return Some(Location {

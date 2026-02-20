@@ -12,6 +12,8 @@
 
 use std::collections::HashMap;
 
+use super::types::split_generic_args;
+
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -1017,7 +1019,10 @@ pub fn extract_generics_tag(docblock: &str, tag: &str) -> Vec<(String, Vec<Strin
             }
 
             // Split on commas respecting nesting.
-            let args = split_generic_args(inner_generics);
+            let args: Vec<String> = split_generic_args(inner_generics)
+                .into_iter()
+                .map(|a| a.strip_prefix('\\').unwrap_or(a).to_string())
+                .collect();
             if !args.is_empty() {
                 results.push((base_name.to_string(), args));
             }
@@ -1308,43 +1313,6 @@ fn find_class_string_param_name(docblock: &str, template_name: &str) -> Option<S
     }
 
     None
-}
-
-/// Split a comma-separated generic argument list, respecting `<…>` and `(…)`
-/// nesting.  Returns cleaned argument strings.
-///
-/// - `"int, Language"` → `["int", "Language"]`
-/// - `"int, array<string, mixed>"` → `["int", "array<string, mixed>"]`
-fn split_generic_args(s: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut depth_angle = 0i32;
-    let mut depth_paren = 0i32;
-    let mut start = 0;
-
-    for (i, ch) in s.char_indices() {
-        match ch {
-            '<' => depth_angle += 1,
-            '>' => depth_angle -= 1,
-            '(' => depth_paren += 1,
-            ')' => depth_paren -= 1,
-            ',' if depth_angle == 0 && depth_paren == 0 => {
-                let arg = s[start..i].trim();
-                if !arg.is_empty() {
-                    let arg = arg.strip_prefix('\\').unwrap_or(arg);
-                    parts.push(arg.to_string());
-                }
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    // Push the last segment.
-    let last = s[start..].trim();
-    if !last.is_empty() {
-        let last = last.strip_prefix('\\').unwrap_or(last);
-        parts.push(last.to_string());
-    }
-    parts
 }
 
 /// Apply docblock type override logic to a type hint.

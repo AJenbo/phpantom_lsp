@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use mago_syntax::ast::*;
 
 use crate::Backend;
+use crate::util::short_name;
 
 impl Backend {
     /// Walk statements and extract `use` statement mappings.
@@ -97,14 +98,14 @@ impl Backend {
         };
 
         // The short (imported) name is either the alias or the last segment
-        let short_name = if let Some(ref alias) = item.alias {
+        let alias_name = if let Some(ref alias) = item.alias {
             alias.identifier.value.to_string()
         } else {
             // Last segment of the FQN
-            fqn.rsplit('\\').next().unwrap_or(&fqn).to_string()
+            short_name(&fqn).to_string()
         };
 
-        use_map.insert(short_name, fqn);
+        use_map.insert(alias_name, fqn);
     }
 
     /// Walk statements and extract the first namespace declaration found.

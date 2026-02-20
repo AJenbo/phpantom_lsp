@@ -41,15 +41,22 @@ src/
 │   ├── handler.rs          # Top-level completion request orchestration
 │   ├── target.rs           # Extract what the user is completing (subject + access kind)
 │   ├── resolver.rs         # Resolve subject → ClassInfo (type resolution engine)
+│   ├── text_resolution.rs  # Text-based type resolution (assignment scanning, call chains)
 │   ├── builder.rs          # Build LSP CompletionItems from resolved ClassInfo
 │   ├── class_completion.rs # Class name, constant, and function completions
 │   ├── variable_completion.rs  # Variable name completions and scope collection
 │   ├── variable_resolution.rs  # Variable type resolution via assignment scanning
+│   ├── foreach_resolution.rs   # Foreach value/key and array destructuring type resolution
 │   ├── closure_resolution.rs   # Closure and arrow-function parameter resolution
 │   ├── type_narrowing.rs       # instanceof / assert / custom type guard narrowing
 │   ├── conditional_resolution.rs  # PHPStan conditional return type resolution at call sites
+│   ├── array_shape.rs      # Array shape key completion and raw variable type resolution
 │   ├── named_args.rs       # Named argument completion inside function/method call parens
 │   ├── phpdoc.rs           # PHPDoc tag completion inside /** … */ blocks
+│   ├── comment_position.rs # Comment and docblock position detection
+│   ├── throws_analysis.rs  # Shared throw-statement scanning and @throws tag lookup
+│   ├── catch_completion.rs # Smart exception type completion inside catch() clauses
+│   ├── type_hint_completion.rs # Type completion in parameter lists, return types, properties
 │   └── use_edit.rs         # Use-statement insertion helpers
 ├── definition/
 │   ├── mod.rs              # Submodule declarations

@@ -24,6 +24,7 @@ use tower_lsp::lsp_types::*;
 use super::member::MemberKind;
 use crate::Backend;
 use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo};
+use crate::util::short_name;
 
 /// Recursively collect all `.php` files under a directory.
 ///
@@ -337,7 +338,7 @@ impl Backend {
             .unwrap_or_default();
 
         for (fqn, _uri) in &index_entries {
-            let short = fqn.rsplit('\\').next().unwrap_or(fqn);
+            let short = short_name(fqn);
             if seen_names.contains(short) {
                 continue;
             }
@@ -519,7 +520,7 @@ impl Backend {
 
         // Direct `implements` match.
         for iface in &cls.interfaces {
-            let iface_short = iface.rsplit('\\').next().unwrap_or(iface);
+            let iface_short = short_name(iface);
             if iface_short == target_short || iface == target_fqn {
                 return true;
             }
@@ -527,7 +528,7 @@ impl Backend {
 
         // Direct `extends` match (for abstract class implementations).
         if let Some(ref parent) = cls.parent_class {
-            let parent_short = parent.rsplit('\\').next().unwrap_or(parent);
+            let parent_short = short_name(parent);
             if parent_short == target_short || parent == target_fqn {
                 return true;
             }
@@ -549,7 +550,7 @@ impl Backend {
             if let Some(parent_cls) = class_loader(parent_name) {
                 // Check if the parent implements the target interface.
                 for iface in &parent_cls.interfaces {
-                    let iface_short = iface.rsplit('\\').next().unwrap_or(iface);
+                    let iface_short = short_name(iface);
                     if iface_short == target_short || iface == target_fqn {
                         return true;
                     }
@@ -611,12 +612,12 @@ impl Backend {
 
     /// Get the FQN for a class given its short name, by looking it up in
     /// the `class_index`.
-    fn class_fqn_for_short(&self, short_name: &str) -> Option<String> {
+    fn class_fqn_for_short(&self, target_short: &str) -> Option<String> {
         let idx = self.class_index.lock().ok()?;
         // Look for an entry whose short name matches.
         for fqn in idx.keys() {
-            let short = fqn.rsplit('\\').next().unwrap_or(fqn);
-            if short == short_name {
+            let short = short_name(fqn);
+            if short == target_short {
                 return Some(fqn.clone());
             }
         }

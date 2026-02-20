@@ -32,6 +32,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::docblock;
 use crate::types::ClassInfo;
+use crate::util::find_semicolon_balanced;
 
 /// Well-known keys for the `$_SERVER` superglobal.
 ///
@@ -326,7 +327,8 @@ impl Backend {
             self.resolve_class_name(name, effective_classes, file_use_map, file_namespace)
         };
         let effective_type =
-            Self::expand_type_alias(&effective_type, effective_classes, &class_loader);
+            Self::resolve_type_alias(&effective_type, "", effective_classes, &class_loader)
+                .unwrap_or(effective_type);
 
         // Parse the array shape entries.
         let entries = match docblock::parse_array_shape(&effective_type) {
@@ -498,8 +500,6 @@ impl Backend {
         file_use_map: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<String> {
-        // Try with the class that contains the cursor first, then fall
-        // back to trying all classes so that top-level code still works.
         // 1. Direct @var / @param annotation on the variable.
         if let Some(raw) =
             docblock::find_iterable_raw_type_in_source(content, cursor_offset, var_name)
@@ -507,264 +507,21 @@ impl Backend {
             return Some(raw);
         }
 
-        // 2. Try to find an assignment and resolve through it.
-        //    Look for patterns like `$var = someFunction();` or
-        //    `$var = $this->method();` and extract the return type.
-        //
-        //    First try with only the class that contains the cursor so
-        //    that `$this->` resolves to the correct class even when
-        //    there are multiple classes/interfaces in the file.
-        if let Some(current) = Self::find_class_at_offset(classes, cursor_offset as u32) {
-            let single = [current.clone()];
-            if let Some(t) = self.resolve_raw_type_from_assignment(
-                var_name,
-                content,
-                cursor_offset,
-                &single,
-                file_use_map,
-                file_namespace,
-            ) {
-                return Some(t);
-            }
-        }
-
-        // Fall back to all classes (handles top-level code and cases
-        // where offset-based lookup doesn't match).
-        self.resolve_raw_type_from_assignment(
+        // 2. Delegate to the shared text-based assignment resolver which
+        //    handles array literals, method/function calls, chained calls,
+        //    `new` expressions, array functions, and property access.
+        let current_class = Self::find_class_at_offset(classes, cursor_offset as u32);
+        let class_loader = |name: &str| -> Option<ClassInfo> {
+            self.resolve_class_name(name, classes, file_use_map, file_namespace)
+        };
+        Self::extract_raw_type_from_assignment_text(
             var_name,
             content,
             cursor_offset,
+            current_class,
             classes,
-            file_use_map,
-            file_namespace,
+            &class_loader,
         )
-    }
-
-    /// Follow a variable assignment to extract the raw return type of the
-    /// RHS expression.
-    ///
-    /// Handles:
-    /// - `$var = functionName(…);` → `@return` type of `functionName`
-    /// - `$var = $this->methodName(…);` → return type of `methodName` on current class
-    /// - `$var = ClassName::methodName(…);` → return type of static method
-    /// - `$var = $this->propertyName;` → `@var` type of property
-    /// - `$var = ['key' => value, …];` → synthesised `array{key: type, …}`
-    /// - Incremental `$var['key'] = expr;` assignments after the initial
-    ///   assignment are merged into the shape.
-    /// - `$var[] = expr;` push-style assignments → synthesised `list<Type>`
-    fn resolve_raw_type_from_assignment(
-        &self,
-        var_name: &str,
-        content: &str,
-        cursor_offset: usize,
-        classes: &[ClassInfo],
-        file_use_map: &std::collections::HashMap<String, String>,
-        file_namespace: &Option<String>,
-    ) -> Option<String> {
-        // Simple text-based scan: search backward for `$var = …;`
-        let search_area = content.get(..cursor_offset)?;
-
-        // Look for the most recent assignment to this variable.
-        let assign_pattern = format!("{} = ", var_name);
-        let assign_pos = search_area.rfind(&assign_pattern)?;
-        let rhs_start = assign_pos + assign_pattern.len();
-
-        // Extract the RHS up to the next `;`
-        let remaining = &content[rhs_start..];
-        let semi_pos = find_balanced_semicolon(remaining)?;
-        let rhs_text = remaining[..semi_pos].trim();
-
-        // Case 1: RHS is an array literal — `[…]` or `array(…)`.
-        // Check this BEFORE the function-call case because `array(…)`
-        // ends with `)` and would otherwise be mistaken for a call.
-        // Also scan for incremental `$var['key'] = expr;` assignments
-        // and push-style `$var[] = expr;` assignments.
-        let base_entries = parse_array_literal_entries(rhs_text);
-
-        // Extract spread element types from the array literal (e.g.
-        // `[...$users, ...$admins]` → resolve each spread variable's
-        // iterable element type).
-        let spread_types = extract_spread_expressions(rhs_text)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|expr| {
-                // Only resolve bare variable expressions for now.
-                if !expr.starts_with('$') {
-                    return None;
-                }
-                let raw = self.resolve_variable_raw_type(
-                    expr,
-                    content,
-                    cursor_offset,
-                    classes,
-                    file_use_map,
-                    file_namespace,
-                )?;
-                docblock::extract_iterable_element_type(&raw)
-            })
-            .collect::<Vec<_>>();
-
-        // Scan for incremental `$var['key'] = expr;` assignments.
-        let after_assign = assign_pos + assign_pattern.len() + semi_pos + 1; // past the `;`
-        let incremental =
-            collect_incremental_key_assignments(var_name, content, after_assign, cursor_offset);
-
-        // Scan for push-style `$var[] = expr;` assignments.
-        let mut push_types =
-            collect_push_assignments(var_name, content, after_assign, cursor_offset);
-
-        // Merge spread element types into push types so they participate
-        // in the `list<…>` inference.
-        push_types.extend(spread_types);
-
-        if base_entries.is_some() || !incremental.is_empty() || !push_types.is_empty() {
-            let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();
-            // Merge incremental assignments — later assignments for the
-            // same key override earlier ones.
-            for (k, v) in incremental {
-                if let Some(existing) = entries.iter_mut().find(|(ek, _)| *ek == k) {
-                    existing.1 = v;
-                } else {
-                    entries.push((k, v));
-                }
-            }
-            // If there are string-keyed entries, prefer the array shape.
-            if !entries.is_empty() {
-                let shape_parts: Vec<String> = entries
-                    .iter()
-                    .map(|(k, v)| format!("{}: {}", k, v))
-                    .collect();
-                return Some(format!("array{{{}}}", shape_parts.join(", ")));
-            }
-            // No string-keyed entries — try push-style list inference.
-            if let Some(list_type) = build_list_type_from_push_types(&push_types) {
-                return Some(list_type);
-            }
-        }
-
-        // Case 2: RHS is a function call — `functionName(…)`
-        // Case 3: RHS is a method call — `$this->methodName(…)` or `$obj->method(…)`
-        // Case 4: RHS is a static call — `ClassName::methodName(…)`
-        if rhs_text.ends_with(')') {
-            return self.resolve_call_raw_return_type(
-                rhs_text,
-                content,
-                cursor_offset,
-                classes,
-                file_use_map,
-                file_namespace,
-            );
-        }
-
-        // Case 5: RHS is a property access — `$this->propertyName`
-        if let Some(prop) = rhs_text.strip_prefix("$this->")
-            && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
-        {
-            return self.resolve_property_raw_type(prop, classes, content, cursor_offset);
-        }
-
-        None
-    }
-
-    /// Resolve the raw return type of a function/method call expression.
-    fn resolve_call_raw_return_type(
-        &self,
-        call_text: &str,
-        content: &str,
-        cursor_offset: usize,
-        classes: &[ClassInfo],
-        file_use_map: &std::collections::HashMap<String, String>,
-        file_namespace: &Option<String>,
-    ) -> Option<String> {
-        // Find the opening `(` at depth 0 to split name from args.
-        let paren_pos = find_top_level_paren(call_text)?;
-        let callee = &call_text[..paren_pos];
-
-        // Method call: `$this->methodName`
-        if let Some(method_name) = callee.strip_prefix("$this->") {
-            // Find the current class that contains the cursor.
-            let current_class =
-                self.find_current_class_from_content(content, classes, cursor_offset)?;
-            return self.get_method_raw_return_type(&current_class, method_name, classes);
-        }
-
-        // Static call: `ClassName::methodName`
-        if let Some((class_part, method_part)) = callee.rsplit_once("::") {
-            let class_info =
-                self.resolve_class_name(class_part, classes, file_use_map, file_namespace)?;
-            return self.get_method_raw_return_type(&class_info, method_part, classes);
-        }
-
-        // Standalone function call.
-        let func_info = self.resolve_function_name(callee, file_use_map, file_namespace)?;
-        func_info.return_type
-    }
-
-    /// Get the raw return type of a method, checking docblock `@return` first.
-    fn get_method_raw_return_type(
-        &self,
-        class: &ClassInfo,
-        method_name: &str,
-        all_classes: &[ClassInfo],
-    ) -> Option<String> {
-        let merged =
-            Self::resolve_class_with_inheritance(class, &|name: &str| -> Option<ClassInfo> {
-                self.resolve_class_name(name, all_classes, &Default::default(), &None)
-            });
-        merged
-            .methods
-            .iter()
-            .find(|m| m.name == method_name)
-            .and_then(|m| m.return_type.clone())
-    }
-
-    /// Get the raw type of a property from the class info.
-    fn resolve_property_raw_type(
-        &self,
-        prop_name: &str,
-        classes: &[ClassInfo],
-        content: &str,
-        cursor_offset: usize,
-    ) -> Option<String> {
-        let current_class =
-            self.find_current_class_from_content(content, classes, cursor_offset)?;
-        let merged = Self::resolve_class_with_inheritance(&current_class, &|name: &str| -> Option<
-            ClassInfo,
-        > {
-            self.resolve_class_name(name, classes, &Default::default(), &None)
-        });
-        merged
-            .properties
-            .iter()
-            .find(|p| p.name == prop_name)
-            .and_then(|p| p.type_hint.clone())
-    }
-
-    /// Find the ClassInfo that contains the cursor offset based on the
-    /// class list.  Uses byte-offset span matching so that when there
-    /// are multiple classes/interfaces in the file, `$this->` resolves
-    /// to the correct one.
-    fn find_current_class_from_content(
-        &self,
-        content: &str,
-        classes: &[ClassInfo],
-        cursor_offset: usize,
-    ) -> Option<ClassInfo> {
-        // Prefer offset-based lookup so that the correct class is found
-        // even when there are multiple classes/interfaces in the file.
-        if let Some(c) = Self::find_class_at_offset(classes, cursor_offset as u32) {
-            return Some(c.clone());
-        }
-        // If the cursor is inside a method call expression that was
-        // extracted from a different offset (e.g. the RHS of an
-        // assignment), try scanning all classes for one that contains
-        // the method.  Use the content length as a rough heuristic —
-        // fall back to the last class whose span starts before the
-        // cursor offset.
-        classes
-            .iter()
-            .rfind(|c| (c.start_offset as usize) < content.len())
-            .cloned()
     }
 }
 
@@ -774,86 +531,6 @@ impl Backend {
 ///
 /// Replaces patterns like `$var['` or `$var[` at the cursor line with
 /// `$var[''];` (or `$var[];`) so the rest of the file parses correctly.
-impl Backend {
-    /// Expand a type string if it is a type alias defined on any class in
-    /// `classes`.
-    ///
-    /// This is used by the array-key completion path which works with raw
-    /// type strings rather than going through `type_hint_to_classes`.  When
-    /// the type is not an alias, the original string is returned unchanged.
-    ///
-    /// Follows up to 10 levels of alias indirection to handle aliases that
-    /// reference other aliases.  For imported type aliases (`from:Class:Name`),
-    /// the `class_loader` is used to load the source class and resolve the
-    /// original alias definition.
-    fn expand_type_alias(
-        type_str: &str,
-        classes: &[ClassInfo],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> String {
-        let mut current = type_str.to_string();
-        for _ in 0..10 {
-            // Only bare identifiers can be aliases.
-            if current.contains('<')
-                || current.contains('{')
-                || current.contains('|')
-                || current.contains('&')
-                || current.contains('\\')
-                || current.contains('$')
-            {
-                break;
-            }
-            let mut found = false;
-            for cls in classes {
-                if let Some(def) = cls.type_aliases.get(current.as_str()) {
-                    if let Some(import_ref) = def.strip_prefix("from:") {
-                        // Imported alias: resolve from the source class.
-                        if let Some(resolved) =
-                            Self::expand_imported_type_alias(import_ref, classes, class_loader)
-                        {
-                            current = resolved;
-                            found = true;
-                        }
-                        break;
-                    }
-                    current = def.clone();
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                break;
-            }
-        }
-        current
-    }
-
-    /// Resolve an imported type alias reference (`ClassName:OriginalName`)
-    /// by loading the source class and looking up the original alias.
-    fn expand_imported_type_alias(
-        import_ref: &str,
-        classes: &[ClassInfo],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> Option<String> {
-        let (source_class_name, original_name) = import_ref.split_once(':')?;
-        let lookup = source_class_name
-            .rsplit('\\')
-            .next()
-            .unwrap_or(source_class_name);
-        let source_class = classes
-            .iter()
-            .find(|c| c.name == lookup)
-            .cloned()
-            .or_else(|| class_loader(source_class_name));
-        let source_class = source_class?;
-        let def = source_class.type_aliases.get(original_name)?;
-        if def.starts_with("from:") {
-            return None; // Don't follow nested imports.
-        }
-        Some(def.clone())
-    }
-}
-
 fn patch_array_access_at_cursor(content: &str, position: Position) -> String {
     let line_idx = position.line as usize;
     let mut result = String::with_capacity(content.len() + 4);
@@ -948,52 +625,6 @@ fn count_trailing_close_chars(
             }
         }
     }
-}
-
-/// Find the position of `;` in `s`, respecting `(…)`, `[…]`, `{…}`, and
-/// string literal nesting.
-fn find_balanced_semicolon(s: &str) -> Option<usize> {
-    let mut depth_paren = 0i32;
-    let mut depth_bracket = 0i32;
-    let mut depth_brace = 0i32;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_char = '\0';
-
-    for (i, ch) in s.char_indices() {
-        // Handle string literals — skip everything inside quotes.
-        if in_single_quote {
-            if ch == '\'' && prev_char != '\\' {
-                in_single_quote = false;
-            }
-            prev_char = ch;
-            continue;
-        }
-        if in_double_quote {
-            if ch == '"' && prev_char != '\\' {
-                in_double_quote = false;
-            }
-            prev_char = ch;
-            continue;
-        }
-
-        match ch {
-            '\'' => in_single_quote = true,
-            '"' => in_double_quote = true,
-            '(' => depth_paren += 1,
-            ')' => depth_paren -= 1,
-            '[' => depth_bracket += 1,
-            ']' => depth_bracket -= 1,
-            '{' => depth_brace += 1,
-            '}' => depth_brace -= 1,
-            ';' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
-                return Some(i);
-            }
-            _ => {}
-        }
-        prev_char = ch;
-    }
-    None
 }
 
 /// Find the position of the first `(` at nesting depth 0.
@@ -1373,7 +1004,7 @@ pub(super) fn collect_incremental_key_assignments(
         let rhs_and_rest = &remainder_trimmed[rhs_start_in_remainder..];
 
         // Find `;` respecting nesting.
-        if let Some(semi) = find_balanced_semicolon(rhs_and_rest) {
+        if let Some(semi) = find_semicolon_balanced(rhs_and_rest) {
             let value_expr = rhs_and_rest[..semi].trim();
             let inferred = infer_literal_type(value_expr);
             entries.push((key.to_string(), inferred));
@@ -1442,7 +1073,7 @@ pub(super) fn collect_push_assignments(
         let rhs_and_rest = after_eq;
 
         // Find `;` respecting nesting.
-        if let Some(semi) = find_balanced_semicolon(rhs_and_rest) {
+        if let Some(semi) = find_semicolon_balanced(rhs_and_rest) {
             let value_expr = rhs_and_rest[..semi].trim();
             let inferred = infer_literal_type(value_expr);
             types.push(inferred);
@@ -1480,28 +1111,6 @@ pub(super) fn build_list_type_from_push_types(types: &[String]) -> Option<String
 
     let inner = seen.join("|");
     Some(format!("list<{}>", inner))
-}
-
-fn find_top_level_paren(s: &str) -> Option<usize> {
-    let mut depth_angle = 0i32;
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'<' => depth_angle += 1,
-            b'>' if depth_angle > 0 => depth_angle -= 1,
-            b'-' if i + 1 < bytes.len() && bytes[i + 1] == b'>' => {
-                // Skip `->` entirely — it's an arrow operator, not
-                // an angle bracket.
-                i += 2;
-                continue;
-            }
-            b'(' if depth_angle == 0 => return Some(i),
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }
 
 #[cfg(test)]

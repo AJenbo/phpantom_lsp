@@ -2553,7 +2553,7 @@ async fn test_method_return_key_double_quote_pair_no_bracket() {
 // ─── Preceding class/interface in the same file ─────────────────────────────
 //
 // When another class or interface is defined before the target class,
-// `find_current_class_from_content` must pick the class that actually
+// `find_class_at_offset` must pick the class that actually
 // contains the cursor — not just `classes.first()`.
 
 #[tokio::test]

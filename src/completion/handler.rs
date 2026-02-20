@@ -85,7 +85,7 @@ impl Backend {
             // block comment (but NOT a `/** … */` docblock), return no
             // completions — typing inside comments should not trigger
             // suggestions.
-            if crate::completion::phpdoc::is_inside_non_doc_comment(&content, position) {
+            if crate::completion::comment_position::is_inside_non_doc_comment(&content, position) {
                 return Ok(None);
             }
 
@@ -136,7 +136,7 @@ impl Backend {
             // positions (descriptions, unknown tags) suppress the
             // remaining strategies so random words don't trigger
             // class / variable suggestions.
-            if crate::completion::phpdoc::is_inside_docblock(&content, position) {
+            if crate::completion::comment_position::is_inside_docblock(&content, position) {
                 use crate::completion::phpdoc::{
                     DocblockTypingContext, detect_docblock_typing_position, extract_symbol_info,
                 };

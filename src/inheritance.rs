@@ -14,8 +14,10 @@
 use std::collections::HashMap;
 
 use crate::Backend;
+use crate::docblock::types::split_generic_args;
 use crate::types::Visibility;
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo, TraitAlias, TraitPrecedence};
+use crate::util::short_name;
 
 impl Backend {
     /// Resolve a class together with all inherited members from its parent
@@ -720,11 +722,8 @@ pub(crate) fn apply_substitution(type_str: &str, subs: &HashMap<String, String>)
         let resolved_base = apply_substitution(base, subs);
 
         // Split inner on commas at depth 0 and resolve each arg.
-        let args = split_generic_args_at_depth_0(inner);
-        let resolved_args: Vec<String> = args
-            .iter()
-            .map(|a| apply_substitution(a.trim(), subs))
-            .collect();
+        let args = split_generic_args(inner);
+        let resolved_args: Vec<String> = args.iter().map(|a| apply_substitution(a, subs)).collect();
 
         let mut result = format!("{resolved_base}<{}>", resolved_args.join(", "));
         if !after.is_empty() {
@@ -762,12 +761,6 @@ pub(crate) fn apply_substitution(type_str: &str, subs: &HashMap<String, String>)
 
     // No match — return as-is.
     s.to_string()
-}
-
-/// Extract the short (unqualified) class name from a potentially
-/// fully-qualified name.
-fn short_name(name: &str) -> &str {
-    name.rsplit('\\').next().unwrap_or(name)
 }
 
 /// Split a type string on `delimiter` at nesting depth 0 (respecting
@@ -856,31 +849,6 @@ fn find_matching_close_angle(s: &str) -> usize {
     }
     // Fallback: end of string (malformed type).
     s.len()
-}
-
-/// Split generic arguments on commas at depth 0, respecting `<…>` and
-/// `(…)` nesting.
-fn split_generic_args_at_depth_0(s: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth_angle = 0i32;
-    let mut depth_paren = 0i32;
-    let mut start = 0;
-
-    for (i, ch) in s.char_indices() {
-        match ch {
-            '<' => depth_angle += 1,
-            '>' => depth_angle -= 1,
-            '(' => depth_paren += 1,
-            ')' => depth_paren -= 1,
-            ',' if depth_angle == 0 && depth_paren == 0 => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    parts.push(&s[start..]);
-    parts
 }
 
 /// Apply explicit generic type arguments to a class's members.
@@ -1090,6 +1058,7 @@ mod tests {
 
     #[test]
     fn test_short_name() {
+        use crate::util::short_name;
         assert_eq!(short_name("Collection"), "Collection");
         assert_eq!(short_name("Illuminate\\Support\\Collection"), "Collection");
         assert_eq!(short_name("\\Collection"), "Collection");

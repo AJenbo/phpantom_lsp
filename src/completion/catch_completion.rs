@@ -16,7 +16,8 @@
 
 use tower_lsp::lsp_types::*;
 
-use super::phpdoc::{find_throw_statements, position_to_byte_offset};
+use super::comment_position::position_to_byte_offset;
+use super::throws_analysis;
 
 /// Information about the catch clause context at the cursor position.
 #[derive(Debug)]
@@ -82,7 +83,7 @@ pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchCo
     let mut seen = std::collections::HashSet::new();
 
     // 1. Direct `throw new ExceptionType(…)` statements
-    let throws = find_throw_statements(&try_body);
+    let throws = throws_analysis::find_throw_statements(&try_body);
     for throw in &throws {
         let short_name = throw
             .type_name
@@ -96,7 +97,7 @@ pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchCo
     }
 
     // 2. Inline `/** @throws ExceptionType */` annotations
-    let inline_throws = find_inline_throws_annotations(&try_body);
+    let inline_throws = throws_analysis::find_inline_throws_annotations(&try_body);
     for exc_type in &inline_throws {
         let short_name = exc_type
             .trim_start_matches('\\')
@@ -109,7 +110,8 @@ pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchCo
     }
 
     // 3. Propagated @throws from called methods
-    let propagated = find_propagated_throws_in_block(&try_body, content);
+    let propagated = throws_analysis::find_propagated_throws(&try_body, content);
+    let propagated: Vec<String> = propagated.iter().map(|t| t.type_name.clone()).collect();
     for exc_type in &propagated {
         let short_name = exc_type
             .trim_start_matches('\\')
@@ -122,7 +124,11 @@ pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchCo
     }
 
     // 4. `throw $this->method()` / `throw self::method()` return types
-    let throw_expr_types = find_throw_expression_types_in_block(&try_body, content);
+    let throw_expr_types = throws_analysis::find_throw_expression_types(&try_body, content);
+    let throw_expr_types: Vec<String> = throw_expr_types
+        .iter()
+        .map(|t| t.type_name.clone())
+        .collect();
     for exc_type in &throw_expr_types {
         let short_name = exc_type
             .trim_start_matches('\\')
@@ -279,7 +285,8 @@ fn find_try_block_body(_content: &str, before_catch: &str) -> Option<String> {
     // we need to find where this `}` is in the full content.
     //
     // Walk backward to find the matching `{`.
-    let block_open = find_matching_brace_reverse(before_catch, close_brace_offset)?;
+    let block_open =
+        crate::util::find_matching_backward(before_catch, close_brace_offset, b'{', b'}')?;
 
     // Now check what keyword precedes this block.
     let before_block = before_catch[..block_open].trim_end();
@@ -288,7 +295,8 @@ fn find_try_block_body(_content: &str, before_catch: &str) -> Option<String> {
     if before_block.ends_with(')') {
         // Skip the catch clause parentheses
         let close_paren = before_block.len() - 1;
-        let open_paren = find_matching_paren_reverse(before_block, close_paren)?;
+        let open_paren =
+            crate::util::find_matching_backward(before_block, close_paren, b'(', b')')?;
         let before_paren = before_block[..open_paren].trim_end();
 
         // Should be `catch`
@@ -341,520 +349,13 @@ fn find_try_block_body(_content: &str, before_catch: &str) -> Option<String> {
     None
 }
 
-/// Find the matching opening `{` for a closing `}` by walking backward.
-fn find_matching_brace_reverse(text: &str, close_pos: usize) -> Option<usize> {
-    let bytes = text.as_bytes();
-    if close_pos >= bytes.len() || bytes[close_pos] != b'}' {
-        return None;
-    }
-
-    let mut depth = 1i32;
-    let mut pos = close_pos;
-
-    while pos > 0 {
-        pos -= 1;
-        match bytes[pos] {
-            b'}' => depth += 1,
-            b'{' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(pos);
-                }
-            }
-            // Skip string literals (walking backward is tricky, but we
-            // do a simple quote-matching heuristic)
-            b'\'' | b'"' => {
-                let quote = bytes[pos];
-                if pos > 0 {
-                    pos -= 1;
-                    while pos > 0 {
-                        if bytes[pos] == quote {
-                            // Check for escape — count preceding backslashes
-                            let mut bs = 0;
-                            let mut check = pos;
-                            while check > 0 && bytes[check - 1] == b'\\' {
-                                bs += 1;
-                                check -= 1;
-                            }
-                            if bs % 2 == 0 {
-                                break; // unescaped quote — string start
-                            }
-                        }
-                        pos -= 1;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
-/// Find the matching opening `(` for a closing `)` by walking backward.
-fn find_matching_paren_reverse(text: &str, close_pos: usize) -> Option<usize> {
-    let bytes = text.as_bytes();
-    if close_pos >= bytes.len() || bytes[close_pos] != b')' {
-        return None;
-    }
-
-    let mut depth = 1i32;
-    let mut pos = close_pos;
-
-    while pos > 0 {
-        pos -= 1;
-        match bytes[pos] {
-            b')' => depth += 1,
-            b'(' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(pos);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
-/// Find inline `/** @throws ExceptionType */` annotations in a block of code.
-///
-/// These are single-line docblock comments that developers can place
-/// inside a try block to hint at exceptions thrown by code that doesn't
-/// have `@throws` annotations itself.
-fn find_inline_throws_annotations(body: &str) -> Vec<String> {
-    let mut results = Vec::new();
-
-    // Scan for `/** ... @throws ... */` patterns
-    let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
-
-    while pos + 6 < len {
-        // Look for `/**`
-        if bytes[pos] == b'/' && pos + 2 < len && bytes[pos + 1] == b'*' && bytes[pos + 2] == b'*' {
-            let doc_start = pos;
-            pos += 3;
-
-            // Find the closing `*/`
-            let mut doc_end = None;
-            while pos + 1 < len {
-                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
-                    doc_end = Some(pos + 2);
-                    break;
-                }
-                pos += 1;
-            }
-
-            if let Some(end) = doc_end {
-                let docblock = &body[doc_start..end];
-                // Look for @throws in this docblock
-                for line in docblock.lines() {
-                    let trimmed = line
-                        .trim()
-                        .trim_start_matches('/')
-                        .trim_start_matches('*')
-                        .trim();
-                    if let Some(rest) = trimmed.strip_prefix("@throws") {
-                        let rest = rest.trim();
-                        if let Some(type_name) = rest.split_whitespace().next() {
-                            let clean = type_name
-                                .trim_start_matches('\\')
-                                .trim_end_matches('*')
-                                .trim_end_matches('/');
-                            if !clean.is_empty() && !clean.starts_with('$') {
-                                results.push(clean.to_string());
-                            }
-                        }
-                    }
-                }
-                pos = end;
-                continue;
-            }
-        }
-
-        pos += 1;
-    }
-
-    results
-}
-
-/// Find `@throws` annotations propagated from method calls in a code block.
-///
-/// Looks for `$this->method(…)`, `self::method(…)`, `static::method(…)`
-/// calls and reads their docblocks from the file content.
-fn find_propagated_throws_in_block(body: &str, file_content: &str) -> Vec<String> {
-    let mut results = Vec::new();
-    let mut seen_methods = std::collections::HashSet::new();
-
-    let patterns: &[&str] = &["$this->", "self::", "static::"];
-
-    let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
-
-    while pos < len {
-        // Skip strings
-        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
-            let quote = bytes[pos];
-            pos += 1;
-            while pos < len {
-                if bytes[pos] == b'\\' {
-                    pos += 1;
-                } else if bytes[pos] == quote {
-                    break;
-                }
-                pos += 1;
-            }
-            pos += 1;
-            continue;
-        }
-        // Skip comments
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
-            while pos < len && bytes[pos] != b'\n' {
-                pos += 1;
-            }
-            continue;
-        }
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
-            pos += 2;
-            while pos + 1 < len {
-                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
-                    pos += 2;
-                    break;
-                }
-                pos += 1;
-            }
-            continue;
-        }
-
-        for pat in patterns {
-            if pos + pat.len() <= len && &body[pos..pos + pat.len()] == *pat {
-                let before_ok = if *pat == "$this->" {
-                    true
-                } else {
-                    pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric() && bytes[pos - 1] != b'_'
-                };
-                if !before_ok {
-                    break;
-                }
-
-                let after_pat = &body[pos + pat.len()..];
-                let name_end = after_pat
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
-                    .unwrap_or(after_pat.len());
-                let method_name = &after_pat[..name_end];
-
-                let after_name = after_pat[name_end..].trim_start();
-                if !method_name.is_empty()
-                    && after_name.starts_with('(')
-                    && seen_methods.insert(method_name.to_string())
-                {
-                    let throws = find_method_throws_tags_local(file_content, method_name);
-                    results.extend(throws);
-                }
-                break;
-            }
-        }
-
-        pos += 1;
-    }
-
-    results
-}
-
-/// Find `throw $this->method()` / `throw self::method()` return types
-/// in a code block.
-fn find_throw_expression_types_in_block(body: &str, file_content: &str) -> Vec<String> {
-    let mut results = Vec::new();
-
-    let patterns: &[&str] = &["$this->", "self::", "static::"];
-
-    let bytes = body.as_bytes();
-    let len = bytes.len();
-    let mut pos = 0;
-
-    while pos < len {
-        // Skip strings
-        if bytes[pos] == b'\'' || bytes[pos] == b'"' {
-            let quote = bytes[pos];
-            pos += 1;
-            while pos < len {
-                if bytes[pos] == b'\\' {
-                    pos += 1;
-                } else if bytes[pos] == quote {
-                    break;
-                }
-                pos += 1;
-            }
-            pos += 1;
-            continue;
-        }
-        // Skip comments
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'/' {
-            while pos < len && bytes[pos] != b'\n' {
-                pos += 1;
-            }
-            continue;
-        }
-        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
-            pos += 2;
-            while pos + 1 < len {
-                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
-                    pos += 2;
-                    break;
-                }
-                pos += 1;
-            }
-            continue;
-        }
-
-        // Look for `throw` keyword
-        if pos + 5 <= len && &body[pos..pos + 5] == "throw" {
-            let before_ok = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
-            let after_ok = pos + 5 >= len
-                || (!bytes[pos + 5].is_ascii_alphanumeric() && bytes[pos + 5] != b'_');
-            if before_ok && after_ok {
-                let after_throw = body[pos + 5..].trim_start();
-                if !after_throw.starts_with("new ")
-                    && !after_throw.starts_with("new\t")
-                    && !after_throw.starts_with("new\n")
-                {
-                    for pat in patterns {
-                        if let Some(rest) = after_throw.strip_prefix(pat) {
-                            let name_end = rest
-                                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                                .unwrap_or(rest.len());
-                            let method_name = &rest[..name_end];
-                            if !method_name.is_empty()
-                                && let Some(ret_type) =
-                                    find_method_return_type_local(file_content, method_name)
-                            {
-                                results.push(ret_type);
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        pos += 1;
-    }
-
-    results
-}
-
-/// Skip PHP modifier keywords (visibility, static, abstract, final, readonly)
-/// when walking backward from the `function` keyword to find a docblock.
-///
-/// Given text like `/** @throws X */\n    private static`, this strips
-/// `static` and `private` to yield `/** @throws X */` so the caller can
-/// check for a trailing `*/`.
-fn skip_modifiers_backward(text: &str) -> &str {
-    const MODIFIERS: &[&str] = &[
-        "private",
-        "protected",
-        "public",
-        "static",
-        "abstract",
-        "final",
-        "readonly",
-    ];
-
-    let mut s = text.trim_end();
-    loop {
-        let mut found = false;
-        for modifier in MODIFIERS {
-            if s.ends_with(modifier) {
-                let start = s.len() - modifier.len();
-                // Verify word boundary before the modifier
-                if start == 0
-                    || (!s.as_bytes()[start - 1].is_ascii_alphanumeric()
-                        && s.as_bytes()[start - 1] != b'_')
-                {
-                    s = s[..start].trim_end();
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if !found {
-            break;
-        }
-    }
-    s
-}
-
-/// Find `@throws` tags in a method's docblock by scanning the file.
-///
-/// This is a local copy of `phpdoc::find_method_throws_tags` to avoid
-/// making that function public.
-fn find_method_throws_tags_local(file_content: &str, method_name: &str) -> Vec<String> {
-    let mut throws = Vec::new();
-    let search = format!("function {}", method_name);
-
-    let mut search_start = 0;
-    while let Some(func_pos) = file_content[search_start..].find(&search) {
-        let abs_pos = search_start + func_pos;
-        search_start = abs_pos + search.len();
-
-        // Verify word boundary after
-        let after_pos = abs_pos + search.len();
-        if after_pos < file_content.len() {
-            let next_byte = file_content.as_bytes()[after_pos];
-            if next_byte.is_ascii_alphanumeric() || next_byte == b'_' {
-                continue;
-            }
-        }
-
-        // Look backward for a docblock, skipping visibility/modifier keywords
-        // like `private`, `public`, `static`, etc.
-        let before = skip_modifiers_backward(&file_content[..abs_pos]);
-        if before.ends_with("*/")
-            && let Some(doc_start) = before.rfind("/**")
-        {
-            let docblock = &before[doc_start..];
-            for line in docblock.lines() {
-                let trimmed = line
-                    .trim()
-                    .trim_start_matches('/')
-                    .trim_start_matches('*')
-                    .trim();
-                if let Some(rest) = trimmed.strip_prefix("@throws") {
-                    let rest = rest.trim();
-                    if let Some(type_str) = rest.split_whitespace().next() {
-                        let clean = type_str.trim_start_matches('\\');
-                        let short = clean.rsplit('\\').next().unwrap_or(clean);
-                        if !short.is_empty() {
-                            throws.push(short.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        break;
-    }
-
-    throws
-}
-
-/// Find the return type of a method by scanning the file content.
-///
-/// Local copy of `phpdoc::find_method_return_type`.
-fn find_method_return_type_local(file_content: &str, method_name: &str) -> Option<String> {
-    let search = format!("function {}", method_name);
-
-    let mut search_start = 0;
-    while let Some(func_pos) = file_content[search_start..].find(&search) {
-        let abs_pos = search_start + func_pos;
-        search_start = abs_pos + search.len();
-
-        let after_pos = abs_pos + search.len();
-        if after_pos < file_content.len() {
-            let next_byte = file_content.as_bytes()[after_pos];
-            if next_byte.is_ascii_alphanumeric() || next_byte == b'_' {
-                continue;
-            }
-        }
-
-        // Check the native return type
-        let after = &file_content[after_pos..];
-        if let Some(paren_start) = after.find('(')
-            && let Some(close_offset) = find_matching_brace_forward(after, paren_start, b'(', b')')
-        {
-            let after_close = after[close_offset + 1..].trim_start();
-            if let Some(rest) = after_close.strip_prefix(':') {
-                let rest = rest.trim_start();
-                let type_end = rest.find(['{', ';']).unwrap_or(rest.len());
-                let type_str = rest[..type_end].trim().trim_start_matches('?');
-                if !type_str.is_empty() {
-                    let short = type_str
-                        .trim_start_matches('\\')
-                        .rsplit('\\')
-                        .next()
-                        .unwrap_or(type_str);
-                    return Some(short.to_string());
-                }
-            }
-        }
-
-        // Check docblock @return, skipping visibility/modifier keywords
-        let before = skip_modifiers_backward(&file_content[..abs_pos]);
-        if before.ends_with("*/")
-            && let Some(doc_start) = before.rfind("/**")
-        {
-            let docblock = &before[doc_start..];
-            for line in docblock.lines() {
-                let trimmed = line
-                    .trim()
-                    .trim_start_matches('/')
-                    .trim_start_matches('*')
-                    .trim();
-                if let Some(rest) = trimmed.strip_prefix("@return") {
-                    let rest = rest.trim();
-                    if let Some(type_str) = rest.split_whitespace().next() {
-                        let clean = type_str.trim_start_matches('\\').trim_start_matches('?');
-                        let short = clean.rsplit('\\').next().unwrap_or(clean);
-                        if !short.is_empty() {
-                            return Some(short.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        break;
-    }
-
-    None
-}
-
-/// Simple forward parenthesis/brace matching.
-fn find_matching_brace_forward(text: &str, open_pos: usize, open: u8, close: u8) -> Option<usize> {
-    let bytes = text.as_bytes();
-    if open_pos >= bytes.len() || bytes[open_pos] != open {
-        return None;
-    }
-
-    let mut depth = 1i32;
-    let mut pos = open_pos + 1;
-
-    while pos < bytes.len() && depth > 0 {
-        match bytes[pos] {
-            b if b == open => depth += 1,
-            b if b == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(pos);
-                }
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[pos];
-                pos += 1;
-                while pos < bytes.len() {
-                    if bytes[pos] == b'\\' {
-                        pos += 1;
-                    } else if bytes[pos] == quote {
-                        break;
-                    }
-                    pos += 1;
-                }
-            }
-            _ => {}
-        }
-        pos += 1;
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::completion::throws_analysis;
 
     #[test]
-    fn test_find_method_throws_tags_local_with_private() {
+    fn test_find_method_throws_tags_with_private() {
         let content = concat!(
             "<?php\n",
             "class Foo {\n",
@@ -862,7 +363,7 @@ mod tests {
             "    private function riskyOperation(): void {}\n",
             "}\n",
         );
-        let result = find_method_throws_tags_local(content, "riskyOperation");
+        let result = throws_analysis::find_method_throws_tags(content, "riskyOperation");
         assert_eq!(
             result,
             vec!["ValidationException"],
@@ -871,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_method_throws_tags_local_with_protected_static() {
+    fn test_find_method_throws_tags_with_protected_static() {
         let content = concat!(
             "<?php\n",
             "class Foo {\n",
@@ -879,7 +380,7 @@ mod tests {
             "    protected static function dangerousCall(): void {}\n",
             "}\n",
         );
-        let result = find_method_throws_tags_local(content, "dangerousCall");
+        let result = throws_analysis::find_method_throws_tags(content, "dangerousCall");
         assert_eq!(
             result,
             vec!["RuntimeException"],
@@ -888,13 +389,13 @@ mod tests {
     }
 
     #[test]
-    fn test_find_method_throws_tags_local_without_modifier() {
+    fn test_find_method_throws_tags_without_modifier() {
         let content = concat!(
             "<?php\n",
             "/** @throws LogicException */\n",
             "function standalone(): void {}\n",
         );
-        let result = find_method_throws_tags_local(content, "standalone");
+        let result = throws_analysis::find_method_throws_tags(content, "standalone");
         assert_eq!(
             result,
             vec!["LogicException"],
@@ -903,26 +404,7 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_modifiers_backward() {
-        assert_eq!(
-            skip_modifiers_backward("/** @throws X */\n    private"),
-            "/** @throws X */"
-        );
-        assert_eq!(
-            skip_modifiers_backward("/** @throws X */\n    private static"),
-            "/** @throws X */"
-        );
-        assert_eq!(
-            skip_modifiers_backward("/** @return Foo */\n    public final"),
-            "/** @return Foo */"
-        );
-        assert_eq!(skip_modifiers_backward("/** docs */"), "/** docs */");
-        // Should not strip partial word matches
-        assert_eq!(skip_modifiers_backward("myprivate"), "myprivate");
-    }
-
-    #[test]
-    fn test_propagated_throws_with_visibility() {
+    fn test_propagated_throws_with_visibility_in_catch() {
         // Full file content — cursor will be inside catch()
         //                                                    v cursor (line 5, char 17)
         // Line 0: <?php
@@ -967,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn test_propagated_throws_with_protected_static() {
+    fn test_propagated_throws_with_protected_static_in_catch() {
         let full_content = concat!(
             "<?php\n",
             "class Bar {\n",
@@ -998,14 +480,14 @@ mod tests {
     }
 
     #[test]
-    fn test_find_inline_throws_annotations() {
+    fn test_find_inline_throws_annotations_in_catch() {
         let body = r#"
             /** @throws ModelNotFoundException */
             $model = SomeService::find($id);
             /** @throws \App\Exceptions\AuthException */
             $auth = doSomething();
         "#;
-        let result = find_inline_throws_annotations(body);
+        let result = throws_analysis::find_inline_throws_annotations(body);
         // Raw names are returned; short-name extraction happens in detect_catch_context
         assert_eq!(
             result,
@@ -1014,14 +496,14 @@ mod tests {
     }
 
     #[test]
-    fn test_find_inline_throws_multiline_docblock() {
+    fn test_find_inline_throws_multiline_docblock_in_catch() {
         let body = r#"
             /**
              * @throws RuntimeException
              */
             doStuff();
         "#;
-        let result = find_inline_throws_annotations(body);
+        let result = throws_analysis::find_inline_throws_annotations(body);
         assert_eq!(result, vec!["RuntimeException"]);
     }
 
