@@ -238,6 +238,23 @@ impl Backend {
                 .map(|t| Self::resolve_name(t, use_map, namespace))
                 .collect();
 
+            // Resolve trait names in `insteadof` precedence adaptations
+            for prec in &mut class.trait_precedences {
+                prec.trait_name = Self::resolve_name(&prec.trait_name, use_map, namespace);
+                prec.insteadof = prec
+                    .insteadof
+                    .iter()
+                    .map(|t| Self::resolve_name(t, use_map, namespace))
+                    .collect();
+            }
+
+            // Resolve trait names in `as` alias adaptations
+            for alias in &mut class.trait_aliases {
+                if let Some(ref t) = alias.trait_name {
+                    alias.trait_name = Some(Self::resolve_name(t, use_map, namespace));
+                }
+            }
+
             // Resolve mixin names to fully-qualified names
             class.mixins = class
                 .mixins

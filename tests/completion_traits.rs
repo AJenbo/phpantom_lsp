@@ -1822,3 +1822,1004 @@ async fn test_completion_trait_method_with_docblock_return_type() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Trait `insteadof` conflict resolution ──────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_trait_insteadof_basic() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_insteadof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait TraitA {\n",
+        "    public function hello(): string { return 'A'; }\n",
+        "    public function shared(): string { return 'A'; }\n",
+        "}\n",
+        "trait TraitB {\n",
+        "    public function world(): string { return 'B'; }\n",
+        "    public function shared(): string { return 'B'; }\n",
+        "}\n",
+        "class MyClass {\n",
+        "    use TraitA, TraitB {\n",
+        "        TraitA::shared insteadof TraitB;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 14,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"hello"),
+                "Should include TraitA::hello, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"world"),
+                "Should include TraitB::world, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"shared"),
+                "Should include 'shared' (from TraitA via insteadof), got: {:?}",
+                method_names
+            );
+            // `shared` should appear exactly once (TraitB's version excluded)
+            let shared_count = method_names.iter().filter(|&&n| n == "shared").count();
+            assert_eq!(
+                shared_count, 1,
+                "Should have exactly one 'shared' method, got: {}",
+                shared_count
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_trait_insteadof_multiple_excluded() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_insteadof_multi.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait TraitA {\n",
+        "    public function doWork(): string { return 'A'; }\n",
+        "}\n",
+        "trait TraitB {\n",
+        "    public function doWork(): string { return 'B'; }\n",
+        "}\n",
+        "trait TraitC {\n",
+        "    public function doWork(): string { return 'C'; }\n",
+        "}\n",
+        "class Worker {\n",
+        "    use TraitA, TraitB, TraitC {\n",
+        "        TraitA::doWork insteadof TraitB, TraitC;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"doWork"),
+                "Should include 'doWork' from TraitA, got: {:?}",
+                method_names
+            );
+            let count = method_names.iter().filter(|&&n| n == "doWork").count();
+            assert_eq!(
+                count, 1,
+                "Should have exactly one 'doWork' (B and C excluded), got: {}",
+                count
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Trait `as` alias ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_trait_as_alias_basic() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_as_alias.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait TraitA {\n",
+        "    public function hello(): string { return 'A'; }\n",
+        "    public function shared(): string { return 'A'; }\n",
+        "}\n",
+        "trait TraitB {\n",
+        "    public function world(): string { return 'B'; }\n",
+        "    public function shared(): string { return 'B'; }\n",
+        "}\n",
+        "class MyClass {\n",
+        "    use TraitA, TraitB {\n",
+        "        TraitA::shared insteadof TraitB;\n",
+        "        TraitB::shared as sharedFromB;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"hello"),
+                "Should include TraitA::hello, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"world"),
+                "Should include TraitB::world, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"shared"),
+                "Should include 'shared' (from TraitA), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"sharedFromB"),
+                "Should include alias 'sharedFromB' (from TraitB), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_trait_as_visibility_only() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_as_visibility.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Greeter {\n",
+        "    public function greet(): string { return 'hi'; }\n",
+        "}\n",
+        "class MyClass {\n",
+        "    use Greeter {\n",
+        "        greet as protected;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            // Method should still be present (visible from within the class)
+            assert!(
+                method_names.contains(&"greet"),
+                "Should include 'greet' with changed visibility, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_completion_trait_as_alias_with_visibility() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_as_vis_alias.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Logger {\n",
+        "    public function log(): void {}\n",
+        "}\n",
+        "class Service {\n",
+        "    use Logger {\n",
+        "        Logger::log as private privateLog;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"log"),
+                "Should include original 'log' method, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"privateLog"),
+                "Should include alias 'privateLog', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Combined insteadof + as ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_trait_insteadof_with_as_alias() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_combined.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Talker {\n",
+        "    public function smallTalk(): string { return 'talker'; }\n",
+        "    public function talk(): string { return 'talker'; }\n",
+        "}\n",
+        "trait Greeter {\n",
+        "    public function greet(): string { return 'greeter'; }\n",
+        "    public function talk(): string { return 'greeter'; }\n",
+        "}\n",
+        "class Person {\n",
+        "    use Talker, Greeter {\n",
+        "        Talker::talk insteadof Greeter;\n",
+        "        Greeter::talk as greeterTalk;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"smallTalk"),
+                "Should include Talker::smallTalk, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"greet"),
+                "Should include Greeter::greet, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"talk"),
+                "Should include 'talk' (from Talker via insteadof), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"greeterTalk"),
+                "Should include alias 'greeterTalk' (from Greeter), got: {:?}",
+                method_names
+            );
+            let talk_count = method_names.iter().filter(|&&n| n == "talk").count();
+            assert_eq!(
+                talk_count, 1,
+                "Should have exactly one 'talk', got: {}",
+                talk_count
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Cross-file insteadof / as ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_trait_insteadof_cross_file_psr4() {
+    let composer_json = r#"{
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        }
+    }"#;
+
+    let trait_a_php = concat!(
+        "<?php\n",
+        "namespace App\\Traits;\n",
+        "trait TraitA {\n",
+        "    public function onlyA(): string { return 'A'; }\n",
+        "    public function conflict(): string { return 'A'; }\n",
+        "}\n",
+    );
+
+    let trait_b_php = concat!(
+        "<?php\n",
+        "namespace App\\Traits;\n",
+        "trait TraitB {\n",
+        "    public function onlyB(): string { return 'B'; }\n",
+        "    public function conflict(): string { return 'B'; }\n",
+        "}\n",
+    );
+
+    let class_php = concat!(
+        "<?php\n",
+        "namespace App\\Models;\n",
+        "use App\\Traits\\TraitA;\n",
+        "use App\\Traits\\TraitB;\n",
+        "class Widget {\n",
+        "    use TraitA, TraitB {\n",
+        "        TraitA::conflict insteadof TraitB;\n",
+        "        TraitB::conflict as conflictFromB;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer_json,
+        &[
+            ("src/Traits/TraitA.php", trait_a_php),
+            ("src/Traits/TraitB.php", trait_b_php),
+            ("src/Models/Widget.php", class_php),
+        ],
+    );
+
+    let uri = Url::parse("file:///test_cross_insteadof.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: class_php.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"onlyA"),
+                "Should include TraitA::onlyA, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"onlyB"),
+                "Should include TraitB::onlyB, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"conflict"),
+                "Should include 'conflict' (from TraitA), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"conflictFromB"),
+                "Should include alias 'conflictFromB' (from TraitB), got: {:?}",
+                method_names
+            );
+            let conflict_count = method_names.iter().filter(|&&n| n == "conflict").count();
+            assert_eq!(
+                conflict_count, 1,
+                "Should have exactly one 'conflict', got: {}",
+                conflict_count
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Class own method overrides trait insteadof ─────────────────────────────
+
+#[tokio::test]
+async fn test_completion_class_own_method_wins_over_insteadof() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_own_wins.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait TraitA {\n",
+        "    public function doIt(): string { return 'A'; }\n",
+        "}\n",
+        "trait TraitB {\n",
+        "    public function doIt(): string { return 'B'; }\n",
+        "}\n",
+        "class MyClass {\n",
+        "    use TraitA, TraitB {\n",
+        "        TraitA::doIt insteadof TraitB;\n",
+        "    }\n",
+        "    public function doIt(): int { return 42; }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"doIt"),
+                "Should include 'doIt', got: {:?}",
+                method_names
+            );
+            let count = method_names.iter().filter(|&&n| n == "doIt").count();
+            assert_eq!(
+                count, 1,
+                "Class own method should win, exactly one 'doIt', got: {}",
+                count
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Alias preserves return type ────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_completion_trait_alias_preserves_return_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_alias_return.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "trait Finder {\n",
+        "    public function find(): User { return new User(); }\n",
+        "}\n",
+        "trait Loader {\n",
+        "    public function find(): User { return new User(); }\n",
+        "}\n",
+        "class Repository {\n",
+        "    use Finder, Loader {\n",
+        "        Finder::find insteadof Loader;\n",
+        "        Loader::find as loadFind;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->loadFind()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 28,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Alias return type should chain — 'loadFind()' returns User, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Variable typed as class with trait adaptations ─────────────────────────
+
+#[tokio::test]
+async fn test_completion_variable_of_class_with_trait_insteadof() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_var_insteadof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Encoder {\n",
+        "    public function encode(): string { return ''; }\n",
+        "    public function process(): string { return 'encoder'; }\n",
+        "}\n",
+        "trait Decoder {\n",
+        "    public function decode(): string { return ''; }\n",
+        "    public function process(): string { return 'decoder'; }\n",
+        "}\n",
+        "class Codec {\n",
+        "    use Encoder, Decoder {\n",
+        "        Encoder::process insteadof Decoder;\n",
+        "        Decoder::process as decoderProcess;\n",
+        "    }\n",
+        "}\n",
+        "function test() {\n",
+        "    $codec = new Codec();\n",
+        "    $codec->\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"encode"),
+                "Should include 'encode', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"decode"),
+                "Should include 'decode', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"process"),
+                "Should include 'process' (from Encoder), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"decoderProcess"),
+                "Should include alias 'decoderProcess', got: {:?}",
+                method_names
+            );
+            let process_count = method_names.iter().filter(|&&n| n == "process").count();
+            assert_eq!(
+                process_count, 1,
+                "Should have exactly one 'process', got: {}",
+                process_count
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Parser extraction ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_parser_extracts_trait_adaptations() {
+    let backend = create_test_backend();
+
+    let text = concat!(
+        "<?php\n",
+        "trait A {\n",
+        "    public function foo(): void {}\n",
+        "}\n",
+        "trait B {\n",
+        "    public function foo(): void {}\n",
+        "}\n",
+        "class C {\n",
+        "    use A, B {\n",
+        "        A::foo insteadof B;\n",
+        "        B::foo as bFoo;\n",
+        "        A::foo as protected;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(text);
+    let class_c = classes
+        .iter()
+        .find(|c| c.name == "C")
+        .expect("Should find class C");
+
+    // Check precedences
+    assert_eq!(
+        class_c.trait_precedences.len(),
+        1,
+        "Should have 1 precedence"
+    );
+    assert_eq!(class_c.trait_precedences[0].trait_name, "A");
+    assert_eq!(class_c.trait_precedences[0].method_name, "foo");
+    assert_eq!(class_c.trait_precedences[0].insteadof, vec!["B"]);
+
+    // Check aliases
+    assert_eq!(class_c.trait_aliases.len(), 2, "Should have 2 aliases");
+
+    // B::foo as bFoo
+    let alias_b = class_c
+        .trait_aliases
+        .iter()
+        .find(|a| a.alias.as_deref() == Some("bFoo"))
+        .expect("Should have bFoo alias");
+    assert_eq!(alias_b.trait_name.as_deref(), Some("B"));
+    assert_eq!(alias_b.method_name, "foo");
+    assert!(alias_b.visibility.is_none());
+
+    // A::foo as protected (visibility-only)
+    let alias_a = class_c
+        .trait_aliases
+        .iter()
+        .find(|a| a.alias.is_none())
+        .expect("Should have visibility-only alias");
+    assert_eq!(alias_a.trait_name.as_deref(), Some("A"));
+    assert_eq!(alias_a.method_name, "foo");
+    assert_eq!(
+        alias_a.visibility,
+        Some(phpantom_lsp::types::Visibility::Protected)
+    );
+}
+
+// ─── Unqualified `as` reference (no trait name prefix) ──────────────────────
+
+#[tokio::test]
+async fn test_completion_trait_as_unqualified_reference() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_unqualified_as.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Greeter {\n",
+        "    public function greet(): string { return 'hi'; }\n",
+        "}\n",
+        "class MyClass {\n",
+        "    use Greeter {\n",
+        "        greet as helloWorld;\n",
+        "    }\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some());
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"greet"),
+                "Should still include original 'greet', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"helloWorld"),
+                "Should include alias 'helloWorld', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

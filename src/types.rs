@@ -8,6 +8,19 @@
 
 use std::collections::HashMap;
 
+/// The return type of [`Backend::extract_class_like_members`].
+///
+/// Contains `(methods, properties, constants, used_traits, trait_precedences, trait_aliases)`
+/// extracted from the members of a class-like declaration.
+pub type ExtractedMembers = (
+    Vec<MethodInfo>,
+    Vec<PropertyInfo>,
+    Vec<ConstantInfo>,
+    Vec<String>,
+    Vec<TraitPrecedence>,
+    Vec<TraitAlias>,
+);
+
 // ─── Array Shape Types ──────────────────────────────────────────────────────
 
 /// A single entry in a PHPStan/Psalm array shape type.
@@ -275,6 +288,58 @@ pub enum ParamCondition {
     IsType(String),
 }
 
+/// A trait `insteadof` adaptation.
+///
+/// When a class uses multiple traits that define the same method, PHP
+/// requires an explicit `insteadof` declaration to resolve the conflict.
+///
+/// # Example
+///
+/// ```php
+/// use TraitA, TraitB {
+///     TraitA::method insteadof TraitB;
+/// }
+/// ```
+///
+/// This means TraitA's version of `method` wins and TraitB's is excluded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitPrecedence {
+    /// The trait that provides the winning method (e.g. `"TraitA"`).
+    pub trait_name: String,
+    /// The method name being resolved (e.g. `"method"`).
+    pub method_name: String,
+    /// The traits whose versions of the method are excluded
+    /// (e.g. `["TraitB"]`).
+    pub insteadof: Vec<String>,
+}
+
+/// A trait `as` alias adaptation.
+///
+/// Creates an alias for a trait method, optionally changing its visibility.
+///
+/// # Examples
+///
+/// ```php
+/// use TraitA, TraitB {
+///     TraitB::method as traitBMethod;          // rename
+///     TraitA::method as protected;             // visibility-only change
+///     TraitB::method as private altMethod;     // rename + visibility change
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitAlias {
+    /// The trait that provides the method (e.g. `Some("TraitB")`).
+    /// `None` when the method reference is unqualified (e.g. `method as …`).
+    pub trait_name: Option<String>,
+    /// The original method name (e.g. `"method"`).
+    pub method_name: String,
+    /// The alias name, if any (e.g. `Some("traitBMethod")`).
+    /// `None` when only the visibility is changed (e.g. `method as protected`).
+    pub alias: Option<String>,
+    /// Optional visibility override (e.g. `Some(Visibility::Protected)`).
+    pub visibility: Option<Visibility>,
+}
+
 /// The syntactic kind of a class-like declaration.
 ///
 /// PHP has four class-like constructs that share the same `ClassInfo`
@@ -376,6 +441,19 @@ pub struct ClassInfo {
     /// These are consulted during type resolution so that a method returning
     /// `UserData` resolves to the underlying `array{name: string, email: string}`.
     pub type_aliases: HashMap<String, String>,
+    /// Trait `insteadof` precedence adaptations.
+    ///
+    /// When a class uses multiple traits with conflicting method names,
+    /// `insteadof` declarations specify which trait's version wins.
+    /// For example, `TraitA::method insteadof TraitB` means TraitA's
+    /// `method` is used and TraitB's is excluded.
+    pub trait_precedences: Vec<TraitPrecedence>,
+    /// Trait `as` alias adaptations.
+    ///
+    /// Creates aliases for trait methods, optionally with visibility changes.
+    /// For example, `TraitB::method as traitBMethod` adds a new method
+    /// `traitBMethod` that is a copy of TraitB's `method`.
+    pub trait_aliases: Vec<TraitAlias>,
 }
 
 // ─── ClassInfo helpers ──────────────────────────────────────────────────────

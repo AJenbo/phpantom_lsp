@@ -123,13 +123,47 @@ impl Backend {
         // 4. Try each candidate class and pick the first one where the
         //    member actually exists (directly or via inheritance).
         for target_class in &candidates {
+            // Check if the member name is a trait `as` alias on this class.
+            // If so, resolve to the original method name and (optionally) the
+            // source trait so we jump to the actual method definition rather
+            // than failing to find an alias that only exists after inheritance
+            // resolution.
+            let (effective_name, alias_trait) =
+                Self::resolve_trait_alias(target_class, member_name);
+
+            // If we know the exact source trait from the alias, go directly
+            // to that trait's method definition.
+            if let Some(ref trait_name) = alias_trait {
+                if let Some(trait_info) = class_loader(trait_name) {
+                    if Self::classify_member(&trait_info, &effective_name, access_hint).is_some() {
+                        if let Some((class_uri, class_content)) =
+                            self.find_class_file_content(&trait_info.name, uri, content)
+                            && let Some(member_position) = Self::find_member_position(
+                                &class_content,
+                                &effective_name,
+                                MemberKind::Method,
+                            )
+                            && let Ok(parsed_uri) = Url::parse(&class_uri)
+                        {
+                            return Some(Location {
+                                uri: parsed_uri,
+                                range: Range {
+                                    start: member_position,
+                                    end: member_position,
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+
             let declaring_class =
-                Self::find_declaring_class(target_class, member_name, &class_loader)
+                Self::find_declaring_class(target_class, &effective_name, &class_loader)
                     .unwrap_or_else(|| target_class.clone());
 
             // Check that the member is actually present on the declaring class.
             let member_kind =
-                match Self::classify_member(&declaring_class, member_name, access_hint) {
+                match Self::classify_member(&declaring_class, &effective_name, access_hint) {
                     Some(k) => k,
                     None => continue, // member not on this candidate, try next
                 };
@@ -138,7 +172,7 @@ impl Backend {
             if let Some((class_uri, class_content)) =
                 self.find_class_file_content(&declaring_class.name, uri, content)
                 && let Some(member_position) =
-                    Self::find_member_position(&class_content, member_name, member_kind)
+                    Self::find_member_position(&class_content, &effective_name, member_kind)
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
             {
                 return Some(Location {
@@ -155,15 +189,45 @@ impl Backend {
         // and try the original (non-iterating) logic so we at least get
         // partial results when possible.
         let target_class = &candidates[0];
-        let declaring_class = Self::find_declaring_class(target_class, member_name, &class_loader)
-            .unwrap_or_else(|| target_class.clone());
 
-        let member_kind = Self::classify_member(&declaring_class, member_name, access_hint)?;
+        let (effective_name, alias_trait) =
+            Self::resolve_trait_alias(target_class, member_name);
+
+        // Direct trait lookup for aliased members in the fallback path.
+        if let Some(ref trait_name) = alias_trait {
+            if let Some(trait_info) = class_loader(trait_name) {
+                if let Some((class_uri, class_content)) =
+                    self.find_class_file_content(&trait_info.name, uri, content)
+                    && let Some(member_position) = Self::find_member_position(
+                        &class_content,
+                        &effective_name,
+                        MemberKind::Method,
+                    )
+                    && let Ok(parsed_uri) = Url::parse(&class_uri)
+                {
+                    return Some(Location {
+                        uri: parsed_uri,
+                        range: Range {
+                            start: member_position,
+                            end: member_position,
+                        },
+                    });
+                }
+            }
+        }
+
+        let declaring_class =
+            Self::find_declaring_class(target_class, &effective_name, &class_loader)
+                .unwrap_or_else(|| target_class.clone());
+
+        let member_kind =
+            Self::classify_member(&declaring_class, &effective_name, access_hint)?;
 
         let (class_uri, class_content) =
             self.find_class_file_content(&declaring_class.name, uri, content)?;
 
-        let member_position = Self::find_member_position(&class_content, member_name, member_kind)?;
+        let member_position =
+            Self::find_member_position(&class_content, &effective_name, member_kind)?;
 
         let parsed_uri = Url::parse(&class_uri).ok()?;
         Some(Location {
@@ -380,6 +444,23 @@ impl Backend {
     ///
     /// Returns `Some(ClassInfo)` of the declaring class, or `None` if the
     /// member cannot be found in any ancestor.
+    /// Resolve a trait `as` alias on a class.
+    ///
+    /// If `member_name` matches a trait alias declared on the class, returns
+    /// the original method name and (optionally) the source trait name.
+    /// Otherwise returns `member_name` unchanged with no trait hint.
+    fn resolve_trait_alias(class: &ClassInfo, member_name: &str) -> (String, Option<String>) {
+        for alias in &class.trait_aliases {
+            if alias.alias.as_deref() == Some(member_name) {
+                return (
+                    alias.method_name.clone(),
+                    alias.trait_name.clone(),
+                );
+            }
+        }
+        (member_name.to_string(), None)
+    }
+
     fn find_declaring_class(
         class: &ClassInfo,
         member_name: &str,

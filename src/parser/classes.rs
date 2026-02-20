@@ -1,3 +1,6 @@
+use mago_syntax::ast::class_like::trait_use::{
+    TraitUseAdaptation, TraitUseMethodReference, TraitUseSpecification,
+};
 /// Class, interface, trait, and enum extraction.
 ///
 /// Each class-like declaration is tagged with a [`ClassLikeKind`] so that
@@ -37,8 +40,14 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let (mut methods, mut properties, constants, used_traits) =
-                        Self::extract_class_like_members(class.members.iter(), doc_ctx);
+                    let (
+                        mut methods,
+                        mut properties,
+                        constants,
+                        used_traits,
+                        trait_precedences,
+                        trait_aliases,
+                    ) = Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
                     // Extract @property, @method, @mixin, @template, @extends,
                     // @implements, @deprecated, and @phpstan-type / @psalm-type
@@ -114,6 +123,8 @@ impl Backend {
                         implements_generics,
                         use_generics,
                         type_aliases,
+                        trait_precedences,
+                        trait_aliases,
                     });
                 }
                 Statement::Interface(iface) => {
@@ -126,8 +137,14 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    let (mut methods, mut properties, constants, used_traits) =
-                        Self::extract_class_like_members(iface.members.iter(), doc_ctx);
+                    let (
+                        mut methods,
+                        mut properties,
+                        constants,
+                        used_traits,
+                        trait_precedences,
+                        trait_aliases,
+                    ) = Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
                     // Extract @property, @method, @mixin, @template, @extends,
                     // @implements, @deprecated, and @phpstan-type / @psalm-type
@@ -198,13 +215,21 @@ impl Backend {
                         implements_generics,
                         use_generics,
                         type_aliases,
+                        trait_precedences,
+                        trait_aliases,
                     });
                 }
                 Statement::Trait(trait_def) => {
                     let trait_name = trait_def.name.value.to_string();
 
-                    let (mut methods, mut properties, constants, used_traits) =
-                        Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
+                    let (
+                        mut methods,
+                        mut properties,
+                        constants,
+                        used_traits,
+                        trait_precedences,
+                        trait_aliases,
+                    ) = Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
 
                     // Extract @property, @method, @mixin, @template, and
                     // @deprecated tags from the trait-level docblock.
@@ -268,12 +293,14 @@ impl Backend {
                         implements_generics: vec![],
                         use_generics: vec![],
                         type_aliases: std::collections::HashMap::new(),
+                        trait_precedences,
+                        trait_aliases,
                     });
                 }
                 Statement::Enum(enum_def) => {
                     let enum_name = enum_def.name.value.to_string();
 
-                    let (mut methods, mut properties, constants, mut used_traits) =
+                    let (mut methods, mut properties, constants, mut used_traits, _, _) =
                         Self::extract_class_like_members(enum_def.members.iter(), doc_ctx);
 
                     // Enums implicitly implement UnitEnum or BackedEnum.
@@ -350,6 +377,8 @@ impl Backend {
                         implements_generics: vec![],
                         use_generics: vec![],
                         type_aliases: std::collections::HashMap::new(),
+                        trait_precedences: vec![],
+                        trait_aliases: vec![],
                     });
                 }
                 Statement::Namespace(namespace) => {
@@ -376,16 +405,13 @@ impl Backend {
     pub(crate) fn extract_class_like_members<'a>(
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
         doc_ctx: Option<&DocblockCtx<'a>>,
-    ) -> (
-        Vec<MethodInfo>,
-        Vec<PropertyInfo>,
-        Vec<ConstantInfo>,
-        Vec<String>,
-    ) {
+    ) -> ExtractedMembers {
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
         let mut used_traits = Vec::new();
+        let mut trait_precedences = Vec::new();
+        let mut trait_aliases = Vec::new();
 
         for member in members {
             match member {
@@ -560,10 +586,72 @@ impl Backend {
                     for trait_name_ident in trait_use.trait_names.iter() {
                         used_traits.push(trait_name_ident.value().to_string());
                     }
+
+                    // Parse trait adaptation block (`{ ... }`) if present.
+                    // This handles `insteadof` (precedence) and `as` (alias)
+                    // declarations for resolving trait method conflicts.
+                    if let TraitUseSpecification::Concrete(spec) = &trait_use.specification {
+                        for adaptation in spec.adaptations.iter() {
+                            match adaptation {
+                                TraitUseAdaptation::Precedence(prec) => {
+                                    let trait_name =
+                                        prec.method_reference.trait_name.value().to_string();
+                                    let method_name =
+                                        prec.method_reference.method_name.value.to_string();
+                                    let insteadof: Vec<String> = prec
+                                        .trait_names
+                                        .iter()
+                                        .map(|id| id.value().to_string())
+                                        .collect();
+                                    trait_precedences.push(TraitPrecedence {
+                                        trait_name,
+                                        method_name,
+                                        insteadof,
+                                    });
+                                }
+                                TraitUseAdaptation::Alias(alias_adapt) => {
+                                    let (trait_name, method_name) =
+                                        match &alias_adapt.method_reference {
+                                            TraitUseMethodReference::Identifier(ident) => {
+                                                (None, ident.value.to_string())
+                                            }
+                                            TraitUseMethodReference::Absolute(abs) => (
+                                                Some(abs.trait_name.value().to_string()),
+                                                abs.method_name.value.to_string(),
+                                            ),
+                                        };
+                                    let alias =
+                                        alias_adapt.alias.as_ref().map(|a| a.value.to_string());
+                                    let visibility = alias_adapt.visibility.as_ref().map(|m| {
+                                        if m.is_private() {
+                                            Visibility::Private
+                                        } else if m.is_protected() {
+                                            Visibility::Protected
+                                        } else {
+                                            Visibility::Public
+                                        }
+                                    });
+                                    trait_aliases.push(TraitAlias {
+                                        trait_name,
+                                        method_name,
+                                        alias,
+                                        visibility,
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        (methods, properties, constants, used_traits)
+        (
+            methods,
+            properties,
+            constants,
+            used_traits,
+            trait_precedences,
+            trait_aliases,
+        )
     }
 }

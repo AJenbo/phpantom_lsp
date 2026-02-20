@@ -1127,6 +1127,35 @@ class ArrayFuncDemo
 }
 
 
+// ── Trait insteadof / as Conflict Resolution ────────────────────────────────
+
+/**
+ * Demonstrates trait conflict resolution with `insteadof` and `as`.
+ *
+ * When multiple traits define the same method, PHP requires explicit
+ * `insteadof` to pick a winner and `as` to create aliases.
+ */
+class TraitConflictDemo
+{
+    use JsonSerializer, XmlSerializer {
+        JsonSerializer::serialize insteadof XmlSerializer;
+        XmlSerializer::serialize as serializeXml;
+        JsonSerializer::serialize as private internalSerialize;
+    }
+
+    public function demo(): void
+    {
+        // Try: $this->  — offers serialize (from JsonSerializer), serializeXml (alias),
+        //                  internalSerialize (alias), toJson, toXml, and demo
+        $this->serialize();               // JsonSerializer wins via insteadof
+        $this->serializeXml();            // XmlSerializer::serialize aliased
+        $this->internalSerialize();       // JsonSerializer::serialize aliased as private
+        $this->toJson();                  // non-conflicting method from JsonSerializer
+        $this->toXml();                   // non-conflicting method from XmlSerializer
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
@@ -1152,6 +1181,16 @@ interface Loggable
 }
 
 // ─── Traits ─────────────────────────────────────────────────────────────────
+
+trait JsonSerializer {
+    public function serialize(): string { return '{}'; }
+    public function toJson(): string { return $this->serialize(); }
+}
+
+trait XmlSerializer {
+    public function serialize(): string { return '<xml/>'; }
+    public function toXml(): string { return $this->serialize(); }
+}
 
 trait HasTimestamps
 {

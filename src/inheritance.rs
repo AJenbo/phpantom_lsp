@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use crate::Backend;
 use crate::types::Visibility;
-use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
+use crate::types::{ClassInfo, MethodInfo, PropertyInfo, TraitAlias, TraitPrecedence};
 
 impl Backend {
     /// Resolve a class together with all inherited members from its parent
@@ -48,6 +48,8 @@ impl Backend {
             &mut merged,
             &class.used_traits,
             &class.use_generics,
+            &class.trait_precedences,
+            &class.trait_aliases,
             class_loader,
             0,
         );
@@ -96,6 +98,8 @@ impl Backend {
                 &mut merged,
                 &parent.used_traits,
                 &parent.use_generics,
+                &parent.trait_precedences,
+                &parent.trait_aliases,
                 class_loader,
                 0,
             );
@@ -303,6 +307,8 @@ impl Backend {
         merged: &mut ClassInfo,
         trait_names: &[String],
         use_generics: &[(String, Vec<String>)],
+        trait_precedences: &[TraitPrecedence],
+        trait_aliases: &[TraitAlias],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: u32,
     ) {
@@ -331,6 +337,8 @@ impl Backend {
                     merged,
                     &trait_info.used_traits,
                     &trait_info.use_generics,
+                    &trait_info.trait_precedences,
+                    &trait_info.trait_aliases,
                     class_loader,
                     depth + 1,
                 );
@@ -360,6 +368,8 @@ impl Backend {
                         merged,
                         &parent.used_traits,
                         &parent.use_generics,
+                        &parent.trait_precedences,
+                        &parent.trait_aliases,
                         class_loader,
                         parent_depth + 1,
                     );
@@ -403,11 +413,46 @@ impl Backend {
 
             // Merge trait methods — skip if already present.
             // Apply generic substitution if a `@use` mapping exists.
+            // Also skip methods excluded by `insteadof` declarations.
             for method in &trait_info.methods {
+                // Check if this method from this trait is excluded by an
+                // `insteadof` declaration.  For example, if the class has
+                // `TraitA::method insteadof TraitB`, then when merging
+                // TraitB's methods, `method` should be skipped.
+                let excluded = trait_precedences.iter().any(|p| {
+                    p.method_name == method.name
+                        && p.insteadof.iter().any(|excluded_trait| {
+                            excluded_trait == trait_name
+                                || short_name(excluded_trait) == short_name(trait_name)
+                        })
+                });
+                if excluded {
+                    continue;
+                }
+
                 if merged.methods.iter().any(|m| m.name == method.name) {
                     continue;
                 }
                 let mut method = method.clone();
+
+                // Apply visibility-only `as` changes (no alias name).
+                // For example, `TraitA::method as protected` changes the
+                // visibility of `method` without creating an alias.
+                for alias in trait_aliases {
+                    if alias.method_name == method.name
+                        && alias.alias.is_none()
+                        && let Some(vis) = alias.visibility
+                    {
+                        // Check trait name matches (if specified)
+                        let name_matches = alias.trait_name.as_ref().is_none_or(|t| {
+                            t == trait_name || short_name(t) == short_name(trait_name)
+                        });
+                        if name_matches {
+                            method.visibility = vis;
+                        }
+                    }
+                }
+
                 if !trait_subs.is_empty() {
                     apply_substitution_to_method(&mut method, &trait_subs);
                 }
@@ -432,6 +477,51 @@ impl Backend {
                     continue;
                 }
                 merged.constants.push(constant.clone());
+            }
+
+            // Apply `as` alias declarations that create new method names.
+            // For example, `TraitB::method as traitBMethod` creates a copy
+            // of `method` accessible as `traitBMethod`.
+            for alias in trait_aliases {
+                // Only process aliases that have a new name.
+                let alias_name = match &alias.alias {
+                    Some(name) => name,
+                    None => continue,
+                };
+
+                // Check trait name matches (if specified).
+                let name_matches = alias
+                    .trait_name
+                    .as_ref()
+                    .is_none_or(|t| t == trait_name || short_name(t) == short_name(trait_name));
+                if !name_matches {
+                    continue;
+                }
+
+                // Find the source method in this trait.
+                let source_method = trait_info
+                    .methods
+                    .iter()
+                    .find(|m| m.name == alias.method_name);
+                let source_method = match source_method {
+                    Some(m) => m,
+                    None => continue,
+                };
+
+                // Skip if an alias with this name already exists.
+                if merged.methods.iter().any(|m| m.name == *alias_name) {
+                    continue;
+                }
+
+                let mut aliased = source_method.clone();
+                aliased.name = alias_name.clone();
+                if let Some(vis) = alias.visibility {
+                    aliased.visibility = vis;
+                }
+                if !trait_subs.is_empty() {
+                    apply_substitution_to_method(&mut aliased, &trait_subs);
+                }
+                merged.methods.push(aliased);
             }
         }
     }
