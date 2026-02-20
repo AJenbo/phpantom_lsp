@@ -14,23 +14,25 @@ PHPantom focuses on completion and go-to-definition and aims to do them really w
 | Completion | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Auto-import | ✅ | 💰 | ✅ | ✅ | ✅ |
 | Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Go-to-implementation | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `@mixin` completion | ✅ | 💰 | ✅ | ✅ | ✅ |
-| `@phpstan-assert` narrowing | ✅ | ❌ | ✅ | ❌ | ⚠️ partial |
-| Conditional return types | ✅ | ❌ | ✅ | ❌ | ✅ |
-| Array shape inference | ✅ | ❌ | ✅ | ❌ | ✅ |
-| Object shape completion | ✅ | ❌ | ✅ | ❌ | ✅ |
-| `@phpstan-type` aliases | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Go-to-implementation | 🚧 | ✅ | ❌ | ✅ | ✅ |
+| `@mixin` completion | ✅ | 💰 | ✅ | ✅ | 🚧 |
+| `@phpstan-assert` narrowing | ✅ | ❌ | 🚧 | ❌ | 🚧 |
+| Conditional return types | ✅ | ❌ | ✅ | ❌ | 🚧 |
+| Array shape inference | ✅ | ❌ | ✅ | ❌ | 🚧 |
+| Object shape completion | ✅ | ❌ | ✅ | ❌ | 🚧 |
+| `@phpstan-type` aliases | ✅ | ❌ | 🚧 | ❌ | ❌ |
 | Hover | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Signature help | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Find references | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Diagnostics | ❌ | ✅ | ✅ | ⚠️ limited | ✅ |
+| Diagnostics | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Rename / refactoring | ❌ | 💰 | ✅ | ✅ | ✅ |
 | Time to ready | **10 ms** | 1 min 25 s | 3 min 17 s | 15 min 39 s | 19 min 38 s |
 | RAM usage | **7 MB** | 520 MB | 3.9 GB | 498 MB | 2.0 GB |
 | Disk cache | **0** | 45 MB | 0 | 4.1 GB | 551 MB |
 
 <sub>Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application).</sub>
+
+> **Want to verify?** Open [`example.php`](example.php) in your editor and trigger completion at the marked locations. It exercises every feature in the table, including edge cases where tools diverge.
 
 ## Context-Aware Intelligence
 

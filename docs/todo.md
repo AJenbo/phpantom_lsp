@@ -195,6 +195,41 @@ native hint is the only concrete type information available. This also
 applies to method return types that use bare template parameters without
 a concrete substitution available.
 
+### 23. Match-expression class-string not forwarded to conditional return types
+**Priority: Medium**
+
+When a variable is assigned a `::class` value through a `match` expression
+and then passed to a function whose return type depends on that argument
+(e.g. `@template T @param class-string<T> @return T`), the resolver cannot
+trace the class-string back through the match arms:
+
+```php
+$requestType = match ($typeName) {
+    'creditnotes' => GetCreditnotesRequest::class,
+    'orders'      => GetOrdersRequest::class,
+};
+$requestBody = app()->make($requestType);
+$requestBody->enabled();  // ← no completion
+```
+
+The resolver already handles direct `::class` arguments at the call site
+(e.g. `app()->make(GetCreditnotesRequest::class)`), but when the
+class-string is stored in an intermediate variable whose value comes from
+a match expression, the link is lost.
+
+Two pieces are needed:
+
+1. **Track class-string values from match arms.** When the RHS of an
+   assignment is a `match` expression and every arm returns a `Foo::class`
+   literal, record the set of possible class-string values on the
+   variable (e.g. `$requestType` holds
+   `GetCreditnotesRequest|GetOrdersRequest`).
+2. **Resolve class-string variables at call sites.** When a variable is
+   passed as an argument to a function with a `@template` + conditional
+   return type, look up the variable's class-string value(s) and use them
+   for template substitution, producing a union of the possible return
+   types.
+
 ---
 
 ## Go-to-Definition Gaps
