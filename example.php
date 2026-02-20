@@ -478,6 +478,44 @@ $fromClosure = $makeUser();
 $fromClosure->getEmail();                 // $result = $fn() resolves return type
 
 
+// ── Spread Operator Type Tracking ───────────────────────────────────────────
+// When array literals contain spread expressions (`...$var`), element types
+// are resolved from the spread variable's iterable annotation and merged.
+
+/** @var list<User> $users */
+$users = [];
+/** @var list<AdminUser> $admins */
+$admins = [];
+
+// Single spread — preserves element type:
+$allUsers = [...$users];
+$allUsers[0]->getEmail();                 // resolves User from list<User>
+
+// Multiple spreads — union of element types:
+$everyone = [...$users, ...$admins];
+$everyone[0]->getEmail();                 // resolves User|AdminUser
+
+// Works with array<K,V> and Type[] annotations too:
+/** @var array<int, User> $indexed */
+$indexed = [];
+$copy = [...$indexed];
+$copy[0]->getName();                      // resolves User from array<int, User>
+
+/** @var User[] $typed */
+$typed = [];
+$merged = [...$typed];
+$merged[0]->getEmail();                   // resolves User from User[]
+
+// Spread combined with push-style assignments:
+$mixed = [...$users];
+$mixed[] = new AdminUser('root', 'root@example.com');
+$mixed[0]->getName();                     // resolves User|AdminUser
+
+// Works with array() syntax too:
+$legacy = array(...$users, ...$admins);
+$legacy[0]->getEmail();                   // resolves User|AdminUser
+
+
 // ── Multi-line @return & Broken Docblock Recovery ───────────────────────────
 
 $collection = collect([]);

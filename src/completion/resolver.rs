@@ -431,6 +431,34 @@ impl Backend {
         // and push-style `$var[] = expr;` assignments.
         let base_entries = super::array_shape::parse_array_literal_entries(rhs_text);
 
+        // Extract spread element types from the array literal (e.g.
+        // `[...$users, ...$admins]` → resolve each spread variable's
+        // iterable element type via docblock annotation).
+        let spread_types = super::array_shape::extract_spread_expressions(rhs_text)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|expr| {
+                if !expr.starts_with('$') {
+                    return None;
+                }
+                // Try docblock annotation first (@var / @param).
+                let raw =
+                    crate::docblock::find_iterable_raw_type_in_source(content, cursor_offset, expr)
+                        .or_else(|| {
+                            // Fall back to resolving through assignment.
+                            Self::extract_raw_type_from_assignment_text(
+                                expr,
+                                content,
+                                cursor_offset,
+                                current_class,
+                                all_classes,
+                                class_loader,
+                            )
+                        })?;
+                crate::docblock::extract_iterable_element_type(&raw)
+            })
+            .collect::<Vec<_>>();
+
         let after_assign = rhs_start + semi_pos + 1; // past the `;`
         let incremental = super::array_shape::collect_incremental_key_assignments(
             base_var,
@@ -440,12 +468,16 @@ impl Backend {
         );
 
         // Scan for push-style `$var[] = expr;` assignments.
-        let push_types = super::array_shape::collect_push_assignments(
+        let mut push_types = super::array_shape::collect_push_assignments(
             base_var,
             content,
             after_assign,
             cursor_offset,
         );
+
+        // Merge spread element types into push types so they participate
+        // in the `list<…>` inference.
+        push_types.extend(spread_types);
 
         if base_entries.is_some() || !incremental.is_empty() || !push_types.is_empty() {
             let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();

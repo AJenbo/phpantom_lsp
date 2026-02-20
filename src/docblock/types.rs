@@ -486,6 +486,55 @@ pub fn extract_generic_value_type(raw_type: &str) -> Option<String> {
     Some(cleaned)
 }
 
+/// Extract the element (value) type from an iterable type annotation,
+/// including scalar element types.
+///
+/// Unlike [`extract_generic_value_type`], which skips scalar element types
+/// (because it is used for class-based completion), this function returns
+/// the raw element type string regardless of whether it is a class or a
+/// scalar.  This is needed for spread operator tracking where we merge
+/// element types into a union and the final `list<…>` type is resolved
+/// later.
+///
+/// # Supported patterns
+///
+/// - `User[]`                → `Some("User")`
+/// - `int[]`                 → `Some("int")`
+/// - `list<User>`            → `Some("User")`
+/// - `array<int, User>`      → `Some("User")`
+/// - `iterable<string>`      → `Some("string")`
+/// - `Collection<int, User>` → `Some("User")`
+/// - `?list<User>`           → `Some("User")`
+/// - `\list<User>`           → `Some("User")`
+/// - `string`                → `None` (not iterable)
+/// - `Closure(): User`       → `None` (not iterable)
+pub fn extract_iterable_element_type(raw_type: &str) -> Option<String> {
+    let s = raw_type.strip_prefix('\\').unwrap_or(raw_type);
+    let s = s.strip_prefix('?').unwrap_or(s);
+
+    // Handle `Type[]` shorthand → element type is everything before `[]`.
+    if let Some(base) = s.strip_suffix("[]") {
+        let trimmed = base.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+        return None;
+    }
+
+    // Handle `GenericType<…>` — extract the last generic parameter.
+    let angle_pos = s.find('<')?;
+    let inner = s.get(angle_pos + 1..)?.strip_suffix('>')?.trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    let last = split_last_generic_param(inner).trim();
+    if last.is_empty() {
+        return None;
+    }
+    Some(last.to_string())
+}
+
 /// Extract the key type from a generic iterable type annotation.
 ///
 /// Handles the most common PHPDoc generic iterable patterns:

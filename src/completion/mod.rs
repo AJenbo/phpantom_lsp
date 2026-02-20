@@ -22,7 +22,7 @@
 /// Class inheritance merging (traits, mixins, parent chain) lives in the
 /// top-level [`crate::inheritance`] module since it is shared infrastructure
 /// used by completion, definition, and future features (hover, references).
-pub(crate) mod array_shape;
+pub mod array_shape;
 pub mod builder;
 pub(crate) mod catch_completion;
 pub mod class_completion;

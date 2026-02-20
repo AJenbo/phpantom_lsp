@@ -581,13 +581,41 @@ impl Backend {
         // and push-style `$var[] = expr;` assignments.
         let base_entries = parse_array_literal_entries(rhs_text);
 
+        // Extract spread element types from the array literal (e.g.
+        // `[...$users, ...$admins]` → resolve each spread variable's
+        // iterable element type).
+        let spread_types = extract_spread_expressions(rhs_text)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|expr| {
+                // Only resolve bare variable expressions for now.
+                if !expr.starts_with('$') {
+                    return None;
+                }
+                let raw = self.resolve_variable_raw_type(
+                    expr,
+                    content,
+                    cursor_offset,
+                    classes,
+                    file_use_map,
+                    file_namespace,
+                )?;
+                docblock::extract_iterable_element_type(&raw)
+            })
+            .collect::<Vec<_>>();
+
         // Scan for incremental `$var['key'] = expr;` assignments.
         let after_assign = assign_pos + assign_pattern.len() + semi_pos + 1; // past the `;`
         let incremental =
             collect_incremental_key_assignments(var_name, content, after_assign, cursor_offset);
 
         // Scan for push-style `$var[] = expr;` assignments.
-        let push_types = collect_push_assignments(var_name, content, after_assign, cursor_offset);
+        let mut push_types =
+            collect_push_assignments(var_name, content, after_assign, cursor_offset);
+
+        // Merge spread element types into push types so they participate
+        // in the `list<…>` inference.
+        push_types.extend(spread_types);
 
         if base_entries.is_some() || !incremental.is_empty() || !push_types.is_empty() {
             let mut entries: Vec<(String, String)> = base_entries.unwrap_or_default();
@@ -1025,6 +1053,52 @@ pub(super) fn parse_array_literal_entries(rhs: &str) -> Option<Vec<(String, Stri
     }
 
     Some(entries)
+}
+
+/// Extract spread expressions from an array literal.
+///
+/// Given an array literal like `[...$users, 'key' => 'val', ...$admins]`,
+/// this returns `Some(vec!["$users", "$admins"])`.
+///
+/// Only elements that start with `...` are collected.  Keyed entries and
+/// non-spread positional entries are ignored.
+///
+/// Returns `None` if `rhs` is not an array literal, or `Some(vec![])` if
+/// it is an array literal but contains no spread elements.
+pub fn extract_spread_expressions(rhs: &str) -> Option<Vec<String>> {
+    let inner = if rhs.starts_with('[') && rhs.ends_with(']') {
+        &rhs[1..rhs.len() - 1]
+    } else {
+        let lower = rhs.to_ascii_lowercase();
+        if lower.starts_with("array(") && rhs.ends_with(')') {
+            &rhs[6..rhs.len() - 1]
+        } else {
+            return None;
+        }
+    };
+
+    let inner = inner.trim();
+    if inner.is_empty() {
+        return Some(vec![]);
+    }
+
+    let parts = split_array_literal_elements(inner);
+    let mut spreads = Vec::new();
+
+    for part in &parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(expr) = part.strip_prefix("...") {
+            let expr = expr.trim();
+            if !expr.is_empty() {
+                spreads.push(expr.to_string());
+            }
+        }
+    }
+
+    Some(spreads)
 }
 
 /// Split array literal elements on commas at depth 0, respecting
