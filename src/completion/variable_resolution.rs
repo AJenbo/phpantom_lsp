@@ -44,7 +44,7 @@ use crate::util::{
 };
 
 use super::conditional_resolution::{resolve_conditional_with_args, split_call_subject};
-use super::resolver::{CallResolutionCtx, FunctionLoaderFn, VarResolutionCtx};
+use super::resolver::{FunctionLoaderFn, ResolutionCtx, VarResolutionCtx};
 
 impl Backend {
     /// Resolve the type of `$variable` by re-parsing the file and walking
@@ -1187,7 +1187,7 @@ impl Backend {
                                 Self::extract_argument_text(&method_call.argument_list, content);
                             let current_class =
                                 all_classes.iter().find(|c| c.name == current_class_name);
-                            let call_ctx = CallResolutionCtx {
+                            let rctx = ResolutionCtx {
                                 current_class,
                                 all_classes,
                                 content,
@@ -1200,7 +1200,7 @@ impl Backend {
                                     owner,
                                     &method_name,
                                     &text_args,
-                                    &call_ctx,
+                                    &rctx,
                                     class_loader,
                                 )
                             } else {
@@ -1228,7 +1228,7 @@ impl Backend {
                             {
                                 let current_class =
                                     all_classes.iter().find(|c| c.name == current_class_name);
-                                let call_ctx = CallResolutionCtx {
+                                let rctx = ResolutionCtx {
                                     current_class,
                                     all_classes,
                                     content,
@@ -1237,7 +1237,7 @@ impl Backend {
                                     function_loader,
                                 };
                                 return Self::resolve_call_return_types(
-                                    call_body, args_text, &call_ctx,
+                                    call_body, args_text, &rctx,
                                 );
                             }
                         }
@@ -1264,7 +1264,7 @@ impl Backend {
                                 Self::extract_argument_text(&static_call.argument_list, content);
                             let current_class =
                                 all_classes.iter().find(|c| c.name == current_class_name);
-                            let call_ctx = CallResolutionCtx {
+                            let rctx = ResolutionCtx {
                                 current_class,
                                 all_classes,
                                 content,
@@ -1277,7 +1277,7 @@ impl Backend {
                                     owner,
                                     &method_name,
                                     &text_args,
-                                    &call_ctx,
+                                    &rctx,
                                     class_loader,
                                 )
                             } else {
@@ -1329,12 +1329,7 @@ impl Backend {
                             Self::resolve_target_classes(
                                 &var,
                                 crate::types::AccessKind::Arrow,
-                                Some(ctx.current_class),
-                                ctx.all_classes,
-                                ctx.content,
-                                ctx.cursor_offset,
-                                ctx.class_loader,
-                                ctx.function_loader,
+                                &ctx.as_resolution_ctx(),
                             )
                         } else {
                             vec![]
@@ -1410,15 +1405,18 @@ impl Backend {
                 let obj_text = content[start..end].trim();
                 if !obj_text.is_empty() {
                     let current_class = all_classes.iter().find(|c| c.name == current_class_name);
-                    return Self::resolve_target_classes(
-                        obj_text,
-                        crate::types::AccessKind::Arrow,
+                    let rctx = ResolutionCtx {
                         current_class,
                         all_classes,
                         content,
-                        ctx.cursor_offset,
+                        cursor_offset: ctx.cursor_offset,
                         class_loader,
-                        ctx.function_loader,
+                        function_loader: ctx.function_loader,
+                    };
+                    return Self::resolve_target_classes(
+                        obj_text,
+                        crate::types::AccessKind::Arrow,
+                        &rctx,
                     );
                 }
             }

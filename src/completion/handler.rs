@@ -12,6 +12,8 @@
 use std::collections::HashMap;
 use std::panic;
 
+use super::resolver::ResolutionCtx;
+
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
@@ -70,15 +72,13 @@ impl Backend {
             None
         };
 
-        // Get classes from ast_map for the current file
-        let classes = if let Ok(map) = self.ast_map.lock() {
-            map.get(&uri).cloned()
-        } else {
-            None
-        };
-
         if let Some(content) = content {
-            let classes = classes.unwrap_or_default();
+            // Gather per-file context (classes, use-map, namespace) in one
+            // call instead of three separate lock-and-unwrap blocks.
+            let ctx = self.file_context(&uri);
+            let classes = ctx.classes;
+            let file_use_map = ctx.use_map;
+            let file_namespace = ctx.namespace;
 
             // ── Suppress completion inside non-doc comments ─────────
             // When the cursor is inside a `//` line comment or a `/* … */`
@@ -88,23 +88,6 @@ impl Backend {
             if crate::completion::comment_position::is_inside_non_doc_comment(&content, position) {
                 return Ok(None);
             }
-
-            // Gather the current file's `use` statement mappings and namespace
-            // so the class_loader can resolve short names like `Resource` to
-            // their fully-qualified equivalents like `Klarna\Rest\Resource`.
-            // These are loaded early because PHPDoc `@throws` completion
-            // needs them for auto-import edits.
-            let file_use_map: HashMap<String, String> = if let Ok(map) = self.use_map.lock() {
-                map.get(&uri).cloned().unwrap_or_default()
-            } else {
-                HashMap::new()
-            };
-
-            let file_namespace: Option<String> = if let Ok(map) = self.namespace_map.lock() {
-                map.get(&uri).cloned().flatten()
-            } else {
-                None
-            };
 
             // ── PHPDoc tag completion ────────────────────────────────
             // When the user types `@` inside a `/** … */` docblock,
@@ -343,20 +326,8 @@ impl Backend {
                 let current_class =
                     cursor_offset.and_then(|off| Self::find_class_at_offset(&classes, off));
 
-                // Build the class_loader closure that provides cross-file /
-                // PSR-4 resolution.  This captures `&self`, the current file's
-                // use-statement mappings, and the current namespace so it can:
-                //   1. Resolve short names via `use` statements
-                //   2. Try the current namespace as a prefix
-                //   3. Search the full ast_map
-                //   4. Load files on demand via PSR-4
-                let class_loader = |name: &str| -> Option<crate::ClassInfo> {
-                    self.resolve_class_name(name, &classes, &file_use_map, &file_namespace)
-                };
-
-                let function_loader = |name: &str| -> Option<crate::FunctionInfo> {
-                    self.resolve_function_name(name, &file_use_map, &file_namespace)
-                };
+                let class_loader = self.class_loader_with(&classes, &file_use_map, &file_namespace);
+                let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
 
                 // `static::` in a final class is equivalent to `self::` but
                 // suggests the class can be subclassed — which it can't.
@@ -377,16 +348,15 @@ impl Backend {
                     let candidates = if suppress {
                         vec![]
                     } else {
-                        Self::resolve_target_classes(
-                            &target.subject,
-                            target.access_kind,
+                        let rctx = ResolutionCtx {
                             current_class,
-                            &classes,
-                            &content,
-                            cursor_offset.unwrap_or(0),
-                            &class_loader,
-                            Some(&function_loader),
-                        )
+                            all_classes: &classes,
+                            content: &content,
+                            cursor_offset: cursor_offset.unwrap_or(0),
+                            class_loader: &class_loader,
+                            function_loader: Some(&function_loader),
+                        };
+                        Self::resolve_target_classes(&target.subject, target.access_kind, &rctx)
                     };
 
                     if candidates.is_empty() {
@@ -677,16 +647,14 @@ impl Backend {
         file_namespace: &Option<String>,
     ) -> Vec<crate::ParameterInfo> {
         let expr = &ctx.call_expression;
+        let class_loader = self.class_loader_with(classes, file_use_map, file_namespace);
+        let function_loader_cl = self.function_loader_with(file_use_map, file_namespace);
 
         // ── Constructor: `new ClassName` ─────────────────────────────
         if let Some(class_name) = expr.strip_prefix("new ") {
             let class_name = class_name.trim();
-            if let Some(ci) =
-                self.resolve_class_name(class_name, classes, file_use_map, file_namespace)
-            {
-                let merged = Self::resolve_class_with_inheritance(&ci, &|name| {
-                    self.resolve_class_name(name, classes, file_use_map, file_namespace)
-                });
+            if let Some(ci) = class_loader(class_name) {
+                let merged = Self::resolve_class_with_inheritance(&ci, &class_loader);
                 if let Some(ctor) = merged.methods.iter().find(|m| m.name == "__construct") {
                     return ctor.parameters.clone();
                 }
@@ -698,9 +666,6 @@ impl Backend {
         if let Some(pos) = expr.rfind("->") {
             let subject = &expr[..pos];
             let method_name = &expr[pos + 2..];
-            let class_loader = |name: &str| -> Option<crate::ClassInfo> {
-                self.resolve_class_name(name, classes, file_use_map, file_namespace)
-            };
 
             let owner_classes: Vec<crate::ClassInfo> =
                 if subject == "$this" || subject == "self" || subject == "static" {
@@ -712,19 +677,15 @@ impl Backend {
                     // Variable — resolve via assignment scanning
                     let cursor_offset = Self::position_to_offset(content, position).unwrap_or(0);
                     let current_class = Self::find_class_at_offset(classes, cursor_offset);
-                    let function_loader = |name: &str| -> Option<crate::FunctionInfo> {
-                        self.resolve_function_name(name, file_use_map, file_namespace)
-                    };
-                    Self::resolve_target_classes(
-                        subject,
-                        crate::AccessKind::Arrow,
+                    let rctx = ResolutionCtx {
                         current_class,
-                        classes,
+                        all_classes: classes,
                         content,
                         cursor_offset,
-                        &class_loader,
-                        Some(&function_loader),
-                    )
+                        class_loader: &class_loader,
+                        function_loader: Some(&function_loader_cl),
+                    };
+                    Self::resolve_target_classes(subject, crate::AccessKind::Arrow, &rctx)
                 } else {
                     vec![]
                 };
@@ -742,9 +703,6 @@ impl Backend {
         if let Some(pos) = expr.rfind("::") {
             let class_part = &expr[..pos];
             let method_name = &expr[pos + 2..];
-            let class_loader = |name: &str| -> Option<crate::ClassInfo> {
-                self.resolve_class_name(name, classes, file_use_map, file_namespace)
-            };
 
             let owner_class = if class_part == "self" || class_part == "static" {
                 let cursor_offset = Self::position_to_offset(content, position);

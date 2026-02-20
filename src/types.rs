@@ -502,3 +502,23 @@ impl ClassInfo {
         }
     }
 }
+
+// ─── File Context ───────────────────────────────────────────────────────────
+
+/// Cached per-file context retrieved from the `Backend` maps.
+///
+/// Bundles the three pieces of file-level metadata that almost every
+/// handler needs: the parsed classes, the `use` statement import table,
+/// and the declared namespace.  Constructed by
+/// [`Backend::file_context`](crate::Backend) to replace the repeated
+/// lock-and-unwrap boilerplate that was duplicated across completion,
+/// definition, and implementation handlers.
+pub(crate) struct FileContext {
+    /// Classes extracted from the file's AST (from `ast_map`).
+    pub classes: Vec<ClassInfo>,
+    /// Import table mapping short names to fully-qualified names
+    /// (from `use_map`).
+    pub use_map: HashMap<String, String>,
+    /// The file's declared namespace, if any (from `namespace_map`).
+    pub namespace: Option<String>,
+}

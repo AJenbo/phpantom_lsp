@@ -34,9 +34,11 @@
 ///   - Qualified names with alias expansion and namespace prefixing
 use std::collections::HashMap;
 
+use std::path::Path;
+
 use crate::Backend;
 use crate::composer;
-use crate::types::{ClassInfo, FunctionInfo};
+use crate::types::{ClassInfo, FileContext, FunctionInfo};
 use crate::util::short_name;
 
 impl Backend {
@@ -117,26 +119,8 @@ impl Backend {
             let file_path = file_path.clone();
             drop(cmap); // release lock before doing I/O
 
-            if let Ok(content) = std::fs::read_to_string(&file_path) {
-                let mut classes = self.parse_php(&content);
-
-                let file_use_map = self.parse_use_statements(&content);
-                let file_namespace = self.parse_namespace(&content);
-                Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
-
+            if let Some(classes) = self.parse_and_cache_file(&file_path) {
                 let result = classes.iter().find(|c| c.name == last_segment).cloned();
-
-                let uri = format!("file://{}", file_path.display());
-                if let Ok(mut map) = self.ast_map.lock() {
-                    map.insert(uri.clone(), classes);
-                }
-                if let Ok(mut map) = self.use_map.lock() {
-                    map.insert(uri.clone(), file_use_map);
-                }
-                if let Ok(mut map) = self.namespace_map.lock() {
-                    map.insert(uri, file_namespace);
-                }
-
                 if result.is_some() {
                     return result;
                 }
@@ -151,27 +135,9 @@ impl Backend {
             .and_then(|guard| guard.clone())
             && let Ok(mappings) = self.psr4_mappings.lock()
             && let Some(file_path) = composer::resolve_class_path(&mappings, &workspace_root, name)
-            && let Ok(content) = std::fs::read_to_string(&file_path)
+            && let Some(classes) = self.parse_and_cache_file(&file_path)
         {
-            let mut classes = self.parse_php(&content);
-
-            let file_use_map = self.parse_use_statements(&content);
-            let file_namespace = self.parse_namespace(&content);
-            Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
-
             let result = classes.iter().find(|c| c.name == last_segment).cloned();
-
-            let uri = format!("file://{}", file_path.display());
-            if let Ok(mut map) = self.ast_map.lock() {
-                map.insert(uri.clone(), classes);
-            }
-            if let Ok(mut map) = self.use_map.lock() {
-                map.insert(uri.clone(), file_use_map);
-            }
-            if let Ok(mut map) = self.namespace_map.lock() {
-                map.insert(uri, file_namespace);
-            }
-
             if result.is_some() {
                 return result;
             }
@@ -189,24 +155,60 @@ impl Backend {
         if expected_ns.is_none()
             && let Some(&stub_content) = self.stub_index.get(last_segment)
         {
-            let mut classes = self.parse_php(stub_content);
-
-            // Stubs are in the root namespace — use an empty use_map / namespace.
-            let empty_use_map = std::collections::HashMap::new();
-            let no_namespace: Option<String> = None;
-            Self::resolve_parent_class_names(&mut classes, &empty_use_map, &no_namespace);
-
-            let result = classes.iter().find(|c| c.name == last_segment).cloned();
-
-            let uri = format!("phpantom-stub://{}", last_segment);
-            if let Ok(mut map) = self.ast_map.lock() {
-                map.insert(uri, classes);
+            let stub_uri = format!("phpantom-stub://{}", last_segment);
+            if let Some(classes) = self.parse_and_cache_content(stub_content, &stub_uri) {
+                let result = classes.iter().find(|c| c.name == last_segment).cloned();
+                if result.is_some() {
+                    return result;
+                }
             }
-
-            return result;
         }
 
         None
+    }
+
+    /// Parse a PHP file from disk, cache the results, and return the
+    /// extracted classes.
+    ///
+    /// Convenience wrapper around [`parse_and_cache_content`] that reads
+    /// the file and derives a `file://` URI from the path.  Used by
+    /// [`find_or_load_class`] (Phases 1.5 and 2) and by the
+    /// go-to-implementation scanner.
+    pub(crate) fn parse_and_cache_file(&self, file_path: &Path) -> Option<Vec<ClassInfo>> {
+        let content = std::fs::read_to_string(file_path).ok()?;
+        let uri = format!("file://{}", file_path.display());
+        self.parse_and_cache_content(&content, &uri)
+    }
+
+    /// Parse PHP source text, cache the results in
+    /// `ast_map`/`use_map`/`namespace_map`, and return the extracted
+    /// classes.
+    ///
+    /// This is the single canonical implementation of the "parse → cache"
+    /// pipeline.  All code paths that need to parse PHP content and store
+    /// the results (file-based resolution, stub resolution, implementation
+    /// scanning) funnel through here so the caching logic stays consistent.
+    pub(crate) fn parse_and_cache_content(
+        &self,
+        content: &str,
+        uri: &str,
+    ) -> Option<Vec<ClassInfo>> {
+        let mut classes = self.parse_php(content);
+        let file_use_map = self.parse_use_statements(content);
+        let file_namespace = self.parse_namespace(content);
+        Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
+
+        if let Ok(mut map) = self.ast_map.lock() {
+            map.insert(uri.to_owned(), classes.clone());
+        }
+        if let Ok(mut map) = self.use_map.lock() {
+            map.insert(uri.to_owned(), file_use_map);
+        }
+        if let Ok(mut map) = self.namespace_map.lock() {
+            map.insert(uri.to_owned(), file_namespace);
+        }
+
+        Some(classes)
     }
 
     /// Try to find a standalone function by name, checking user-defined
@@ -407,5 +409,61 @@ impl Backend {
         // falls back to embedded PHP stubs (parsed lazily and
         // cached for future lookups).
         self.find_or_load_function(&candidates)
+    }
+
+    // ─── Loader Closure Factories ───────────────────────────────────────
+
+    /// Return a class-loader closure bound to a [`FileContext`].
+    ///
+    /// This is the convenience wrapper for the common case where the
+    /// caller already has a `FileContext`.  For situations that need a
+    /// different class list (e.g. patched/effective classes after error
+    /// recovery), use [`class_loader_with`](Self::class_loader_with).
+    pub(crate) fn class_loader<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> impl Fn(&str) -> Option<ClassInfo> + 'a {
+        self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return a class-loader closure from individual file-context
+    /// components.
+    ///
+    /// Useful when the class list differs from what is stored in a
+    /// `FileContext` (e.g. after re-parsing patched content for error
+    /// recovery).
+    pub(crate) fn class_loader_with<'a>(
+        &'a self,
+        classes: &'a [ClassInfo],
+        use_map: &'a HashMap<String, String>,
+        namespace: &'a Option<String>,
+    ) -> impl Fn(&str) -> Option<ClassInfo> + 'a {
+        move |name: &str| self.resolve_class_name(name, classes, use_map, namespace)
+    }
+
+    /// Return a function-loader closure bound to a [`FileContext`].
+    ///
+    /// This is the convenience wrapper for the common case where the
+    /// caller already has a `FileContext`.  For situations that need
+    /// explicit use-map / namespace values, use
+    /// [`function_loader_with`](Self::function_loader_with).
+    pub(crate) fn function_loader<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
+        self.function_loader_with(&ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return a function-loader closure from individual file-context
+    /// components.
+    ///
+    /// Useful when the caller does not have a full `FileContext` or
+    /// needs to use a different use-map / namespace.
+    pub(crate) fn function_loader_with<'a>(
+        &'a self,
+        use_map: &'a HashMap<String, String>,
+        namespace: &'a Option<String>,
+    ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
+        move |name: &str| self.resolve_function_name(name, use_map, namespace)
     }
 }

@@ -9,12 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Consolidated generic argument splitting.** Unified six duplicate depth-tracking splitter functions into a single shared `split_generic_args` in `docblock/types.rs`, removing ~120 lines of duplicated logic from `inheritance.rs`, `docblock/tags.rs`, and three single-purpose wrapper functions.
-- **Consolidated type alias resolution.** Removed duplicate `expand_type_alias` and `expand_imported_type_alias` from `array_shape.rs` (~75 lines). The array-key completion path now calls the shared `resolve_type_alias` in `resolver.rs`, which also gained built-in alias-chain following (up to 10 levels).
-- **Split `variable_resolution.rs` by responsibility.** Extracted foreach value/key resolution and array destructuring resolution into a new `foreach_resolution.rs` submodule (728 lines), reducing `variable_resolution.rs` from 2398 lines to 1702.
-- **Deduplicated array-shape assignment resolution.** Replaced six private helper methods in `array_shape.rs` (~220 lines) with a single delegation to the shared `extract_raw_type_from_assignment_text` in `text_resolution.rs`. The array-key completion path now also gains chained call, `new` expression, array function, and source-based function return resolution.
-- **Split `phpdoc.rs` into detection and completion.** Extracted context detection and symbol info extraction into a new `phpdoc_context.rs` submodule (721 lines), reducing `phpdoc.rs` from 1773 lines to 1095. Public items are re-exported for backward compatibility.
-
 ## [0.3.0] - 2026-02-21
 
 ### Added

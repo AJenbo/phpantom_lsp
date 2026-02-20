@@ -97,22 +97,10 @@ impl Backend {
         }
 
         // 2. Gather context from the current file (use map + namespace).
-        let file_use_map = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|map| map.get(uri).cloned())
-            .unwrap_or_default();
-
-        let file_namespace = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|map| map.get(uri).cloned())
-            .flatten();
+        let ctx = self.file_context(uri);
 
         // 3. Resolve to a fully-qualified name.
-        let fqn = Self::resolve_to_fqn(&word, &file_use_map, &file_namespace);
+        let fqn = Self::resolve_to_fqn(&word, &ctx.use_map, &ctx.namespace);
 
         // Build a list of FQN candidates to try.  The resolved name is tried
         // first, but when the original word already contains `\` (e.g. from a
@@ -629,21 +617,9 @@ impl Backend {
         }
 
         // Resolve the parent class name to a FQN using use-map / namespace.
-        let file_use_map = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let ctx = self.file_context(uri);
 
-        let file_namespace = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
-
-        let fqn = Self::resolve_to_fqn(parent_name, &file_use_map, &file_namespace);
+        let fqn = Self::resolve_to_fqn(parent_name, &ctx.use_map, &ctx.namespace);
 
         // Try class_index / ast_map lookup via find_class_file_content.
         let sn = short_name(&fqn);

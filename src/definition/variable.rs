@@ -253,21 +253,9 @@ impl Backend {
 
         // Resolve to FQN and jump, reusing the standard class resolution
         // path from resolve_definition.
-        let file_use_map = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|map| map.get(uri).cloned())
-            .unwrap_or_default();
+        let ctx = self.file_context(uri);
 
-        let file_namespace = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|map| map.get(uri).cloned())
-            .flatten();
-
-        let fqn = Self::resolve_to_fqn(class_name, &file_use_map, &file_namespace);
+        let fqn = Self::resolve_to_fqn(class_name, &ctx.use_map, &ctx.namespace);
 
         let mut candidates = vec![fqn];
         if class_name.contains('\\') && !candidates.contains(&class_name.to_string()) {

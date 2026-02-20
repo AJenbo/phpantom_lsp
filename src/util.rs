@@ -233,7 +233,7 @@ pub(crate) fn find_matching_backward(
 }
 
 use crate::Backend;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, FileContext};
 
 impl Backend {
     /// Convert an LSP Position (line, character) to a byte offset in content.
@@ -272,6 +272,43 @@ impl Backend {
             map.get(uri).cloned()
         } else {
             None
+        }
+    }
+
+    /// Gather the per-file context (classes, use-map, namespace) in one call.
+    ///
+    /// This replaces the repeated lock-and-unwrap boilerplate that was
+    /// duplicated across the completion handler, definition resolver,
+    /// member definition, implementation resolver, and variable definition
+    /// modules.  Each of those sites used to have three nearly-identical
+    /// blocks acquiring `ast_map`, `use_map`, and `namespace_map` locks
+    /// and extracting the entry for a given URI.
+    pub(crate) fn file_context(&self, uri: &str) -> FileContext {
+        let classes = self
+            .ast_map
+            .lock()
+            .ok()
+            .and_then(|m| m.get(uri).cloned())
+            .unwrap_or_default();
+
+        let use_map = self
+            .use_map
+            .lock()
+            .ok()
+            .and_then(|m| m.get(uri).cloned())
+            .unwrap_or_default();
+
+        let namespace = self
+            .namespace_map
+            .lock()
+            .ok()
+            .and_then(|m| m.get(uri).cloned())
+            .flatten();
+
+        FileContext {
+            classes,
+            use_map,
+            namespace,
         }
     }
 

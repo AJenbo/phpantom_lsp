@@ -65,7 +65,7 @@ pub use types::{
 /// - [`parser`]: `parse_php`, `update_ast`, AST extraction helpers
 /// - [`completion::handler`]: Top-level completion request orchestration
 /// - [`completion::target`]: `extract_completion_target`, `detect_access_kind`
-/// - [`completion::resolver`]: `resolve_target_class` and type-resolution helpers
+/// - [`completion::resolver`]: `resolve_target_classes` and type-resolution helpers
 /// - [`completion::builder`]: `build_completion_items`, `build_method_label`
 /// - [`composer`]: PSR-4 autoload mapping and class file resolution
 /// - [`server`]: `impl LanguageServer` (initialize, completion, did_open, …)

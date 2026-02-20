@@ -40,6 +40,28 @@ use super::text_resolution::parse_bracket_segments;
 /// the resolution chain.  Reduces clippy `type_complexity` warnings.
 pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
 
+/// Bundles the context needed by [`Backend::resolve_target_classes`] and
+/// the functions it delegates to.
+///
+/// Introduced to replace the 8-parameter signature of
+/// `resolve_target_classes` with a cleaner `(subject, access_kind, ctx)`
+/// triple.  Also used directly by `resolve_call_return_types` and
+/// `resolve_arg_text_to_type` (formerly `CallResolutionCtx`).
+pub(crate) struct ResolutionCtx<'a> {
+    /// The class the cursor is inside, if any.
+    pub current_class: Option<&'a ClassInfo>,
+    /// All classes known in the current file.
+    pub all_classes: &'a [ClassInfo],
+    /// The full source text of the current file.
+    pub content: &'a str,
+    /// Byte offset of the cursor in `content`.
+    pub cursor_offset: u32,
+    /// Cross-file class resolution callback.
+    pub class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    /// Cross-file function resolution callback (optional).
+    pub function_loader: FunctionLoaderFn<'a>,
+}
+
 /// Bundles the common parameters threaded through variable-type resolution.
 ///
 /// Introducing this struct avoids passing 7–10 individual arguments to
@@ -55,18 +77,20 @@ pub(super) struct VarResolutionCtx<'a> {
     pub function_loader: FunctionLoaderFn<'a>,
 }
 
-/// Bundles the common parameters threaded through call-expression
-/// return-type resolution.
-///
-/// This keeps the argument count of [`resolve_call_return_types`] under
-/// clippy's `too_many_arguments` threshold.
-pub(super) struct CallResolutionCtx<'a> {
-    pub current_class: Option<&'a ClassInfo>,
-    pub all_classes: &'a [ClassInfo],
-    pub content: &'a str,
-    pub cursor_offset: u32,
-    pub class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
-    pub function_loader: FunctionLoaderFn<'a>,
+impl<'a> VarResolutionCtx<'a> {
+    /// Create a [`ResolutionCtx`] from this variable resolution context.
+    ///
+    /// The non-optional `current_class` is wrapped in `Some(…)`.
+    pub fn as_resolution_ctx(&self) -> ResolutionCtx<'a> {
+        ResolutionCtx {
+            current_class: Some(self.current_class),
+            all_classes: self.all_classes,
+            content: self.content,
+            cursor_offset: self.cursor_offset,
+            class_loader: self.class_loader,
+            function_loader: self.function_loader,
+        }
+    }
 }
 
 /// Split a subject string at the **last** `->` or `?->` operator,
@@ -120,56 +144,19 @@ fn split_last_arrow(subject: &str) -> Option<(&str, &str)> {
 }
 
 impl Backend {
-    /// Determine which class (if any) the completion subject refers to.
-    ///
-    /// `current_class` is the class the cursor is inside (if any).
-    /// `all_classes` is every class we know about in the current file.
-    /// `content` + `cursor_offset` are used for variable-type resolution.
-    /// `class_loader` is a fallback that can search across files / load
-    /// classes on demand (e.g. via PSR-4).
-    ///
-    /// Returns an owned `ClassInfo` if the type could be resolved.
-    #[allow(clippy::too_many_arguments)]
-    pub fn resolve_target_class(
-        subject: &str,
-        access_kind: AccessKind,
-        current_class: Option<&ClassInfo>,
-        all_classes: &[ClassInfo],
-        content: &str,
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
-    ) -> Option<ClassInfo> {
-        Self::resolve_target_classes(
-            subject,
-            access_kind,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
-            function_loader,
-        )
-        .into_iter()
-        .next()
-    }
-
-    /// Like `resolve_target_class`, but returns **all** candidate types.
+    /// Resolve a completion subject to all candidate class types.
     ///
     /// When a variable is assigned different types in conditional branches
     /// (e.g. an `if` block reassigns `$thing`), this returns every possible
     /// type so the caller can try each one when looking up members.
-    #[allow(clippy::too_many_arguments)]
-    pub fn resolve_target_classes(
+    pub(crate) fn resolve_target_classes(
         subject: &str,
         _access_kind: AccessKind,
-        current_class: Option<&ClassInfo>,
-        all_classes: &[ClassInfo],
-        content: &str,
-        cursor_offset: u32,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: FunctionLoaderFn<'_>,
+        ctx: &ResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
+        let current_class = ctx.current_class;
+        let all_classes = ctx.all_classes;
+        let class_loader = ctx.class_loader;
         // ── Keywords that always mean "current class" ──
         if subject == "$this" || subject == "self" || subject == "static" {
             return current_class.cloned().into_iter().collect();
@@ -190,6 +177,8 @@ impl Backend {
             }
             return vec![];
         }
+
+        let function_loader = ctx.function_loader;
 
         // ── Enum case / static member access: `ClassName::CaseName` ──
         // When an enum case or static member is used with `->`, resolve to
@@ -227,15 +216,7 @@ impl Backend {
         if subject.ends_with(')')
             && let Some((call_body, args_text)) = split_call_subject(subject)
         {
-            let ctx = CallResolutionCtx {
-                current_class,
-                all_classes,
-                content,
-                cursor_offset,
-                class_loader,
-                function_loader,
-            };
-            return Self::resolve_call_return_types(call_body, args_text, &ctx);
+            return Self::resolve_call_return_types(call_body, args_text, ctx);
         }
 
         // ── Property-chain: $this->prop  or  $this?->prop ──
@@ -264,16 +245,7 @@ impl Backend {
             && !subject.ends_with(')')
             && let Some((base, prop_name)) = split_last_arrow(subject)
         {
-            let base_classes = Self::resolve_target_classes(
-                base,
-                _access_kind,
-                current_class,
-                all_classes,
-                content,
-                cursor_offset,
-                class_loader,
-                function_loader,
-            );
+            let base_classes = Self::resolve_target_classes(base, _access_kind, ctx);
             let mut results = Vec::new();
             for cls in &base_classes {
                 let resolved =
@@ -299,8 +271,8 @@ impl Backend {
                 let resolved = Self::resolve_chained_array_access(
                     &segs.base_var,
                     &segs.segments,
-                    content,
-                    cursor_offset,
+                    ctx.content,
+                    ctx.cursor_offset,
                     current_class,
                     all_classes,
                     class_loader,
@@ -329,8 +301,8 @@ impl Backend {
                 subject,
                 effective_class,
                 all_classes,
-                content,
-                cursor_offset,
+                ctx.content,
+                ctx.cursor_offset,
                 class_loader,
                 function_loader,
             );
@@ -342,7 +314,7 @@ impl Backend {
     pub(super) fn resolve_call_return_types(
         call_body: &str,
         text_args: &str,
-        ctx: &CallResolutionCtx<'_>,
+        ctx: &ResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
         let current_class = ctx.current_class;
         let all_classes = ctx.all_classes;
@@ -397,16 +369,7 @@ impl Backend {
                 // assignment scanning so that chains like
                 // `$profile->getUser()->getEmail()` work in both
                 // class-method and top-level contexts.
-                Self::resolve_target_classes(
-                    lhs,
-                    AccessKind::Arrow,
-                    ctx.current_class,
-                    ctx.all_classes,
-                    ctx.content,
-                    ctx.cursor_offset,
-                    ctx.class_loader,
-                    ctx.function_loader,
-                )
+                Self::resolve_target_classes(lhs, AccessKind::Arrow, ctx)
             } else {
                 // Unknown LHS form — skip
                 vec![]
@@ -645,7 +608,7 @@ impl Backend {
         class_info: &ClassInfo,
         method_name: &str,
         text_args: &str,
-        ctx: &CallResolutionCtx<'_>,
+        ctx: &ResolutionCtx<'_>,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> HashMap<String, String> {
         // Find the method — first on the class directly, then via inheritance.
@@ -697,7 +660,7 @@ impl Backend {
     /// - `$this` / `self` / `static` → current class name
     /// - `$this->prop` → property type
     /// - `$var` → variable type via assignment scanning
-    fn resolve_arg_text_to_type(arg_text: &str, ctx: &CallResolutionCtx<'_>) -> Option<String> {
+    fn resolve_arg_text_to_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<String> {
         let trimmed = arg_text.trim();
 
         // ClassName::class → ClassName
@@ -736,16 +699,8 @@ impl Backend {
 
         // $var → resolve variable type
         if trimmed.starts_with('$') {
-            let classes = Self::resolve_target_classes(
-                trimmed,
-                crate::types::AccessKind::Arrow,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                ctx.class_loader,
-                ctx.function_loader,
-            );
+            let classes =
+                Self::resolve_target_classes(trimmed, crate::types::AccessKind::Arrow, ctx);
             if let Some(first) = classes.first() {
                 return Some(first.name.clone());
             }

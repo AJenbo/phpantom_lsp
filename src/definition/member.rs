@@ -14,11 +14,10 @@
 /// Resolution walks the class hierarchy (parent classes, traits, mixins)
 /// to find the declaring class and locates the member position in its
 /// source file.
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::resolver::ResolutionCtx;
 use crate::subject_extraction::{extract_arrow_subject, extract_double_colon_subject};
 use crate::types::*;
 
@@ -64,54 +63,25 @@ impl Backend {
 
         // 2. Gather context needed for class resolution.
         let cursor_offset = Self::position_to_offset(content, position)?;
+        let ctx = self.file_context(uri);
 
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let current_class = Self::find_class_at_offset(&ctx.classes, cursor_offset).cloned();
 
-        let current_class = Self::find_class_at_offset(&classes, cursor_offset).cloned();
-
-        let file_use_map: HashMap<String, String> = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
-
-        let file_namespace: Option<String> = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
-
-        // Build a class_loader closure (same pattern as the completion handler).
-        let class_loader = |name: &str| -> Option<ClassInfo> {
-            self.resolve_class_name(name, &classes, &file_use_map, &file_namespace)
-        };
-
-        // Build a function_loader closure for resolving standalone function
-        // return types (needed for call-expression subjects like `app()->`).
-        let function_loader = |name: &str| -> Option<FunctionInfo> {
-            self.resolve_function_name(name, &file_use_map, &file_namespace)
-        };
+        let class_loader = self.class_loader(&ctx);
+        let function_loader = self.function_loader(&ctx);
 
         // 3. Resolve the subject to all candidate classes.
         //    When a variable is assigned different types in conditional
         //    branches (e.g. if/else), multiple candidates are returned.
-        let candidates = Self::resolve_target_classes(
-            &subject,
-            access_kind,
-            current_class.as_ref(),
-            &classes,
+        let rctx = ResolutionCtx {
+            current_class: current_class.as_ref(),
+            all_classes: &ctx.classes,
             content,
             cursor_offset,
-            &class_loader,
-            Some(&function_loader),
-        );
+            class_loader: &class_loader,
+            function_loader: Some(&function_loader),
+        };
+        let candidates = Self::resolve_target_classes(&subject, access_kind, &rctx);
 
         if candidates.is_empty() {
             return None;

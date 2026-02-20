@@ -323,9 +323,7 @@ impl Backend {
         // resolves to `array{name: string, email: string}`.
         // Uses `effective_classes` which may be the patched classes when
         // the original parse failed due to syntax errors.
-        let class_loader = |name: &str| -> Option<ClassInfo> {
-            self.resolve_class_name(name, effective_classes, file_use_map, file_namespace)
-        };
+        let class_loader = self.class_loader_with(effective_classes, file_use_map, file_namespace);
         let effective_type =
             Self::resolve_type_alias(&effective_type, "", effective_classes, &class_loader)
                 .unwrap_or(effective_type);
@@ -511,9 +509,7 @@ impl Backend {
         //    handles array literals, method/function calls, chained calls,
         //    `new` expressions, array functions, and property access.
         let current_class = Self::find_class_at_offset(classes, cursor_offset as u32);
-        let class_loader = |name: &str| -> Option<ClassInfo> {
-            self.resolve_class_name(name, classes, file_use_map, file_namespace)
-        };
+        let class_loader = self.class_loader_with(classes, file_use_map, file_namespace);
         Self::extract_raw_type_from_assignment_text(
             var_name,
             content,

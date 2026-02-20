@@ -23,6 +23,7 @@ use tower_lsp::lsp_types::*;
 
 use super::member::MemberKind;
 use crate::Backend;
+use crate::completion::resolver::ResolutionCtx;
 use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo};
 use crate::util::short_name;
 
@@ -65,37 +66,13 @@ impl Backend {
         }
 
         // ── 2. Gather file context ──────────────────────────────────────
-        let file_use_map: HashMap<String, String> = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
-
-        let file_namespace: Option<String> = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
-
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let ctx = self.file_context(uri);
 
         let cursor_offset = Self::position_to_offset(content, position)?;
-        let current_class = Self::find_class_at_offset(&classes, cursor_offset).cloned();
+        let current_class = Self::find_class_at_offset(&ctx.classes, cursor_offset).cloned();
 
-        let class_loader = |name: &str| -> Option<ClassInfo> {
-            self.resolve_class_name(name, &classes, &file_use_map, &file_namespace)
-        };
-
-        let function_loader = |name: &str| -> Option<FunctionInfo> {
-            self.resolve_function_name(name, &file_use_map, &file_namespace)
-        };
+        let class_loader = self.class_loader(&ctx);
+        let function_loader = self.function_loader(&ctx);
 
         // ── 3. Check for member access context (->method, ::method) ─────
         let is_member_access = Self::is_member_access_context(content, position);
@@ -105,18 +82,18 @@ impl Backend {
                 content,
                 position,
                 &word,
-                &classes,
+                &ctx.classes,
                 current_class.as_ref(),
                 &class_loader,
                 &function_loader,
-                &file_use_map,
-                &file_namespace,
+                &ctx.use_map,
+                &ctx.namespace,
             );
         }
 
         // ── 4. Not a member access — the cursor is on a class/interface name ─
         // Resolve the word to a fully-qualified class name.
-        let fqn = Self::resolve_to_fqn(&word, &file_use_map, &file_namespace);
+        let fqn = Self::resolve_to_fqn(&word, &ctx.use_map, &ctx.namespace);
         let target = class_loader(&fqn).or_else(|| class_loader(&word))?;
 
         // Only interfaces and abstract classes are meaningful targets.
@@ -170,16 +147,15 @@ impl Backend {
         let cursor_offset = Self::position_to_offset(content, position)?;
 
         // Resolve the subject to candidate classes.
-        let candidates = Self::resolve_target_classes(
-            &subject,
-            access_kind,
+        let rctx = ResolutionCtx {
             current_class,
-            classes,
+            all_classes: classes,
             content,
             cursor_offset,
             class_loader,
-            Some(function_loader),
-        );
+            function_loader: Some(function_loader),
+        };
+        let candidates = Self::resolve_target_classes(&subject, access_kind, &rctx);
 
         if candidates.is_empty() {
             return None;
@@ -622,33 +598,6 @@ impl Backend {
             }
         }
         None
-    }
-
-    /// Parse a PHP file, cache the results in `ast_map`/`use_map`/`namespace_map`,
-    /// and return the extracted classes.
-    ///
-    /// This follows the same caching pattern as [`find_or_load_class`] Phases
-    /// 1.5 and 2 so that subsequent calls to the class loader can find the
-    /// parsed classes via the ast_map without re-reading the file.
-    fn parse_and_cache_file(&self, file_path: &Path) -> Option<Vec<ClassInfo>> {
-        let content = std::fs::read_to_string(file_path).ok()?;
-        let mut classes = self.parse_php(&content);
-        let file_use_map = self.parse_use_statements(&content);
-        let file_namespace = self.parse_namespace(&content);
-        Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
-
-        let uri = format!("file://{}", file_path.display());
-        if let Ok(mut map) = self.ast_map.lock() {
-            map.insert(uri.clone(), classes.clone());
-        }
-        if let Ok(mut map) = self.use_map.lock() {
-            map.insert(uri.clone(), file_use_map);
-        }
-        if let Ok(mut map) = self.namespace_map.lock() {
-            map.insert(uri, file_namespace);
-        }
-
-        Some(classes)
     }
 
     /// Find the location of a class declaration for an implementor.

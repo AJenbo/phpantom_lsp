@@ -20,7 +20,7 @@ use crate::types::ClassInfo;
 use crate::util::short_name;
 
 use super::conditional_resolution::split_call_subject;
-use super::resolver::VarResolutionCtx;
+use super::resolver::{ResolutionCtx, VarResolutionCtx};
 
 impl Backend {
     // ─── Foreach Resolution ─────────────────────────────────────────────
@@ -249,12 +249,7 @@ impl Backend {
         Self::resolve_target_classes(
             expr_text,
             crate::types::AccessKind::Arrow,
-            Some(ctx.current_class),
-            ctx.all_classes,
-            ctx.content,
-            ctx.cursor_offset,
-            ctx.class_loader,
-            ctx.function_loader,
+            &ctx.as_resolution_ctx(),
         )
     }
 
@@ -621,15 +616,18 @@ impl Backend {
                             let method_name = &call_body[arrow_pos + 2..];
                             let current_class =
                                 all_classes.iter().find(|c| c.name == current_class_name);
-                            let obj_classes = Self::resolve_target_classes(
-                                obj_text,
-                                crate::types::AccessKind::Arrow,
+                            let rctx = ResolutionCtx {
                                 current_class,
                                 all_classes,
                                 content,
-                                ctx.cursor_offset,
+                                cursor_offset: ctx.cursor_offset,
                                 class_loader,
                                 function_loader,
+                            };
+                            let obj_classes = Self::resolve_target_classes(
+                                obj_text,
+                                crate::types::AccessKind::Arrow,
+                                &rctx,
                             );
                             for cls in &obj_classes {
                                 let merged =
@@ -702,12 +700,7 @@ impl Backend {
                             Self::resolve_target_classes(
                                 &var,
                                 crate::types::AccessKind::Arrow,
-                                Some(ctx.current_class),
-                                ctx.all_classes,
-                                ctx.content,
-                                ctx.cursor_offset,
-                                ctx.class_loader,
-                                ctx.function_loader,
+                                &ctx.as_resolution_ctx(),
                             )
                         } else {
                             vec![]

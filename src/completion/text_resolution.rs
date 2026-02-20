@@ -6,7 +6,7 @@
 /// caller needs to infer a variable's type from its assignment RHS.
 ///
 /// Extracted from [`super::resolver`] to keep that module focused on the
-/// higher-level entry points (`resolve_target_class`,
+/// higher-level entry points (`resolve_target_classes`,
 /// `resolve_call_return_types`, `type_hint_to_classes`, etc.).
 ///
 /// The main entry point is
@@ -520,7 +520,7 @@ impl Backend {
     /// the chain from left to right.
     ///
     /// This is used by `extract_raw_type_from_assignment_text` where we
-    /// don't have a `function_loader` or full `CallResolutionCtx`, only
+    /// don't have a `function_loader` or full `ResolutionCtx`, only
     /// `class_loader`.  Handles:
     ///
     /// - `$this->getRepo()->findAll` + args → return type of `findAll`
