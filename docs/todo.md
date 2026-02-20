@@ -147,6 +147,54 @@ chained assignments and some edge cases.
 `extract_raw_type_from_assignment_text` (recursively), then looking up
 the property on the resulting class.
 
+### 22. Template parameter bounds not used for property type resolution
+**Priority: Medium**
+
+When a property's docblock type is a template parameter (e.g. `TNode`),
+the resolver treats it as a raw class name and fails to find it. It
+should recognise that `TNode` is a `@template` parameter of the
+enclosing class and fall back to its upper bound for completion and
+definition:
+
+```php
+/**
+ * @template-covariant TNode of PDependNode
+ */
+abstract class AbstractNode
+{
+    /**
+     * @param TNode $node
+     */
+    public function __construct(
+        private readonly PDependNode $node,
+    ) {
+    }
+
+    public function getParent()
+    {
+        $this->node->getParent();  // ← no completion / definition
+    }
+}
+```
+
+The native type hint is `PDependNode`, but `@param TNode $node` overrides
+it via `resolve_effective_type`. The resolved type becomes `TNode`, which
+does not match any class. The resolver should detect that `TNode` is a
+template parameter declared on the enclosing class, read its bound
+(`of PDependNode`), and use that bound as the effective type.
+
+**Fix:** in the property/parameter type resolution path (likely
+`resolve_subject_type` or `type_hint_to_classes` in
+`completion/resolver.rs`), when a resolved type string does not match any
+known class, check whether it appears in the enclosing class's
+`@template` / `@template-covariant` / `@template-contravariant`
+declarations. If it does and has an `of` bound, substitute the bound
+type. If the template parameter has no bound (bare `@template T`), fall
+back to the native type hint instead of the docblock type, since the
+native hint is the only concrete type information available. This also
+applies to method return types that use bare template parameters without
+a concrete substitution available.
+
 ---
 
 ## Go-to-Definition Gaps
