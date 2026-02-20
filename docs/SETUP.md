@@ -39,6 +39,8 @@ Then run `composer dump-autoload -o`.
 
 PHPantom communicates over stdin/stdout using the standard [Language Server Protocol](https://microsoft.github.io/language-server-protocol/). Any editor with LSP support can use it. Point the client at the `phpantom_lsp` binary with `php` as the file type. No special initialization options are required.
 
+---
+
 ### Zed
 
 A Zed extension is included in the `zed-extension/` directory:
@@ -62,6 +64,8 @@ To make PHPantom the default PHP language server, add to your Zed `settings.json
 }
 ```
 
+---
+
 ### Neovim
 
 > [!NOTE]
@@ -76,24 +80,52 @@ vim.lsp.config['phpantom'] = {
 vim.lsp.enable('phpantom')
 ```
 
+---
+
 ### VS Code
 
-1. **Install a generic LSP client extension.**
-   - We recommend [Generic LSP Client (v2)](https://marketplace.visualstudio.com/items?itemName=zsol.vscode-glspc) for maximum flexibility.
-   - Install via VS Code Marketplace:
+1. **Install a generic LSP client extension**
+
+   * Recommended: [Generic LSP Client (v2)](https://marketplace.visualstudio.com/items?itemName=zsol.vscode-glspc)
+   * Install via VS Code Marketplace:
+
      ```vscode-extensions
      zsol.vscode-glspc
      ```
 
-2. **Download PHPantom LSP binary:**
-   - Download: [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest)
-   - Extract the binary and put it where you like
+2. **Download PHPantom LSP binary**
 
-3. **Configure the extension:**
-   - Open VS Code settings for Generic LSP Client (v2).
-   - Set the path to your actual binary location.
-   - Add Language ID `php`
-   - Restart VS Code
+   * Get it from [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest)
+   * Extract the binary and place it in a preferred location
+
+3. **Configure the extension**
+
+   * Open VS Code settings for Generic LSP Client (v2)
+   * Set the path to your PHPantom binary
+   * Add the Language ID: `php`
+   * Restart VS Code
+
+---
+
+### PHPStorm
+
+1. **Download PHPantom LSP binary**
+
+   * Get it from [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest)
+   * Extract the binary to a preferred location
+
+2. **Install and configure LSP plugin**
+
+   * Go to **Editor → Plugins** and install [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij)
+   * Restart PHPStorm
+   * Navigate to **Languages & Frameworks → Language Servers**
+   * Click **+** to add a new server
+
+     * Name: `PHPantom`
+     * Command: path to your PHPantom binary
+     * Mapping: add a new Language and set it to `PHP`
+
+---
 
 ### Sublime Text
 
