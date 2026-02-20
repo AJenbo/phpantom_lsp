@@ -34,6 +34,27 @@ before comparison.
 
 ---
 
+## Completion Gaps
+
+### 15. `unset()` tracking
+**Priority: Medium**
+
+`unset($var)` removes a variable from scope, and `unset($arr['key'])` removes
+a key from an array shape. Neither is tracked today.
+
+- **Variable scope.** After `unset($x)`, the variable `$x` should no longer
+  appear in variable name suggestions, and `$x->` should not resolve to the
+  type it had before the `unset`.
+- **Array shape keys.** After `unset($config['host'])`, the key `host` should
+  no longer appear in `$config['` key completions, and the inferred shape
+  should reflect its removal.
+
+Both cases require the assignment/variable scanner in
+`completion/variable_resolution.rs` to recognise `unset(...)` statements
+and update its tracking accordingly.
+
+---
+
 ## Missing LSP Features
 
 ### 6. Hover (`textDocument/hover`)

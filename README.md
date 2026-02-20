@@ -12,6 +12,7 @@ PHPantom focuses on completion and go-to-definition and aims to do them really w
 | | PHPantom | Intelephense | PHP Tools | Phpactor | PHPStorm |
 |---|---|---|---|---|---|
 | Completion | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Auto-import | ✅ | 💰 | ✅ | ✅ | ✅ |
 | Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Go-to-implementation | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `@mixin` completion | ✅ | 💰 | ✅ | ✅ | ✅ |
@@ -38,7 +39,8 @@ PHPantom focuses on completion and go-to-definition and aims to do them really w
 - **Guard clause stacking.** Early return narrows subsequent code. Multiple guards stack to whittle a union down. Works in ternaries, `match(true)`, with `is_a()`, `assert()`.
 - **Generic collection foreach.** Iterating `Collection<User>`, `Generator<int, Item>`, or a class with `@implements IteratorAggregate<int, User>` resolves the loop variable to the element type. Keys too.
 - **Generics.** `@template` with type substitution through inheritance chains and at call sites.
-- **Everything else you'd expect.** `foreach`, `clone`, `$arr[] = new Foo()`, destructuring with named keys, chained method calls in assignments.
+- **Conditional return types.** PHPStan-style `@return ($param is class-string<T> ? T : mixed)` resolves to the concrete branch at each call site.
+- **Everything else you'd expect.** Named arguments completion, destructuring with named keys, chained method calls in assignments, `@deprecated` detection.
 
 ## Project Awareness
 
