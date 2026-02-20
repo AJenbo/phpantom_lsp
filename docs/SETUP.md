@@ -78,10 +78,22 @@ vim.lsp.enable('phpantom')
 
 ### VS Code
 
-> [!NOTE]
-> This configuration is untested. If you get it working (or run into issues), please [open an issue](../../issues).
+1. **Install a generic LSP client extension.**
+   - We recommend [Generic LSP Client (v2)](https://marketplace.visualstudio.com/items?itemName=zsol.vscode-glspc) for maximum flexibility.
+   - Install via VS Code Marketplace:
+     ```vscode-extensions
+     zsol.vscode-glspc
+     ```
 
-Use a generic LSP client extension such as [LSP-client](https://github.com/nicolo-ribaudo/vscode-lsp-client) and configure it to run `phpantom_lsp` over stdio for PHP files.
+2. **Download PHPantom LSP binary:**
+   - Download: [GitHub Releases](https://github.com/AJenbo/phpantom_lsp/releases/latest)
+   - Extract the binary and put it where you like
+
+3. **Configure the extension:**
+   - Open VS Code settings for Generic LSP Client (v2).
+   - Set the path to your actual binary location.
+   - Add Language ID `php`
+   - Restart VS Code
 
 ### Sublime Text
 
