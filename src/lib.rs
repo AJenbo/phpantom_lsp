@@ -160,7 +160,7 @@ impl Backend {
     fn defaults() -> Self {
         Self {
             name: "PHPantom".to_string(),
-            version: "0.2.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             open_files: Arc::new(Mutex::new(HashMap::new())),
             ast_map: Arc::new(Mutex::new(HashMap::new())),
             client: None,

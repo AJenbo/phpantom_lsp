@@ -37,7 +37,7 @@ PHPantom focuses on completion and go-to-definition and aims to do them really w
 - **Array shape inference from code.** `$config = ['host' => 'localhost', 'port' => 3306]` offers key completion with no annotation. Incremental `$config['key'] = ...` assignments extend the shape. Nested access chains resolve through shapes and generics. `array_filter`, `array_map`, `array_pop`, `current`, etc. preserve the element type instead of losing it to `array`.
 - **Guard clause stacking.** Early return narrows subsequent code. Multiple guards stack to whittle a union down. Works in ternaries, `match(true)`, with `is_a()`, `assert()`.
 - **Generic collection foreach.** Iterating `Collection<User>`, `Generator<int, Item>`, or a class with `@implements IteratorAggregate<int, User>` resolves the loop variable to the element type. Keys too.
-- **Generics.** Class-level `@template` with substitution through inheritance (`@extends Base<User>`).
+- **Generics.** `@template` with type substitution through inheritance chains and at call sites.
 - **Everything else you'd expect.** `foreach`, `clone`, `$arr[] = new Foo()`, destructuring with named keys, chained method calls in assignments.
 
 ## Project Awareness
@@ -74,6 +74,14 @@ See **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**.
 ## Architecture
 
 For details on how symbol resolution, stub loading, and inheritance merging work, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+
+## Changelog
+
+See **[docs/CHANGELOG.md](docs/CHANGELOG.md)** for a detailed history of each release.
+
+## Roadmap
+
+See **[docs/todo.md](docs/todo.md)** for the backlog of known gaps, missing LSP features, and planned improvements.
 
 ## Acknowledgements
 
