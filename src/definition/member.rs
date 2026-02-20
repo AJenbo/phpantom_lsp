@@ -24,7 +24,7 @@ use crate::types::*;
 
 /// The kind of class member being resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MemberKind {
+pub(crate) enum MemberKind {
     Method,
     Property,
     Constant,
@@ -237,7 +237,7 @@ impl Backend {
     /// [`resolve_definition`](super::resolve) to prevent falling through
     /// to standalone symbol resolution when member resolution fails
     /// (e.g. because the owning class couldn't be determined).
-    pub(super) fn is_member_access_context(content: &str, position: Position) -> bool {
+    pub(crate) fn is_member_access_context(content: &str, position: Position) -> bool {
         Self::extract_member_access_context(content, position).is_some()
     }
 
@@ -251,7 +251,7 @@ impl Backend {
     ///   2. Skipping a `$` prefix if present (for `::$staticProp`).
     ///   3. Checking for `::`, `->`, or `?->` immediately before.
     ///   4. Extracting the subject expression to the left of the operator.
-    fn extract_member_access_context(
+    pub(crate) fn extract_member_access_context(
         content: &str,
         position: Position,
     ) -> Option<(String, AccessKind)> {
@@ -641,7 +641,7 @@ impl Backend {
     ///
     /// Searches the `ast_map` (which includes files loaded via PSR-4 by
     /// `find_or_load_class`) and returns `(uri, content)`.
-    pub(super) fn find_class_file_content(
+    pub(crate) fn find_class_file_content(
         &self,
         class_name: &str,
         current_uri: &str,
@@ -701,7 +701,7 @@ impl Backend {
     ///
     /// Searches line by line for the declaration pattern corresponding to the
     /// member kind, with word-boundary checks to avoid partial matches.
-    fn find_member_position(
+    pub(crate) fn find_member_position(
         content: &str,
         member_name: &str,
         kind: MemberKind,

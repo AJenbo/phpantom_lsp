@@ -55,13 +55,15 @@ src/
 │   ├── mod.rs              # Submodule declarations
 │   ├── resolve.rs          # Core go-to-definition resolution (classes, functions)
 │   ├── member.rs           # Member-access resolution (->method, ::$prop, ::CONST)
-│   └── variable.rs         # Variable definition resolution ($var jump-to-definition)
+│   ├── variable.rs         # Variable definition resolution ($var jump-to-definition)
+│   └── implementation.rs   # Go-to-implementation (interface/abstract → concrete classes)
 build.rs                    # Parses PhpStormStubsMap.php, generates stub index
 stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
 tests/
 ├── common/mod.rs           # Shared test helpers and minimal PHP stubs
 ├── completion_*.rs         # Completion integration tests (by feature area)
 ├── definition_*.rs         # Go-to-definition integration tests
+├── implementation.rs       # Go-to-implementation integration tests
 ├── docblock_*.rs           # Docblock parsing and type tests
 ├── parser.rs               # PHP parser / AST extraction tests
 ├── composer.rs             # Composer integration tests
@@ -247,6 +249,66 @@ When resolving a standalone function call (e.g. `app()`, `date_create()`), the l
 2. **Embedded stubs** (`stub_function_index` from phpstorm-stubs, parsed lazily)
 
 This ensures that user-defined overrides or polyfills always win over built-in stubs.
+
+## Go-to-Implementation: `find_implementors`
+
+When the user invokes go-to-implementation on an interface or abstract class, PHPantom scans for concrete classes that implement or extend it. The scan runs five phases, each progressively wider:
+
+```
+find_implementors("Cacheable", "App\\Contracts\\Cacheable")
+│
+├── Phase 1: ast_map (already-parsed classes)
+│   Iterates every ClassInfo in every file already in memory.
+│   Checks interfaces list and parent_class chain against the target.
+│   ↓ continue
+│
+├── Phase 2: class_index (FQN → URI entries not yet covered)
+│   Loads classes via class_loader for entries not seen in Phase 1.
+│   ↓ continue
+│
+├── Phase 3: classmap files (string pre-filter → parse)
+│   Collects unique file paths from the Composer classmap.
+│   Skips files already in ast_map.
+│   Reads each file's raw source and checks contains(target_short).
+│   Only matching files are parsed via parse_and_cache_file.
+│   Every class in a parsed file is checked (not just the classmap FQN).
+│   ↓ continue
+│
+├── Phase 4: embedded stubs (string pre-filter → lazy parse)
+│   Checks each stub's static source string for contains(target_short).
+│   Matching stubs are loaded via class_loader (parsed and cached).
+│   ↓ continue
+│
+├── Phase 5: PSR-4 directory walk (user code only)
+│   Recursively collects all .php files under every PSR-4 root.
+│   Skips files already covered by the classmap (Phase 3) or ast_map.
+│   Reads raw source, applies the same string pre-filter.
+│   Matching files are parsed via parse_and_cache_file.
+│   Discovers classes in projects without `composer dump-autoload -o`.
+│   ↓ done
+│
+└── Vec<ClassInfo> (concrete implementors only)
+```
+
+### Phase 5 Scope: User Code Only (by design)
+
+Phase 5 walks PSR-4 roots from `composer.json` (`autoload` and `autoload-dev`), **not** from `vendor/composer/autoload_psr4.php`. This means it only discovers classes in the user's own source directories (e.g. `src/`, `app/`, `tests/`), not in vendor dependencies.
+
+This is intentional. Vendor dependencies are managed by Composer and don't change during development — they are fully covered by the classmap (`composer dump-autoload -o`). The user's own files, on the other hand, change constantly and may not be in the classmap yet. Phase 5 exists specifically to catch those newly-created or not-yet-indexed user classes.
+
+Do not "fix" this by adding vendor PSR-4 roots to the Phase 5 walk — that would scan tens of thousands of vendor files on every go-to-implementation request for no benefit, since Phase 3 already covers them via the classmap.
+
+### String Pre-Filter
+
+Phases 3–5 avoid expensive parsing by first reading the raw file content and checking whether it contains the target class's short name. A file that doesn't mention `"Cacheable"` anywhere in its source can't possibly implement the `Cacheable` interface, so it's skipped without parsing. This keeps the scan fast even for large projects with thousands of files.
+
+### Caching
+
+`parse_and_cache_file` follows the same pattern as `find_or_load_class`: it parses the PHP file, resolves parent/interface names via `resolve_parent_class_names`, and stores the results in `ast_map`, `use_map`, and `namespace_map`. This means files discovered during a go-to-implementation scan are immediately available for subsequent completion, definition, and implementation lookups without re-parsing.
+
+### Member-Level Implementation
+
+When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. Only classes that directly define (override) the method are returned — inherited-but-not-overridden methods are excluded.
 
 ## Name Resolution
 

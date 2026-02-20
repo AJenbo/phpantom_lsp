@@ -238,6 +238,13 @@ impl Backend {
                 .map(|t| Self::resolve_name(t, use_map, namespace))
                 .collect();
 
+            // Resolve interface names to fully-qualified names
+            class.interfaces = class
+                .interfaces
+                .iter()
+                .map(|i| Self::resolve_name(i, use_map, namespace))
+                .collect();
+
             // Resolve trait names in `insteadof` precedence adaptations
             for prec in &mut class.trait_precedences {
                 prec.trait_name = Self::resolve_name(&prec.trait_name, use_map, namespace);

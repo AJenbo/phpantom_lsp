@@ -394,6 +394,19 @@ try { typeHintGtdParam(new User('', '')); } catch (NotFoundException|ValidationE
 
 // Extends / implements — Ctrl+Click User, Renderable, or Loggable in scaffolding below.
 
+
+// ── Go-to-Implementation ────────────────────────────────────────────────────
+// Right-click → "Go to Implementations" (or editor shortcut) on an interface
+// or abstract class name to jump to all concrete classes that implement it.
+// Also works on method calls typed as an interface/abstract class.
+
+// Try: Go-to-Implementation on "Renderable" → jumps to User and HtmlReport
+//      Go-to-Implementation on "format" below → jumps to format() in each implementor
+function renderDemo(Renderable $item): string {
+    return $item->format('<b>{name}</b>');
+}
+
+
 // Docblock type references — Ctrl+Click class names inside these annotations:
 /**
  * @param TypedCollection<int, User> $items   Ctrl+Click User or TypedCollection
@@ -1257,6 +1270,19 @@ interface Renderable extends Stringable
 interface Loggable
 {
     public function log(string $message): void;
+}
+
+class HtmlReport implements Renderable
+{
+    public function format(string $template): string
+    {
+        return '<div>' . $template . '</div>';
+    }
+
+    public function __toString(): string
+    {
+        return $this->format('report');
+    }
 }
 
 // ─── Traits ─────────────────────────────────────────────────────────────────

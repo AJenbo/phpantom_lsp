@@ -40,6 +40,18 @@ impl Backend {
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
+                    // Extract interface names from `implements` clause
+                    let interfaces: Vec<String> = class
+                        .implements
+                        .as_ref()
+                        .map(|imp| {
+                            imp.types
+                                .iter()
+                                .map(|ident| ident.value().to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
                     let (
                         mut methods,
                         mut properties,
@@ -113,6 +125,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class,
+                        interfaces,
                         used_traits,
                         mixins,
                         is_final,
@@ -205,6 +218,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class,
+                        interfaces: vec![],
                         used_traits,
                         mixins,
                         is_final: false,
@@ -283,6 +297,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class: None,
+                        interfaces: vec![],
                         used_traits,
                         mixins,
                         is_final: false,
@@ -354,6 +369,18 @@ impl Backend {
                     // Enums can implement interfaces but cannot extend classes.
                     let parent_class = None;
 
+                    // Extract interface names from `implements` clause
+                    let interfaces: Vec<String> = enum_def
+                        .implements
+                        .as_ref()
+                        .map(|imp| {
+                            imp.types
+                                .iter()
+                                .map(|ident| ident.value().to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
                     let start_offset = enum_def.left_brace.start.offset;
                     let end_offset = enum_def.right_brace.end.offset;
 
@@ -367,6 +394,7 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class,
+                        interfaces,
                         used_traits,
                         mixins,
                         is_final: true,

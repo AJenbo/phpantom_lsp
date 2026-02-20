@@ -13,6 +13,7 @@ PHPantom focuses on completion and go-to-definition and aims to do them really w
 |---|---|---|---|---|---|
 | Completion | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Go-to-implementation | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `@mixin` completion | ✅ | 💰 | ✅ | ✅ | ✅ |
 | `@phpstan-assert` narrowing | ✅ | ❌ | ✅ | ❌ | ⚠️ partial |
 | Conditional return types | ✅ | ❌ | ✅ | ❌ | ✅ |
@@ -47,6 +48,7 @@ PHPantom understands Composer projects out of the box:
 - **Classmap and file autoloading.** `autoload_classmap.php` and `autoload_files.php`.
 - **Embedded PHP stubs** from [phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) bundled in the binary, no runtime downloads needed.
 - **`require_once` discovery.** Functions from required files are available for completion.
+- **Go-to-implementation.** Jump from an interface or abstract class to all concrete implementations. Scans open files, classmap, PSR-4 directories, and embedded stubs.
 
 > [!IMPORTANT]
 > Run `composer install -o` (or `composer dump-autoload -o`) in your project to generate the optimized autoload files PHPantom needs for cross-file class resolution.

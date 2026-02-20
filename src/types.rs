@@ -399,6 +399,13 @@ pub struct ClassInfo {
     /// The parent class name from the `extends` clause, if any.
     /// This is the raw name as written in source (e.g. "BaseClass", "Foo\\Bar").
     pub parent_class: Option<String>,
+    /// Interface names from the `implements` clause (classes and enums only).
+    ///
+    /// These are resolved to fully-qualified names during post-processing
+    /// (see `resolve_parent_class_names` in `parser/ast_update.rs`).
+    /// Used by "Go to Implementation" to find classes that implement a
+    /// given interface.
+    pub interfaces: Vec<String>,
     /// Trait names used by this class via `use TraitName;` statements.
     /// These are resolved to fully-qualified names during post-processing.
     pub used_traits: Vec<String>,

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::request::{GotoImplementationParams, GotoImplementationResponse};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -51,6 +52,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 definition_provider: Some(OneOf::Left(true)),
+                implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -256,6 +258,53 @@ impl LanguageServer for Backend {
                 Err(_) => {
                     log::error!(
                         "PHPantom: panic during goto_definition at {}:{}:{}",
+                        uri,
+                        position.line,
+                        position.character
+                    );
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn goto_implementation(
+        &self,
+        params: GotoImplementationParams,
+    ) -> Result<Option<GotoImplementationResponse>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        let content = if let Ok(files) = self.open_files.lock() {
+            files.get(&uri).cloned()
+        } else {
+            None
+        };
+
+        if let Some(content) = content {
+            let uri_owned = uri.clone();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.resolve_implementation(&uri_owned, &content, position)
+            }));
+
+            match result {
+                Ok(Some(locations)) if locations.len() == 1 => {
+                    return Ok(Some(GotoImplementationResponse::Scalar(
+                        locations.into_iter().next().unwrap(),
+                    )));
+                }
+                Ok(Some(locations)) if !locations.is_empty() => {
+                    return Ok(Some(GotoImplementationResponse::Array(locations)));
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    log::error!(
+                        "PHPantom: panic during goto_implementation at {}:{}:{}",
                         uri,
                         position.line,
                         position.character
