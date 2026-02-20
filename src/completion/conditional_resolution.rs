@@ -121,7 +121,7 @@ pub(crate) fn resolve_conditional_with_text_args(
 
 /// Split a textual argument list by commas, respecting nested parentheses
 /// so that `"foo(a, b), c"` splits into `["foo(a, b)", "c"]`.
-fn split_text_args(text: &str) -> Vec<&str> {
+pub(crate) fn split_text_args(text: &str) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth = 0u32;
     let mut start = 0;

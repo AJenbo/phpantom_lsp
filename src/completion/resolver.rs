@@ -17,16 +17,19 @@
 ///   parent chain).
 /// - [`super::conditional_resolution`]: PHPStan conditional return type
 ///   resolution at call sites.
+use std::collections::HashMap;
+
 use crate::Backend;
 use crate::docblock;
 use crate::docblock::types::{
     parse_generic_args, split_intersection_depth0, split_union_depth0, strip_generics,
 };
-use crate::inheritance::apply_generic_args;
+use crate::inheritance::{apply_generic_args, apply_substitution};
 use crate::types::*;
 
 use super::conditional_resolution::{
     resolve_conditional_with_text_args, resolve_conditional_without_args, split_call_subject,
+    split_text_args,
 };
 
 /// A single bracket segment in a chained array access subject.
@@ -1297,12 +1300,26 @@ impl Backend {
 
             let mut results = Vec::new();
             for owner in &lhs_classes {
+                // Build template substitution map when the method has
+                // method-level @template params and we have arguments.
+                let template_subs = if !text_args.is_empty() {
+                    Self::build_method_template_subs(
+                        owner,
+                        method_name,
+                        text_args,
+                        ctx,
+                        class_loader,
+                    )
+                } else {
+                    HashMap::new()
+                };
                 results.extend(Self::resolve_method_return_types_with_args(
                     owner,
                     method_name,
                     text_args,
                     all_classes,
                     class_loader,
+                    &template_subs,
                 ));
             }
             return results;
@@ -1330,12 +1347,24 @@ impl Backend {
             };
 
             if let Some(ref owner) = owner_class {
+                let template_subs = if !text_args.is_empty() {
+                    Self::build_method_template_subs(
+                        owner,
+                        method_name,
+                        text_args,
+                        ctx,
+                        class_loader,
+                    )
+                } else {
+                    HashMap::new()
+                };
                 return Self::resolve_method_return_types_with_args(
                     owner,
                     method_name,
                     text_args,
                     all_classes,
                     class_loader,
+                    &template_subs,
                 );
             }
             return vec![];
@@ -1407,41 +1436,24 @@ impl Backend {
         vec![]
     }
 
-    /// Look up a method's return type in a class (including inherited methods)
-    /// and resolve all candidate classes.
-    ///
-    /// When the return type is a union (e.g. `A|B`), every resolvable part
-    /// is returned as a separate candidate.
-    pub(crate) fn resolve_method_return_types(
-        class_info: &ClassInfo,
-        method_name: &str,
-        all_classes: &[ClassInfo],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> Vec<ClassInfo> {
-        Self::resolve_method_return_types_with_args(
-            class_info,
-            method_name,
-            "",
-            all_classes,
-            class_loader,
-        )
-    }
-
     /// Resolve a method call's return type, taking into account PHPStan
-    /// conditional return types when `text_args` is provided.
+    /// conditional return types when `text_args` is provided, and
+    /// method-level `@template` substitutions when `template_subs` is
+    /// non-empty.
     ///
     /// This is the workhorse behind both `resolve_method_return_types`
     /// (which passes `""`) and the inline call-chain path (which passes
     /// the raw argument text from the source, e.g. `"CurrentCart::class"`).
-    fn resolve_method_return_types_with_args(
+    pub(super) fn resolve_method_return_types_with_args(
         class_info: &ClassInfo,
         method_name: &str,
         text_args: &str,
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        template_subs: &HashMap<String, String>,
     ) -> Vec<ClassInfo> {
         // Helper: try to resolve a method's conditional return type, falling
-        // back to the plain return type.
+        // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<ClassInfo> {
             // Try conditional return type first (PHPStan syntax)
             if let Some(ref cond) = method.conditional_return {
@@ -1458,6 +1470,28 @@ impl Backend {
                     }
                 }
             }
+
+            // Try method-level @template substitution on the return type.
+            // This handles the general case where the return type references
+            // a template param (e.g. `@return Collection<T>`) and we have
+            // resolved bindings from the call-site arguments.
+            if !template_subs.is_empty()
+                && let Some(ref ret) = method.return_type
+            {
+                let substituted = apply_substitution(ret, template_subs);
+                if substituted != *ret {
+                    let classes = Self::type_hint_to_classes(
+                        &substituted,
+                        &class_info.name,
+                        all_classes,
+                        class_loader,
+                    );
+                    if !classes.is_empty() {
+                        return classes;
+                    }
+                }
+            }
+
             // Fall back to plain return type
             if let Some(ref ret) = method.return_type {
                 return Self::type_hint_to_classes(
@@ -1482,6 +1516,128 @@ impl Backend {
         }
 
         vec![]
+    }
+
+    /// Build a template substitution map for a method-level `@template` call.
+    ///
+    /// Finds the method on the class (or inherited), checks for template
+    /// params and bindings, resolves argument types from `text_args` using
+    /// the call resolution context, and returns a `HashMap` mapping template
+    /// parameter names to their resolved concrete types.
+    ///
+    /// Returns an empty map if the method has no template params, no
+    /// bindings, or if argument types cannot be resolved.
+    pub(super) fn build_method_template_subs(
+        class_info: &ClassInfo,
+        method_name: &str,
+        text_args: &str,
+        ctx: &CallResolutionCtx<'_>,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> HashMap<String, String> {
+        // Find the method — first on the class directly, then via inheritance.
+        let method = class_info
+            .methods
+            .iter()
+            .find(|m| m.name == method_name)
+            .cloned()
+            .or_else(|| {
+                let merged = Self::resolve_class_with_inheritance(class_info, class_loader);
+                merged.methods.into_iter().find(|m| m.name == method_name)
+            });
+
+        let method = match method {
+            Some(m) if !m.template_params.is_empty() && !m.template_bindings.is_empty() => m,
+            _ => return HashMap::new(),
+        };
+
+        let args = split_text_args(text_args);
+        let mut subs = HashMap::new();
+
+        for (tpl_name, param_name) in &method.template_bindings {
+            // Find the parameter index for this binding.
+            let param_idx = match method.parameters.iter().position(|p| p.name == *param_name) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            // Get the corresponding argument text.
+            let arg_text = match args.get(param_idx) {
+                Some(text) => text.trim(),
+                None => continue,
+            };
+
+            // Try to resolve the argument text to a type name.
+            if let Some(type_name) = Self::resolve_arg_text_to_type(arg_text, ctx) {
+                subs.insert(tpl_name.clone(), type_name);
+            }
+        }
+
+        subs
+    }
+
+    /// Resolve an argument text string to a type name.
+    ///
+    /// Handles common patterns:
+    /// - `ClassName::class` → `ClassName`
+    /// - `new ClassName(…)` → `ClassName`
+    /// - `$this` / `self` / `static` → current class name
+    /// - `$this->prop` → property type
+    /// - `$var` → variable type via assignment scanning
+    fn resolve_arg_text_to_type(arg_text: &str, ctx: &CallResolutionCtx<'_>) -> Option<String> {
+        let trimmed = arg_text.trim();
+
+        // ClassName::class → ClassName
+        if let Some(name) = trimmed.strip_suffix("::class")
+            && !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+        {
+            return Some(name.strip_prefix('\\').unwrap_or(name).to_string());
+        }
+
+        // new ClassName(…) → ClassName
+        if let Some(class_name) = Self::extract_new_expression_class(trimmed) {
+            return Some(class_name);
+        }
+
+        // $this / self / static → current class
+        if trimmed == "$this" || trimmed == "self" || trimmed == "static" {
+            return ctx.current_class.map(|c| c.name.clone());
+        }
+
+        // $this->prop → property type
+        if let Some(prop) = trimmed
+            .strip_prefix("$this->")
+            .or_else(|| trimmed.strip_prefix("$this?->"))
+            && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && let Some(owner) = ctx.current_class
+        {
+            let types =
+                Self::resolve_property_types(prop, owner, ctx.all_classes, ctx.class_loader);
+            if let Some(first) = types.first() {
+                return Some(first.name.clone());
+            }
+        }
+
+        // $var → resolve variable type
+        if trimmed.starts_with('$') {
+            let classes = Self::resolve_target_classes(
+                trimmed,
+                crate::types::AccessKind::Arrow,
+                ctx.current_class,
+                ctx.all_classes,
+                ctx.content,
+                ctx.cursor_offset,
+                ctx.class_loader,
+                ctx.function_loader,
+            );
+            if let Some(first) = classes.first() {
+                return Some(first.name.clone());
+            }
+        }
+
+        None
     }
 
     /// Look up a property's type hint and resolve all candidate classes.

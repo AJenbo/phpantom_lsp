@@ -1873,11 +1873,39 @@ impl Backend {
                         if let Some(owner) =
                             all_classes.iter().find(|c| c.name == current_class_name)
                         {
-                            return Self::resolve_method_return_types(
+                            // Extract argument text from the AST span so that
+                            // conditional return types and method-level
+                            // @template substitutions can use it.
+                            let text_args =
+                                Self::extract_argument_text(&method_call.argument_list, content);
+                            let current_class =
+                                all_classes.iter().find(|c| c.name == current_class_name);
+                            let call_ctx = CallResolutionCtx {
+                                current_class,
+                                all_classes,
+                                content,
+                                cursor_offset: ctx.cursor_offset,
+                                class_loader,
+                                function_loader,
+                            };
+                            let template_subs = if !text_args.is_empty() {
+                                Self::build_method_template_subs(
+                                    owner,
+                                    &method_name,
+                                    &text_args,
+                                    &call_ctx,
+                                    class_loader,
+                                )
+                            } else {
+                                std::collections::HashMap::new()
+                            };
+                            return Self::resolve_method_return_types_with_args(
                                 owner,
                                 &method_name,
+                                &text_args,
                                 all_classes,
                                 class_loader,
+                                &template_subs,
                             );
                         }
                     } else {
@@ -1925,11 +1953,36 @@ impl Backend {
                             .cloned()
                             .or_else(|| class_loader(&cls_name));
                         if let Some(ref owner) = owner {
-                            return Self::resolve_method_return_types(
+                            let text_args =
+                                Self::extract_argument_text(&static_call.argument_list, content);
+                            let current_class =
+                                all_classes.iter().find(|c| c.name == current_class_name);
+                            let call_ctx = CallResolutionCtx {
+                                current_class,
+                                all_classes,
+                                content,
+                                cursor_offset: ctx.cursor_offset,
+                                class_loader,
+                                function_loader,
+                            };
+                            let template_subs = if !text_args.is_empty() {
+                                Self::build_method_template_subs(
+                                    owner,
+                                    &method_name,
+                                    &text_args,
+                                    &call_ctx,
+                                    class_loader,
+                                )
+                            } else {
+                                std::collections::HashMap::new()
+                            };
+                            return Self::resolve_method_return_types_with_args(
                                 owner,
                                 &method_name,
+                                &text_args,
                                 all_classes,
                                 class_loader,
+                                &template_subs,
                             );
                         }
                     }
@@ -2354,6 +2407,23 @@ impl Backend {
         }
 
         None
+    }
+
+    /// Extract the raw text of a function/method argument list from source.
+    ///
+    /// Returns the text between the parentheses (exclusive), trimmed.
+    /// For example, an argument list `($user, $role)` returns `"$user, $role"`.
+    fn extract_argument_text(
+        argument_list: &mago_syntax::ast::ArgumentList<'_>,
+        content: &str,
+    ) -> String {
+        let left = argument_list.left_parenthesis.span().end.offset as usize;
+        let right = argument_list.right_parenthesis.span().start.offset as usize;
+        if right > left && right <= content.len() {
+            content[left..right].trim().to_string()
+        } else {
+            String::new()
+        }
     }
 
     /// Extract the output element type for `array_map($callback, $array)`.

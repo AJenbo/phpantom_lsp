@@ -697,6 +697,8 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             visibility: Visibility::Public,
             conditional_return: None,
             is_deprecated: false,
+            template_params: Vec::new(),
+            template_bindings: Vec::new(),
         });
     }
 
@@ -866,6 +868,78 @@ pub fn extract_template_params(docblock: &str) -> Vec<String> {
                 .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
             {
                 results.push(name.to_string());
+            }
+        }
+    }
+
+    results
+}
+
+/// Extract bindings from method-level `@template` parameters to the method
+/// parameters that directly use them in `@param` annotations.
+///
+/// For each `@param` annotation whose type token directly matches one of the
+/// given `template_params` (e.g. `@param T $model` where `T` is a template
+/// param), returns a `(template_name, param_name_with_$)` pair.
+///
+/// Also handles nullable variants (`?T`) and union-with-null (`T|null`).
+///
+/// # Examples
+///
+/// ```text
+/// /**
+///  * @template T of Model
+///  * @param T $model
+///  * @return Collection<T>
+///  */
+/// ```
+/// With `template_params = ["T"]`, returns `[("T", "$model")]`.
+pub fn extract_template_param_bindings(
+    docblock: &str,
+    template_params: &[String],
+) -> Vec<(String, String)> {
+    if template_params.is_empty() {
+        return Vec::new();
+    }
+
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = trimmed.strip_prefix("@param") {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the full type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+
+            // The next token should be the parameter name (e.g. `$model`).
+            let param_name = match remainder.split_whitespace().next() {
+                Some(name) if name.starts_with('$') => name,
+                _ => continue,
+            };
+
+            // Strip nullable prefix and `|null` suffix to get the core type.
+            let core = type_token.strip_prefix('?').unwrap_or(type_token);
+            // Handle `T|null` — split on `|` and check non-null parts.
+            let matched_template = core
+                .split('|')
+                .map(str::trim)
+                .filter(|part| *part != "null")
+                .find(|part| template_params.iter().any(|t| t == part));
+
+            if let Some(tpl_name) = matched_template {
+                results.push((tpl_name.to_string(), param_name.to_string()));
             }
         }
     }

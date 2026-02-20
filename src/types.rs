@@ -98,6 +98,25 @@ pub struct MethodInfo {
     pub conditional_return: Option<ConditionalReturnType>,
     /// Whether this method is marked `@deprecated` in its PHPDoc.
     pub is_deprecated: bool,
+    /// Template parameter names declared via `@template` tags in the
+    /// method-level docblock.
+    ///
+    /// For example, a method with `@template T of Model` would have
+    /// `template_params: vec!["T".into()]`.
+    ///
+    /// These are distinct from class-level template parameters
+    /// (`ClassInfo::template_params`) and are used for general
+    /// method-level generic type substitution at call sites.
+    pub template_params: Vec<String>,
+    /// Mappings from method-level template parameter names to the method
+    /// parameter names (with `$` prefix) that directly bind them via
+    /// `@param` annotations.
+    ///
+    /// For example, `@template T` + `@param T $model` produces
+    /// `[("T", "$model")]`.  At call sites the resolver uses these
+    /// bindings to infer concrete types for each template parameter
+    /// from the actual argument expressions.
+    pub template_bindings: Vec<(String, String)>,
 }
 
 /// Stores extracted property information from a parsed PHP class.

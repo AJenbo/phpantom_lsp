@@ -428,9 +428,16 @@ impl Backend {
                     // Look up the PHPDoc `@return` tag (if any) and apply
                     // type override logic.  Also extract PHPStan conditional
                     // return types if present.  Also check for `@deprecated`.
-                    let (return_type, conditional_return, is_deprecated) = if let Some(ctx) =
-                        doc_ctx
-                    {
+                    // Additionally extract method-level `@template` params
+                    // and their `@param` bindings for general template
+                    // substitution at call sites.
+                    let (
+                        return_type,
+                        conditional_return,
+                        is_deprecated,
+                        method_template_params,
+                        method_template_bindings,
+                    ) = if let Some(ctx) = doc_ctx {
                         let docblock_text =
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method);
 
@@ -445,6 +452,21 @@ impl Backend {
                             docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, method)
                                 .and_then(docblock::extract_conditional_return_type);
 
+                        // Extract method-level @template params and their
+                        // @param bindings for general template substitution.
+                        let tpl_params = docblock_text
+                            .map(docblock::extract_template_params)
+                            .unwrap_or_default();
+                        let tpl_bindings = if !tpl_params.is_empty() {
+                            docblock_text
+                                .map(|doc| {
+                                    docblock::extract_template_param_bindings(doc, &tpl_params)
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+
                         // If no explicit conditional return type was found,
                         // try to synthesize one from method-level @template
                         // annotations.  For example:
@@ -455,7 +477,6 @@ impl Backend {
                         // call-site argument (e.g. find(User::class) → User).
                         let conditional = conditional.or_else(|| {
                             let doc = docblock_text?;
-                            let tpl_params = docblock::extract_template_params(doc);
                             docblock::synthesize_template_conditional(
                                 doc,
                                 &tpl_params,
@@ -466,9 +487,9 @@ impl Backend {
 
                         let deprecated = docblock_text.is_some_and(docblock::has_deprecated_tag);
 
-                        (effective, conditional, deprecated)
+                        (effective, conditional, deprecated, tpl_params, tpl_bindings)
                     } else {
-                        (native_return_type, None, false)
+                        (native_return_type, None, false, Vec::new(), Vec::new())
                     };
 
                     // Extract promoted properties from constructor parameters.
@@ -527,6 +548,8 @@ impl Backend {
                         visibility,
                         conditional_return,
                         is_deprecated,
+                        template_params: method_template_params,
+                        template_bindings: method_template_bindings,
                     });
                 }
                 ClassLikeMember::Property(property) => {

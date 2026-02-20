@@ -683,7 +683,7 @@ fn apply_substitution_to_property(property: &mut PropertyInfo, subs: &HashMap<St
 ///   - Nested generics: `"Collection<TKey, list<TValue>>"` →
 ///     `"Collection<int, list<Language>>"`
 ///   - Combinations: `"?Collection<TKey, TValue>|null"` → resolved correctly
-fn apply_substitution(type_str: &str, subs: &HashMap<String, String>) -> String {
+pub(crate) fn apply_substitution(type_str: &str, subs: &HashMap<String, String>) -> String {
     let s = type_str.trim();
     if s.is_empty() {
         return s.to_string();
@@ -1115,6 +1115,8 @@ mod tests {
             visibility: Visibility::Public,
             conditional_return: None,
             is_deprecated: false,
+            template_params: Vec::new(),
+            template_bindings: Vec::new(),
         };
 
         apply_substitution_to_method(&mut method, &subs);

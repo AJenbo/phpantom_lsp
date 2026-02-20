@@ -133,28 +133,22 @@ impl Backend {
 
             // If we know the exact source trait from the alias, go directly
             // to that trait's method definition.
-            if let Some(ref trait_name) = alias_trait {
-                if let Some(trait_info) = class_loader(trait_name) {
-                    if Self::classify_member(&trait_info, &effective_name, access_hint).is_some() {
-                        if let Some((class_uri, class_content)) =
-                            self.find_class_file_content(&trait_info.name, uri, content)
-                            && let Some(member_position) = Self::find_member_position(
-                                &class_content,
-                                &effective_name,
-                                MemberKind::Method,
-                            )
-                            && let Ok(parsed_uri) = Url::parse(&class_uri)
-                        {
-                            return Some(Location {
-                                uri: parsed_uri,
-                                range: Range {
-                                    start: member_position,
-                                    end: member_position,
-                                },
-                            });
-                        }
-                    }
-                }
+            if let Some(ref trait_name) = alias_trait
+                && let Some(trait_info) = class_loader(trait_name)
+                && Self::classify_member(&trait_info, &effective_name, access_hint).is_some()
+                && let Some((class_uri, class_content)) =
+                    self.find_class_file_content(&trait_info.name, uri, content)
+                && let Some(member_position) =
+                    Self::find_member_position(&class_content, &effective_name, MemberKind::Method)
+                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            {
+                return Some(Location {
+                    uri: parsed_uri,
+                    range: Range {
+                        start: member_position,
+                        end: member_position,
+                    },
+                });
             }
 
             let declaring_class =
@@ -190,38 +184,31 @@ impl Backend {
         // partial results when possible.
         let target_class = &candidates[0];
 
-        let (effective_name, alias_trait) =
-            Self::resolve_trait_alias(target_class, member_name);
+        let (effective_name, alias_trait) = Self::resolve_trait_alias(target_class, member_name);
 
         // Direct trait lookup for aliased members in the fallback path.
-        if let Some(ref trait_name) = alias_trait {
-            if let Some(trait_info) = class_loader(trait_name) {
-                if let Some((class_uri, class_content)) =
-                    self.find_class_file_content(&trait_info.name, uri, content)
-                    && let Some(member_position) = Self::find_member_position(
-                        &class_content,
-                        &effective_name,
-                        MemberKind::Method,
-                    )
-                    && let Ok(parsed_uri) = Url::parse(&class_uri)
-                {
-                    return Some(Location {
-                        uri: parsed_uri,
-                        range: Range {
-                            start: member_position,
-                            end: member_position,
-                        },
-                    });
-                }
-            }
+        if let Some(ref trait_name) = alias_trait
+            && let Some(trait_info) = class_loader(trait_name)
+            && let Some((class_uri, class_content)) =
+                self.find_class_file_content(&trait_info.name, uri, content)
+            && let Some(member_position) =
+                Self::find_member_position(&class_content, &effective_name, MemberKind::Method)
+            && let Ok(parsed_uri) = Url::parse(&class_uri)
+        {
+            return Some(Location {
+                uri: parsed_uri,
+                range: Range {
+                    start: member_position,
+                    end: member_position,
+                },
+            });
         }
 
         let declaring_class =
             Self::find_declaring_class(target_class, &effective_name, &class_loader)
                 .unwrap_or_else(|| target_class.clone());
 
-        let member_kind =
-            Self::classify_member(&declaring_class, &effective_name, access_hint)?;
+        let member_kind = Self::classify_member(&declaring_class, &effective_name, access_hint)?;
 
         let (class_uri, class_content) =
             self.find_class_file_content(&declaring_class.name, uri, content)?;
@@ -452,10 +439,7 @@ impl Backend {
     fn resolve_trait_alias(class: &ClassInfo, member_name: &str) -> (String, Option<String>) {
         for alias in &class.trait_aliases {
             if alias.alias.as_deref() == Some(member_name) {
-                return (
-                    alias.method_name.clone(),
-                    alias.trait_name.clone(),
-                );
+                return (alias.method_name.clone(), alias.trait_name.clone());
             }
         }
         (member_name.to_string(), None)

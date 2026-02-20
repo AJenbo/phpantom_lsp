@@ -103,6 +103,21 @@ $appUser->getEmail();
 $found = findOrFail(1);                   // User|AdminUser union
 $found->getName();                        // available on both types
 
+
+// ── Method-level @template (General Case) ───────────────────────────────────
+// When a method declares @template T and @param T $param, the resolver infers
+// T from the actual argument type — not just class-string<T>, but any object.
+
+$mapper = new ObjectMapper();
+$mapped = $mapper->wrap($user);           // wrap(@param T $item): Collection<T>
+$mapped->first();                         // → User (T resolved to User)
+
+$identity = $mapper->identity($user);     // identity(@param T): T
+$identity->getEmail();                    // → User methods
+
+$mapper->wrap(new Product())->first()->getPrice(); // new expression arg → Product
+
+
 function handleIntersection(User&Loggable $entity): void {
     $entity->getEmail();                  // from User
     $entity->log('saved');                // from Loggable
@@ -1161,6 +1176,32 @@ class TraitConflictDemo
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 // ┃  Everything below exists to support the playground above.           ┃
 // ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+// ── ObjectMapper (method-level @template demo) ──────────────────────────────
+
+class ObjectMapper
+{
+    /**
+     * @template T
+     * @param T $item
+     * @return TypedCollection<int, T>
+     */
+    public function wrap(object $item): TypedCollection
+    {
+        /** @var TypedCollection<int, T> */
+        return new TypedCollection();
+    }
+
+    /**
+     * @template T
+     * @param T $item
+     * @return T
+     */
+    public function identity(mixed $item): mixed
+    {
+        return $item;
+    }
+}
 // ═══════════════════════════════════════════════════════════════════════════
 
 

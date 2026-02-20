@@ -310,8 +310,21 @@ impl Backend {
             }
 
             for method in &mut class.methods {
+                // Build a per-method skip list that includes both class-level
+                // and method-level template params so that names like `T` in
+                // `@return Collection<T>` are not namespace-resolved.
+                let method_skip: Vec<String> = if method.template_params.is_empty() {
+                    skip_names.clone()
+                } else {
+                    skip_names
+                        .iter()
+                        .cloned()
+                        .chain(method.template_params.iter().cloned())
+                        .collect()
+                };
+
                 if let Some(ref ret) = method.return_type {
-                    let resolved = Self::resolve_type_string(ret, use_map, namespace, &skip_names);
+                    let resolved = Self::resolve_type_string(ret, use_map, namespace, &method_skip);
                     if resolved != *ret {
                         method.return_type = Some(resolved);
                     }
@@ -319,7 +332,7 @@ impl Backend {
                 for param in &mut method.parameters {
                     if let Some(ref hint) = param.type_hint {
                         let resolved =
-                            Self::resolve_type_string(hint, use_map, namespace, &skip_names);
+                            Self::resolve_type_string(hint, use_map, namespace, &method_skip);
                         if resolved != *hint {
                             param.type_hint = Some(resolved);
                         }
