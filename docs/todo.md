@@ -1,6 +1,170 @@
 # PHPantom — Remaining Work
 
-> Last updated: 2026-02-20
+> Last updated: 2026-02-21
+
+---
+
+## Completion Gaps
+
+### 16. Multi-line method chain completion
+**Priority: High**
+
+Subject extraction in `completion/target.rs` and `subject_extraction.rs`
+operates on the current line only.  Chains that span multiple lines produce
+no completions:
+
+```php
+$this->getRepository()
+    ->findAll()
+    ->filter(fn($u) => $u->active)
+    ->  // ← cursor here: no completion
+```
+
+`extract_completion_target` sees only whitespace and `->` on the cursor
+line and `extract_arrow_subject` finds nothing meaningful to the left.
+This is extremely common in Laravel/Symfony code with fluent builders,
+query chains, and collection pipelines.
+
+The same limitation affects go-to-definition: `extract_member_access_context`
+in `definition/member.rs` also works on the current line, so Ctrl-clicking
+a method in a multi-line chain cannot resolve the owning class.
+
+**Fix:** before extracting the subject, collapse continuation lines around
+the cursor.  Lines that start with `->` or `?->` (after optional
+whitespace) should be joined with the preceding line, then the extraction
+runs on the flattened text.
+
+### 17. Switch statement variable type tracking
+**Priority: Medium**
+
+`walk_statements_for_assignments` in `completion/variable_resolution.rs`
+handles `If`, `Foreach`, `While`, `For`, `DoWhile`, `Try`, `Block`, and
+`Expression`, but `Statement::Switch` falls into the `_ => {}` catch-all
+and is silently skipped.  Variables assigned inside switch cases are
+invisible to the type resolver:
+
+```php
+switch ($type) {
+    case 'user':
+        $result = new User();
+        break;
+    case 'admin':
+        $result = new Admin();
+        break;
+}
+$result->  // ← no completion
+```
+
+The variable *name* collector in `completion/variable_completion.rs`
+already handles `Statement::Switch`, so `$result` appears in variable
+name suggestions, but its type is not resolved.
+
+**Fix:** add a `Statement::Switch` arm to `walk_statements_for_assignments`
+that iterates the switch cases and recurses into each case's statement
+list with `conditional = true` (same pattern as `if` branches).
+
+### 18. `?->` chaining loses intermediate segments
+**Priority: Medium**
+
+In `extract_arrow_subject` (`subject_extraction.rs`), when a `?->` is
+encountered mid-chain, the code calls `extract_simple_variable` instead
+of recursing with `extract_arrow_subject`.  The `->` path recurses
+correctly, but `?->` does not:
+
+```php
+$user->getAddress()?->getCity()->  // extracts "$user?->getCity", loses "->getAddress()"
+```
+
+**Fix:** change the `?->` branch to call `extract_arrow_subject(chars, inner_arrow)`
+instead of `extract_simple_variable(chars, inner_arrow)`, mirroring what
+the `->` branch does.
+
+### 19. `static` return type not resolved to concrete class at call sites
+**Priority: Medium**
+
+When a method declares `@return static` (common in builder/factory
+patterns), `type_hint_to_classes` resolves `static` to
+`owning_class_name` — the class that *declares* the method, not the
+class it is called on:
+
+```php
+class Builder {
+    /** @return static */
+    public function configure(): static { return $this; }
+}
+class AppBuilder extends Builder {}
+
+$builder = new AppBuilder();
+$builder->configure()->  // resolves to Builder, not AppBuilder
+```
+
+The resolution works correctly when the subject is `$this` or `self`,
+but when the method return type is `static` and the call is on a variable
+typed as a subclass, the declaring class is used instead of the
+variable's concrete type.
+
+**Fix:** when `resolve_method_return_types_with_args` encounters a
+`static` (or `$this`) return type, substitute the caller's class name
+(the class the subject resolved to) rather than the class that declares
+the method.
+
+### 15. `unset()` tracking
+**Priority: Medium**
+
+`unset($var)` removes a variable from scope, and `unset($arr['key'])` removes
+a key from an array shape. Neither is tracked today.
+
+- **Variable scope.** After `unset($x)`, the variable `$x` should no longer
+  appear in variable name suggestions, and `$x->` should not resolve to the
+  type it had before the `unset`.
+- **Array shape keys.** After `unset($config['host'])`, the key `host` should
+  no longer appear in `$config['` key completions, and the inferred shape
+  should reflect its removal.
+
+Both cases require the assignment/variable scanner in
+`completion/variable_resolution.rs` to recognise `unset(...)` statements
+and update its tracking accordingly.
+
+### 20. Non-`$this` property access in text-based assignment path
+**Priority: Low**
+
+In `extract_raw_type_from_assignment_text` (`completion/resolver.rs`),
+property access on the RHS is only handled for `$this->propName`.  When
+the RHS is `$otherVar->propName`, it falls through to `None`:
+
+```php
+$user = getUser();
+$address = $user->address;  // text-based path returns None
+$address->  // ← no completion (unless the AST-based path catches it)
+```
+
+The AST-based path in `resolve_rhs_expression` handles this correctly,
+so the gap only surfaces in the text-based fallback used for intermediate
+chained assignments and some edge cases.
+
+**Fix:** after the `$this->propName` check, add a branch that resolves
+`$var->propName` by first resolving `$var`'s type via
+`extract_raw_type_from_assignment_text` (recursively), then looking up
+the property on the resulting class.
+
+---
+
+## Go-to-Definition Gaps
+
+### 21. No reverse jump: implementation → interface method declaration
+**Priority: Medium**
+
+Go-to-implementation lets you jump from an interface method to its concrete
+implementations, but there is no way to jump from a concrete implementation
+*back* to the interface or abstract method it satisfies.  For example,
+clicking `handle()` in a class that `implements Handler` cannot jump to
+`Handler::handle()`.
+
+This would be a natural extension of `find_declaring_class` in
+`definition/member.rs`: when the cursor is on a method *definition* (not
+a call), check whether any implemented interface or parent abstract class
+declares a method with the same name, and offer that as a definition
+target.
 
 ---
 
@@ -31,27 +195,6 @@ could shadow each other.
 
 **Fix:** always compare fully-qualified names by resolving both sides
 before comparison.
-
----
-
-## Completion Gaps
-
-### 15. `unset()` tracking
-**Priority: Medium**
-
-`unset($var)` removes a variable from scope, and `unset($arr['key'])` removes
-a key from an array shape. Neither is tracked today.
-
-- **Variable scope.** After `unset($x)`, the variable `$x` should no longer
-  appear in variable name suggestions, and `$x->` should not resolve to the
-  type it had before the `unset`.
-- **Array shape keys.** After `unset($config['host'])`, the key `host` should
-  no longer appear in `$config['` key completions, and the inferred shape
-  should reflect its removal.
-
-Both cases require the assignment/variable scanner in
-`completion/variable_resolution.rs` to recognise `unset(...)` statements
-and update its tracking accordingly.
 
 ---
 
