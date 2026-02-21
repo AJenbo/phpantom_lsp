@@ -4,6 +4,37 @@
 
 ---
 
+### Trait property completion/goto-definition gap: InteractsWithIO::$output and createProgressBar()
+
+We are unable to go to `createProgressBar()` and can't provide completion for `$this->output` when a trait defines a property with a docblock type, and a class uses that trait:
+
+```php
+trait InteractsWithIO
+{
+    /**
+     * @var \Illuminate\Console\OutputStyle
+     */
+    protected $output;
+}
+
+class Command extends SymfonyCommand
+{
+    use Concerns\InteractsWithIO;
+}
+
+final class ReindexSelectedCommand extends Command
+{
+    public function handle(): int
+    {
+        $bar = $this->output->createProgressBar();
+    }
+}
+```
+
+- Completion for `$this->output` does not resolve to `OutputStyle`
+- Go-to-definition for `createProgressBar()` fails
+
+
 ## Completion Gaps
 
 ### 16. Multi-line method chain completion
