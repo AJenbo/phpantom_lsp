@@ -261,6 +261,46 @@ Two pieces are needed:
    for template substitution, producing a union of the possible return
    types.
 
+### 24. Namespaced class breaks `static` return type chain resolution
+**Priority: Medium**
+
+When a class lives in a namespace and calls a static method whose return
+type is `Builder<static>`, the chain resolution breaks. The same code
+works without a namespace.
+
+```php
+// lead_providers.php
+namespace Luxplus\Core\Database\Model\LeadProviders;
+
+final class LeadProviders extends Model {}
+
+LeadProviders::query()->  // ← no completion (works without the namespace)
+```
+
+```php
+// model.php (same or separate file)
+abstract class Model
+{
+    /** @return \Illuminate\Database\Eloquent\Builder */
+    public static function query() {}
+}
+```
+
+```php
+// builder.php
+namespace Illuminate\Database\Eloquent;
+
+class Builder
+{
+    public function where() {}
+}
+```
+
+The generic argument in `Builder` should resolve to
+`LeadProviders`, giving a `Builder`, and `where()` should then be
+offered.  With a namespace present the chain breaks, likely because the
+FQN resolution of `Model` when a namespace is involved.
+
 ---
 
 ## Go-to-Definition Gaps
