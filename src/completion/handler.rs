@@ -542,10 +542,37 @@ impl Backend {
                     is_self_or_ancestor,
                 );
                 for item in items {
-                    if !all_items
-                        .iter()
-                        .any(|existing| existing.label == item.label)
+                    if let Some(existing) = all_items
+                        .iter_mut()
+                        .find(|existing| existing.label == item.label)
                     {
+                        // Merge class names into the detail so the user
+                        // sees which types provide this member (e.g.
+                        // "User | AdminUser" for shared members vs
+                        // "AdminUser" for branch-only members).
+                        if let (Some(existing_detail), Some(new_detail)) =
+                            (&mut existing.detail, &item.detail)
+                        {
+                            // Extract "Foo" from "Class: Foo" or "Class: Foo — type".
+                            let em_dash = " \u{2014} ";
+                            let get_cls = |d: &str| -> Option<String> {
+                                d.strip_prefix("Class: ")
+                                    .map(|r| r.split(em_dash).next().unwrap_or(r).to_string())
+                            };
+                            if let (Some(ec), Some(nc)) =
+                                (get_cls(existing_detail), get_cls(new_detail))
+                                && !ec.split('|').any(|p| p == nc)
+                            {
+                                let merged = format!("{ec}|{nc}");
+                                if let Some(pos) = existing_detail.find(em_dash) {
+                                    let suffix = existing_detail[pos..].to_string();
+                                    *existing_detail = format!("Class: {merged}{suffix}");
+                                } else {
+                                    *existing_detail = format!("Class: {merged}");
+                                }
+                            }
+                        }
+                    } else {
                         all_items.push(item);
                     }
                 }

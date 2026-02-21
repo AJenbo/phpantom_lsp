@@ -966,3 +966,110 @@ async fn test_completion_match_expression_inside_if_block() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// When a variable holds a union type from a match expression, the completion
+/// detail should show all contributing class names for shared members (e.g.
+/// "Class: ElasticProductReviewIndexService | ElasticBrandIndexService") and
+/// only the originating class for branch-only members.
+#[tokio::test]
+async fn test_completion_match_expression_detail_shows_merged_classes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_detail_merge.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class ElasticProductReviewIndexService {\n",
+        "    public function index(): void {}\n",
+        "    public function reindex(): void {}\n",
+        "}\n",
+        "\n",
+        "class ElasticBrandIndexService {\n",
+        "    public function index(): void {}\n",
+        "    public function bulkDelete(): void {}\n",
+        "}\n",
+        "\n",
+        "class App {\n",
+        "    public function run(string $indexName): void {\n",
+        "        $service = match ($indexName) {\n",
+        "            'product-reviews' => new ElasticProductReviewIndexService(),\n",
+        "            'brands'          => new ElasticBrandIndexService(),\n",
+        "            default           => null,\n",
+        "        };\n",
+        "        $service->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 18,
+                character: 18,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $service->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            // `index` is on both classes — detail should list both.
+            let index_item = items
+                .iter()
+                .find(|i| i.filter_text.as_deref() == Some("index"))
+                .expect("Should have an index completion item");
+            let index_detail = index_item.detail.as_deref().unwrap_or("");
+            assert!(
+                index_detail.contains("ElasticProductReviewIndexService")
+                    && index_detail.contains("ElasticBrandIndexService"),
+                "Shared method 'index' detail should list both classes, got: {:?}",
+                index_detail
+            );
+
+            // `reindex` is only on ElasticProductReviewIndexService.
+            let reindex_item = items
+                .iter()
+                .find(|i| i.filter_text.as_deref() == Some("reindex"))
+                .expect("Should have a reindex completion item");
+            let reindex_detail = reindex_item.detail.as_deref().unwrap_or("");
+            assert!(
+                reindex_detail.contains("ElasticProductReviewIndexService")
+                    && !reindex_detail.contains("ElasticBrandIndexService"),
+                "Branch-only method 'reindex' detail should show only its class, got: {:?}",
+                reindex_detail
+            );
+
+            // `bulkDelete` is only on ElasticBrandIndexService.
+            let bulk_item = items
+                .iter()
+                .find(|i| i.filter_text.as_deref() == Some("bulkDelete"))
+                .expect("Should have a bulkDelete completion item");
+            let bulk_detail = bulk_item.detail.as_deref().unwrap_or("");
+            assert!(
+                bulk_detail.contains("ElasticBrandIndexService")
+                    && !bulk_detail.contains("ElasticProductReviewIndexService"),
+                "Branch-only method 'bulkDelete' detail should show only its class, got: {:?}",
+                bulk_detail
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

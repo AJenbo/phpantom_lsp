@@ -5159,3 +5159,522 @@ async fn test_method_template_general_deep_chain_namespaced() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// When a variable is assigned a `::class` value through a `match` expression
+/// and then passed to a method with `@template T` + `@param class-string<T>`
+/// + `@return T`, the resolver should trace the class-string back through the
+/// match arms and produce a union of all possible return types.
+#[tokio::test]
+async fn test_match_class_string_forwarded_to_method_conditional_return() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_class_string_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                      // 0
+        "class GetCreditnotesRequest {\n",                              // 1
+        "    public function getCreditnotes(): array {}\n",             // 2
+        "}\n",                                                          // 3
+        "\n",                                                           // 4
+        "class GetOrdersRequest {\n",                                   // 5
+        "    public function getOrders(): array {}\n",                  // 6
+        "}\n",                                                          // 7
+        "\n",                                                           // 8
+        "class Container {\n",                                          // 9
+        "    /**\n",                                                    // 10
+        "     * @template T\n",                                         // 11
+        "     * @param class-string<T> $abstract\n",                    // 12
+        "     * @return T\n",                                           // 13
+        "     */\n",                                                    // 14
+        "    public function make(string $abstract): object {}\n",      // 15
+        "}\n",                                                          // 16
+        "\n",                                                           // 17
+        "class App {\n",                                                // 18
+        "    public function run(string $typeName): void {\n",          // 19
+        "        $container = new Container();\n",                      // 20
+        "        $requestType = match ($typeName) {\n",                 // 21
+        "            'creditnotes' => GetCreditnotesRequest::class,\n", // 22
+        "            'orders'      => GetOrdersRequest::class,\n",      // 23
+        "        };\n",                                                 // 24
+        "        $requestBody = $container->make($requestType);\n",     // 25
+        "        $requestBody->\n",                                     // 26
+        "    }\n",                                                      // 27
+        "}\n",                                                          // 28
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 26,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $requestBody->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getCreditnotes"),
+                "Should include getCreditnotes from GetCreditnotesRequest, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getOrders"),
+                "Should include getOrders from GetOrdersRequest, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Same as above but using a standalone function instead of a method.
+/// `$result = resolve($matchVar)` where `resolve` has `@template T` +
+/// `@param class-string<T>` + `@return T`.
+#[tokio::test]
+async fn test_match_class_string_forwarded_to_function_conditional_return() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_class_string_func.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                         // 0
+        "class Alpha {\n",                                 // 1
+        "    public function alphaMethod(): void {}\n",    // 2
+        "}\n",                                             // 3
+        "\n",                                              // 4
+        "class Beta {\n",                                  // 5
+        "    public function betaMethod(): void {}\n",     // 6
+        "}\n",                                             // 7
+        "\n",                                              // 8
+        "/**\n",                                           // 9
+        " * @template T\n",                                // 10
+        " * @param class-string<T> $class\n",              // 11
+        " * @return T\n",                                  // 12
+        " */\n",                                           // 13
+        "function resolve(string $class): object {}\n",    // 14
+        "\n",                                              // 15
+        "class Service {\n",                               // 16
+        "    public function handle(int $type): void {\n", // 17
+        "        $cls = match ($type) {\n",                // 18
+        "            1 => Alpha::class,\n",                // 19
+        "            2 => Beta::class,\n",                 // 20
+        "        };\n",                                    // 21
+        "        $obj = resolve($cls);\n",                 // 22
+        "        $obj->\n",                                // 23
+        "    }\n",                                         // 24
+        "}\n",                                             // 25
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 23,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $obj->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"alphaMethod"),
+                "Should include alphaMethod from Alpha, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"betaMethod"),
+                "Should include betaMethod from Beta, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// A simple `$cls = User::class` (not a match) forwarded to a method with
+/// `@template T` + `@param class-string<T>` + `@return T` should also work.
+#[tokio::test]
+async fn test_simple_class_string_variable_forwarded_to_conditional_return() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///simple_class_string_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class User {\n",                                       // 1
+        "    public function getName(): string {}\n",           // 2
+        "}\n",                                                  // 3
+        "\n",                                                   // 4
+        "class Repository {\n",                                 // 5
+        "    /**\n",                                            // 6
+        "     * @template T\n",                                 // 7
+        "     * @param class-string<T> $class\n",               // 8
+        "     * @return T\n",                                   // 9
+        "     */\n",                                            // 10
+        "    public function find(string $class): object {}\n", // 11
+        "}\n",                                                  // 12
+        "\n",                                                   // 13
+        "class Service {\n",                                    // 14
+        "    public function handle(): void {\n",               // 15
+        "        $repo = new Repository();\n",                  // 16
+        "        $cls = User::class;\n",                        // 17
+        "        $user = $repo->find($cls);\n",                 // 18
+        "        $user->\n",                                    // 19
+        "    }\n",                                              // 20
+        "}\n",                                                  // 21
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 19,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $user->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve $cls = User::class through variable and show getName, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Ternary expression assigning class-string values to a variable, then
+/// forwarded to a conditional return type method.
+#[tokio::test]
+async fn test_ternary_class_string_forwarded_to_conditional_return() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ternary_class_string.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                  // 0
+        "class Admin {\n",                                          // 1
+        "    public function getRole(): string {}\n",               // 2
+        "}\n",                                                      // 3
+        "\n",                                                       // 4
+        "class Guest {\n",                                          // 5
+        "    public function getToken(): string {}\n",              // 6
+        "}\n",                                                      // 7
+        "\n",                                                       // 8
+        "class Container {\n",                                      // 9
+        "    /**\n",                                                // 10
+        "     * @template T\n",                                     // 11
+        "     * @param class-string<T> $abstract\n",                // 12
+        "     * @return T\n",                                       // 13
+        "     */\n",                                                // 14
+        "    public function make(string $abstract): object {}\n",  // 15
+        "}\n",                                                      // 16
+        "\n",                                                       // 17
+        "class Handler {\n",                                        // 18
+        "    public function handle(bool $isAdmin): void {\n",      // 19
+        "        $container = new Container();\n",                  // 20
+        "        $cls = $isAdmin ? Admin::class : Guest::class;\n", // 21
+        "        $user = $container->make($cls);\n",                // 22
+        "        $user->\n",                                        // 23
+        "    }\n",                                                  // 24
+        "}\n",                                                      // 25
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 23,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $user->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getRole"),
+                "Should include getRole from Admin (ternary true branch), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getToken"),
+                "Should include getToken from Guest (ternary false branch), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Inline chain: `$container->make($matchVar)->` should also resolve when
+/// the argument is a variable holding class-string values from a match.
+#[tokio::test]
+async fn test_match_class_string_inline_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_class_string_inline.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                 // 0
+        "class Foo {\n",                                           // 1
+        "    public function fooMethod(): void {}\n",              // 2
+        "}\n",                                                     // 3
+        "\n",                                                      // 4
+        "class Bar {\n",                                           // 5
+        "    public function barMethod(): void {}\n",              // 6
+        "}\n",                                                     // 7
+        "\n",                                                      // 8
+        "class Container {\n",                                     // 9
+        "    /**\n",                                               // 10
+        "     * @template T\n",                                    // 11
+        "     * @param class-string<T> $abstract\n",               // 12
+        "     * @return T\n",                                      // 13
+        "     */\n",                                               // 14
+        "    public function make(string $abstract): object {}\n", // 15
+        "}\n",                                                     // 16
+        "\n",                                                      // 17
+        "class Runner {\n",                                        // 18
+        "    public function run(int $which): void {\n",           // 19
+        "        $container = new Container();\n",                 // 20
+        "        $cls = match ($which) {\n",                       // 21
+        "            1 => Foo::class,\n",                          // 22
+        "            2 => Bar::class,\n",                          // 23
+        "        };\n",                                            // 24
+        "        $container->make($cls)->\n",                      // 25
+        "    }\n",                                                 // 26
+        "}\n",                                                     // 27
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 25,
+                character: 38,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for inline chain $container->make($cls)->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"fooMethod"),
+                "Should include fooMethod from Foo via inline chain, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"barMethod"),
+                "Should include barMethod from Bar via inline chain, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Static method call: `ClassName::create($matchVar)` where `create` has a
+/// `@template T` + `@param class-string<T>` + `@return T` conditional.
+#[tokio::test]
+async fn test_match_class_string_forwarded_to_static_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///match_class_string_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                       // 0
+        "class Widget {\n",                                              // 1
+        "    public function render(): string {}\n",                     // 2
+        "}\n",                                                           // 3
+        "\n",                                                            // 4
+        "class Factory {\n",                                             // 5
+        "    /**\n",                                                     // 6
+        "     * @template T\n",                                          // 7
+        "     * @param class-string<T> $class\n",                        // 8
+        "     * @return T\n",                                            // 9
+        "     */\n",                                                     // 10
+        "    public static function create(string $class): object {}\n", // 11
+        "}\n",                                                           // 12
+        "\n",                                                            // 13
+        "class Builder {\n",                                             // 14
+        "    public function build(string $name): void {\n",             // 15
+        "        $cls = match ($name) {\n",                              // 16
+        "            'widget' => Widget::class,\n",                      // 17
+        "        };\n",                                                  // 18
+        "        $instance = Factory::create($cls);\n",                  // 19
+        "        $instance->\n",                                         // 20
+        "    }\n",                                                       // 21
+        "}\n",                                                           // 22
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 20,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $instance->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"render"),
+                "Should resolve $cls from match through static Factory::create and show render, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

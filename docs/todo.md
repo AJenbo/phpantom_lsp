@@ -1,6 +1,6 @@
 # PHPantom — Remaining Work
 
-> Last updated: 2026-02-21
+> Last updated: 2026-02-22
 
 Items are ordered by recommended implementation sequence: quick wins
 first, then high-impact items, then competitive-parity features, then
@@ -11,42 +11,6 @@ long-tail polish.
 ## Completion & Go-to-Definition Gaps
 
 ### High impact
-
-#### 23. Match-expression class-string not forwarded to conditional return types
-
-When a variable is assigned a `::class` value through a `match` expression
-and then passed to a function whose return type depends on that argument
-(e.g. `@template T @param class-string<T> @return T`), the resolver cannot
-trace the class-string back through the match arms:
-
-```php
-$requestType = match ($typeName) {
-    'creditnotes' => GetCreditnotesRequest::class,
-    'orders'      => GetOrdersRequest::class,
-};
-$requestBody = app()->make($requestType);
-$requestBody->enabled();  // ← no completion
-```
-
-The resolver already handles direct `::class` arguments at the call site
-(e.g. `app()->make(GetCreditnotesRequest::class)`), but when the
-class-string is stored in an intermediate variable whose value comes from
-a match expression, the link is lost.
-
-Two pieces are needed:
-
-1. **Track class-string values from match arms.** When the RHS of an
-   assignment is a `match` expression and every arm returns a `Foo::class`
-   literal, record the set of possible class-string values on the
-   variable (e.g. `$requestType` holds
-   `GetCreditnotesRequest|GetOrdersRequest`).
-2. **Resolve class-string variables at call sites.** When a variable is
-   passed as an argument to a function with a `@template` + conditional
-   return type, look up the variable's class-string value(s) and use them
-   for template substitution, producing a union of the possible return
-   types.
-
----
 
 #### Trait property completion/goto-definition gap: InteractsWithIO::$output and createProgressBar()
 
@@ -276,6 +240,27 @@ class UserRepository {
 This is a niche scenario (the developer writing the generator usually
 knows the types), but it would help when the generator body grows large
 and variables are passed around before being yielded.
+
+---
+
+#### 35. Union completion: sort intersection members above branch-only members
+
+When a variable has a union type (e.g. `User|AdminUser` from a match or
+ternary), the completion list shows all members from all types (see
+"Union Type Completion" in ARCHITECTURE.md for the design rationale).
+Members that only exist on a subset of the union already display the
+originating class in the `detail` field, but nothing else distinguishes
+them from members shared by all types.
+
+A small UX improvement: after collecting all completion items, do a
+post-processing pass that counts how many of the resolved classes each
+member appeared on. Members present on all types (the intersection)
+would keep their current sort position. Members present on only some
+types would be sorted lower via `sort_text` and could get a marker in
+`label_details` (e.g. the originating class name as a suffix).
+
+This keeps everything visible (no completions are removed) but nudges
+the developer toward type-safe choices first.
 
 ---
 

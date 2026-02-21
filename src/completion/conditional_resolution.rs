@@ -20,6 +20,14 @@ use mago_syntax::ast::*;
 
 use crate::types::{ConditionalReturnType, ParamCondition, ParameterInfo};
 
+/// Callback that resolves a variable name (e.g. `"$requestType"`) to the
+/// class names it holds as class-string values (e.g. from match expression
+/// arms like `match (...) { 'a' => A::class, 'b' => B::class }`).
+///
+/// Returns an empty `Vec` when the variable cannot be resolved or does not
+/// hold class-string values.
+pub(crate) type VarClassStringResolver<'a> = Option<&'a dyn Fn(&str) -> Vec<String>>;
+
 /// Split a call-expression subject into the call body and any textual
 /// arguments.  Handles both `"app()"` → `("app", "")` and
 /// `"app(A::class)"` → `("app", "A::class")`.
@@ -67,6 +75,7 @@ pub(crate) fn resolve_conditional_with_text_args(
     conditional: &ConditionalReturnType,
     params: &[ParameterInfo],
     text_args: &str,
+    var_resolver: VarClassStringResolver<'_>,
 ) -> Option<String> {
     match conditional {
         ConditionalReturnType::Concrete(ty) => {
@@ -98,21 +107,43 @@ pub(crate) fn resolve_conditional_with_text_args(
                     {
                         return Some(class_name);
                     }
-                    // Argument isn't a ::class literal → try else branch
-                    resolve_conditional_with_text_args(else_type, params, text_args)
+                    // Check if the argument is a variable holding class-string
+                    // value(s) (e.g. from a match expression).
+                    if let Some(arg) = arg_text
+                        && let trimmed = arg.trim()
+                        && trimmed.starts_with('$')
+                        && let Some(resolver) = var_resolver
+                    {
+                        let names = resolver(trimmed);
+                        if !names.is_empty() {
+                            return Some(names.join("|"));
+                        }
+                    }
+                    // Argument isn't a ::class literal or resolvable variable → try else branch
+                    resolve_conditional_with_text_args(else_type, params, text_args, var_resolver)
                 }
                 ParamCondition::IsNull => {
                     if arg_text.is_none() || arg_text == Some("") || arg_text == Some("null") {
                         // No argument provided or explicitly null → null branch
-                        resolve_conditional_with_text_args(then_type, params, text_args)
+                        resolve_conditional_with_text_args(
+                            then_type,
+                            params,
+                            text_args,
+                            var_resolver,
+                        )
                     } else {
                         // Argument was provided → not null
-                        resolve_conditional_with_text_args(else_type, params, text_args)
+                        resolve_conditional_with_text_args(
+                            else_type,
+                            params,
+                            text_args,
+                            var_resolver,
+                        )
                     }
                 }
                 ParamCondition::IsType(_) => {
                     // Can't statically determine; fall through to else.
-                    resolve_conditional_with_text_args(else_type, params, text_args)
+                    resolve_conditional_with_text_args(else_type, params, text_args, var_resolver)
                 }
             }
         }
@@ -182,6 +213,7 @@ pub(crate) fn resolve_conditional_with_args<'b>(
     conditional: &ConditionalReturnType,
     params: &[ParameterInfo],
     argument_list: &ArgumentList<'b>,
+    var_resolver: VarClassStringResolver<'_>,
 ) -> Option<String> {
     match conditional {
         ConditionalReturnType::Concrete(ty) => {
@@ -223,22 +255,42 @@ pub(crate) fn resolve_conditional_with_args<'b>(
                     if let Some(class_name) = arg_expr.and_then(extract_class_string_from_expr) {
                         return Some(class_name);
                     }
-                    // Argument isn't a ::class literal → try else branch
-                    resolve_conditional_with_args(else_type, params, argument_list)
+                    // Check if the argument is a variable holding class-string
+                    // value(s) (e.g. from a match expression).
+                    if let Some(Expression::Variable(Variable::Direct(dv))) = arg_expr
+                        && let Some(resolver) = var_resolver
+                    {
+                        let names = resolver(dv.name);
+                        if !names.is_empty() {
+                            return Some(names.join("|"));
+                        }
+                    }
+                    // Argument isn't a ::class literal or resolvable variable → try else branch
+                    resolve_conditional_with_args(else_type, params, argument_list, var_resolver)
                 }
                 ParamCondition::IsNull => {
                     if arg_expr.is_none() {
                         // No argument provided → param uses default (null)
-                        resolve_conditional_with_args(then_type, params, argument_list)
+                        resolve_conditional_with_args(
+                            then_type,
+                            params,
+                            argument_list,
+                            var_resolver,
+                        )
                     } else {
                         // Argument was provided → not null
-                        resolve_conditional_with_args(else_type, params, argument_list)
+                        resolve_conditional_with_args(
+                            else_type,
+                            params,
+                            argument_list,
+                            var_resolver,
+                        )
                     }
                 }
                 ParamCondition::IsType(_) => {
                     // We can't statically determine the type of an
                     // arbitrary expression; fall through to else.
-                    resolve_conditional_with_args(else_type, params, argument_list)
+                    resolve_conditional_with_args(else_type, params, argument_list, var_resolver)
                 }
             }
         }

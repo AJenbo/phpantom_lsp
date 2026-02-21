@@ -47,6 +47,29 @@ use super::conditional_resolution::{
 };
 use super::resolver::{FunctionLoaderFn, VarResolutionCtx};
 
+/// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
+///
+/// The returned closure resolves a variable name (e.g. `"$requestType"`)
+/// to the class names it holds as class-string values by delegating to
+/// [`Backend::resolve_class_string_targets`].
+fn build_var_resolver_from_ctx<'a>(
+    ctx: &'a VarResolutionCtx<'a>,
+) -> impl Fn(&str) -> Vec<String> + 'a {
+    move |var_name: &str| -> Vec<String> {
+        Backend::resolve_class_string_targets(
+            var_name,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            ctx.cursor_offset,
+            ctx.class_loader,
+        )
+        .iter()
+        .map(|c| c.name.clone())
+        .collect()
+    }
+}
+
 impl Backend {
     /// Resolve the type of `$variable` by re-parsing the file and walking
     /// the method body that contains `cursor_offset`.
@@ -1401,10 +1424,12 @@ impl Backend {
         {
             // Try conditional return type first
             if let Some(ref cond) = func_info.conditional_return {
+                let var_resolver = build_var_resolver_from_ctx(ctx);
                 let resolved_type = resolve_conditional_with_args(
                     cond,
                     &func_info.parameters,
                     &func_call.argument_list,
+                    Some(&var_resolver),
                 );
                 if let Some(ref ty) = resolved_type {
                     let resolved = Self::type_hint_to_classes(
@@ -1500,6 +1525,7 @@ impl Backend {
                 } else {
                     HashMap::new()
                 };
+                let var_resolver = build_var_resolver_from_ctx(ctx);
                 return Self::resolve_method_return_types_with_args(
                     owner,
                     &method_name,
@@ -1507,6 +1533,7 @@ impl Backend {
                     ctx.all_classes,
                     ctx.class_loader,
                     &template_subs,
+                    Some(&var_resolver),
                 );
             }
         } else {
@@ -1567,6 +1594,7 @@ impl Backend {
                 } else {
                     HashMap::new()
                 };
+                let var_resolver = build_var_resolver_from_ctx(ctx);
                 return Self::resolve_method_return_types_with_args(
                     owner,
                     &method_name,
@@ -1574,6 +1602,7 @@ impl Backend {
                     ctx.all_classes,
                     ctx.class_loader,
                     &template_subs,
+                    Some(&var_resolver),
                 );
             }
         }

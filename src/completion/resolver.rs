@@ -31,9 +31,34 @@ use crate::types::*;
 use crate::util::short_name;
 
 use super::conditional_resolution::{
-    resolve_conditional_with_text_args, resolve_conditional_without_args, split_call_subject,
-    split_text_args,
+    VarClassStringResolver, resolve_conditional_with_text_args, resolve_conditional_without_args,
+    split_call_subject, split_text_args,
 };
+
+/// Build a [`VarClassStringResolver`] closure from a [`ResolutionCtx`].
+///
+/// The returned closure resolves a variable name (e.g. `"$requestType"`)
+/// to the class names it holds as class-string values by delegating to
+/// [`Backend::resolve_class_string_targets`].
+fn build_var_resolver<'a>(ctx: &'a ResolutionCtx<'a>) -> impl Fn(&str) -> Vec<String> + 'a {
+    move |var_name: &str| -> Vec<String> {
+        if let Some(cc) = ctx.current_class {
+            Backend::resolve_class_string_targets(
+                var_name,
+                cc,
+                ctx.all_classes,
+                ctx.content,
+                ctx.cursor_offset,
+                ctx.class_loader,
+            )
+            .iter()
+            .map(|c| c.name.clone())
+            .collect()
+        } else {
+            vec![]
+        }
+    }
+}
 use super::text_resolution::parse_bracket_segments;
 
 /// Type alias for the optional function-loader closure passed through
@@ -413,6 +438,7 @@ impl Backend {
                 } else {
                     HashMap::new()
                 };
+                let var_resolver = build_var_resolver(ctx);
                 results.extend(Self::resolve_method_return_types_with_args(
                     owner,
                     method_name,
@@ -420,6 +446,7 @@ impl Backend {
                     all_classes,
                     class_loader,
                     &template_subs,
+                    Some(&var_resolver),
                 ));
             }
             return results;
@@ -458,6 +485,7 @@ impl Backend {
                 } else {
                     HashMap::new()
                 };
+                let var_resolver = build_var_resolver(ctx);
                 return Self::resolve_method_return_types_with_args(
                     owner,
                     method_name,
@@ -465,6 +493,7 @@ impl Backend {
                     all_classes,
                     class_loader,
                     &template_subs,
+                    Some(&var_resolver),
                 );
             }
             return vec![];
@@ -478,8 +507,14 @@ impl Backend {
             // it using any textual arguments we preserved from the call site
             // (e.g. `app(SessionManager::class)` → text_args = "SessionManager::class").
             if let Some(ref cond) = func_info.conditional_return {
+                let var_resolver = build_var_resolver(ctx);
                 let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args(cond, &func_info.parameters, text_args)
+                    resolve_conditional_with_text_args(
+                        cond,
+                        &func_info.parameters,
+                        text_args,
+                        Some(&var_resolver),
+                    )
                 } else {
                     resolve_conditional_without_args(cond, &func_info.parameters)
                 };
@@ -551,6 +586,7 @@ impl Backend {
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         template_subs: &HashMap<String, String>,
+        var_resolver: VarClassStringResolver<'_>,
     ) -> Vec<ClassInfo> {
         // Helper: try to resolve a method's conditional return type, falling
         // back to template-substituted return type, then plain return type.
@@ -558,7 +594,12 @@ impl Backend {
             // Try conditional return type first (PHPStan syntax)
             if let Some(ref cond) = method.conditional_return {
                 let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args(cond, &method.parameters, text_args)
+                    resolve_conditional_with_text_args(
+                        cond,
+                        &method.parameters,
+                        text_args,
+                        var_resolver,
+                    )
                 } else {
                     resolve_conditional_without_args(cond, &method.parameters)
                 };

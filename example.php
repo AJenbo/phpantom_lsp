@@ -723,6 +723,66 @@ class SwitchDemo
 }
 
 
+// ── Match Class-String Forwarding to Conditional Return Types ───────────────
+// When a variable holds a ::class value from a match expression and is then
+// passed to a function/method with @template T + @param class-string<T> +
+// @return T, the resolver traces the class-string back through the match arms.
+
+class MatchClassStringDemo
+{
+    public function viaMethod(string $typeName): void
+    {
+        $container = new Container();
+        $requestType = match ($typeName) {
+            'reviews' => ElasticProductReviewIndexService::class,
+            'brands'  => ElasticBrandIndexService::class,
+        };
+        $requestBody = $container->make($requestType);
+        $requestBody->index();            // on both classes
+        $requestBody->reindex();          // ElasticProductReviewIndexService only
+        $requestBody->bulkDelete([]);     // ElasticBrandIndexService only
+    }
+
+    public function viaFunction(string $typeName): void
+    {
+        $cls = match ($typeName) {
+            'reviews' => ElasticProductReviewIndexService::class,
+            'brands'  => ElasticBrandIndexService::class,
+        };
+        $resolved = resolve($cls);
+        $resolved->index();               // on both classes
+        $resolved->reindex();             // ElasticProductReviewIndexService only
+    }
+
+    public function inlineChain(string $typeName): void
+    {
+        $container = new Container();
+        $cls = match ($typeName) {
+            'reviews' => ElasticProductReviewIndexService::class,
+            'brands'  => ElasticBrandIndexService::class,
+        };
+        $container->make($cls)->index();  // inline chain also works
+    }
+
+    public function simpleClassStringVar(): void
+    {
+        $container = new Container();
+        $cls = User::class;
+        $user = $container->make($cls);
+        $user->getEmail();                // resolves through simple $cls variable
+    }
+
+    public function ternaryClassString(bool $flag): void
+    {
+        $container = new Container();
+        $cls = $flag ? User::class : AdminUser::class;
+        $obj = $container->make($cls);
+        $obj->getName();                  // shared by both User and AdminUser
+        $obj->grantPermission('edit');    // from AdminUser branch
+    }
+}
+
+
 // ── Template Parameter Bounds ───────────────────────────────────────────────
 // When a property's type is a template parameter (e.g. TNode), the resolver
 // falls back to the upper bound declared in @template TNode of SomeClass.

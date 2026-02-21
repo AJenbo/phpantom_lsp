@@ -320,6 +320,38 @@ Phases 3–5 avoid expensive parsing by first reading the raw file content and c
 
 When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. Only classes that directly define (override) the method are returned — inherited-but-not-overridden methods are excluded.
 
+## Union Type Completion (by design)
+
+When a variable can hold one of several types (from match arms, ternary
+branches, null-coalescing, or conditional return types), the completion
+list shows the **union** of all members across all possible types, not
+just the intersection of shared members.
+
+This is a deliberate choice that matches PHPStorm and Intelephense
+behaviour. The rationale:
+
+1. **The developer may not have isolated branches yet.** When working
+   through a match or ternary, the code often starts with a shared
+   variable before the developer splits behaviour per type. Hiding
+   branch-specific members would block progress during that phase.
+2. **Missing completions are worse than extra completions.** Restricting
+   to the intersection would hide useful members whenever a variable has
+   more than one possible type.
+3. **Type safety belongs in diagnostics.** Calling a method that only
+   exists on one branch is a potential bug, but the right place to flag
+   it is a diagnostic/static-analysis pass, not the completion list.
+
+This is distinct from narrowing via early return, `unset()`, or
+`instanceof` guards. Those reflect deliberate developer intent to
+eliminate types, so the narrowed-out members are correctly hidden. Union
+completion is about types the developer has *not yet* separated.
+
+Members that are only available on a subset of the union already show the
+originating class in the `detail` field (e.g. "Class: AdminUser"), which
+gives the developer a visual hint. A future enhancement could sort
+intersection members above branch-only members or add an explicit marker
+(see todo item 35).
+
 ## Name Resolution
 
 PHP class names go through resolution at parse time (`resolve_parent_class_names`):
