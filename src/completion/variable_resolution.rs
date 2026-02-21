@@ -1161,6 +1161,8 @@ impl Backend {
                 }
                 _ => None,
             },
+            // First-class callable syntax always produces a Closure.
+            Expression::PartialApplication(_) => Some("Closure".to_string()),
             _ => None,
         }
     }
@@ -1316,6 +1318,17 @@ impl Backend {
                 combined
             }
             Expression::Clone(clone_expr) => Self::resolve_rhs_clone(clone_expr, ctx),
+            Expression::PartialApplication(_) => {
+                // First-class callable syntax: `strlen(...)`,
+                // `$obj->method(...)`, `ClassName::method(...)`.
+                // The result is always a `Closure` instance.
+                Self::type_hint_to_classes(
+                    "Closure",
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                )
+            }
             _ => vec![],
         }
     }
@@ -1482,6 +1495,26 @@ impl Backend {
                 &var_name,
                 content,
                 ctx.cursor_offset,
+            ) {
+                let resolved =
+                    Self::type_hint_to_classes(&ret, current_class_name, all_classes, class_loader);
+                if !resolved.is_empty() {
+                    return resolved;
+                }
+            }
+
+            // 3. Scan backward for first-class callable assignment:
+            //    `$fn = strlen(...)`, `$fn = $obj->method(...)`, or
+            //    `$fn = ClassName::staticMethod(...)`.
+            //    Resolve the underlying function/method's return type.
+            if let Some(ret) = Self::extract_first_class_callable_return_type(
+                &var_name,
+                content,
+                ctx.cursor_offset,
+                Some(ctx.current_class),
+                ctx.all_classes,
+                ctx.class_loader,
+                ctx.function_loader,
             ) {
                 let resolved =
                     Self::type_hint_to_classes(&ret, current_class_name, all_classes, class_loader);

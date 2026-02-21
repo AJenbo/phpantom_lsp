@@ -1,6 +1,6 @@
 # PHPantom — Remaining Work
 
-> Last updated: 2026-02-22
+> Last updated: 2025-07-09
 
 Items are ordered by recommended implementation sequence: quick wins
 first, then high-impact items, then competitive-parity features, then
@@ -11,28 +11,6 @@ long-tail polish.
 ## Completion & Go-to-Definition Gaps
 
 ### Competitive parity (close the gap with PHPStorm / Intelephense)
-
-#### 26. First-class callable syntax not tracked
-
-PHP 8.1's first-class callable syntax (`$fn = strlen(...)`,
-`$fn = $obj->method(...)`, `$fn = ClassName::staticMethod(...)`) creates
-a `Closure` object, but the assignment scanner does not recognise the
-`(...)` token. The variable `$fn` gets no type, so neither `$fn()` return
-type resolution nor `$fn->` (for `Closure` methods like `bindTo()`) works.
-
-```php
-$fn = strlen(...);
-$fn();  // ← return type not resolved (should be int)
-
-$fn2 = $user->getName(...);
-$fn2();  // ← return type not resolved
-```
-
-**Fix:** in `resolve_rhs_expression`, handle the first-class callable AST
-node by resolving the referenced function/method and wrapping its return
-type information so that `$fn()` resolves correctly.
-
----
 
 #### 31. No context-aware filtering for class name completions
 

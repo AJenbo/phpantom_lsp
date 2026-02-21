@@ -22,6 +22,8 @@ use crate::util::{
     ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS, find_semicolon_balanced, short_name,
 };
 
+use super::resolver::FunctionLoaderFn;
+
 use super::array_shape::{
     build_list_type_from_push_types, collect_incremental_key_assignments, collect_push_assignments,
     extract_spread_expressions, parse_array_literal_entries,
@@ -92,6 +94,40 @@ pub(super) fn parse_bracket_segments(subject: &str) -> Option<BracketSubject> {
     }
 
     Some(BracketSubject { base_var, segments })
+}
+
+/// Replace `self`, `static`, and `$this` tokens in a type string with
+/// the concrete class name.
+///
+/// This is needed when a method's return type is extracted in a context
+/// where the owning class is known but the caller will resolve the type
+/// string without that class context (e.g. first-class callable return
+/// types passed through with `owning_class_name = ""`).
+fn replace_self_references(type_str: &str, class_name: &str) -> String {
+    // Fast path: no substitution needed.
+    if !type_str.contains("self") && !type_str.contains("static") && !type_str.contains("$this") {
+        return type_str.to_string();
+    }
+
+    // Split on `|` (union) boundaries, replace each token that is
+    // exactly `self`, `static`, or `$this` (with optional leading `?`).
+    type_str
+        .split('|')
+        .map(|part| {
+            let trimmed = part.trim();
+            let (prefix, base) = if let Some(rest) = trimmed.strip_prefix('?') {
+                ("?", rest)
+            } else {
+                ("", trimmed)
+            };
+            if base == "self" || base == "static" || base == "$this" {
+                format!("{}{}", prefix, class_name)
+            } else {
+                trimmed.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 // ─── impl Backend — text-based resolution methods ───────────────────────────
@@ -202,6 +238,13 @@ impl Backend {
             if let Some(list_type) = build_list_type_from_push_types(&push_types) {
                 return Some(list_type);
             }
+        }
+
+        // ── First-class callable — `funcName(...)` / `$obj->method(...)` ──
+        // Detect before the call expression branch because `fn(...)`
+        // ends with `)` and would otherwise be resolved as a call.
+        if rhs_text.ends_with("(...)") && rhs_text.len() > 4 {
+            return Some("Closure".to_string());
         }
 
         // RHS is a call expression — extract the return type.
@@ -751,6 +794,127 @@ impl Backend {
         }
 
         Some(ret_type.to_string())
+    }
+
+    /// Scan backward through `content` for a first-class callable
+    /// assignment to `var_name` and resolve the underlying
+    /// function/method's return type.
+    ///
+    /// Matches patterns like:
+    ///   - `$fn = strlen(...)`            → look up `strlen` return type
+    ///   - `$fn = $this->method(...)`     → look up method return type
+    ///   - `$fn = $obj->method(...)`      → resolve `$obj`, look up method
+    ///   - `$fn = ClassName::method(...)` → look up static method return type
+    ///
+    /// Returns the return type string (e.g. `"int"`, `"User"`) or `None`
+    /// if no first-class callable assignment is found or the return type
+    /// cannot be determined.
+    pub(super) fn extract_first_class_callable_return_type(
+        var_name: &str,
+        content: &str,
+        cursor_offset: u32,
+        current_class: Option<&ClassInfo>,
+        all_classes: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        function_loader: FunctionLoaderFn<'_>,
+    ) -> Option<String> {
+        let search_area = content.get(..cursor_offset as usize)?;
+
+        // Look for `$fn = ` assignment.
+        let assign_prefix = format!("{} = ", var_name);
+        let assign_pos = search_area.rfind(&assign_prefix)?;
+        let rhs_start = assign_pos + assign_prefix.len();
+
+        // Extract the RHS up to the next `;`
+        let remaining = &content[rhs_start..];
+        let semi_pos = find_semicolon_balanced(remaining)?;
+        let rhs_text = remaining[..semi_pos].trim();
+
+        // Must end with `(...)` — the first-class callable marker.
+        let callable_text = rhs_text.strip_suffix("(...)")?.trim_end();
+        if callable_text.is_empty() {
+            return None;
+        }
+
+        // ── Instance method: `$this->method` or `$obj->method` ──────
+        if let Some(pos) = callable_text.rfind("->") {
+            let lhs = callable_text[..pos].trim_end_matches('?');
+            let method_name = &callable_text[pos + 2..];
+
+            let owner = if lhs == "$this" || lhs == "self" || lhs == "static" {
+                current_class.cloned()
+            } else if lhs.starts_with('$') {
+                // Bare variable LHS like `$factory->create(...)`.
+                // Resolve the variable's type via assignment scanning,
+                // then look up the resulting class.
+                Self::extract_raw_type_from_assignment_text(
+                    lhs,
+                    content,
+                    cursor_offset as usize,
+                    current_class,
+                    all_classes,
+                    class_loader,
+                )
+                .and_then(|raw| {
+                    let clean = crate::docblock::types::clean_type(&raw);
+                    let lookup = short_name(&clean);
+                    all_classes
+                        .iter()
+                        .find(|c| c.name == lookup)
+                        .cloned()
+                        .or_else(|| class_loader(&clean))
+                })
+            } else {
+                // Non-variable LHS (e.g. chained call) — delegate to
+                // the general-purpose text resolver.
+                Self::resolve_lhs_to_class(lhs, current_class, all_classes, class_loader)
+            };
+
+            if let Some(cls) = owner {
+                return Self::resolve_method_return_type(&cls, method_name, class_loader)
+                    .map(|ret| replace_self_references(&ret, &cls.name));
+            }
+            return None;
+        }
+
+        // ── Static method: `ClassName::method` / `self::method` ─────
+        if let Some(pos) = callable_text.rfind("::") {
+            let class_part = &callable_text[..pos];
+            let method_name = &callable_text[pos + 2..];
+
+            let owner = if class_part == "self" || class_part == "static" {
+                current_class.cloned()
+            } else if class_part == "parent" {
+                current_class
+                    .and_then(|cc| cc.parent_class.as_ref())
+                    .and_then(|p| class_loader(p))
+            } else {
+                let lookup = short_name(class_part);
+                all_classes
+                    .iter()
+                    .find(|c| c.name == lookup)
+                    .cloned()
+                    .or_else(|| class_loader(class_part))
+            };
+
+            if let Some(cls) = owner {
+                return Self::resolve_method_return_type(&cls, method_name, class_loader)
+                    .map(|ret| replace_self_references(&ret, &cls.name));
+            }
+            return None;
+        }
+
+        // ── Plain function: `strlen`, `array_map`, etc. ─────────────
+        if callable_text
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+            && !callable_text.starts_with('$')
+        {
+            let func_info = function_loader?(callable_text)?;
+            return func_info.return_type;
+        }
+
+        None
     }
 
     /// Resolve a chained array access subject like `$var['key'][]`.

@@ -566,6 +566,25 @@ impl Backend {
                     return classes;
                 }
             }
+
+            // 3. Scan backward for a first-class callable assignment:
+            //    `$fn = strlen(...)`, `$fn = $obj->method(...)`, or
+            //    `$fn = ClassName::staticMethod(...)`.
+            //    Resolve the underlying function/method's return type.
+            if let Some(ret) = Self::extract_first_class_callable_return_type(
+                call_body,
+                content,
+                cursor_offset,
+                current_class,
+                all_classes,
+                class_loader,
+                function_loader,
+            ) {
+                let classes = Self::type_hint_to_classes(&ret, "", all_classes, class_loader);
+                if !classes.is_empty() {
+                    return classes;
+                }
+            }
         }
 
         vec![]

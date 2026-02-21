@@ -1456,6 +1456,43 @@ class UnsetDemo
 }
 
 
+// ── First-Class Callable Syntax (PHP 8.1) ───────────────────────────────────
+
+/**
+ * PHP 8.1 first-class callable syntax creates a Closure from any
+ * function or method reference.  PHPantom resolves the return type of
+ * the underlying callable so that invoking the Closure gives completion
+ * on the result.
+ */
+class FirstClassCallableDemo
+{
+    public function makeOrder(): Response
+    {
+        return new Response(200);
+    }
+
+    public function demo(): void
+    {
+        // Function reference: createUser(...) → Closure that returns User
+        $fn = createUser(...);
+        $fn()->getEmail();                // resolves to User
+
+        // Instance method: $this->makeOrder(...) → Closure returning Response
+        $orderFn = $this->makeOrder(...);
+        $orderFn()->getStatusCode();      // resolves to Response
+
+        // Static method returning ?self: User::findByEmail(...)
+        $finder = User::findByEmail(...);
+        $finder()->getName();             // resolves to User
+
+        // Assigned result
+        $make = createUser(...);
+        $user = $make();
+        $user->getProfile();              // resolves to User
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃

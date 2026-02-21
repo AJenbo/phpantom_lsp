@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **First-class callable syntax.** PHP 8.1's `strlen(...)`, `$obj->method(...)`, and `ClassName::method(...)` syntax now resolves correctly. The variable holding the callable is typed as `Closure` (for `$fn->bindTo()` etc.), and invoking it with `$fn()` resolves to the underlying function or method's return type. Works with function references, instance methods, static methods, `$this->method(...)`, `self::method(...)`, chained calls on the result, and cross-file resolution.
 - **Multi-line method chain completion.** Fluent chains spanning multiple lines now produce completions and support go-to-definition. Continuation lines starting with `->` or `?->` are joined with preceding lines before subject extraction, so builder patterns, query chains, and collection pipelines work seamlessly.
 - **Template parameter bound resolution.** When a property or variable type is a `@template` parameter (e.g. `TNode`), the resolver falls back to the upper bound declared via `of` (e.g. `@template TNode of SomeClass`) for completion and go-to-definition.
 - **Transitive interface inheritance in go-to-implementation.** If `InterfaceB extends InterfaceA` and `ClassC implements InterfaceB`, go-to-implementation on `InterfaceA` now finds `ClassC`. Works through arbitrary depth and with interfaces that extend multiple parents.
