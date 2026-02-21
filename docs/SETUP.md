@@ -125,6 +125,10 @@ vim.lsp.enable('phpantom')
      * Command: path to your PHPantom binary
      * Mapping: add a new Language and set it to `PHP`
 
+<img width="779" height="645" alt="Screenshot From 2026-02-21 00-28-37" src="https://github.com/user-attachments/assets/2da88e68-d012-476e-82e7-977dbfcd9653" />
+
+<img width="779" height="645" alt="Screenshot From 2026-02-21 00-32-24" src="https://github.com/user-attachments/assets/62358f9e-973c-487d-ac17-098d7dab007e" />
+
 ---
 
 ### Sublime Text
