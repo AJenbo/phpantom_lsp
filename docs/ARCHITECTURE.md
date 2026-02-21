@@ -27,7 +27,7 @@ src/
 ├── util.rs                 # Position conversion, class lookup, logging
 ├── parser/
 │   ├── mod.rs              # Top-level parse entry points (parse_php, parse_functions, …)
-│   ├── classes.rs          # Class, interface, trait, and enum extraction
+│   ├── classes.rs          # Class, interface, trait, enum, and anonymous class extraction
 │   ├── functions.rs        # Standalone function and define() constant extraction
 │   ├── use_statements.rs   # use statement and namespace extraction
 │   └── ast_update.rs       # update_ast orchestrator and name resolution helpers

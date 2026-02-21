@@ -12,6 +12,18 @@ use crate::Backend;
 use crate::types::Visibility;
 use crate::types::*;
 
+/// Return a user-friendly class name for display in completion item details.
+///
+/// Anonymous classes have synthetic names like `__anonymous@156` which are
+/// meaningless to the user. This replaces them with `"anonymous class"`.
+fn display_class_name(name: &str) -> &str {
+    if name.starts_with("__anonymous@") {
+        "anonymous class"
+    } else {
+        name
+    }
+}
+
 /// Build an LSP snippet string for a callable (function, method, or constructor).
 ///
 /// Required parameters are included as numbered tab stops with their
@@ -205,7 +217,7 @@ impl Backend {
             items.push(CompletionItem {
                 label,
                 kind: Some(CompletionItemKind::METHOD),
-                detail: Some(format!("Class: {}", target_class.name)),
+                detail: Some(format!("Class: {}", display_class_name(&target_class.name))),
                 insert_text: Some(build_callable_snippet(&method.name, &method.parameters)),
                 insert_text_format: Some(InsertTextFormat::SNIPPET),
                 filter_text: Some(method.name.clone()),
@@ -247,10 +259,11 @@ impl Backend {
                 property.name.clone()
             };
 
+            let display = display_class_name(&target_class.name);
             let detail = if let Some(ref th) = property.type_hint {
-                format!("Class: {} — {}", target_class.name, th)
+                format!("Class: {} — {}", display, th)
             } else {
-                format!("Class: {}", target_class.name)
+                format!("Class: {}", display)
             };
 
             items.push(CompletionItem {
@@ -281,10 +294,11 @@ impl Backend {
                     continue;
                 }
 
+                let display = display_class_name(&target_class.name);
                 let detail = if let Some(ref th) = constant.type_hint {
-                    format!("Class: {} — {}", target_class.name, th)
+                    format!("Class: {} — {}", display, th)
                 } else {
-                    format!("Class: {}", target_class.name)
+                    format!("Class: {}", display)
                 };
 
                 items.push(CompletionItem {

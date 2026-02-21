@@ -614,6 +614,21 @@ $imported = $importDemo->fetchUser();
 $imported['email'];                      // @phpstan-import-type UserData from TypeAliasDemo
 
 
+// ── Anonymous Classes ───────────────────────────────────────────────────────
+// $this-> inside anonymous class bodies resolves to the anonymous class's
+// own members. Supports extends, implements, trait use, and promoted properties.
+
+$anon = new class extends Model {
+    public string $label;
+    public function tag(): string { return ''; }
+    public function demo() {
+        $this->tag();                    // own method
+        $this->label;                    // own property
+        $this->getName();                // inherited from Model
+    }
+};
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  DEMO CLASSES — features that require class / method context
 // ═══════════════════════════════════════════════════════════════════════════

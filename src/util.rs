@@ -273,10 +273,16 @@ impl Backend {
     }
 
     /// Find which class the cursor (byte offset) is inside.
+    ///
+    /// When multiple classes contain the offset (e.g. an anonymous class
+    /// nested inside a named class's method), the smallest (most specific)
+    /// class is returned.  This ensures that `$this` inside an anonymous
+    /// class body resolves to the anonymous class, not the outer class.
     pub(crate) fn find_class_at_offset(classes: &[ClassInfo], offset: u32) -> Option<&ClassInfo> {
         classes
             .iter()
-            .find(|c| offset >= c.start_offset && offset <= c.end_offset)
+            .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
+            .min_by_key(|c| c.end_offset - c.start_offset)
     }
 
     /// Look up a class by its (possibly namespace-qualified) name in the

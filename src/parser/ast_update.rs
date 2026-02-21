@@ -108,7 +108,15 @@ impl Backend {
                                     Some(&doc_ctx),
                                 );
                             }
-                            _ => {}
+                            _ => {
+                                // Walk other statements (expression statements,
+                                // control flow, etc.) for anonymous classes.
+                                Self::find_anonymous_classes_in_statement(
+                                    inner,
+                                    &mut classes,
+                                    Some(&doc_ctx),
+                                );
+                            }
                         }
                     }
                 }
@@ -122,7 +130,16 @@ impl Backend {
                         Some(&doc_ctx),
                     );
                 }
-                _ => {}
+                _ => {
+                    // Walk other top-level statements (expression statements,
+                    // function declarations, control flow, etc.) for anonymous
+                    // classes.
+                    Self::find_anonymous_classes_in_statement(
+                        statement,
+                        &mut classes,
+                        Some(&doc_ctx),
+                    );
+                }
             }
         }
 

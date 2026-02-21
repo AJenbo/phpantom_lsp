@@ -3067,7 +3067,10 @@ async fn test_completion_trait_property_docblock_type_different_namespace() {
             ("src/Support/OutputStyle.php", output_style_file),
             ("src/Support/ProgressBar.php", progress_bar_file),
             ("src/Console/Command.php", command_file),
-            ("src/Console/Commands/ReindexSelectedCommand.php", child_file),
+            (
+                "src/Console/Commands/ReindexSelectedCommand.php",
+                child_file,
+            ),
         ],
     );
 
@@ -3168,7 +3171,10 @@ async fn test_completion_trait_property_fqn_leading_backslash() {
             ("src/Concerns/InteractsWithIO.php", trait_file),
             ("src/Support/OutputStyle.php", output_style_file),
             ("src/Console/Command.php", command_file),
-            ("src/Console/Commands/ReindexSelectedCommand.php", child_file),
+            (
+                "src/Console/Commands/ReindexSelectedCommand.php",
+                child_file,
+            ),
         ],
     );
 
@@ -3314,8 +3320,7 @@ async fn test_goto_definition_method_on_trait_property_docblock_type() {
         "Should resolve go-to-definition for method on trait property's @var type"
     );
     if let Some(GotoDefinitionResponse::Scalar(location)) = result {
-        let expected_uri =
-            Url::from_file_path(dir.path().join("src/OutputStyle.php")).unwrap();
+        let expected_uri = Url::from_file_path(dir.path().join("src/OutputStyle.php")).unwrap();
         assert_eq!(
             location.uri, expected_uri,
             "Should jump to OutputStyle file"

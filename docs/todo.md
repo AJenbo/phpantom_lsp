@@ -12,37 +12,6 @@ long-tail polish.
 
 ### Competitive parity (close the gap with PHPStorm / Intelephense)
 
-#### 30. No completion or go-to-definition inside anonymous classes
-
-Anonymous classes (`new class { ... }`) are not parsed by
-`extract_classes_from_statements`, which only handles named
-`Statement::Class` / `Statement::Interface` / `Statement::Trait` /
-`Statement::Enum` nodes. Because anonymous classes are expression-level
-constructs (`Expression::AnonymousClass`), they are invisible to the
-AST extraction pass.
-
-This means:
-- `$this->` inside an anonymous class body does not resolve to the
-  anonymous class's own members.
-- Members declared in the anonymous class are not available for
-  completion.
-- Go-to-definition for members of the anonymous class fails.
-
-```php
-$handler = new class($dependency) extends BaseHandler {
-    public function handle(): Response {
-        $this->  // ← no completion for anonymous class's own members
-    }
-};
-```
-
-**Fix:** in `extract_classes_from_statements`, walk expression
-statements and detect `Expression::AnonymousClass` nodes. Synthesize a
-`ClassInfo` with a unique internal name (e.g. `__anonymous@<offset>`)
-so that `find_class_at_offset` resolves `$this` correctly.
-
----
-
 #### 26. First-class callable syntax not tracked
 
 PHP 8.1's first-class callable syntax (`$fn = strlen(...)`,
