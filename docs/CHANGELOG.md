@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Switch statement variable type tracking.** Variables assigned inside `switch` case bodies now resolve their types. Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms are supported, and all cases contribute to a union type.
 - **`unset()` variable tracking.** After `unset($var)`, the variable no longer appears in name suggestions and `$var->` does not resolve to its previous type. Re-assignment after `unset` restores the variable with the new type. Conditional `unset` (inside `if` blocks) is handled conservatively, keeping the variable because it might still exist.
 - **Class-string variable forwarding to conditional return types.** When a variable holds `::class` values from a `match` expression, ternary, or simple assignment (e.g. `$cls = match (...) { 'a' => A::class, 'b' => B::class }`) and is passed to a function or method with `@template T` + `@param class-string<T>` + `@return T`, the resolver traces the class-string back through the variable and produces a union of all possible return types. Works for instance methods, static methods, standalone functions, and inline chains.
+- **Trait property @var docblock type resolution.** When a trait defines a property with a `@var` docblock type, and a class uses that trait (possibly through inheritance), chaining on `$this->prop` resolves to the docblock type and offers its members.
 
 ### Fixed
 

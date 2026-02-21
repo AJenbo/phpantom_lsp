@@ -2823,3 +2823,603 @@ async fn test_completion_trait_as_unqualified_reference() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Trait property @var docblock type resolution ───────────────────────────
+
+/// When a trait defines a property with a `@var` docblock type, and a class
+/// uses that trait (possibly through inheritance), chaining on `$this->prop`
+/// should resolve to the docblock type and offer its members.
+#[tokio::test]
+async fn test_completion_trait_property_docblock_type_chain_same_file() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_prop_docblock.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class OutputStyle {\n",
+        "    public function createProgressBar(): ProgressBar { return new ProgressBar(); }\n",
+        "}\n",
+        "class ProgressBar {\n",
+        "    public function advance(): void {}\n",
+        "}\n",
+        "trait InteractsWithIO {\n",
+        "    /** @var OutputStyle */\n",
+        "    protected $output;\n",
+        "}\n",
+        "class Command {\n",
+        "    use InteractsWithIO;\n",
+        "}\n",
+        "final class ReindexSelectedCommand extends Command {\n",
+        "    public function handle(): int {\n",
+        "        $this->output->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Completion on `$this->output->` inside ReindexSelectedCommand
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completion results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"createProgressBar"),
+                "Should resolve trait property @var type and show OutputStyle::createProgressBar, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Cross-file PSR-4 variant: the trait, the parent class, and the child
+/// class live in separate files.
+#[tokio::test]
+async fn test_completion_trait_property_docblock_type_chain_cross_file() {
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
+    let trait_file = concat!(
+        "<?php\n",
+        "namespace App\\Concerns;\n",
+        "use App\\OutputStyle;\n",
+        "trait InteractsWithIO {\n",
+        "    /** @var OutputStyle */\n",
+        "    protected $output;\n",
+        "}\n",
+    );
+    let output_style_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class OutputStyle {\n",
+        "    public function createProgressBar(): ProgressBar { return new ProgressBar(); }\n",
+        "}\n",
+    );
+    let progress_bar_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class ProgressBar {\n",
+        "    public function advance(): void {}\n",
+        "}\n",
+    );
+    let command_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Concerns\\InteractsWithIO;\n",
+        "class Command {\n",
+        "    use InteractsWithIO;\n",
+        "}\n",
+    );
+    let child_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "final class ReindexSelectedCommand extends Command {\n",
+        "    public function handle(): int {\n",
+        "        $this->output->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Concerns/InteractsWithIO.php", trait_file),
+            ("src/OutputStyle.php", output_style_file),
+            ("src/ProgressBar.php", progress_bar_file),
+            ("src/Command.php", command_file),
+            ("src/ReindexSelectedCommand.php", child_file),
+        ],
+    );
+
+    let uri = Url::from_file_path(_dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: child_file.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completion results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"createProgressBar"),
+                "Should resolve cross-file trait property @var type, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Edge case: the trait lives in a completely different namespace from the
+/// consuming class, and the `@var` type is imported via `use` in the trait
+/// file but NOT in the consuming class file. The type should still resolve
+/// because `resolve_parent_class_names` resolves property type hints to FQN
+/// at parse time using the trait file's own use_map.
+#[tokio::test]
+async fn test_completion_trait_property_docblock_type_different_namespace() {
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
+    let trait_file = concat!(
+        "<?php\n",
+        "namespace App\\Concerns;\n",
+        "use App\\Support\\OutputStyle;\n",
+        "trait InteractsWithIO {\n",
+        "    /** @var OutputStyle */\n",
+        "    protected $output;\n",
+        "}\n",
+    );
+    let output_style_file = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class OutputStyle {\n",
+        "    public function createProgressBar(): ProgressBar { return new ProgressBar(); }\n",
+        "}\n",
+    );
+    let progress_bar_file = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class ProgressBar {\n",
+        "    public function advance(): void {}\n",
+        "}\n",
+    );
+    let command_file = concat!(
+        "<?php\n",
+        "namespace App\\Console;\n",
+        "use App\\Concerns\\InteractsWithIO;\n",
+        "class Command {\n",
+        "    use InteractsWithIO;\n",
+        "}\n",
+    );
+    // Child is in App\Console\Commands — a completely different namespace
+    // from App\Support where OutputStyle lives. OutputStyle is NOT imported
+    // in this file.
+    let child_file = concat!(
+        "<?php\n",
+        "namespace App\\Console\\Commands;\n",
+        "use App\\Console\\Command;\n",
+        "final class ReindexSelectedCommand extends Command {\n",
+        "    public function handle(): int {\n",
+        "        $this->output->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Concerns/InteractsWithIO.php", trait_file),
+            ("src/Support/OutputStyle.php", output_style_file),
+            ("src/Support/ProgressBar.php", progress_bar_file),
+            ("src/Console/Command.php", command_file),
+            ("src/Console/Commands/ReindexSelectedCommand.php", child_file),
+        ],
+    );
+
+    let uri = Url::from_file_path(
+        _dir.path()
+            .join("src/Console/Commands/ReindexSelectedCommand.php"),
+    )
+    .unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: child_file.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completion results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"createProgressBar"),
+                "Should resolve trait property @var type across different namespaces, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// FQN variant with leading backslash: `@var \App\Support\OutputStyle`.
+/// The leading `\` should be preserved by `resolve_name` and handled
+/// correctly by downstream resolution.
+#[tokio::test]
+async fn test_completion_trait_property_fqn_leading_backslash() {
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
+    let trait_file = concat!(
+        "<?php\n",
+        "namespace App\\Concerns;\n",
+        "trait InteractsWithIO {\n",
+        "    /** @var \\App\\Support\\OutputStyle */\n",
+        "    protected $output;\n",
+        "}\n",
+    );
+    let output_style_file = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "class OutputStyle {\n",
+        "    public function createProgressBar(): void {}\n",
+        "}\n",
+    );
+    let command_file = concat!(
+        "<?php\n",
+        "namespace App\\Console;\n",
+        "use App\\Concerns\\InteractsWithIO;\n",
+        "class Command {\n",
+        "    use InteractsWithIO;\n",
+        "}\n",
+    );
+    let child_file = concat!(
+        "<?php\n",
+        "namespace App\\Console\\Commands;\n",
+        "use App\\Console\\Command;\n",
+        "final class ReindexSelectedCommand extends Command {\n",
+        "    public function handle(): int {\n",
+        "        $this->output->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Concerns/InteractsWithIO.php", trait_file),
+            ("src/Support/OutputStyle.php", output_style_file),
+            ("src/Console/Command.php", command_file),
+            ("src/Console/Commands/ReindexSelectedCommand.php", child_file),
+        ],
+    );
+
+    let uri = Url::from_file_path(
+        _dir.path()
+            .join("src/Console/Commands/ReindexSelectedCommand.php"),
+    )
+    .unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: child_file.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 5,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completion results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"createProgressBar"),
+                "Should resolve FQN @var type with leading backslash across namespaces, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Go-to-definition on a method called on a trait property's `@var` type.
+/// The child class inherits `$output` from a trait via a parent class, and
+/// go-to-definition on `createProgressBar()` should jump to `OutputStyle`.
+#[tokio::test]
+async fn test_goto_definition_method_on_trait_property_docblock_type() {
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
+    let trait_file = concat!(
+        "<?php\n",
+        "namespace App\\Concerns;\n",
+        "use App\\OutputStyle;\n",
+        "trait InteractsWithIO {\n",
+        "    /** @var OutputStyle */\n",
+        "    protected $output;\n",
+        "}\n",
+    );
+    let output_style_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class OutputStyle {\n",
+        "    public function createProgressBar(): ProgressBar { return new ProgressBar(); }\n",
+        "}\n",
+    );
+    let progress_bar_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class ProgressBar {\n",
+        "    public function advance(): void {}\n",
+        "}\n",
+    );
+    let command_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Concerns\\InteractsWithIO;\n",
+        "class Command {\n",
+        "    use InteractsWithIO;\n",
+        "}\n",
+    );
+    let child_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "final class ReindexSelectedCommand extends Command {\n",
+        "    public function handle(): int {\n",
+        "        $bar = $this->output->createProgressBar();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Concerns/InteractsWithIO.php", trait_file),
+            ("src/OutputStyle.php", output_style_file),
+            ("src/ProgressBar.php", progress_bar_file),
+            ("src/Command.php", command_file),
+            ("src/ReindexSelectedCommand.php", child_file),
+        ],
+    );
+
+    let uri = Url::from_file_path(dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: child_file.to_string(),
+            },
+        })
+        .await;
+
+    // Go-to-definition on `createProgressBar` (line 4, inside the method name)
+    let result = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 35,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should resolve go-to-definition for method on trait property's @var type"
+    );
+    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+        let expected_uri =
+            Url::from_file_path(dir.path().join("src/OutputStyle.php")).unwrap();
+        assert_eq!(
+            location.uri, expected_uri,
+            "Should jump to OutputStyle file"
+        );
+        assert_eq!(
+            location.range.start.line, 3,
+            "Should jump to createProgressBar definition line"
+        );
+    } else {
+        panic!("Expected GotoDefinitionResponse::Scalar");
+    }
+}
+
+/// FQN variant: when the `@var` type uses a fully-qualified name (leading `\`),
+/// the type should still resolve correctly.
+#[tokio::test]
+async fn test_completion_trait_property_fqn_var_type() {
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
+    let trait_file = concat!(
+        "<?php\n",
+        "namespace App\\Concerns;\n",
+        "trait InteractsWithIO {\n",
+        "    /** @var \\App\\OutputStyle */\n",
+        "    protected $output;\n",
+        "}\n",
+    );
+    let output_style_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class OutputStyle {\n",
+        "    public function createProgressBar(): void {}\n",
+        "}\n",
+    );
+    let command_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "use App\\Concerns\\InteractsWithIO;\n",
+        "class Command {\n",
+        "    use InteractsWithIO;\n",
+        "}\n",
+    );
+    let child_file = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "final class ReindexSelectedCommand extends Command {\n",
+        "    public function handle(): int {\n",
+        "        $this->output->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Concerns/InteractsWithIO.php", trait_file),
+            ("src/OutputStyle.php", output_style_file),
+            ("src/Command.php", command_file),
+            ("src/ReindexSelectedCommand.php", child_file),
+        ],
+    );
+
+    let uri = Url::from_file_path(_dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: child_file.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 4,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completion results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"createProgressBar"),
+                "Should resolve FQN @var type on trait property, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
