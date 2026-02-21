@@ -49,77 +49,6 @@ Two pieces are needed:
 
 ---
 
-#### 19. `static` return type not resolved to concrete class at call sites
-
-When a method declares `@return static` (common in builder/factory
-patterns), `type_hint_to_classes` resolves `static` to
-`owning_class_name` — the class that *declares* the method, not the
-class it is called on:
-
-```php
-class Builder {
-    /** @return static */
-    public function configure(): static { return $this; }
-}
-class AppBuilder extends Builder {}
-
-$builder = new AppBuilder();
-$builder->configure()->  // resolves to Builder, not AppBuilder
-```
-
-The resolution works correctly when the subject is `$this` or `self`,
-but when the method return type is `static` and the call is on a variable
-typed as a subclass, the declaring class is used instead of the
-variable's concrete type.
-
-**Fix:** when `resolve_method_return_types_with_args` encounters a
-`static` (or `$this`) return type, substitute the caller's class name
-(the class the subject resolved to) rather than the class that declares
-the method.
-
----
-
-#### 24. Namespaced class breaks `static` return type chain resolution
-
-When a class lives in a namespace and calls a static method whose return
-type is `Builder<static>`, the chain resolution breaks. The same code
-works without a namespace.
-
-```php
-// lead_providers.php
-namespace Luxplus\Core\Database\Model\LeadProviders;
-
-final class LeadProviders extends Model {}
-
-LeadProviders::query()->  // ← no completion (works without the namespace)
-```
-
-```php
-// model.php (same or separate file)
-abstract class Model
-{
-    /** @return \Illuminate\Database\Eloquent\Builder */
-    public static function query() {}
-}
-```
-
-```php
-// builder.php
-namespace Illuminate\Database\Eloquent;
-
-class Builder
-{
-    public function where() {}
-}
-```
-
-The generic argument in `Builder` should resolve to
-`LeadProviders`, giving a `Builder`, and `where()` should then be
-offered.  With a namespace present the chain breaks, likely because the
-FQN resolution of `Model` when a namespace is involved.
-
----
-
 #### Trait property completion/goto-definition gap: InteractsWithIO::$output and createProgressBar()
 
 We are unable to go to `createProgressBar()` and can't provide completion
@@ -367,6 +296,23 @@ class UserRepository {
 This is a niche scenario (the developer writing the generator usually
 knows the types), but it would help when the generator body grows large
 and variables are passed around before being yielded.
+
+---
+
+### Resolved
+
+- **19. `static` return type not resolved to concrete class at call sites.**
+  When a method declares `@return static` and the call is on a subclass
+  variable, the resolver now substitutes the caller's concrete class
+  rather than the declaring (parent) class. Chained fluent calls preserve
+  the subclass through multiple `static` returns.
+
+- **24. Namespaced class breaks `static` return type chain resolution.**
+  `clean_type` now preserves the leading `\` on fully-qualified names so
+  that `resolve_type_string` does not incorrectly prepend the current
+  file's namespace. Cross-file FQN return types (e.g.
+  `@return \Illuminate\Database\Eloquent\Builder`) resolve correctly
+  regardless of the caller's namespace.
 
 ---
 

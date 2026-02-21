@@ -200,7 +200,14 @@ pub fn split_intersection_depth0(s: &str) -> Vec<&str> {
 /// Generic parameters like `<int, User>` are **not** stripped.  Use
 /// [`base_class_name`] when you need just the unparameterised class name.
 pub fn clean_type(raw: &str) -> String {
-    let s = raw.strip_prefix('\\').unwrap_or(raw);
+    // Preserve the leading `\` — it marks the type as a fully-qualified
+    // name (FQN).  Stripping it would make the name look relative,
+    // causing `resolve_type_string` to incorrectly prepend the current
+    // file's namespace (e.g. `\Illuminate\Builder` would become
+    // `App\Models\Illuminate\Builder`).  Downstream consumers
+    // (`type_hint_to_classes`, `resolve_name`, `resolve_class_name`)
+    // all handle `\`-prefixed names correctly.
+    let s = raw;
 
     // Strip trailing punctuation that could leak from docblocks
     // (e.g. trailing `.` or `,` in descriptions).
@@ -240,7 +247,7 @@ pub fn clean_type(raw: &str) -> String {
 /// # Examples
 ///
 /// - `"Collection<int, User>"` → `"Collection"`
-/// - `"\\App\\Models\\User"` → `"App\\Models\\User"`
+/// - `"\\App\\Models\\User"` → `"\\App\\Models\\User"`
 /// - `"?Foo"` → `"Foo"`
 /// - `"Foo|null"` → `"Foo"`
 pub fn base_class_name(raw: &str) -> String {

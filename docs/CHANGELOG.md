@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`static` return type resolved to concrete class at call sites.** When a method declares `@return static` and is called on a subclass variable, the resolver now returns the caller's concrete class rather than the declaring (parent) class. Chained fluent calls preserve the subclass through multiple `static` returns.
+- **Namespaced FQN return types no longer break chain resolution.** `clean_type` now preserves the leading `\` on fully-qualified names so that `resolve_type_string` does not incorrectly prepend the current file's namespace. Cross-file FQN return types (e.g. `@return \Illuminate\Database\Eloquent\Builder`) resolve correctly regardless of the caller's namespace.
 - **Parenthesized RHS expressions now resolved.** Assignments like `$var = (new Foo())` and `$var = ($cond ? $a : $b)` now resolve correctly through the AST path. Previously the `Expression::Parenthesized` wrapper was not unwrapped in `resolve_rhs_expression`.
 - **`$var::` completion for class-string variables.** When a variable holds a class-string (e.g. `$cls = User::class`), using `$cls::` now offers the referenced class's static members, constants, and static properties. Handles `self::class`, `static::class`, `parent::class`, and unions from match/ternary/null-coalescing expressions.
 - **`?->` chaining fallback now recurses correctly.** The `?->` fallback branch in subject extraction called `extract_simple_variable` instead of `extract_arrow_subject`. The primary `->` branch already handled `?->` chains correctly via a `?` skip, so this was not user-visible, but the fallback is now consistent.

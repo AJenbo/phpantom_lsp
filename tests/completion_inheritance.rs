@@ -1030,3 +1030,471 @@ async fn test_completion_magic_methods_not_inherited() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// When a parent method declares `@return static`, calling it on a variable
+/// typed as a subclass should resolve to the *subclass*, not the declaring
+/// (parent) class.  This is PHP's late-static-binding semantics.
+#[tokio::test]
+async fn test_static_return_type_resolved_to_caller_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///static_return.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Builder {\n",
+        "    /** @return static */\n",
+        "    public function configure(): static { return $this; }\n",
+        "    public function build(): void {}\n",
+        "}\n",
+        "class AppBuilder extends Builder {\n",
+        "    public function setDebug(): void {}\n",
+        "}\n",
+        "class TestClass {\n",
+        "    public function test() {\n",
+        "        $builder = new AppBuilder();\n",
+        "        $builder->configure()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 31,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+
+    let method_names: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .map(|i| i.filter_text.as_deref().unwrap())
+        .collect();
+
+    assert!(
+        method_names.contains(&"setDebug"),
+        "static return should resolve to AppBuilder and include setDebug. Got: {:?}",
+        method_names
+    );
+    assert!(
+        method_names.contains(&"configure"),
+        "Should include inherited configure. Got: {:?}",
+        method_names
+    );
+    assert!(
+        method_names.contains(&"build"),
+        "Should include inherited build. Got: {:?}",
+        method_names
+    );
+}
+
+/// Cross-file variant: parent with `@return static` lives in a separate
+/// PSR-4 file. Completion on a subclass variable after calling the parent
+/// method should still resolve to the subclass.
+#[tokio::test]
+async fn test_static_return_type_cross_file_psr4() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "Acme\\": "src/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/Builder.php",
+                concat!(
+                    "<?php\n",
+                    "namespace Acme;\n",
+                    "class Builder {\n",
+                    "    /** @return static */\n",
+                    "    public function configure(): static { return $this; }\n",
+                    "    public function build(): void {}\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/AppBuilder.php",
+                concat!(
+                    "<?php\n",
+                    "namespace Acme;\n",
+                    "class AppBuilder extends Builder {\n",
+                    "    public function setDebug(): void {}\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let uri = Url::parse("file:///app.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use Acme\\AppBuilder;\n",
+        "class Controller {\n",
+        "    public function test() {\n",
+        "        $builder = new AppBuilder();\n",
+        "        $builder->configure()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 31,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+
+    let method_names: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .map(|i| i.filter_text.as_deref().unwrap())
+        .collect();
+
+    assert!(
+        method_names.contains(&"setDebug"),
+        "Cross-file static return should resolve to AppBuilder. Got: {:?}",
+        method_names
+    );
+    assert!(
+        method_names.contains(&"configure"),
+        "Should include inherited configure cross-file. Got: {:?}",
+        method_names
+    );
+    assert!(
+        method_names.contains(&"build"),
+        "Should include inherited build cross-file. Got: {:?}",
+        method_names
+    );
+}
+
+/// Chained `static` return types: calling two fluent methods that each
+/// return `static` should still resolve to the subclass, not the parent.
+#[tokio::test]
+async fn test_static_return_type_chained_calls() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///static_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Query {\n",
+        "    /** @return static */\n",
+        "    public function where(): static { return $this; }\n",
+        "    /** @return static */\n",
+        "    public function orderBy(): static { return $this; }\n",
+        "    public function get(): array { return []; }\n",
+        "}\n",
+        "class UserQuery extends Query {\n",
+        "    public function active(): static { return $this; }\n",
+        "}\n",
+        "class TestClass {\n",
+        "    public function test() {\n",
+        "        $q = new UserQuery();\n",
+        "        $q->where()->orderBy()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 14,
+                character: 32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+
+    let method_names: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .map(|i| i.filter_text.as_deref().unwrap())
+        .collect();
+
+    assert!(
+        method_names.contains(&"active"),
+        "Chained static returns should resolve to UserQuery. Got: {:?}",
+        method_names
+    );
+    assert!(
+        method_names.contains(&"where"),
+        "Should include inherited where. Got: {:?}",
+        method_names
+    );
+    assert!(
+        method_names.contains(&"get"),
+        "Should include inherited get. Got: {:?}",
+        method_names
+    );
+}
+
+/// Cross-file FQN return type resolution through an inheritance chain.
+///
+/// `LeadProvider extends Model`, and `Model::query()` declares
+/// `@return \Illuminate\Database\Eloquent\Builder`. Completion on
+/// `LeadProvider::query()->` must resolve the FQN return type across
+/// PSR-4 file boundaries and offer Builder's methods.
+#[tokio::test]
+async fn test_namespaced_static_method_return_type_chain() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\Models\\": "src/Models/",
+                    "Illuminate\\Database\\Eloquent\\": "src/Eloquent/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/Eloquent/Builder.php",
+                concat!(
+                    "<?php\n",
+                    "namespace Illuminate\\Database\\Eloquent;\n",
+                    "class Builder {\n",
+                    "    public function where(): static { return $this; }\n",
+                    "    public function first(): mixed { return null; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Models/Model.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Models;\n",
+                    "abstract class Model {\n",
+                    "    /** @return \\Illuminate\\Database\\Eloquent\\Builder */\n",
+                    "    public static function query() {}\n",
+                    "    public function save(): bool { return true; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Models/LeadProvider.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Models;\n",
+                    "final class LeadProvider extends Model {}\n",
+                ),
+            ),
+        ],
+    );
+
+    // LeadProvider:: should include inherited `query` from Model
+    let uri1 = Url::parse("file:///step1.php").unwrap();
+    let text1 = concat!(
+        "<?php\n",
+        "use App\\Models\\LeadProvider;\n",
+        "LeadProvider::\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri1.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text1.to_string(),
+            },
+        })
+        .await;
+    let result1 = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri1 },
+                position: Position {
+                    line: 2,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let items1 = match result1 {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+    let labels1: Vec<&str> = items1
+        .iter()
+        .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+        .collect();
+    assert!(
+        labels1.contains(&"query"),
+        "LeadProvider:: should include inherited 'query'. Got: {:?}",
+        labels1
+    );
+
+    // Model::query()-> should resolve the FQN return type to Builder
+    let uri2 = Url::parse("file:///step2.php").unwrap();
+    let text2 = concat!(
+        "<?php\n",
+        "use App\\Models\\Model;\n",
+        "class Step2 {\n",
+        "    function t() {\n",
+        "        Model::query()->\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri2.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text2.to_string(),
+            },
+        })
+        .await;
+    let result2 = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri2 },
+                position: Position {
+                    line: 4,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let items2 = match result2 {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+    let labels2: Vec<&str> = items2
+        .iter()
+        .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+        .collect();
+    assert!(
+        labels2.contains(&"where"),
+        "Model::query()-> should include Builder::where(). Got: {:?}",
+        labels2
+    );
+
+    // The full chain: LeadProvider::query()-> through the parent's FQN return type
+    let uri3 = Url::parse("file:///step3.php").unwrap();
+    let text3 = concat!(
+        "<?php\n",
+        "use App\\Models\\LeadProvider;\n",
+        "class Step3 {\n",
+        "    function t() {\n",
+        "        LeadProvider::query()->\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri3.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text3.to_string(),
+            },
+        })
+        .await;
+    let result3 = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri3 },
+                position: Position {
+                    line: 4,
+                    character: 31,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let items3 = match result3 {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => vec![],
+    };
+    let labels3: Vec<&str> = items3
+        .iter()
+        .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+        .collect();
+    assert!(
+        labels3.contains(&"where"),
+        "LeadProvider::query()-> should include Builder::where(). Got: {:?}",
+        labels3
+    );
+    assert!(
+        labels3.contains(&"first"),
+        "LeadProvider::query()-> should include Builder::first(). Got: {:?}",
+        labels3
+    );
+}

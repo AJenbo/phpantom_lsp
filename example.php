@@ -127,8 +127,14 @@ $fromNew->getEmail();                    // resolves to User
 
 // ── Return Type Resolution ──────────────────────────────────────────────────
 
-$made = User::make('Charlie');            // static return type
+$made = User::make('Charlie');            // static return type → User
 $made->getEmail();
+
+$admin = AdminUser::make('Eve');          // static on subclass → AdminUser
+$admin->grantPermission('edit');          // resolves to AdminUser, not User/Model
+
+$fluent = $admin->setName('Eve');         // setName returns static → AdminUser
+$fluent->grantPermission('delete');       // chained static stays on the subclass
 
 $created = createUser('Dana', 'dana@example.com');
 $created->getName();                      // function return type

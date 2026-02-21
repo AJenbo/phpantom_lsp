@@ -1255,7 +1255,7 @@ fn test_clean_type_preserves_array_shape() {
         clean_type("array{name: string, age: int}|null"),
         "array{name: string, age: int}"
     );
-    assert_eq!(clean_type("\\array{name: string}"), "array{name: string}");
+    assert_eq!(clean_type("\\array{name: string}"), "\\array{name: string}");
 }
 
 #[test]

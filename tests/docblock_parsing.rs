@@ -71,7 +71,7 @@ fn method_tag_fqn_return_type() {
     assert_eq!(methods.len(), 1);
     assert_eq!(
         methods[0].return_type.as_deref(),
-        Some("Mockery\\MockInterface")
+        Some("\\Mockery\\MockInterface")
     );
 }
 
@@ -188,7 +188,7 @@ fn property_tag_fqn() {
     let props = extract_property_tags(doc);
     assert_eq!(
         props,
-        vec![("user".to_string(), "App\\Models\\User".to_string())]
+        vec![("user".to_string(), "\\App\\Models\\User".to_string())]
     );
 }
 
@@ -281,7 +281,7 @@ fn return_type_fqn() {
     let doc = "/** @return \\Illuminate\\Session\\Store */";
     assert_eq!(
         extract_return_type(doc),
-        Some("Illuminate\\Session\\Store".into())
+        Some("\\Illuminate\\Session\\Store".into())
     );
 }
 
@@ -309,7 +309,7 @@ fn return_type_multiline() {
     );
     assert_eq!(
         extract_return_type(doc),
-        Some("Illuminate\\Session\\Store".into())
+        Some("\\Illuminate\\Session\\Store".into())
     );
 }
 
@@ -458,7 +458,7 @@ fn var_type_simple() {
 #[test]
 fn var_type_fqn() {
     let doc = "/** @var \\App\\Models\\User */";
-    assert_eq!(extract_var_type(doc), Some("App\\Models\\User".into()));
+    assert_eq!(extract_var_type(doc), Some("\\App\\Models\\User".into()));
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn var_type_with_name_fqn() {
     let doc = "/** @var \\App\\Models\\User $user */";
     assert_eq!(
         extract_var_type_with_name(doc),
-        Some(("App\\Models\\User".into(), Some("$user".into())))
+        Some(("\\App\\Models\\User".into(), Some("$user".into())))
     );
 }
 
@@ -549,7 +549,7 @@ fn inline_var_docblock_fqn() {
     let stmt_start = content.find("$u").unwrap();
     assert_eq!(
         find_inline_var_docblock(content, stmt_start),
-        Some(("App\\Models\\User".into(), None))
+        Some(("\\App\\Models\\User".into(), None))
     );
 }
 
@@ -742,7 +742,9 @@ fn effective_type_neither() {
 
 #[test]
 fn clean_leading_backslash() {
-    assert_eq!(clean_type("\\Foo\\Bar"), "Foo\\Bar");
+    // Leading `\` is preserved — it marks a fully-qualified name so that
+    // `resolve_type_string` does not incorrectly prepend the file namespace.
+    assert_eq!(clean_type("\\Foo\\Bar"), "\\Foo\\Bar");
 }
 
 #[test]
@@ -764,7 +766,7 @@ fn base_class_name_strips_generics() {
 fn base_class_name_fqn_with_generics() {
     assert_eq!(
         base_class_name("\\App\\Models\\Collection<int, User>"),
-        "App\\Models\\Collection"
+        "\\App\\Models\\Collection"
     );
 }
 
@@ -854,12 +856,12 @@ fn conditional_null_check() {
             assert_eq!(condition, ParamCondition::IsNull);
             assert_eq!(
                 *then_type,
-                ConditionalReturnType::Concrete("Illuminate\\Contracts\\Auth\\Factory".into())
+                ConditionalReturnType::Concrete("\\Illuminate\\Contracts\\Auth\\Factory".into())
             );
             assert_eq!(
                 *else_type,
                 ConditionalReturnType::Concrete(
-                    "Illuminate\\Contracts\\Auth\\StatefulGuard".into()
+                    "\\Illuminate\\Contracts\\Auth\\StatefulGuard".into()
                 )
             );
         }
@@ -901,7 +903,7 @@ fn conditional_nested() {
                     assert_eq!(
                         **inner_then,
                         ConditionalReturnType::Concrete(
-                            "Illuminate\\Foundation\\Application".into()
+                            "\\Illuminate\\Foundation\\Application".into()
                         )
                     );
                     assert_eq!(
@@ -965,13 +967,13 @@ fn conditional_is_type() {
             assert_eq!(
                 *then_type,
                 ConditionalReturnType::Concrete(
-                    "Illuminate\\Foundation\\Bus\\PendingClosureDispatch".into()
+                    "\\Illuminate\\Foundation\\Bus\\PendingClosureDispatch".into()
                 )
             );
             assert_eq!(
                 *else_type,
                 ConditionalReturnType::Concrete(
-                    "Illuminate\\Foundation\\Bus\\PendingDispatch".into()
+                    "\\Illuminate\\Foundation\\Bus\\PendingDispatch".into()
                 )
             );
         }
@@ -1004,7 +1006,7 @@ fn mixin_tag_simple() {
 fn mixin_tag_fqn() {
     let doc = concat!("/**\n", " * @mixin \\App\\Models\\ShoppingCart\n", " */",);
     let mixins = extract_mixin_tags(doc);
-    assert_eq!(mixins, vec!["App\\Models\\ShoppingCart"]);
+    assert_eq!(mixins, vec!["\\App\\Models\\ShoppingCart"]);
 }
 
 #[test]
@@ -1139,7 +1141,7 @@ fn assert_fqn_type() {
     );
     let assertions = extract_type_assertions(doc);
     assert_eq!(assertions.len(), 1);
-    assert_eq!(assertions[0].asserted_type, "App\\Models\\User");
+    assert_eq!(assertions[0].asserted_type, "\\App\\Models\\User");
 }
 
 #[test]
@@ -1344,8 +1346,8 @@ fn generic_value_type_nullable() {
 
 #[test]
 fn generic_value_type_fqn_bracket() {
-    // clean_type strips the leading `\` but preserves namespace segments;
-    // type_hint_to_classes handles the FQN → short-name lookup separately.
+    // extract_generic_value_type strips the leading `\` from the outer type
+    // before processing, so the bracket-shorthand path never sees it.
     assert_eq!(
         extract_generic_value_type("\\App\\Models\\User[]"),
         Some("App\\Models\\User".to_string())
@@ -1356,7 +1358,7 @@ fn generic_value_type_fqn_bracket() {
 fn generic_value_type_fqn_inside_generic() {
     assert_eq!(
         extract_generic_value_type("list<\\App\\Models\\User>"),
-        Some("App\\Models\\User".to_string())
+        Some("\\App\\Models\\User".to_string())
     );
 }
 
@@ -1455,7 +1457,7 @@ fn generic_value_type_generator_nested_generic_value() {
 fn generic_value_type_generator_fqn_value() {
     assert_eq!(
         extract_generic_value_type("Generator<int, \\App\\Models\\User>"),
-        Some("App\\Models\\User".to_string())
+        Some("\\App\\Models\\User".to_string())
     );
 }
 
@@ -1528,7 +1530,7 @@ fn generic_key_type_fqn_prefix() {
 fn generic_key_type_fqn_key() {
     assert_eq!(
         extract_generic_key_type("WeakMap<\\App\\Models\\User, Session>"),
-        Some("App\\Models\\User".to_string())
+        Some("\\App\\Models\\User".to_string())
     );
 }
 
