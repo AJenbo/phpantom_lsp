@@ -92,22 +92,16 @@ variable's concrete type.
 (the class the subject resolved to) rather than the class that declares
 the method.
 
-### 15. `unset()` tracking
-**Priority: Medium**
+### ~~15. `unset()` tracking (variable scope)~~ ✅
 
-`unset($var)` removes a variable from scope, and `unset($arr['key'])` removes
-a key from an array shape. Neither is tracked today.
+Variable scope tracking is complete. After `unset($x)`, the variable `$x`
+no longer appears in variable name suggestions and `$x->` does not resolve
+to the type it had before the `unset`. Re-assignment after `unset` restores
+the variable with its new type. Conditional `unset` (inside `if` blocks)
+is treated conservatively: the variable is kept because it might still exist.
 
-- **Variable scope.** After `unset($x)`, the variable `$x` should no longer
-  appear in variable name suggestions, and `$x->` should not resolve to the
-  type it had before the `unset`.
-- **Array shape keys.** After `unset($config['host'])`, the key `host` should
-  no longer appear in `$config['` key completions, and the inferred shape
-  should reflect its removal.
-
-Both cases require the assignment/variable scanner in
-`completion/variable_resolution.rs` to recognise `unset(...)` statements
-and update its tracking accordingly.
+**Remaining:** Array shape key removal (`unset($config['host'])` removing
+the `host` key from `$config['` key completions) is not yet tracked.
 
 ### 20. Non-`$this` property access in text-based assignment path
 **Priority: Low**

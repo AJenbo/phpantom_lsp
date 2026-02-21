@@ -1297,6 +1297,53 @@ class TraitConflictDemo
 }
 
 
+
+// ── unset() Tracking ────────────────────────────────────────────────────────
+
+/**
+ * Demonstrates that `unset($var)` removes the variable from scope.
+ *
+ * After `unset($x)`, completion on `$x->` should produce no results.
+ * Re-assigning the variable restores its type.
+ */
+class UnsetDemo
+{
+    public function basicUnset(): void
+    {
+        $user = new User('Alice', 'alice@example.com');
+        $user->getEmail();                // resolves to User
+        unset($user);
+        //$user->
+        // Try: $user->  — no completions (variable was unset)
+    }
+
+    public function reassignAfterUnset(): void
+    {
+        $item = new User('Bob', 'bob@example.com');
+        unset($item);
+        $item = new AdminUser('Admin', 'admin@example.com');
+        $item->grantPermission('edit');   // resolves to AdminUser
+    }
+
+    public function unsetMultiple(): void
+    {
+        $user = new User('A', 'a@b.com');
+        $profile = new UserProfile($user);
+        unset($user, $profile);
+        // Try: $user->   — no completions
+        // Try: $profile-> — no completions
+    }
+
+    public function unsetOnlyAffectsTarget(): void
+    {
+        $user = new User('A', 'a@b.com');
+        $profile = new UserProfile($user);
+        unset($user);
+        $profile->getDisplayName();       // still resolves to UserProfile
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Template parameter bound resolution.** When a property or variable type is a `@template` parameter (e.g. `TNode`), the resolver falls back to the upper bound declared via `of` (e.g. `@template TNode of SomeClass`) for completion and go-to-definition.
 - **Transitive interface inheritance in go-to-implementation.** If `InterfaceB extends InterfaceA` and `ClassC implements InterfaceB`, go-to-implementation on `InterfaceA` now finds `ClassC`. Works through arbitrary depth and with interfaces that extend multiple parents.
 - **Switch statement variable type tracking.** Variables assigned inside `switch` case bodies now resolve their types. Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms are supported, and all cases contribute to a union type.
+- **`unset()` variable tracking.** After `unset($var)`, the variable no longer appears in name suggestions and `$var->` does not resolve to its previous type. Re-assignment after `unset` restores the variable with the new type. Conditional `unset` (inside `if` blocks) is handled conservatively, keeping the variable because it might still exist.
 
 ### Fixed
 

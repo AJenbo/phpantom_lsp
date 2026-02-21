@@ -486,6 +486,16 @@ fn collect_from_statements<'b>(
                     }
                 }
             }
+            // ── unset($var) ──
+            // When `unset($var)` appears before the cursor, the variable
+            // is no longer in scope and should not be suggested.
+            Statement::Unset(unset_stmt) => {
+                for val in unset_stmt.values.iter() {
+                    if let Expression::Variable(Variable::Direct(dv)) = val {
+                        vars.remove(&dv.name.to_string());
+                    }
+                }
+            }
             // Skip class/function/namespace declarations (they have their
             // own scopes handled by find_scope_and_collect).
             Statement::Class(_)

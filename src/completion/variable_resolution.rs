@@ -101,10 +101,13 @@ impl Backend {
                     if ctx.cursor_offset < start || ctx.cursor_offset > end {
                         continue;
                     }
-                    let results = Self::resolve_variable_in_members(class.members.iter(), ctx);
-                    if !results.is_empty() {
-                        return results;
-                    }
+                    // The cursor is inside this class body.  PHP method
+                    // scopes are isolated — they cannot access variables
+                    // from enclosing or top-level code.  Return whatever
+                    // the member scan found (even if empty, e.g. after
+                    // `unset($var)`), and never fall through to the
+                    // top-level walk.
+                    return Self::resolve_variable_in_members(class.members.iter(), ctx);
                 }
                 Statement::Interface(iface) => {
                     let start = iface.left_brace.start.offset;
@@ -112,10 +115,7 @@ impl Backend {
                     if ctx.cursor_offset < start || ctx.cursor_offset > end {
                         continue;
                     }
-                    let results = Self::resolve_variable_in_members(iface.members.iter(), ctx);
-                    if !results.is_empty() {
-                        return results;
-                    }
+                    return Self::resolve_variable_in_members(iface.members.iter(), ctx);
                 }
                 Statement::Enum(enum_def) => {
                     let start = enum_def.left_brace.start.offset;
@@ -123,10 +123,7 @@ impl Backend {
                     if ctx.cursor_offset < start || ctx.cursor_offset > end {
                         continue;
                     }
-                    let results = Self::resolve_variable_in_members(enum_def.members.iter(), ctx);
-                    if !results.is_empty() {
-                        return results;
-                    }
+                    return Self::resolve_variable_in_members(enum_def.members.iter(), ctx);
                 }
                 Statement::Namespace(ns) => {
                     let results = Self::resolve_variable_in_statements(ns.statements().iter(), ctx);
@@ -142,6 +139,9 @@ impl Backend {
                     let body_start = func.body.left_brace.start.offset;
                     let body_end = func.body.right_brace.end.offset;
                     if ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end {
+                        // The cursor is inside this function body.  PHP
+                        // function scopes are isolated, so return the
+                        // result directly (even if empty after `unset`).
                         let mut results: Vec<ClassInfo> = Vec::new();
                         Self::resolve_closure_params(&func.parameter_list, ctx, &mut results);
                         Self::walk_statements_for_assignments(
@@ -150,9 +150,7 @@ impl Backend {
                             &mut results,
                             false,
                         );
-                        if !results.is_empty() {
-                            return results;
-                        }
+                        return results;
                     }
                 }
                 _ => {}
@@ -389,6 +387,26 @@ impl Backend {
                             results,
                             true,
                         );
+                    }
+                }
+                // ── unset($var) tracking ──
+                // When `unset($var)` appears unconditionally before the
+                // cursor, the variable no longer has a type.  Clear all
+                // previously accumulated results so that `$var->` does
+                // not resolve to the type it had before the unset.
+                //
+                // Inside conditional branches (`conditional == true`)
+                // the variable *might* still exist, so we leave the
+                // results untouched.
+                Statement::Unset(unset_stmt) => {
+                    if !conditional {
+                        for val in unset_stmt.values.iter() {
+                            if let Expression::Variable(Variable::Direct(dv)) = val
+                                && dv.name == ctx.var_name
+                            {
+                                results.clear();
+                            }
+                        }
                     }
                 }
                 _ => {}
