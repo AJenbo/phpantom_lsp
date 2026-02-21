@@ -19,7 +19,9 @@ use tower_lsp::lsp_types::*;
 use super::point_location;
 use crate::Backend;
 use crate::completion::resolver::ResolutionCtx;
-use crate::subject_extraction::{extract_arrow_subject, extract_double_colon_subject};
+use crate::subject_extraction::{
+    collapse_continuation_lines, extract_arrow_subject, extract_double_colon_subject,
+};
 use crate::types::*;
 
 /// The kind of class member being resolved.
@@ -203,9 +205,19 @@ impl Backend {
         position: Position,
     ) -> Option<(String, AccessKind)> {
         let lines: Vec<&str> = content.lines().collect();
-        let line = lines.get(position.line as usize)?;
+        if position.line as usize >= lines.len() {
+            return None;
+        }
+
+        // Collapse multi-line method chains so that continuation lines
+        // (starting with `->` or `?->`) are joined with preceding lines.
+        let (line, col) = collapse_continuation_lines(
+            &lines,
+            position.line as usize,
+            position.character as usize,
+        );
         let chars: Vec<char> = line.chars().collect();
-        let col = (position.character as usize).min(chars.len());
+        let col = col.min(chars.len());
 
         if chars.is_empty() {
             return None;

@@ -1203,3 +1203,252 @@ async fn test_implementation_method_via_psr4_scan() {
         "Should find UserRepository::find via PSR-4 scan"
     );
 }
+
+// ─── Transitive interface inheritance ───────────────────────────────────────
+
+/// If InterfaceB extends InterfaceA and ClassC implements InterfaceB,
+/// go-to-implementation on InterfaceA should find ClassC.
+#[tokio::test]
+async fn test_implementation_transitive_interface_extends() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///transitive_iface.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                     // 0
+        "interface InterfaceA {\n",                    // 1
+        "    public function doA(): void;\n",          // 2
+        "}\n",                                         // 3
+        "interface InterfaceB extends InterfaceA {\n", // 4
+        "    public function doB(): void;\n",          // 5
+        "}\n",                                         // 6
+        "class ConcreteC implements InterfaceB {\n",   // 7
+        "    public function doA(): void {}\n",        // 8
+        "    public function doB(): void {}\n",        // 9
+        "}\n",                                         // 10
+        "class DirectImpl implements InterfaceA {\n",  // 11
+        "    public function doA(): void {}\n",        // 12
+        "}\n",                                         // 13
+    );
+
+    open(&backend, &uri, text).await;
+
+    // Cursor on "InterfaceA" on line 1
+    let locations = implementation_at(&backend, &uri, 1, 12).await;
+
+    let lines: Vec<u32> = locations.iter().map(|l| l.range.start.line).collect();
+    assert!(
+        lines.contains(&7),
+        "Should find ConcreteC (line 7) via transitive InterfaceB extends InterfaceA, got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&11),
+        "Should find DirectImpl (line 11) via direct implements, got lines: {:?}",
+        lines
+    );
+}
+
+/// Three-level interface chain: C extends B extends A, ClassD implements C.
+/// Go-to-implementation on A should find ClassD.
+#[tokio::test]
+async fn test_implementation_deeply_transitive_interface() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///deep_transitive.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                           // 0
+        "interface BaseContract {\n",                        // 1
+        "    public function execute(): void;\n",            // 2
+        "}\n",                                               // 3
+        "interface MiddleContract extends BaseContract {\n", // 4
+        "    public function prepare(): void;\n",            // 5
+        "}\n",                                               // 6
+        "interface LeafContract extends MiddleContract {\n", // 7
+        "    public function finalize(): void;\n",           // 8
+        "}\n",                                               // 9
+        "class Worker implements LeafContract {\n",          // 10
+        "    public function execute(): void {}\n",          // 11
+        "    public function prepare(): void {}\n",          // 12
+        "    public function finalize(): void {}\n",         // 13
+        "}\n",                                               // 14
+    );
+
+    open(&backend, &uri, text).await;
+
+    // Cursor on "BaseContract" on line 1
+    let locations = implementation_at(&backend, &uri, 1, 12).await;
+
+    let lines: Vec<u32> = locations.iter().map(|l| l.range.start.line).collect();
+    assert!(
+        lines.contains(&10),
+        "Should find Worker (line 10) via deeply transitive interface chain, got lines: {:?}",
+        lines
+    );
+}
+
+/// Interface extends multiple parent interfaces. A class implementing the
+/// child should appear when searching for any of the parents.
+#[tokio::test]
+async fn test_implementation_multi_extends_interface() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///multi_extends.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                               // 0
+        "interface Readable {\n",                                // 1
+        "    public function read(): string;\n",                 // 2
+        "}\n",                                                   // 3
+        "interface Writable {\n",                                // 4
+        "    public function write(string $data): void;\n",      // 5
+        "}\n",                                                   // 6
+        "interface ReadWritable extends Readable, Writable {\n", // 7
+        "}\n",                                                   // 8
+        "class FileStream implements ReadWritable {\n",          // 9
+        "    public function read(): string { return ''; }\n",   // 10
+        "    public function write(string $data): void {}\n",    // 11
+        "}\n",                                                   // 12
+    );
+
+    open(&backend, &uri, text).await;
+
+    // Go-to-implementation on "Readable" (line 1) should find FileStream.
+    let locations_readable = implementation_at(&backend, &uri, 1, 12).await;
+    let lines_readable: Vec<u32> = locations_readable
+        .iter()
+        .map(|l| l.range.start.line)
+        .collect();
+    assert!(
+        lines_readable.contains(&9),
+        "Should find FileStream (line 9) via Readable -> ReadWritable, got lines: {:?}",
+        lines_readable
+    );
+
+    // Go-to-implementation on "Writable" (line 4) should also find FileStream.
+    let locations_writable = implementation_at(&backend, &uri, 4, 12).await;
+    let lines_writable: Vec<u32> = locations_writable
+        .iter()
+        .map(|l| l.range.start.line)
+        .collect();
+    assert!(
+        lines_writable.contains(&9),
+        "Should find FileStream (line 9) via Writable -> ReadWritable, got lines: {:?}",
+        lines_writable
+    );
+}
+
+/// Transitive interface via parent class chain: ClassB extends ClassA,
+/// ClassA implements InterfaceX which extends InterfaceBase.
+/// Go-to-implementation on InterfaceBase should find ClassB.
+#[tokio::test]
+async fn test_implementation_transitive_interface_via_parent_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trans_via_parent.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                        // 0
+        "interface InterfaceBase {\n",                    // 1
+        "    public function base(): void;\n",            // 2
+        "}\n",                                            // 3
+        "interface InterfaceX extends InterfaceBase {\n", // 4
+        "    public function extra(): void;\n",           // 5
+        "}\n",                                            // 6
+        "class ClassA implements InterfaceX {\n",         // 7
+        "    public function base(): void {}\n",          // 8
+        "    public function extra(): void {}\n",         // 9
+        "}\n",                                            // 10
+        "class ClassB extends ClassA {\n",                // 11
+        "}\n",                                            // 12
+    );
+
+    open(&backend, &uri, text).await;
+
+    // Cursor on "InterfaceBase" on line 1
+    let locations = implementation_at(&backend, &uri, 1, 12).await;
+
+    let lines: Vec<u32> = locations.iter().map(|l| l.range.start.line).collect();
+    assert!(
+        lines.contains(&7),
+        "Should find ClassA (line 7) via InterfaceX extends InterfaceBase, got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&11),
+        "Should find ClassB (line 11) via parent ClassA -> InterfaceX -> InterfaceBase, got lines: {:?}",
+        lines
+    );
+}
+
+/// Cross-file transitive interface inheritance via PSR-4.
+#[tokio::test]
+async fn test_implementation_transitive_interface_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[
+            (
+                "src/Contracts/Loggable.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Contracts;\n",
+                    "interface Loggable {\n",
+                    "    public function log(string $msg): void;\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Contracts/AuditLoggable.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Contracts;\n",
+                    "interface AuditLoggable extends Loggable {\n",
+                    "    public function auditLog(string $action): void;\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Services/AuditService.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Services;\n",
+                    "use App\\Contracts\\AuditLoggable;\n",
+                    "class AuditService implements AuditLoggable {\n",
+                    "    public function log(string $msg): void {}\n",
+                    "    public function auditLog(string $action): void {}\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let loggable_uri = Url::from_file_path(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
+    let loggable_text =
+        std::fs::read_to_string(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
+    open(&backend, &loggable_uri, &loggable_text).await;
+
+    // Also open the intermediate interface and concrete class so they
+    // are in ast_map.
+    let audit_loggable_uri =
+        Url::from_file_path(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
+    let audit_loggable_text =
+        std::fs::read_to_string(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
+    open(&backend, &audit_loggable_uri, &audit_loggable_text).await;
+
+    let service_uri =
+        Url::from_file_path(_dir.path().join("src/Services/AuditService.php")).unwrap();
+    let service_text =
+        std::fs::read_to_string(_dir.path().join("src/Services/AuditService.php")).unwrap();
+    open(&backend, &service_uri, &service_text).await;
+
+    // Cursor on "Loggable" on line 2 of Loggable.php
+    let locations = implementation_at(&backend, &loggable_uri, 2, 12).await;
+
+    assert!(
+        !locations.is_empty(),
+        "Should find AuditService via transitive AuditLoggable extends Loggable"
+    );
+}

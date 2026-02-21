@@ -68,6 +68,22 @@ $maybe = User::find(1);                  // null-safe chaining
 $maybe?->getProfile()?->getDisplayName();
 
 
+// ── Multi-line Method Chains ────────────────────────────────────────────────
+// Try: trigger completion after `->` on continuation lines. The resolver joins
+// multi-line chains automatically, so fluent builder patterns work seamlessly.
+
+$user->setName('Bob')
+    ->setStatus(Status::Active)
+    ->getEmail();                         // resolves through the full chain
+
+User::query()
+    ->where('active', true)
+    ->where('name', 'Bob');               // static call base + continuations
+
+$maybe?->getProfile()
+    ?->getDisplayName();                  // nullsafe continuations
+
+
 // ── Chained Method Calls in Variable Assignment ─────────────────────────────
 // When a variable is assigned from a chained call, the LSP walks the full
 // chain to resolve the stored type.
@@ -670,6 +686,34 @@ class SwitchDemo
 }
 
 
+// ── Template Parameter Bounds ───────────────────────────────────────────────
+// When a property's type is a template parameter (e.g. TNode), the resolver
+// falls back to the upper bound declared in @template TNode of SomeClass.
+
+/**
+ * @template-covariant TNode of AstNode
+ */
+class TemplateBoundsDemo
+{
+    /** @var TNode */
+    public $node;
+
+    /**
+     * @param TNode $node
+     */
+    public function __construct(AstNode $node)
+    {
+        $this->node = $node;
+    }
+
+    public function demo(): void
+    {
+        $this->node->getChildren();       // resolves via TNode's bound: AstNode
+        $this->node->getParent();         // AstNode::getParent()
+    }
+}
+
+
 // ── Foreach, Key Types, and Destructuring ───────────────────────────────────
 
 class IterationDemo
@@ -1258,6 +1302,19 @@ class TraitConflictDemo
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 // ┃  Everything below exists to support the playground above.           ┃
 // ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+// ── AST Node (template bounds demo) ────────────────────────────────────────
+
+class AstNode
+{
+    /** @return AstNode|null */
+    public function getParent(): ?AstNode { return null; }
+
+    /** @return AstNode[] */
+    public function getChildren(): array { return []; }
+
+    public function getType(): string { return ''; }
+}
 
 // ── ObjectMapper (method-level @template demo) ──────────────────────────────
 

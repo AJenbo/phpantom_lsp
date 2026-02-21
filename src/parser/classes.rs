@@ -34,6 +34,8 @@ struct ClassDocblockInfo {
     is_deprecated: bool,
     /// `@template` parameters declared on the class-like.
     template_params: Vec<String>,
+    /// Upper bounds for template parameters (`@template T of Bound`).
+    template_param_bounds: HashMap<String, String>,
     /// Generic arguments from `@extends` / `@phpstan-extends`.
     extends_generics: Vec<(String, Vec<String>)>,
     /// Generic arguments from `@implements` / `@phpstan-implements`.
@@ -101,9 +103,17 @@ fn extract_class_docblock<'a>(
         })
         .collect();
 
+    let params_with_bounds = docblock::extract_template_params_with_bounds(doc_text);
+    let template_params = params_with_bounds.iter().map(|(n, _)| n.clone()).collect();
+    let template_param_bounds: HashMap<String, String> = params_with_bounds
+        .into_iter()
+        .filter_map(|(name, bound)| bound.map(|b| (name, b)))
+        .collect();
+
     ClassDocblockInfo {
         is_deprecated: docblock::has_deprecated_tag(doc_text),
-        template_params: docblock::extract_template_params(doc_text),
+        template_params,
+        template_param_bounds,
         extends_generics: docblock::extract_generics_tag(doc_text, "@extends"),
         implements_generics: docblock::extract_generics_tag(doc_text, "@implements"),
         use_generics: docblock::extract_generics_tag(doc_text, "@use"),
@@ -175,6 +185,7 @@ impl Backend {
                         is_abstract: class.modifiers.contains_abstract(),
                         is_deprecated: doc_info.is_deprecated,
                         template_params: doc_info.template_params,
+                        template_param_bounds: doc_info.template_param_bounds,
                         extends_generics: doc_info.extends_generics,
                         implements_generics: doc_info.implements_generics,
                         use_generics: doc_info.use_generics,
@@ -186,12 +197,23 @@ impl Backend {
                 Statement::Interface(iface) => {
                     let iface_name = iface.name.value.to_string();
 
-                    // Interfaces use `extends` for parent interfaces;
-                    // take the first one for single-inheritance resolution.
-                    let parent_class = iface
+                    // Interfaces can extend multiple parent interfaces.
+                    // Store the first one in `parent_class` for backward
+                    // compatibility with single-inheritance resolution,
+                    // and all of them in `interfaces` so that transitive
+                    // interface inheritance checks work correctly.
+                    let all_parents: Vec<String> = iface
                         .extends
                         .as_ref()
-                        .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
+                        .map(|ext| {
+                            ext.types
+                                .iter()
+                                .map(|ident| ident.value().to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let parent_class = all_parents.first().cloned();
 
                     let (
                         mut methods,
@@ -217,13 +239,14 @@ impl Backend {
                         start_offset,
                         end_offset,
                         parent_class,
-                        interfaces: vec![],
+                        interfaces: all_parents,
                         used_traits,
                         mixins: doc_info.mixins,
                         is_final: false,
                         is_abstract: false,
                         is_deprecated: doc_info.is_deprecated,
                         template_params: doc_info.template_params,
+                        template_param_bounds: doc_info.template_param_bounds,
                         extends_generics: doc_info.extends_generics,
                         implements_generics: doc_info.implements_generics,
                         use_generics: doc_info.use_generics,
@@ -266,6 +289,7 @@ impl Backend {
                         is_abstract: false,
                         is_deprecated: doc_info.is_deprecated,
                         template_params: doc_info.template_params,
+                        template_param_bounds: doc_info.template_param_bounds,
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],
@@ -327,6 +351,7 @@ impl Backend {
                         is_abstract: false,
                         is_deprecated: doc_info.is_deprecated,
                         template_params: vec![],
+                        template_param_bounds: HashMap::new(),
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],

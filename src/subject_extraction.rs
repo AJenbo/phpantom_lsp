@@ -8,6 +8,22 @@
 //! All functions operate on a `&[char]` slice representing a single line
 //! and work backwards from a given position.
 //!
+//! # Multi-line chains
+//!
+//! PHP code frequently uses fluent method chains that span multiple lines:
+//!
+//! ```php
+//! $this->getRepository()
+//!     ->findAll()
+//!     ->filter(fn($u) => $u->active)
+//!     ->  // ← cursor here
+//! ```
+//!
+//! The [`collapse_continuation_lines`] helper detects when the cursor is
+//! on a continuation line (one that starts with `->` or `?->` after
+//! optional whitespace) and joins it with preceding lines to form a
+//! single flattened expression that the character-level helpers can parse.
+//!
 //! # Subjects
 //!
 //! A "subject" is the textual expression that precedes an operator.
@@ -283,7 +299,7 @@ pub(crate) fn extract_arrow_subject(chars: &[char], arrow_pos: usize) -> String 
     // Check if preceded by `?->` (null-safe)
     if i >= 3 && chars[i - 3] == '?' && chars[i - 2] == '-' && chars[i - 1] == '>' {
         let inner_arrow = i - 3;
-        let inner_subject = extract_simple_variable(chars, inner_arrow);
+        let inner_subject = extract_arrow_subject(chars, inner_arrow);
         if !inner_subject.is_empty() {
             let prop: String = chars[ident_start..ident_end].iter().collect();
             return format!("{}?->{}", inner_subject, prop);
@@ -460,4 +476,232 @@ pub(crate) fn extract_double_colon_subject(chars: &[char], colon_pos: usize) -> 
         i -= 1;
     }
     chars[i..end].iter().collect()
+}
+
+/// Collapse multi-line method chains around the cursor into a single line.
+///
+/// When the cursor line (after trimming leading whitespace) begins with
+/// `->` or `?->`, this function walks backwards through preceding lines
+/// that are also continuations, plus the base expression line, and joins
+/// them into one flattened string.  The returned column is the cursor's
+/// position within that flattened string.
+///
+/// If the cursor line is not a continuation, the original line and column
+/// are returned unchanged.
+///
+/// # Returns
+///
+/// `(collapsed_line, adjusted_column)` — the flattened text and the
+/// cursor's character offset within it.
+pub(crate) fn collapse_continuation_lines(
+    lines: &[&str],
+    cursor_line: usize,
+    cursor_col: usize,
+) -> (String, usize) {
+    let line = lines[cursor_line];
+    let trimmed = line.trim_start();
+
+    // Only collapse when the cursor line is a continuation (starts with
+    // `->` or `?->` after optional whitespace).
+    if !trimmed.starts_with("->") && !trimmed.starts_with("?->") {
+        return (line.to_string(), cursor_col);
+    }
+
+    let cursor_leading_ws = line.len() - trimmed.len();
+
+    // Walk backwards to find the first non-continuation line (the base).
+    let mut start = cursor_line;
+    while start > 0 {
+        let prev_trimmed = lines[start - 1].trim_start();
+        if prev_trimmed.starts_with("->") || prev_trimmed.starts_with("?->") {
+            start -= 1;
+        } else {
+            // This is the base expression line.
+            start -= 1;
+            break;
+        }
+    }
+
+    // Build the collapsed string from the base line through the cursor line.
+    let mut prefix = String::new();
+    for (i, line) in lines.iter().enumerate().take(cursor_line).skip(start) {
+        let piece = if i == start {
+            line.trim_end()
+        } else {
+            line.trim()
+        };
+        prefix.push_str(piece);
+    }
+
+    // The cursor position in the collapsed string is the length of the
+    // prefix (everything before the cursor line) plus the cursor's offset
+    // within the trimmed cursor line.
+    let new_col = prefix.chars().count() + (cursor_col.saturating_sub(cursor_leading_ws));
+
+    prefix.push_str(trimmed);
+
+    (prefix, new_col)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nullsafe_chain_with_call() {
+        // $user->getAddress()?->getCity()->
+        let input = "$user->getAddress()?->getCity()->";
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        let result = extract_arrow_subject(&chars, arrow_pos);
+        // Should include the full chain, not lose ->getAddress()
+        assert!(
+            result.contains("getAddress"),
+            "Expected chain to include getAddress(), got: {result}"
+        );
+        assert!(
+            result.contains("getCity"),
+            "Expected chain to include getCity, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_nullsafe_simple_var() {
+        // $user?->getCity()->
+        let input = "$user?->getCity()->";
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        let result = extract_arrow_subject(&chars, arrow_pos);
+        assert!(
+            result.contains("$user") && result.contains("getCity"),
+            "Expected $user...getCity, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_nullsafe_property_chain() {
+        // $a?->b?->c->
+        let input = "$a?->b?->c->";
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        let result = extract_arrow_subject(&chars, arrow_pos);
+        assert!(
+            result.contains("$a") && result.contains("b") && result.contains("c"),
+            "Expected full chain $a...b...c, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_regular_chain() {
+        let input = "$user->getProfile()->getName()->";
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        let result = extract_arrow_subject(&chars, arrow_pos);
+        assert!(
+            result.contains("getProfile") && result.contains("getName"),
+            "Expected full chain, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_simple_variable() {
+        let input = "$user->";
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        let result = extract_arrow_subject(&chars, arrow_pos);
+        assert_eq!(result, "$user");
+    }
+
+    #[test]
+    fn test_nullsafe_simple() {
+        let input = "$user?->";
+        let chars: Vec<char> = input.chars().collect();
+        let arrow_pos = input.rfind("->").unwrap();
+        let result = extract_arrow_subject(&chars, arrow_pos);
+        assert_eq!(result, "$user");
+    }
+
+    // ── Multi-line chain collapse tests ─────────────────────────────
+
+    #[test]
+    fn test_collapse_simple_chain() {
+        let lines = vec!["$this->getRepository()", "    ->findAll()", "    ->"];
+        let (collapsed, col) = collapse_continuation_lines(&lines, 2, 6);
+        assert!(
+            collapsed.starts_with("$this->getRepository()"),
+            "collapsed should start with base expression, got: {collapsed}"
+        );
+        assert!(
+            collapsed.contains("->findAll()->"),
+            "collapsed should contain intermediate chain, got: {collapsed}"
+        );
+        // The cursor should be past the `->` in the collapsed string.
+        let chars: Vec<char> = collapsed.chars().collect();
+        assert!(
+            col <= chars.len(),
+            "col {col} should be within collapsed len {}",
+            chars.len()
+        );
+    }
+
+    #[test]
+    fn test_collapse_not_a_continuation() {
+        let lines = vec!["$this->getRepository()", "    $foo->bar()"];
+        let (collapsed, col) = collapse_continuation_lines(&lines, 1, 10);
+        assert_eq!(collapsed, "    $foo->bar()");
+        assert_eq!(col, 10);
+    }
+
+    #[test]
+    fn test_collapse_nullsafe_chain() {
+        let lines = vec!["$user->getAddress()", "    ?->getCity()", "    ->"];
+        let (collapsed, col) = collapse_continuation_lines(&lines, 2, 6);
+        assert!(
+            collapsed.contains("?->getCity()"),
+            "collapsed should preserve nullsafe operator, got: {collapsed}"
+        );
+        let chars: Vec<char> = collapsed.chars().collect();
+        assert!(col <= chars.len());
+    }
+
+    #[test]
+    fn test_collapse_with_static_call_base() {
+        let lines = vec![
+            "SomeClass::query()",
+            "    ->where('active', true)",
+            "    ->",
+        ];
+        let (collapsed, col) = collapse_continuation_lines(&lines, 2, 6);
+        assert!(
+            collapsed.starts_with("SomeClass::query()"),
+            "collapsed should start with static call, got: {collapsed}"
+        );
+        assert!(
+            collapsed.contains("->where('active', true)->"),
+            "collapsed should contain chained call, got: {collapsed}"
+        );
+        let chars: Vec<char> = collapsed.chars().collect();
+        assert!(col <= chars.len());
+    }
+
+    #[test]
+    fn test_collapse_cursor_mid_identifier() {
+        // Cursor is in the middle of typing an identifier after `->`.
+        let lines = vec!["$builder->configure()", "    ->whe"];
+        let (collapsed, col) = collapse_continuation_lines(&lines, 1, 9);
+        assert!(
+            collapsed.contains("->configure()->whe"),
+            "collapsed should contain the partial identifier, got: {collapsed}"
+        );
+        // col should point at the end of `whe`
+        let chars: Vec<char> = collapsed.chars().collect();
+        assert!(col <= chars.len());
+    }
+
+    #[test]
+    fn test_collapse_single_continuation() {
+        let lines = vec!["$foo->bar()", "    ->"];
+        let (collapsed, _col) = collapse_continuation_lines(&lines, 1, 6);
+        assert_eq!(collapsed, "$foo->bar()->");
+    }
 }

@@ -41,7 +41,7 @@ pub use tags::{
 // Template / generics / type alias tags
 pub use templates::{
     extract_generics_tag, extract_template_param_bindings, extract_template_params,
-    extract_type_aliases, synthesize_template_conditional,
+    extract_template_params_with_bounds, extract_type_aliases, synthesize_template_conditional,
 };
 
 // Virtual member tags

@@ -37,33 +37,15 @@ final class ReindexSelectedCommand extends Command
 
 ## Completion Gaps
 
-### 16. Multi-line method chain completion
-**Priority: High**
+### ~~16. Multi-line method chain completion~~ ✅
 
-Subject extraction in `completion/target.rs` and `subject_extraction.rs`
-operates on the current line only.  Chains that span multiple lines produce
-no completions:
-
-```php
-$this->getRepository()
-    ->findAll()
-    ->filter(fn($u) => $u->active)
-    ->  // ← cursor here: no completion
-```
-
-`extract_completion_target` sees only whitespace and `->` on the cursor
-line and `extract_arrow_subject` finds nothing meaningful to the left.
-This is extremely common in Laravel/Symfony code with fluent builders,
-query chains, and collection pipelines.
-
-The same limitation affects go-to-definition: `extract_member_access_context`
-in `definition/member.rs` also works on the current line, so Ctrl-clicking
-a method in a multi-line chain cannot resolve the owning class.
-
-**Fix:** before extracting the subject, collapse continuation lines around
-the cursor.  Lines that start with `->` or `?->` (after optional
-whitespace) should be joined with the preceding line, then the extraction
-runs on the flattened text.
+Resolved. Added `collapse_continuation_lines` to `subject_extraction.rs`
+that detects when the cursor is on a continuation line (starting with
+`->` or `?->` after optional whitespace) and joins it with preceding
+lines to form a single flattened expression.  Both `extract_completion_target`
+in `completion/target.rs` and `extract_member_access_context` in
+`definition/member.rs` now use this helper, so completion and
+go-to-definition work correctly on multi-line fluent chains.
 
 ### ~~17. Switch statement variable type tracking~~ ✅
 
@@ -72,21 +54,14 @@ that iterates each case's statement list with `conditional = true`.
 Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms
 are handled via `switch.body.cases()`.
 
-### 18. `?->` chaining loses intermediate segments
-**Priority: Medium**
+### ~~18. `?->` chaining loses intermediate segments~~ ✅
 
-In `extract_arrow_subject` (`subject_extraction.rs`), when a `?->` is
-encountered mid-chain, the code calls `extract_simple_variable` instead
-of recursing with `extract_arrow_subject`.  The `->` path recurses
-correctly, but `?->` does not:
-
-```php
-$user->getAddress()?->getCity()->  // extracts "$user?->getCity", loses "->getAddress()"
-```
-
-**Fix:** change the `?->` branch to call `extract_arrow_subject(chars, inner_arrow)`
-instead of `extract_simple_variable(chars, inner_arrow)`, mirroring what
-the `->` branch does.
+Resolved. The `->` branch already handled `?->` correctly via the `?`
+skip at the top of `extract_arrow_subject`, so the described bug did not
+manifest in practice. The `?->` fallback branch was still changed from
+`extract_simple_variable` to `extract_arrow_subject` for correctness,
+and unit tests were added to `subject_extraction.rs` covering nullsafe
+chains with calls, properties, and simple variables.
 
 ### 19. `static` return type not resolved to concrete class at call sites
 **Priority: Medium**
@@ -156,53 +131,18 @@ chained assignments and some edge cases.
 `extract_raw_type_from_assignment_text` (recursively), then looking up
 the property on the resulting class.
 
-### 22. Template parameter bounds not used for property type resolution
-**Priority: Medium**
+### ~~22. Template parameter bounds not used for property type resolution~~ ✅
 
-When a property's docblock type is a template parameter (e.g. `TNode`),
-the resolver treats it as a raw class name and fails to find it. It
-should recognise that `TNode` is a `@template` parameter of the
-enclosing class and fall back to its upper bound for completion and
-definition:
-
-```php
-/**
- * @template-covariant TNode of PDependNode
- */
-abstract class AbstractNode
-{
-    /**
-     * @param TNode $node
-     */
-    public function __construct(
-        private readonly PDependNode $node,
-    ) {
-    }
-
-    public function getParent()
-    {
-        $this->node->getParent();  // ← no completion / definition
-    }
-}
-```
-
-The native type hint is `PDependNode`, but `@param TNode $node` overrides
-it via `resolve_effective_type`. The resolved type becomes `TNode`, which
-does not match any class. The resolver should detect that `TNode` is a
-template parameter declared on the enclosing class, read its bound
-(`of PDependNode`), and use that bound as the effective type.
-
-**Fix:** in the property/parameter type resolution path (likely
-`resolve_subject_type` or `type_hint_to_classes` in
-`completion/resolver.rs`), when a resolved type string does not match any
-known class, check whether it appears in the enclosing class's
-`@template` / `@template-covariant` / `@template-contravariant`
-declarations. If it does and has an `of` bound, substitute the bound
-type. If the template parameter has no bound (bare `@template T`), fall
-back to the native type hint instead of the docblock type, since the
-native hint is the only concrete type information available. This also
-applies to method return types that use bare template parameters without
-a concrete substitution available.
+Resolved. Added `extract_template_params_with_bounds` to
+`docblock/templates.rs` that extracts both the parameter name and its
+optional `of` bound. A new `template_param_bounds: HashMap<String, String>`
+field on `ClassInfo` stores the bounds, populated during parsing. In
+`type_hint_to_classes_depth` in `completion/resolver.rs`, when a type
+hint does not match any known class, the resolver now checks whether it
+is a template parameter declared on the owning class and, if it has an
+`of` bound, resolves the bound type instead. This covers
+`@template`, `@template-covariant`, `@template-contravariant`, and
+`@phpstan-template` variants.
 
 ### 23. Match-expression class-string not forwarded to conditional return types
 **Priority: Medium**
@@ -302,17 +242,17 @@ target.
 
 ## Go-to-Implementation Gaps
 
-### 5a. Transitive interface inheritance
-**Priority: Medium**
+### ~~5a. Transitive interface inheritance~~ ✅
 
-If `InterfaceB extends InterfaceA` and `ClassC implements InterfaceB`,
-go-to-implementation on `InterfaceA` will not find `ClassC`.  The
-transitive check in `class_implements_or_extends` walks `parent_class`
-chains but does not walk interface-extends chains.
-
-**Fix:** in `class_implements_or_extends`, when checking a class's
-`interfaces` list, load each interface via `class_loader` and recursively
-check whether it extends the target interface (with a depth bound).
+Resolved. Added `interface_extends_target` helper in
+`definition/implementation.rs` that recursively walks an interface's
+parent chain (both `parent_class` and `interfaces` fields) up to
+`MAX_INHERITANCE_DEPTH`. `class_implements_or_extends` now calls this
+helper for every directly-implemented interface and for interfaces found
+on parent classes. Also fixed the interface parser to store all extended
+interfaces in the `interfaces` field (not just the first one in
+`parent_class`), so multi-extends interfaces like
+`interface C extends A, B` are fully represented.
 
 ### 5b. Short-name collisions in `find_implementors`
 **Priority: Low**

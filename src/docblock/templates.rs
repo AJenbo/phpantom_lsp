@@ -25,6 +25,22 @@ use crate::types::{ConditionalReturnType, ParamCondition};
 ///
 /// Returns a list of template parameter names (e.g. `["T", "TKey"]`).
 pub fn extract_template_params(docblock: &str) -> Vec<String> {
+    extract_template_params_with_bounds(docblock)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// Extract template parameter names **and** their optional upper bounds
+/// from `@template` tags in a docblock.
+///
+/// The bound is the type after the `of` keyword, e.g.:
+///   - `@template T` → `("T", None)`
+///   - `@template TNode of PDependNode` → `("TNode", Some("PDependNode"))`
+///   - `@template-covariant TValue of Stringable` → `("TValue", Some("Stringable"))`
+///
+/// Returns a list of `(name, optional_bound)` pairs.
+pub fn extract_template_params_with_bounds(docblock: &str) -> Vec<(String, Option<String>)> {
     let inner = docblock
         .trim()
         .strip_prefix("/**")
@@ -65,14 +81,21 @@ pub fn extract_template_params(docblock: &str) -> Vec<String> {
         }
 
         // The template parameter name is the first whitespace-delimited token.
-        if let Some(name) = rest.split_whitespace().next() {
+        let mut tokens = rest.split_whitespace();
+        if let Some(name) = tokens.next() {
             // Sanity: template names are identifiers (start with a letter or _).
             if name
                 .chars()
                 .next()
                 .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
             {
-                results.push(name.to_string());
+                // Check for an `of` bound: `@template T of SomeClass`
+                let bound = if tokens.next().is_some_and(|kw| kw == "of") {
+                    tokens.next().map(|b| b.to_string())
+                } else {
+                    None
+                };
+                results.push((name.to_string(), bound));
             }
         }
     }

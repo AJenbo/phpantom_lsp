@@ -433,6 +433,15 @@ pub struct ClassInfo {
     /// For example, `Collection` with `@template TKey` and `@template TValue`
     /// would have `template_params: vec!["TKey".into(), "TValue".into()]`.
     pub template_params: Vec<String>,
+    /// Upper bounds for template parameters, keyed by parameter name.
+    ///
+    /// Populated from the `of` clause in `@template` tags. For example,
+    /// `@template TNode of PDependNode` produces `("TNode", "PDependNode")`.
+    ///
+    /// When a type hint resolves to a template parameter name that cannot be
+    /// concretely substituted, the resolver falls back to this bound so that
+    /// completion and go-to-definition still work against the bound type.
+    pub template_param_bounds: HashMap<String, String>,
     /// Generic type arguments from `@extends` / `@phpstan-extends` tags.
     ///
     /// Each entry is `(ClassName, [TypeArg1, TypeArg2, …])`.

@@ -12,7 +12,9 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::subject_extraction::{extract_arrow_subject, extract_double_colon_subject};
+use crate::subject_extraction::{
+    collapse_continuation_lines, extract_arrow_subject, extract_double_colon_subject,
+};
 use crate::types::*;
 
 impl Backend {
@@ -29,9 +31,15 @@ impl Backend {
             return None;
         }
 
-        let line = lines[position.line as usize];
+        // Collapse multi-line method chains so that continuation lines
+        // (starting with `->` or `?->`) are joined with preceding lines.
+        let (line, col) = collapse_continuation_lines(
+            &lines,
+            position.line as usize,
+            position.character as usize,
+        );
         let chars: Vec<char> = line.chars().collect();
-        let col = (position.character as usize).min(chars.len());
+        let col = col.min(chars.len());
 
         // Walk backwards past any partial identifier the user may have typed
         let mut i = col;

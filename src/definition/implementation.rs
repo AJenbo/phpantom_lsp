@@ -488,7 +488,18 @@ impl Backend {
             }
         }
 
-        // ── Transitive check: walk the parent chain ─────────────────────
+        // ── Transitive check: walk the interface-extends chains ─────────
+        // If ClassC implements InterfaceB, and InterfaceB extends
+        // InterfaceA, a go-to-implementation on InterfaceA should find
+        // ClassC.  Load each directly-implemented interface and
+        // recursively check whether it extends the target.
+        for iface in &cls.interfaces {
+            if Self::interface_extends_target(iface, target_short, target_fqn, class_loader, 0) {
+                return true;
+            }
+        }
+
+        // ── Transitive check: walk the parent class chain ───────────────
         // A class might extend another class that implements the target
         // interface.  Walk up to a bounded depth to find it.
         let mut current = cls.parent_class.clone();
@@ -507,6 +518,16 @@ impl Backend {
                     if iface_short == target_short || iface == target_fqn {
                         return true;
                     }
+                    // Also walk the interface's own extends chain.
+                    if Self::interface_extends_target(
+                        iface,
+                        target_short,
+                        target_fqn,
+                        class_loader,
+                        0,
+                    ) {
+                        return true;
+                    }
                 }
 
                 // Check if the parent IS the target (for abstract class chains).
@@ -518,6 +539,65 @@ impl Backend {
                 current = parent_cls.parent_class.clone();
             } else {
                 break;
+            }
+        }
+
+        false
+    }
+
+    /// Check whether `iface_name` transitively extends the target interface.
+    ///
+    /// Loads the interface via `class_loader`, then checks its
+    /// `parent_class` (single-extends) and `interfaces` (multi-extends)
+    /// lists recursively up to [`MAX_INHERITANCE_DEPTH`].
+    fn interface_extends_target(
+        iface_name: &str,
+        target_short: &str,
+        target_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        depth: u32,
+    ) -> bool {
+        if depth >= MAX_INHERITANCE_DEPTH {
+            return false;
+        }
+
+        let Some(iface_cls) = class_loader(iface_name) else {
+            return false;
+        };
+
+        // Check `parent_class` (first extended interface stored here for
+        // backward compatibility).
+        if let Some(ref parent) = iface_cls.parent_class {
+            let parent_short = short_name(parent);
+            if parent_short == target_short || parent == target_fqn {
+                return true;
+            }
+            if Self::interface_extends_target(
+                parent,
+                target_short,
+                target_fqn,
+                class_loader,
+                depth + 1,
+            ) {
+                return true;
+            }
+        }
+
+        // Check all entries in `interfaces` (covers multi-extends for
+        // interfaces that extend more than one parent).
+        for parent_iface in &iface_cls.interfaces {
+            let parent_short = short_name(parent_iface);
+            if parent_short == target_short || parent_iface == target_fqn {
+                return true;
+            }
+            if Self::interface_extends_target(
+                parent_iface,
+                target_short,
+                target_fqn,
+                class_loader,
+                depth + 1,
+            ) {
+                return true;
             }
         }
 

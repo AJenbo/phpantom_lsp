@@ -9,7 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-line method chain completion.** Fluent chains spanning multiple lines now produce completions and support go-to-definition. Continuation lines starting with `->` or `?->` are joined with preceding lines before subject extraction, so builder patterns, query chains, and collection pipelines work seamlessly.
+- **Template parameter bound resolution.** When a property or variable type is a `@template` parameter (e.g. `TNode`), the resolver falls back to the upper bound declared via `of` (e.g. `@template TNode of SomeClass`) for completion and go-to-definition.
+- **Transitive interface inheritance in go-to-implementation.** If `InterfaceB extends InterfaceA` and `ClassC implements InterfaceB`, go-to-implementation on `InterfaceA` now finds `ClassC`. Works through arbitrary depth and with interfaces that extend multiple parents.
 - **Switch statement variable type tracking.** Variables assigned inside `switch` case bodies now resolve their types. Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms are supported, and all cases contribute to a union type.
+
+### Fixed
+
+- **`?->` chaining fallback now recurses correctly.** The `?->` fallback branch in subject extraction called `extract_simple_variable` instead of `extract_arrow_subject`. The primary `->` branch already handled `?->` chains correctly via a `?` skip, so this was not user-visible, but the fallback is now consistent.
+- **Multi-extends interfaces now fully stored.** Interfaces extending multiple parents (e.g. `interface C extends A, B`) now store all parent names, not just the first one.
 
 ### Changed
 

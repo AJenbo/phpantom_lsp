@@ -914,7 +914,38 @@ impl Backend {
                     vec![cls]
                 }
             }
-            None => vec![],
+            None => {
+                // ── Template parameter bound fallback ──────────────────
+                // When the type hint doesn't match any known class, check
+                // whether it is a template parameter declared on the
+                // owning class.  If it has an `of` bound (e.g.
+                // `@template TNode of PDependNode`), resolve the bound
+                // type so that completion and go-to-definition still work.
+                let loaded;
+                let owning = match all_classes.iter().find(|c| c.name == owning_class_name) {
+                    Some(c) => Some(c),
+                    None => {
+                        loaded = class_loader(owning_class_name);
+                        loaded.as_ref()
+                    }
+                };
+
+                // Try class-level template param bounds on the owning class.
+                if let Some(owner) = owning
+                    && owner.template_params.contains(&lookup.to_string())
+                    && let Some(bound) = owner.template_param_bounds.get(lookup)
+                {
+                    return Self::type_hint_to_classes_depth(
+                        bound,
+                        owning_class_name,
+                        all_classes,
+                        class_loader,
+                        depth + 1,
+                    );
+                }
+
+                vec![]
+            }
         }
     }
 
