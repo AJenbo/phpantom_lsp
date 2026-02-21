@@ -117,7 +117,7 @@ async fn test_stub_function_cached_after_first_lookup() {
 
     // Verify it's actually in global_functions now.
     let in_cache = backend
-        .global_functions
+        .global_functions()
         .lock()
         .ok()
         .and_then(|fmap| fmap.get("str_contains").map(|(uri, _)| uri.clone()));
@@ -304,7 +304,7 @@ async fn test_stub_function_sibling_functions_cached() {
     // Check if it got cached in global_functions (it may be in a different
     // file, but let's verify the caching mechanism works for the same file).
     let in_cache = backend
-        .global_functions
+        .global_functions()
         .lock()
         .ok()
         .and_then(|fmap| fmap.get("array_push").cloned());
@@ -352,7 +352,7 @@ async fn test_user_function_takes_precedence_over_stub() {
         is_deprecated: false,
     };
 
-    if let Ok(mut fmap) = backend.global_functions.lock() {
+    if let Ok(mut fmap) = backend.global_functions().lock() {
         fmap.insert(
             "str_contains".to_string(),
             ("file:///custom.php".to_string(), custom_func),
@@ -377,7 +377,7 @@ async fn test_stub_constant_index_built() {
 
     // The stub_constant_index should be populated from the embedded stubs.
     // PHP_EOL is a very common constant that should be present.
-    let has_php_eol = backend.stub_constant_index.contains_key("PHP_EOL");
+    let has_php_eol = backend.stub_constant_index().contains_key("PHP_EOL");
     assert!(has_php_eol, "stub_constant_index should contain PHP_EOL");
 }
 
@@ -397,7 +397,7 @@ async fn test_stub_constant_index_common_constants() {
     ];
     for name in &expected {
         assert!(
-            backend.stub_constant_index.contains_key(name),
+            backend.stub_constant_index().contains_key(name),
             "stub_constant_index should contain '{}', but it doesn't",
             name
         );

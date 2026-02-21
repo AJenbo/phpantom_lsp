@@ -474,7 +474,7 @@ async fn test_goto_definition_class_from_autoload_files() {
 
             // Also register functions
             let functions = backend.parse_functions(&content);
-            if let Ok(mut fmap) = backend.global_functions.lock() {
+            if let Ok(mut fmap) = backend.global_functions().lock() {
                 for func in functions {
                     let fqn = if let Some(ref ns) = func.namespace {
                         format!("{}\\{}", ns, &func.name)
@@ -505,7 +505,7 @@ async fn test_goto_definition_class_from_autoload_files() {
 
     // Verify the class_index has the FQN
     let has_fqn = backend
-        .class_index
+        .class_index()
         .lock()
         .ok()
         .map(
@@ -951,7 +951,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
             backend.update_ast(&uri, &content);
 
             let functions = backend.parse_functions(&content);
-            if let Ok(mut fmap) = backend.global_functions.lock() {
+            if let Ok(mut fmap) = backend.global_functions().lock() {
                 for func in functions {
                     let fqn = if let Some(ref ns) = func.namespace {
                         format!("{}\\{}", ns, &func.name)
@@ -1318,7 +1318,7 @@ async fn test_goto_definition_function_inside_function_exists_guard() {
 
     // Verify both functions were discovered
     {
-        let fmap = backend.global_functions.lock().unwrap();
+        let fmap = backend.global_functions().lock().unwrap();
         assert!(
             fmap.contains_key("session"),
             "session() should be in global_functions after parsing autoload files. Keys: {:?}",

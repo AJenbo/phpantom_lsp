@@ -5,16 +5,16 @@
 //!
 //! # Submodules
 //!
-//! - [`tags`]: Core PHPDoc tag extraction (`@return`, `@var`, `@param`,
+//! - `tags`: Core PHPDoc tag extraction (`@return`, `@var`, `@param`,
 //!   `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval,
 //!   and type override logic).
-//! - [`templates`]: Template, generics, and type alias tag extraction
+//! - `templates`: Template, generics, and type alias tag extraction
 //!   (`@template`, `@extends`, `@implements`, `@use`, `@phpstan-type`,
 //!   `@phpstan-import-type`, and `class-string<T>` conditional synthesis).
-//! - [`virtual_members`]: Virtual member tag extraction (`@property`,
+//! - `virtual_members`: Virtual member tag extraction (`@property`,
 //!   `@property-read`, `@property-write`, `@method`).
-//! - [`conditional`]: PHPStan conditional return type parsing.
-//! - [`types`]: Type cleaning utilities (`clean_type`, `strip_nullable`,
+//! - `conditional`: PHPStan conditional return type parsing.
+//! - `types`: Type cleaning utilities (`clean_type`, `strip_nullable`,
 //!   `is_scalar`, `split_type_token`).
 
 mod conditional;

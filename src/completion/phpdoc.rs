@@ -22,7 +22,7 @@
 //! insert the import automatically.
 //!
 //! Context detection and symbol info extraction live in the sibling
-//! [`super::phpdoc_context`] module and are re-exported here for
+//! `phpdoc_context` module and are re-exported here for
 //! backward compatibility.
 
 use std::collections::HashMap;

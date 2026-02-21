@@ -9,87 +9,85 @@ use tower_lsp::lsp_types::*;
 
 #[tokio::test]
 async fn test_detect_access_kind_arrow() {
-    assert_eq!(
-        Backend::detect_access_kind(
-            "$this->",
-            Position {
-                line: 0,
-                character: 7
-            }
-        ),
-        AccessKind::Arrow
-    );
+    let target = Backend::extract_completion_target(
+        "$this->",
+        Position {
+            line: 0,
+            character: 7,
+        },
+    )
+    .expect("should detect arrow");
+    assert_eq!(target.access_kind, AccessKind::Arrow);
+    assert_eq!(target.subject, "$this");
 }
 
 #[tokio::test]
 async fn test_detect_access_kind_arrow_with_partial_identifier() {
-    assert_eq!(
-        Backend::detect_access_kind(
-            "$this->get",
-            Position {
-                line: 0,
-                character: 10
-            }
-        ),
-        AccessKind::Arrow
-    );
+    let target = Backend::extract_completion_target(
+        "$this->get",
+        Position {
+            line: 0,
+            character: 10,
+        },
+    )
+    .expect("should detect arrow");
+    assert_eq!(target.access_kind, AccessKind::Arrow);
+    assert_eq!(target.subject, "$this");
 }
 
 #[tokio::test]
 async fn test_detect_access_kind_double_colon() {
-    assert_eq!(
-        Backend::detect_access_kind(
-            "self::",
-            Position {
-                line: 0,
-                character: 6
-            }
-        ),
-        AccessKind::DoubleColon
-    );
+    let target = Backend::extract_completion_target(
+        "self::",
+        Position {
+            line: 0,
+            character: 6,
+        },
+    )
+    .expect("should detect double colon");
+    assert_eq!(target.access_kind, AccessKind::DoubleColon);
+    assert_eq!(target.subject, "self");
 }
 
 #[tokio::test]
 async fn test_detect_access_kind_double_colon_with_partial_identifier() {
-    assert_eq!(
-        Backend::detect_access_kind(
-            "Foo::cr",
-            Position {
-                line: 0,
-                character: 7
-            }
-        ),
-        AccessKind::DoubleColon
-    );
+    let target = Backend::extract_completion_target(
+        "Foo::cr",
+        Position {
+            line: 0,
+            character: 7,
+        },
+    )
+    .expect("should detect double colon");
+    assert_eq!(target.access_kind, AccessKind::DoubleColon);
+    assert_eq!(target.subject, "Foo");
 }
 
 #[tokio::test]
 async fn test_detect_access_kind_other() {
-    assert_eq!(
-        Backend::detect_access_kind(
-            "    $x = 1;",
-            Position {
-                line: 0,
-                character: 4
-            }
-        ),
-        AccessKind::Other
+    let result = Backend::extract_completion_target(
+        "    $x = 1;",
+        Position {
+            line: 0,
+            character: 4,
+        },
     );
+    assert!(result.is_none(), "no access operator expected");
 }
 
 #[tokio::test]
 async fn test_detect_access_kind_multiline() {
     let content = "<?php\n$obj->meth";
-    assert_eq!(
-        Backend::detect_access_kind(
-            content,
-            Position {
-                line: 1,
-                character: 10
-            }
-        ),
-        AccessKind::Arrow
-    );
+    let target = Backend::extract_completion_target(
+        content,
+        Position {
+            line: 1,
+            character: 10,
+        },
+    )
+    .expect("should detect arrow");
+    assert_eq!(target.access_kind, AccessKind::Arrow);
+    assert_eq!(target.subject, "$obj");
 }
 
 // ─── Arrow vs Double-Colon Filtering ────────────────────────────────────────

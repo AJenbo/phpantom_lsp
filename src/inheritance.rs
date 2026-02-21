@@ -15,8 +15,10 @@ use std::collections::HashMap;
 
 use crate::Backend;
 use crate::docblock::types::split_generic_args;
-use crate::types::Visibility;
-use crate::types::{ClassInfo, MethodInfo, PropertyInfo, TraitAlias, TraitPrecedence};
+use crate::types::{
+    ClassInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MAX_TRAIT_DEPTH, MethodInfo, PropertyInfo,
+    TraitAlias, TraitPrecedence, Visibility,
+};
 use crate::util::short_name;
 
 impl Backend {
@@ -59,7 +61,6 @@ impl Backend {
         // 2. Walk up the `extends` chain and merge parent members.
         let mut current = class.clone();
         let mut depth = 0;
-        const MAX_DEPTH: u32 = 20;
 
         // The substitution map accumulates as we walk the chain.
         // It maps template parameter names → concrete types, and is
@@ -77,7 +78,7 @@ impl Backend {
 
         while let Some(ref parent_name) = current.parent_class {
             depth += 1;
-            if depth > MAX_DEPTH {
+            if depth > MAX_INHERITANCE_DEPTH {
                 break;
             }
 
@@ -173,7 +174,7 @@ impl Backend {
         let mut mixin_depth = 0u32;
         while let Some(ref parent_name) = ancestor.parent_class {
             mixin_depth += 1;
-            if mixin_depth > MAX_DEPTH {
+            if mixin_depth > MAX_INHERITANCE_DEPTH {
                 break;
             }
             let parent = if let Some(p) = class_loader(parent_name) {
@@ -246,7 +247,6 @@ impl Backend {
         mixin_names: &[String],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) {
-        const MAX_MIXIN_DEPTH: u32 = 10;
         Self::merge_mixins_into_recursive(merged, mixin_names, class_loader, 0, MAX_MIXIN_DEPTH);
     }
 
@@ -354,7 +354,6 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: u32,
     ) {
-        const MAX_TRAIT_DEPTH: u32 = 20;
         if depth > MAX_TRAIT_DEPTH {
             return;
         }

@@ -4,6 +4,10 @@
 /// "go to implementation" requests, allowing users to jump from a symbol
 /// reference to its definition or concrete implementations.
 ///
+/// The [`point_location`] helper constructs a zero-width `Location`
+/// (start == end), which is the standard shape for "go to definition"
+/// results.
+///
 /// Supported symbols (definition):
 ///   - **Class-like types**: class, interface, trait, enum references
 ///   - **Methods**: `$this->method()`, `self::method()`, `MyClass::method()`, `$var->method()`
@@ -31,7 +35,25 @@
 /// - [`implementation`]: Go-to-implementation — finding concrete classes that
 ///   implement an interface or extend an abstract class, and locating the
 ///   concrete method definitions within those classes.
+use tower_lsp::lsp_types::{Location, Position, Range, Url};
+
 mod implementation;
 pub(crate) mod member;
 mod resolve;
 mod variable;
+
+/// Build an LSP `Location` with a zero-width range (start == end).
+///
+/// Almost every "go to definition" result points to a single position
+/// rather than a span.  This helper eliminates the repeated 5-line
+/// `Location { uri, range: Range { start: pos, end: pos } }` blocks
+/// found throughout the definition modules.
+pub(crate) fn point_location(uri: Url, position: Position) -> Location {
+    Location {
+        uri,
+        range: Range {
+            start: position,
+            end: position,
+        },
+    }
+}

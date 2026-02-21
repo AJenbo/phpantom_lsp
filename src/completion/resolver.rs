@@ -311,6 +311,9 @@ impl Backend {
         vec![]
     }
 
+    /// Resolve the return type of a call expression given its text-based
+    /// subject (`call_body`) and argument text, returning zero or more
+    /// `ClassInfo` values.
     pub(super) fn resolve_call_return_types(
         call_body: &str,
         text_args: &str,
@@ -764,8 +767,6 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: u8,
     ) -> Vec<ClassInfo> {
-        // Guard against circular / deeply nested type alias resolution.
-        const MAX_ALIAS_DEPTH: u8 = 10;
         if depth > MAX_ALIAS_DEPTH {
             return vec![];
         }

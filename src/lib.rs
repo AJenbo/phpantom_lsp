@@ -2,22 +2,22 @@
 //!
 //! This crate is organised into the following modules:
 //!
-//! - [`types`]: Data structures for extracted PHP information (classes, methods, functions, etc.)
-//! - [`parser`]: PHP parsing and AST extraction using mago_syntax
-//! - [`completion`]: Completion logic (target extraction, type resolution, item building,
+//! - [`types`] — Data structures for extracted PHP information (classes, methods, functions, etc.)
+//! - `parser` — PHP parsing and AST extraction using mago_syntax
+//! - [`completion`] — Completion logic (target extraction, type resolution, item building,
 //!   and the top-level completion request handler)
-//! - [`composer`]: Composer autoload (PSR-4, classmap) parsing and class-to-file resolution
-//! - [`server`]: The LSP `LanguageServer` trait implementation (thin wrapper that delegates
+//! - [`composer`] — Composer autoload (PSR-4, classmap) parsing and class-to-file resolution
+//! - `server` — The LSP `LanguageServer` trait implementation (thin wrapper that delegates
 //!   to feature-specific modules)
-//! - [`util`]: Utility helpers (position conversion, class lookup, logging)
-//! - [`definition`]: Go-to-definition support for classes, members, and functions
-//! - [`inheritance`]: Class inheritance resolution — merging members from parent
+//! - `util` — Utility helpers (position conversion, class lookup, logging)
+//! - `definition` — Go-to-definition support for classes, members, and functions
+//! - `inheritance` — Class inheritance resolution. Merges members from parent
 //!   classes, traits, and `@mixin` classes into a unified `ClassInfo`
-//! - [`resolution`]: Class and function lookup / name resolution (multi-phase:
+//! - `resolution` — Class and function lookup / name resolution (multi-phase:
 //!   class_index → ast_map → classmap → PSR-4 → stubs)
-//! - [`subject_extraction`]: Shared helpers for extracting the left-hand side of
+//! - `subject_extraction` — Shared helpers for extracting the left-hand side of
 //!   `->`, `?->`, and `::` access operators (used by both completion and definition)
-//! - [`docblock`]: PHPDoc block parsing, split into submodules:
+//! - [`docblock`] — PHPDoc block parsing, split into submodules:
 //!   - `docblock::tags` — tag extraction (`@return`, `@var`, `@property`, `@method`,
 //!     `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval)
 //!   - `docblock::conditional` — PHPStan conditional return type parsing
@@ -62,19 +62,19 @@ pub use types::{
 /// The main LSP backend that holds all server state.
 ///
 /// Method implementations are spread across several modules:
-/// - [`parser`]: `parse_php`, `update_ast`, AST extraction helpers
-/// - [`completion::handler`]: Top-level completion request orchestration
-/// - [`completion::target`]: `extract_completion_target`, `detect_access_kind`
-/// - [`completion::resolver`]: `resolve_target_classes` and type-resolution helpers
-/// - [`completion::builder`]: `build_completion_items`, `build_method_label`
-/// - [`composer`]: PSR-4 autoload mapping and class file resolution
-/// - [`server`]: `impl LanguageServer` (initialize, completion, did_open, …)
-/// - [`resolution`]: `find_or_load_class`, `find_or_load_function`, `resolve_class_name`,
+/// - `parser` — `parse_php`, `update_ast`, AST extraction helpers
+/// - `completion::handler` — Top-level completion request orchestration
+/// - `completion::target` — `extract_completion_target`
+/// - `completion::resolver` — `resolve_target_classes` and type-resolution helpers
+/// - `completion::builder` — `build_completion_items`, `build_method_label`
+/// - [`composer`] — PSR-4 autoload mapping and class file resolution
+/// - `server` — `impl LanguageServer` (initialize, completion, did_open, …)
+/// - `resolution` — `find_or_load_class`, `find_or_load_function`, `resolve_class_name`,
 ///   `resolve_function_name`
-/// - [`inheritance`]: `resolve_class_with_inheritance`, trait/mixin/parent merging
-/// - [`subject_extraction`]: Shared subject extraction helpers for `->`, `?->`, `::` operators
-/// - [`util`]: `position_to_offset`, `find_class_at_offset`, `log`, `get_classes_for_uri`
-/// - [`definition`]: `resolve_definition`, member resolution, function resolution
+/// - `inheritance` — `resolve_class_with_inheritance`, trait/mixin/parent merging
+/// - `subject_extraction` — Shared subject extraction helpers for `->`, `?->`, `::` operators
+/// - `util` — `position_to_offset`, `find_class_at_offset`, `log`, `get_classes_for_uri`
+/// - `definition` — `resolve_definition`, member resolution, function resolution
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
@@ -83,7 +83,7 @@ pub struct Backend {
     pub(crate) ast_map: Arc<Mutex<HashMap<String, Vec<ClassInfo>>>>,
     pub(crate) client: Option<Client>,
     /// The root directory of the workspace (set during `initialize`).
-    pub workspace_root: Arc<Mutex<Option<PathBuf>>>,
+    pub(crate) workspace_root: Arc<Mutex<Option<PathBuf>>>,
     /// PSR-4 autoload mappings parsed from `composer.json`.
     pub(crate) psr4_mappings: Arc<Mutex<Vec<composer::Psr4Mapping>>>,
     /// Maps a file URI to its `use` statement mappings (short name → fully qualified name).
@@ -98,14 +98,14 @@ pub struct Backend {
     /// Populated from files listed in Composer's `autoload_files.php` at init
     /// time, and also from any opened/changed files that contain standalone
     /// function declarations.
-    pub global_functions: Arc<Mutex<HashMap<String, (String, FunctionInfo)>>>,
+    pub(crate) global_functions: Arc<Mutex<HashMap<String, (String, FunctionInfo)>>>,
     /// Global constants defined via `define('NAME', value)` calls.
     ///
     /// Maps constant name → file URI where it was defined.
     /// Populated from files listed in Composer's `autoload_files.php` at init
     /// time, and also from any opened/changed files that contain `define()`
     /// calls.  Used to offer constant name completions alongside class names.
-    pub global_defines: Arc<Mutex<HashMap<String, String>>>,
+    pub(crate) global_defines: Arc<Mutex<HashMap<String, String>>>,
     /// Index of fully-qualified class names to file URIs.
     ///
     /// This allows reliable lookup of classes that don't follow PSR-4
@@ -116,7 +116,7 @@ pub struct Backend {
     ///
     /// Populated during `update_ast` (using the file's namespace + class
     /// short name) and during server initialization for autoload files.
-    pub class_index: Arc<Mutex<HashMap<String, String>>>,
+    pub(crate) class_index: Arc<Mutex<HashMap<String, String>>>,
     /// Composer classmap: fully-qualified class name → file path on disk.
     ///
     /// Parsed from `<vendor>/composer/autoload_classmap.php` during server
@@ -127,7 +127,7 @@ pub struct Backend {
     ///
     /// Consulted by `find_or_load_class` as a resolution step between
     /// the ast_map scan (Phase 1) and PSR-4 resolution (Phase 2).
-    pub classmap: Arc<Mutex<HashMap<String, PathBuf>>>,
+    pub(crate) classmap: Arc<Mutex<HashMap<String, PathBuf>>>,
     /// Embedded PHP stubs for built-in classes/interfaces (e.g. `UnitEnum`,
     /// `BackedEnum`, `Iterator`, `Countable`, …).
     /// Maps class short name → raw PHP source code.
@@ -148,7 +148,7 @@ pub struct Backend {
     ///
     /// Built once during construction via [`stubs::build_stub_constant_index`].
     /// Can be consulted when resolving standalone constant references.
-    pub stub_constant_index: HashMap<&'static str, &'static str>,
+    pub(crate) stub_constant_index: HashMap<&'static str, &'static str>,
 }
 
 impl Backend {
@@ -231,5 +231,37 @@ impl Backend {
             psr4_mappings: Arc::new(Mutex::new(psr4_mappings)),
             ..Self::defaults()
         }
+    }
+
+    // ── Public accessors for integration tests ──────────────────────────
+
+    /// Borrow the workspace root mutex (used by integration tests to set a
+    /// custom workspace directory).
+    pub fn workspace_root(&self) -> &Arc<Mutex<Option<PathBuf>>> {
+        &self.workspace_root
+    }
+
+    /// Borrow the global functions mutex (used by integration tests to
+    /// inject user-defined functions or inspect the cache).
+    pub fn global_functions(&self) -> &Arc<Mutex<HashMap<String, (String, FunctionInfo)>>> {
+        &self.global_functions
+    }
+
+    /// Borrow the class index mutex (used by integration tests to
+    /// populate discovered class entries).
+    pub fn class_index(&self) -> &Arc<Mutex<HashMap<String, String>>> {
+        &self.class_index
+    }
+
+    /// Borrow the classmap mutex (used by integration tests to populate
+    /// Composer classmap entries).
+    pub fn classmap(&self) -> &Arc<Mutex<HashMap<String, PathBuf>>> {
+        &self.classmap
+    }
+
+    /// Borrow the stub constant index (used by integration tests to
+    /// verify built-in constants are present).
+    pub fn stub_constant_index(&self) -> &HashMap<&'static str, &'static str> {
+        &self.stub_constant_index
     }
 }

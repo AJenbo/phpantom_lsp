@@ -32,26 +32,26 @@
 /// - **closure_resolution**: Closure and arrow-function parameter resolution
 ///
 /// Class inheritance merging (traits, mixins, parent chain) lives in the
-/// top-level [`crate::inheritance`] module since it is shared infrastructure
+/// top-level `crate::inheritance` module since it is shared infrastructure
 /// used by completion, definition, and future features (hover, references).
 pub mod array_shape;
-pub mod builder;
+pub(crate) mod builder;
 pub(crate) mod catch_completion;
-pub mod class_completion;
-pub mod closure_resolution;
-pub mod comment_position;
-pub mod conditional_resolution;
-pub mod foreach_resolution;
+pub(crate) mod class_completion;
+pub(crate) mod closure_resolution;
+pub(crate) mod comment_position;
+pub(crate) mod conditional_resolution;
+pub(crate) mod foreach_resolution;
 pub(crate) mod handler;
 pub mod named_args;
 pub mod phpdoc;
-pub mod phpdoc_context;
-pub mod resolver;
-pub mod target;
-pub mod text_resolution;
+pub(crate) mod phpdoc_context;
+pub(crate) mod resolver;
+pub(crate) mod target;
+pub(crate) mod text_resolution;
 pub(crate) mod throws_analysis;
 pub(crate) mod type_hint_completion;
-pub mod type_narrowing;
-pub mod use_edit;
-pub mod variable_completion;
-pub mod variable_resolution;
+pub(crate) mod type_narrowing;
+pub(crate) mod use_edit;
+pub(crate) mod variable_completion;
+pub(crate) mod variable_resolution;

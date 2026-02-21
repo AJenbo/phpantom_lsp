@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use mago_span::HasSpan;
 use mago_syntax::ast::class_like::trait_use::{
     TraitUseAdaptation, TraitUseMethodReference, TraitUseSpecification,
 };
@@ -20,6 +23,97 @@ use crate::types::*;
 
 use super::DocblockCtx;
 
+/// Docblock-derived metadata common to all class-like declarations.
+///
+/// Produced by [`extract_class_docblock`] and consumed by each match arm
+/// in [`Backend::extract_classes_from_statements`] to avoid repeating
+/// the same extraction calls for classes, interfaces, traits, and enums.
+#[derive(Default)]
+struct ClassDocblockInfo {
+    /// Whether the class-level docblock contains `@deprecated`.
+    is_deprecated: bool,
+    /// `@template` parameters declared on the class-like.
+    template_params: Vec<String>,
+    /// Generic arguments from `@extends` / `@phpstan-extends`.
+    extends_generics: Vec<(String, Vec<String>)>,
+    /// Generic arguments from `@implements` / `@phpstan-implements`.
+    implements_generics: Vec<(String, Vec<String>)>,
+    /// Generic arguments from `@use` / `@phpstan-use`.
+    use_generics: Vec<(String, Vec<String>)>,
+    /// Type aliases from `@phpstan-type` / `@psalm-type`.
+    type_aliases: HashMap<String, String>,
+    /// Virtual properties from `@property` tags.
+    extra_properties: Vec<PropertyInfo>,
+    /// Virtual methods from `@method` tags.
+    extra_methods: Vec<MethodInfo>,
+    /// Mixin class names from `@mixin` tags.
+    mixins: Vec<String>,
+}
+
+impl ClassDocblockInfo {
+    /// Merge virtual `@property` and `@method` tags into existing member
+    /// lists, skipping any that duplicate a real declaration.
+    ///
+    /// The extra vectors are drained so the remaining fields can still be
+    /// read after calling this method.
+    fn merge_into(&mut self, methods: &mut Vec<MethodInfo>, properties: &mut Vec<PropertyInfo>) {
+        for prop in std::mem::take(&mut self.extra_properties) {
+            if !properties.iter().any(|p| p.name == prop.name) {
+                properties.push(prop);
+            }
+        }
+        for method in std::mem::take(&mut self.extra_methods) {
+            if !methods.iter().any(|m| m.name == method.name) {
+                methods.push(method);
+            }
+        }
+    }
+}
+
+/// Extract all docblock-derived metadata from a class-like AST node.
+///
+/// Returns [`ClassDocblockInfo::default()`] when no docblock context is
+/// available or when the node has no preceding doc comment.
+fn extract_class_docblock<'a>(
+    node: &impl HasSpan,
+    doc_ctx: Option<&DocblockCtx<'a>>,
+) -> ClassDocblockInfo {
+    let Some(ctx) = doc_ctx else {
+        return ClassDocblockInfo::default();
+    };
+    let Some(doc_text) = docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, node)
+    else {
+        return ClassDocblockInfo::default();
+    };
+
+    let extra_properties = docblock::extract_property_tags(doc_text)
+        .into_iter()
+        .map(|(name, type_str)| PropertyInfo {
+            name,
+            type_hint: if type_str.is_empty() {
+                None
+            } else {
+                Some(type_str)
+            },
+            is_static: false,
+            visibility: Visibility::Public,
+            is_deprecated: false,
+        })
+        .collect();
+
+    ClassDocblockInfo {
+        is_deprecated: docblock::has_deprecated_tag(doc_text),
+        template_params: docblock::extract_template_params(doc_text),
+        extends_generics: docblock::extract_generics_tag(doc_text, "@extends"),
+        implements_generics: docblock::extract_generics_tag(doc_text, "@implements"),
+        use_generics: docblock::extract_generics_tag(doc_text, "@use"),
+        type_aliases: docblock::extract_type_aliases(doc_text),
+        extra_properties,
+        extra_methods: docblock::extract_method_tags(doc_text),
+        mixins: docblock::extract_mixin_tags(doc_text),
+    }
+}
+
 impl Backend {
     /// Recursively walk statements and extract class information.
     /// This handles classes at the top level as well as classes nested
@@ -34,13 +128,11 @@ impl Backend {
                 Statement::Class(class) => {
                     let class_name = class.name.value.to_string();
 
-                    // Extract parent class name from `extends` clause
                     let parent_class = class
                         .extends
                         .as_ref()
                         .and_then(|ext| ext.types.first().map(|ident| ident.value().to_string()));
 
-                    // Extract interface names from `implements` clause
                     let interfaces: Vec<String> = class
                         .implements
                         .as_ref()
@@ -61,60 +153,11 @@ impl Backend {
                         trait_aliases,
                     ) = Self::extract_class_like_members(class.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, @mixin, @template, @extends,
-                    // @implements, @deprecated, and @phpstan-type / @psalm-type
-                    // tags from the class-level docblock.
-                    let mut mixins = Vec::new();
-                    let mut template_params = Vec::new();
-                    let mut extends_generics = Vec::new();
-                    let mut implements_generics = Vec::new();
-                    let mut use_generics = Vec::new();
-                    let mut type_aliases = std::collections::HashMap::new();
-                    let mut class_deprecated = false;
-                    if let Some(ctx) = doc_ctx
-                        && let Some(doc_text) =
-                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, class)
-                    {
-                        class_deprecated = docblock::has_deprecated_tag(doc_text);
-                        template_params = docblock::extract_template_params(doc_text);
-                        extends_generics = docblock::extract_generics_tag(doc_text, "@extends");
-                        implements_generics =
-                            docblock::extract_generics_tag(doc_text, "@implements");
-                        use_generics = docblock::extract_generics_tag(doc_text, "@use");
-                        type_aliases = docblock::extract_type_aliases(doc_text);
-
-                        for (name, type_str) in docblock::extract_property_tags(doc_text) {
-                            // Only add if not already declared as a real property.
-                            if !properties.iter().any(|p| p.name == name) {
-                                properties.push(PropertyInfo {
-                                    name,
-                                    type_hint: if type_str.is_empty() {
-                                        None
-                                    } else {
-                                        Some(type_str)
-                                    },
-                                    is_static: false,
-                                    visibility: Visibility::Public,
-                                    is_deprecated: false,
-                                });
-                            }
-                        }
-
-                        for method_info in docblock::extract_method_tags(doc_text) {
-                            // Only add if not already declared as a real method.
-                            if !methods.iter().any(|m| m.name == method_info.name) {
-                                methods.push(method_info);
-                            }
-                        }
-
-                        mixins = docblock::extract_mixin_tags(doc_text);
-                    }
+                    let mut doc_info = extract_class_docblock(class, doc_ctx);
+                    doc_info.merge_into(&mut methods, &mut properties);
 
                     let start_offset = class.left_brace.start.offset;
                     let end_offset = class.right_brace.end.offset;
-
-                    let is_final = class.modifiers.contains_final();
-                    let is_abstract = class.modifiers.contains_abstract();
 
                     classes.push(ClassInfo {
                         kind: ClassLikeKind::Class,
@@ -127,15 +170,15 @@ impl Backend {
                         parent_class,
                         interfaces,
                         used_traits,
-                        mixins,
-                        is_final,
-                        is_abstract,
-                        is_deprecated: class_deprecated,
-                        template_params,
-                        extends_generics,
-                        implements_generics,
-                        use_generics,
-                        type_aliases,
+                        mixins: doc_info.mixins,
+                        is_final: class.modifiers.contains_final(),
+                        is_abstract: class.modifiers.contains_abstract(),
+                        is_deprecated: doc_info.is_deprecated,
+                        template_params: doc_info.template_params,
+                        extends_generics: doc_info.extends_generics,
+                        implements_generics: doc_info.implements_generics,
+                        use_generics: doc_info.use_generics,
+                        type_aliases: doc_info.type_aliases,
                         trait_precedences,
                         trait_aliases,
                     });
@@ -159,52 +202,8 @@ impl Backend {
                         trait_aliases,
                     ) = Self::extract_class_like_members(iface.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, @mixin, @template, @extends,
-                    // @implements, @deprecated, and @phpstan-type / @psalm-type
-                    // tags from the interface-level docblock.
-                    let mut mixins = Vec::new();
-                    let mut template_params = Vec::new();
-                    let mut extends_generics = Vec::new();
-                    let mut implements_generics = Vec::new();
-                    let mut use_generics = Vec::new();
-                    let mut type_aliases = std::collections::HashMap::new();
-                    let mut iface_deprecated = false;
-                    if let Some(ctx) = doc_ctx
-                        && let Some(doc_text) =
-                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, iface)
-                    {
-                        iface_deprecated = docblock::has_deprecated_tag(doc_text);
-                        template_params = docblock::extract_template_params(doc_text);
-                        extends_generics = docblock::extract_generics_tag(doc_text, "@extends");
-                        implements_generics =
-                            docblock::extract_generics_tag(doc_text, "@implements");
-                        use_generics = docblock::extract_generics_tag(doc_text, "@use");
-                        type_aliases = docblock::extract_type_aliases(doc_text);
-
-                        for (name, type_str) in docblock::extract_property_tags(doc_text) {
-                            if !properties.iter().any(|p| p.name == name) {
-                                properties.push(PropertyInfo {
-                                    name,
-                                    type_hint: if type_str.is_empty() {
-                                        None
-                                    } else {
-                                        Some(type_str)
-                                    },
-                                    is_static: false,
-                                    visibility: Visibility::Public,
-                                    is_deprecated: false,
-                                });
-                            }
-                        }
-
-                        for method_info in docblock::extract_method_tags(doc_text) {
-                            if !methods.iter().any(|m| m.name == method_info.name) {
-                                methods.push(method_info);
-                            }
-                        }
-
-                        mixins = docblock::extract_mixin_tags(doc_text);
-                    }
+                    let mut doc_info = extract_class_docblock(iface, doc_ctx);
+                    doc_info.merge_into(&mut methods, &mut properties);
 
                     let start_offset = iface.left_brace.start.offset;
                     let end_offset = iface.right_brace.end.offset;
@@ -220,15 +219,15 @@ impl Backend {
                         parent_class,
                         interfaces: vec![],
                         used_traits,
-                        mixins,
+                        mixins: doc_info.mixins,
                         is_final: false,
                         is_abstract: false,
-                        is_deprecated: iface_deprecated,
-                        template_params,
-                        extends_generics,
-                        implements_generics,
-                        use_generics,
-                        type_aliases,
+                        is_deprecated: doc_info.is_deprecated,
+                        template_params: doc_info.template_params,
+                        extends_generics: doc_info.extends_generics,
+                        implements_generics: doc_info.implements_generics,
+                        use_generics: doc_info.use_generics,
+                        type_aliases: doc_info.type_aliases,
                         trait_precedences,
                         trait_aliases,
                     });
@@ -245,45 +244,8 @@ impl Backend {
                         trait_aliases,
                     ) = Self::extract_class_like_members(trait_def.members.iter(), doc_ctx);
 
-                    // Extract @property, @method, @mixin, @template, and
-                    // @deprecated tags from the trait-level docblock.
-                    let mut mixins = Vec::new();
-                    let mut template_params = Vec::new();
-                    let mut trait_deprecated = false;
-                    if let Some(ctx) = doc_ctx
-                        && let Some(doc_text) = docblock::get_docblock_text_for_node(
-                            ctx.trivias,
-                            ctx.content,
-                            trait_def,
-                        )
-                    {
-                        trait_deprecated = docblock::has_deprecated_tag(doc_text);
-                        template_params = docblock::extract_template_params(doc_text);
-
-                        for (name, type_str) in docblock::extract_property_tags(doc_text) {
-                            if !properties.iter().any(|p| p.name == name) {
-                                properties.push(PropertyInfo {
-                                    name,
-                                    type_hint: if type_str.is_empty() {
-                                        None
-                                    } else {
-                                        Some(type_str)
-                                    },
-                                    is_static: false,
-                                    visibility: Visibility::Public,
-                                    is_deprecated: false,
-                                });
-                            }
-                        }
-
-                        for method_info in docblock::extract_method_tags(doc_text) {
-                            if !methods.iter().any(|m| m.name == method_info.name) {
-                                methods.push(method_info);
-                            }
-                        }
-
-                        mixins = docblock::extract_mixin_tags(doc_text);
-                    }
+                    let mut doc_info = extract_class_docblock(trait_def, doc_ctx);
+                    doc_info.merge_into(&mut methods, &mut properties);
 
                     let start_offset = trait_def.left_brace.start.offset;
                     let end_offset = trait_def.right_brace.end.offset;
@@ -299,15 +261,15 @@ impl Backend {
                         parent_class: None,
                         interfaces: vec![],
                         used_traits,
-                        mixins,
+                        mixins: doc_info.mixins,
                         is_final: false,
                         is_abstract: false,
-                        is_deprecated: trait_deprecated,
-                        template_params,
+                        is_deprecated: doc_info.is_deprecated,
+                        template_params: doc_info.template_params,
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],
-                        type_aliases: std::collections::HashMap::new(),
+                        type_aliases: HashMap::new(),
                         trait_precedences,
                         trait_aliases,
                     });
@@ -331,45 +293,9 @@ impl Backend {
                     };
                     used_traits.push(implicit_interface.to_string());
 
-                    // Extract @property, @method, @mixin, and @deprecated tags
-                    // from the enum-level docblock.
-                    let mut mixins = Vec::new();
-                    let mut enum_deprecated = false;
-                    if let Some(ctx) = doc_ctx
-                        && let Some(doc_text) =
-                            docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, enum_def)
-                    {
-                        enum_deprecated = docblock::has_deprecated_tag(doc_text);
+                    let mut doc_info = extract_class_docblock(enum_def, doc_ctx);
+                    doc_info.merge_into(&mut methods, &mut properties);
 
-                        for (name, type_str) in docblock::extract_property_tags(doc_text) {
-                            if !properties.iter().any(|p| p.name == name) {
-                                properties.push(PropertyInfo {
-                                    name,
-                                    type_hint: if type_str.is_empty() {
-                                        None
-                                    } else {
-                                        Some(type_str)
-                                    },
-                                    is_static: false,
-                                    visibility: Visibility::Public,
-                                    is_deprecated: false,
-                                });
-                            }
-                        }
-
-                        for method_info in docblock::extract_method_tags(doc_text) {
-                            if !methods.iter().any(|m| m.name == method_info.name) {
-                                methods.push(method_info);
-                            }
-                        }
-
-                        mixins = docblock::extract_mixin_tags(doc_text);
-                    }
-
-                    // Enums can implement interfaces but cannot extend classes.
-                    let parent_class = None;
-
-                    // Extract interface names from `implements` clause
                     let interfaces: Vec<String> = enum_def
                         .implements
                         .as_ref()
@@ -384,7 +310,7 @@ impl Backend {
                     let start_offset = enum_def.left_brace.start.offset;
                     let end_offset = enum_def.right_brace.end.offset;
 
-                    // Enums are implicitly final — they cannot be extended.
+                    // Enums are implicitly final and cannot be extended.
                     classes.push(ClassInfo {
                         kind: ClassLikeKind::Enum,
                         name: enum_name,
@@ -393,18 +319,18 @@ impl Backend {
                         constants,
                         start_offset,
                         end_offset,
-                        parent_class,
+                        parent_class: None,
                         interfaces,
                         used_traits,
-                        mixins,
+                        mixins: doc_info.mixins,
                         is_final: true,
                         is_abstract: false,
-                        is_deprecated: enum_deprecated,
+                        is_deprecated: doc_info.is_deprecated,
                         template_params: vec![],
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],
-                        type_aliases: std::collections::HashMap::new(),
+                        type_aliases: HashMap::new(),
                         trait_precedences: vec![],
                         trait_aliases: vec![],
                     });

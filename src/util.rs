@@ -265,10 +265,11 @@ use crate::types::{ClassInfo, FileContext};
 impl Backend {
     /// Convert an LSP Position (line, character) to a byte offset in content.
     ///
-    /// Thin wrapper around [`position_to_byte_offset`] that returns
-    /// `Option<u32>` for backward compatibility with existing call sites.
-    pub(crate) fn position_to_offset(content: &str, position: Position) -> Option<u32> {
-        Some(position_to_byte_offset(content, position) as u32)
+    /// Thin wrapper around [`position_to_byte_offset`] that returns `u32`
+    /// (matching the offset type used by `ClassInfo::start_offset` /
+    /// `end_offset` and `ResolutionCtx::cursor_offset`).
+    pub(crate) fn position_to_offset(content: &str, position: Position) -> u32 {
+        position_to_byte_offset(content, position) as u32
     }
 
     /// Find which class the cursor (byte offset) is inside.
@@ -276,6 +277,66 @@ impl Backend {
         classes
             .iter()
             .find(|c| offset >= c.start_offset && offset <= c.end_offset)
+    }
+
+    /// Look up a class by its (possibly namespace-qualified) name in the
+    /// in-memory `ast_map`, without triggering any disk I/O.
+    ///
+    /// The `class_name` can be:
+    ///   - A simple name like `"Customer"`
+    ///   - A namespace-qualified name like `"Klarna\\Customer"`
+    ///   - A fully-qualified name like `"\\Klarna\\Customer"` (leading `\` is stripped)
+    ///
+    /// When a namespace prefix is present, the file's namespace (from
+    /// `namespace_map`) must match for the class to be returned.  This
+    /// prevents `"Demo\\PDO"` from matching the global `PDO` stub.
+    ///
+    /// Returns a cloned `ClassInfo` if found, or `None`.
+    pub(crate) fn find_class_in_ast_map(&self, class_name: &str) -> Option<ClassInfo> {
+        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
+        let last_segment = short_name(normalized);
+        let expected_ns: Option<&str> = if normalized.contains('\\') {
+            Some(&normalized[..normalized.len() - last_segment.len() - 1])
+        } else {
+            None
+        };
+
+        let map = self.ast_map.lock().ok()?;
+        let nmap = self.namespace_map.lock().ok();
+        for (uri, classes) in map.iter() {
+            if let Some(cls) = classes.iter().find(|c| c.name == last_segment) {
+                if let Some(exp_ns) = expected_ns {
+                    let file_ns = nmap
+                        .as_ref()
+                        .and_then(|nm| nm.get(uri))
+                        .and_then(|opt| opt.as_deref());
+                    if file_ns != Some(exp_ns) {
+                        continue;
+                    }
+                }
+                return Some(cls.clone());
+            }
+        }
+        None
+    }
+
+    /// Get the content of a file by URI, trying open files first then disk.
+    ///
+    /// This replaces the repeated pattern of locking `open_files`, looking
+    /// up the URI, and falling back to reading from disk via
+    /// `Url::to_file_path` + `std::fs::read_to_string`.  Three call sites
+    /// in the definition modules used this exact sequence.
+    pub(crate) fn get_file_content(&self, uri: &str) -> Option<String> {
+        if let Some(content) = self
+            .open_files
+            .lock()
+            .ok()
+            .and_then(|files| files.get(uri).cloned())
+        {
+            return Some(content);
+        }
+        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        std::fs::read_to_string(path).ok()
     }
 
     /// Public helper for tests: get the ast_map for a given URI.
@@ -321,6 +382,23 @@ impl Backend {
             classes,
             use_map,
             namespace,
+        }
+    }
+
+    /// Remove a file's entries from `ast_map`, `use_map`, and `namespace_map`.
+    ///
+    /// This is the mirror of [`file_context`](Self::file_context): where that
+    /// method *reads* the three maps, this method *clears* them for a given URI.
+    /// Called from `did_close` to clean up state when a file is closed.
+    pub(crate) fn clear_file_maps(&self, uri: &str) {
+        if let Ok(mut map) = self.ast_map.lock() {
+            map.remove(uri);
+        }
+        if let Ok(mut map) = self.use_map.lock() {
+            map.remove(uri);
+        }
+        if let Ok(mut map) = self.namespace_map.lock() {
+            map.remove(uri);
         }
     }
 

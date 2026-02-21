@@ -27,11 +27,9 @@ pub fn is_inside_docblock(content: &str, position: Position) -> bool {
     let before_cursor = &content[..byte_offset.min(content.len())];
 
     // Find the last `/**` before the cursor
-    let last_open = before_cursor.rfind("/**");
-    if last_open.is_none() {
+    let Some(open_pos) = before_cursor.rfind("/**") else {
         return false;
-    }
-    let open_pos = last_open.unwrap();
+    };
 
     // Check if there is a `*/` between the `/**` and the cursor
     // (which would mean the docblock is closed)

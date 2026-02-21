@@ -16,15 +16,16 @@
 /// 4. **Return locations** — for class-level requests, return the class
 ///    declaration position; for method-level requests, return the method
 ///    position in each implementing class.
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
 use super::member::MemberKind;
+use super::point_location;
 use crate::Backend;
 use crate::completion::resolver::ResolutionCtx;
-use crate::types::{ClassInfo, ClassLikeKind, FunctionInfo};
+use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
 /// Recursively collect all `.php` files under a directory.
@@ -68,28 +69,13 @@ impl Backend {
         // ── 2. Gather file context ──────────────────────────────────────
         let ctx = self.file_context(uri);
 
-        let cursor_offset = Self::position_to_offset(content, position)?;
-        let current_class = Self::find_class_at_offset(&ctx.classes, cursor_offset).cloned();
-
-        let class_loader = self.class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-
         // ── 3. Check for member access context (->method, ::method) ─────
         let is_member_access = Self::is_member_access_context(content, position);
         if is_member_access {
-            return self.resolve_member_implementations(
-                uri,
-                content,
-                position,
-                &word,
-                &ctx.classes,
-                current_class.as_ref(),
-                &class_loader,
-                &function_loader,
-                &ctx.use_map,
-                &ctx.namespace,
-            );
+            return self.resolve_member_implementations(uri, content, position, &word, &ctx);
         }
+
+        let class_loader = self.class_loader(&ctx);
 
         // ── 4. Not a member access — the cursor is on a class/interface name ─
         // Resolve the word to a fully-qualified class name.
@@ -127,33 +113,31 @@ impl Backend {
     }
 
     /// Resolve implementations of a method call on an interface/abstract class.
-    #[allow(clippy::too_many_arguments)]
     fn resolve_member_implementations(
         &self,
         uri: &str,
         content: &str,
         position: Position,
         member_name: &str,
-        classes: &[ClassInfo],
-        current_class: Option<&ClassInfo>,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-        function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
-        _file_use_map: &HashMap<String, String>,
-        _file_namespace: &Option<String>,
+        ctx: &FileContext,
     ) -> Option<Vec<Location>> {
         // Extract the subject (left side of -> or ::).
         let (subject, access_kind) = Self::extract_member_access_context(content, position)?;
 
-        let cursor_offset = Self::position_to_offset(content, position)?;
+        let cursor_offset = Self::position_to_offset(content, position);
+        let current_class = Self::find_class_at_offset(&ctx.classes, cursor_offset);
+
+        let class_loader = self.class_loader(ctx);
+        let function_loader = self.function_loader(ctx);
 
         // Resolve the subject to candidate classes.
         let rctx = ResolutionCtx {
             current_class,
-            all_classes: classes,
+            all_classes: &ctx.classes,
             content,
             cursor_offset,
-            class_loader,
-            function_loader: Some(function_loader),
+            class_loader: &class_loader,
+            function_loader: Some(&function_loader),
         };
         let candidates = Self::resolve_target_classes(&subject, access_kind, &rctx);
 
@@ -172,7 +156,7 @@ impl Backend {
 
             // Verify the method exists on this interface/abstract class
             // (directly or inherited).
-            let merged = Self::resolve_class_with_inheritance(candidate, class_loader);
+            let merged = Self::resolve_class_with_inheritance(candidate, &class_loader);
             let has_method = merged.methods.iter().any(|m| m.name == member_name);
             let has_property = merged.properties.iter().any(|p| p.name == member_name);
 
@@ -191,11 +175,11 @@ impl Backend {
                 .class_fqn_for_short(&target_short)
                 .unwrap_or(target_short.clone());
 
-            let implementors = self.find_implementors(&target_short, &target_fqn, class_loader);
+            let implementors = self.find_implementors(&target_short, &target_fqn, &class_loader);
 
             for imp in &implementors {
                 // Check that the implementor actually has this member.
-                let imp_merged = Self::resolve_class_with_inheritance(imp, class_loader);
+                let imp_merged = Self::resolve_class_with_inheritance(imp, &class_loader);
                 let imp_has = match member_kind {
                     MemberKind::Method => imp_merged.methods.iter().any(|m| m.name == member_name),
                     MemberKind::Property => {
@@ -236,13 +220,7 @@ impl Backend {
                     )
                     && let Ok(parsed_uri) = Url::parse(&class_uri)
                 {
-                    let loc = Location {
-                        uri: parsed_uri,
-                        range: Range {
-                            start: member_pos,
-                            end: member_pos,
-                        },
-                    };
+                    let loc = point_location(parsed_uri, member_pos);
                     if !all_locations.contains(&loc) {
                         all_locations.push(loc);
                     }
@@ -513,12 +491,11 @@ impl Backend {
         // ── Transitive check: walk the parent chain ─────────────────────
         // A class might extend another class that implements the target
         // interface.  Walk up to a bounded depth to find it.
-        const MAX_DEPTH: usize = 10;
         let mut current = cls.parent_class.clone();
-        let mut depth = 0;
+        let mut depth = 0u32;
 
         while let Some(ref parent_name) = current {
-            if depth >= MAX_DEPTH {
+            if depth >= MAX_INHERITANCE_DEPTH {
                 break;
             }
             depth += 1;
@@ -613,12 +590,6 @@ impl Backend {
         let position = Self::find_definition_position(&class_content, &cls.name)?;
         let parsed_uri = Url::parse(&class_uri).ok()?;
 
-        Some(Location {
-            uri: parsed_uri,
-            range: Range {
-                start: position,
-                end: position,
-            },
-        })
+        Some(point_location(parsed_uri, position))
     }
 }

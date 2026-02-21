@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::parser::with_parsed_program;
+use crate::util::position_to_byte_offset;
 
 impl Backend {
     /// PHP superglobal variable names (always available in any scope).
@@ -124,7 +125,7 @@ impl Backend {
         let mut seen: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
-        let cursor_offset = Self::line_col_to_byte_offset(content, position).unwrap_or(0) as u32;
+        let cursor_offset = position_to_byte_offset(content, position) as u32;
 
         // ── 1. AST-based scope-aware variable collection ────────────
         let scope_vars = collect_variables_in_scope(content, cursor_offset);
@@ -174,25 +175,6 @@ impl Backend {
         }
 
         (items, is_incomplete)
-    }
-
-    /// Convert a line/column `Position` to a byte offset within `content`.
-    ///
-    /// Returns `None` if the position is out of range.
-    pub(crate) fn line_col_to_byte_offset(content: &str, position: Position) -> Option<usize> {
-        let mut offset = 0usize;
-        for (line_idx, line) in content.lines().enumerate() {
-            if line_idx == position.line as usize {
-                let col = (position.character as usize).min(line.len());
-                return Some(offset + col);
-            }
-            // +1 for the newline character
-            offset += line.len() + 1;
-        }
-        // Line number is past the end of the file — treat the cursor as
-        // being at the very end of the content so that all preceding
-        // statements are still visible.
-        Some(content.len())
     }
 }
 

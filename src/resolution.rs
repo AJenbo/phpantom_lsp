@@ -68,43 +68,11 @@ impl Backend {
             None
         };
 
-        // ── Phase 0: Try the class_index for a direct FQN → URI lookup ──
-        // This handles classes that don't follow PSR-4 conventions, such as
-        // classes defined in Composer autoload_files.php entries.  Using the
-        // FQN avoids false positives from short-name collisions.
-        if name.contains('\\')
-            && let Ok(idx) = self.class_index.lock()
-            && let Some(uri) = idx.get(name)
-            && let Ok(map) = self.ast_map.lock()
-            && let Some(classes) = map.get(uri)
-            && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
-        {
-            return Some(cls.clone());
-        }
-
         // ── Phase 1: Search all already-parsed files in the ast_map ──
-        // When the requested name is namespace-qualified (e.g. "Demo\\PDO"),
-        // only match classes in files whose namespace matches the expected
-        // prefix.  This prevents "Demo\\PDO" from matching the global "PDO"
-        // stub that was cached under a different URI.
-        if let Ok(map) = self.ast_map.lock() {
-            let nmap = self.namespace_map.lock().ok();
-            for (uri, classes) in map.iter() {
-                if let Some(cls) = classes.iter().find(|c| c.name == last_segment) {
-                    // Verify namespace matches when a specific namespace is
-                    // expected.
-                    if let Some(exp_ns) = expected_ns {
-                        let file_ns = nmap
-                            .as_ref()
-                            .and_then(|nm| nm.get(uri))
-                            .and_then(|opt| opt.as_deref());
-                        if file_ns != Some(exp_ns) {
-                            continue;
-                        }
-                    }
-                    return Some(cls.clone());
-                }
-            }
+        // Checks short name + namespace to avoid false positives (e.g.
+        // "Demo\\PDO" won't match the global "PDO" stub).
+        if let Some(cls) = self.find_class_in_ast_map(class_name) {
+            return Some(cls);
         }
 
         // ── Phase 1.5: Try Composer classmap ──
@@ -283,7 +251,7 @@ impl Backend {
                 // (e.g. return types) can find them later.
                 let mut classes = self.parse_php(stub_content);
                 if !classes.is_empty() {
-                    let empty_use_map = std::collections::HashMap::new();
+                    let empty_use_map = HashMap::new();
                     let stub_namespace = self.parse_namespace(stub_content);
                     Self::resolve_parent_class_names(&mut classes, &empty_use_map, &stub_namespace);
                     let class_uri = format!("phpantom-stub-fn://{}", lookup);

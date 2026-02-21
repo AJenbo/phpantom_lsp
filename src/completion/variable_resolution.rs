@@ -29,6 +29,8 @@
 /// Type narrowing (instanceof, assert, custom type guards) is delegated
 /// to the [`super::type_narrowing`] module.  Closure/arrow-function scope
 /// handling is delegated to [`super::closure_resolution`].
+use std::collections::HashMap;
+
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -41,7 +43,7 @@ use crate::util::{
 };
 
 use super::conditional_resolution::{resolve_conditional_with_args, split_call_subject};
-use super::resolver::{FunctionLoaderFn, ResolutionCtx, VarResolutionCtx};
+use super::resolver::{FunctionLoaderFn, VarResolutionCtx};
 
 impl Backend {
     /// Resolve the type of `$variable` by re-parsing the file and walking
@@ -80,6 +82,9 @@ impl Backend {
         })
     }
 
+    /// Walk a sequence of top-level statements to find the class or
+    /// function body that contains the cursor, then resolve the target
+    /// variable's type within that scope.
     pub(super) fn resolve_variable_in_statements<'b>(
         statements: impl Iterator<Item = &'b Statement<'b>>,
         ctx: &VarResolutionCtx<'_>,
@@ -348,298 +353,15 @@ impl Backend {
                         conditional,
                     );
                 }
-                // ── Conditional blocks: recurse with conditional = true ──
-                //
-                // When the condition is `$var instanceof ClassName` and the
-                // cursor falls inside the corresponding branch body, we
-                // *narrow* the variable to only that class — replacing all
-                // previous candidates.
                 Statement::If(if_stmt) => {
-                    match &if_stmt.body {
-                        IfBody::Statement(body) => {
-                            // ── instanceof narrowing for then-body ──
-                            Self::try_apply_instanceof_narrowing(
-                                if_stmt.condition,
-                                body.statement.span(),
-                                ctx,
-                                results,
-                            );
-                            // ── @phpstan-assert-if-true/false narrowing for then-body ──
-                            Self::try_apply_assert_condition_narrowing(
-                                if_stmt.condition,
-                                body.statement.span(),
-                                ctx,
-                                results,
-                                false, // not inverted — this is the then-body
-                            );
-                            Self::check_statement_for_assignments(
-                                body.statement,
-                                ctx,
-                                results,
-                                true,
-                            );
-
-                            for else_if in body.else_if_clauses.iter() {
-                                // ── instanceof narrowing for elseif-body ──
-                                Self::try_apply_instanceof_narrowing(
-                                    else_if.condition,
-                                    else_if.statement.span(),
-                                    ctx,
-                                    results,
-                                );
-                                Self::try_apply_assert_condition_narrowing(
-                                    else_if.condition,
-                                    else_if.statement.span(),
-                                    ctx,
-                                    results,
-                                    false,
-                                );
-                                Self::check_statement_for_assignments(
-                                    else_if.statement,
-                                    ctx,
-                                    results,
-                                    true,
-                                );
-                            }
-                            if let Some(else_clause) = &body.else_clause {
-                                // ── inverse instanceof narrowing for else-body ──
-                                // `if ($v instanceof Foo) { … } else { ← here }`
-                                // means $v is NOT Foo in the else branch.
-                                Self::try_apply_instanceof_narrowing_inverse(
-                                    if_stmt.condition,
-                                    else_clause.statement.span(),
-                                    ctx,
-                                    results,
-                                );
-                                Self::try_apply_assert_condition_narrowing(
-                                    if_stmt.condition,
-                                    else_clause.statement.span(),
-                                    ctx,
-                                    results,
-                                    true, // inverted — this is the else-body
-                                );
-                                Self::check_statement_for_assignments(
-                                    else_clause.statement,
-                                    ctx,
-                                    results,
-                                    true,
-                                );
-                            }
-                        }
-                        IfBody::ColonDelimited(body) => {
-                            // Determine the then-body span: from the colon to
-                            // the first elseif / else / endif keyword.
-                            let then_end = if !body.else_if_clauses.is_empty() {
-                                body.else_if_clauses
-                                    .first()
-                                    .unwrap()
-                                    .elseif
-                                    .span()
-                                    .start
-                                    .offset
-                            } else if let Some(ref ec) = body.else_clause {
-                                ec.r#else.span().start.offset
-                            } else {
-                                body.endif.span().start.offset
-                            };
-                            let then_span = mago_span::Span::new(
-                                body.colon.file_id,
-                                body.colon.start,
-                                mago_span::Position::new(then_end),
-                            );
-                            Self::try_apply_instanceof_narrowing(
-                                if_stmt.condition,
-                                then_span,
-                                ctx,
-                                results,
-                            );
-                            Self::try_apply_assert_condition_narrowing(
-                                if_stmt.condition,
-                                then_span,
-                                ctx,
-                                results,
-                                false,
-                            );
-                            Self::walk_statements_for_assignments(
-                                body.statements.iter(),
-                                ctx,
-                                results,
-                                true,
-                            );
-                            for else_if in body.else_if_clauses.iter() {
-                                let ei_span = mago_span::Span::new(
-                                    else_if.colon.file_id,
-                                    else_if.colon.start,
-                                    mago_span::Position::new(
-                                        else_if
-                                            .statements
-                                            .span(else_if.colon.file_id, else_if.colon.end)
-                                            .end
-                                            .offset,
-                                    ),
-                                );
-                                Self::try_apply_instanceof_narrowing(
-                                    else_if.condition,
-                                    ei_span,
-                                    ctx,
-                                    results,
-                                );
-                                Self::try_apply_assert_condition_narrowing(
-                                    else_if.condition,
-                                    ei_span,
-                                    ctx,
-                                    results,
-                                    false,
-                                );
-                                Self::walk_statements_for_assignments(
-                                    else_if.statements.iter(),
-                                    ctx,
-                                    results,
-                                    true,
-                                );
-                            }
-                            if let Some(else_clause) = &body.else_clause {
-                                // ── inverse instanceof narrowing for else-body ──
-                                let else_span = mago_span::Span::new(
-                                    else_clause.colon.file_id,
-                                    else_clause.colon.start,
-                                    mago_span::Position::new(
-                                        else_clause
-                                            .statements
-                                            .span(else_clause.colon.file_id, else_clause.colon.end)
-                                            .end
-                                            .offset,
-                                    ),
-                                );
-                                Self::try_apply_instanceof_narrowing_inverse(
-                                    if_stmt.condition,
-                                    else_span,
-                                    ctx,
-                                    results,
-                                );
-                                Self::try_apply_assert_condition_narrowing(
-                                    if_stmt.condition,
-                                    else_span,
-                                    ctx,
-                                    results,
-                                    true, // inverted — else-body
-                                );
-                                Self::walk_statements_for_assignments(
-                                    else_clause.statements.iter(),
-                                    ctx,
-                                    results,
-                                    true,
-                                );
-                            }
-                        }
-                    }
-
-                    // ── Guard clause narrowing (early return / throw) ──
-                    // When the cursor is *after* a guard clause (an `if`
-                    // whose then-body unconditionally exits via return /
-                    // throw / continue / break, with no else / elseif),
-                    // apply the inverse narrowing so subsequent code sees
-                    // the narrowed type.
-                    //
-                    // Example:
-                    //   if (!$var instanceof Foo) { return; }
-                    //   $var-> // narrowed to Foo here
-                    if stmt.span().end.offset < ctx.cursor_offset {
-                        Self::apply_guard_clause_narrowing(if_stmt, ctx, results);
-                    }
+                    Self::walk_if_statement(if_stmt, stmt, ctx, results);
                 }
                 Statement::Foreach(foreach) => {
-                    // Only resolve the foreach value variable and recurse
-                    // into the body when the cursor is actually inside it.
-                    // Outside the loop the iteration variables are out of
-                    // scope.
-                    let body_span = foreach.body.span();
-                    if ctx.cursor_offset >= body_span.start.offset
-                        && ctx.cursor_offset <= body_span.end.offset
-                    {
-                        // ── Foreach value/key type from generic iterables ──
-                        // When the variable we're resolving is the foreach
-                        // *value* variable, try to infer its type from the
-                        // iterated expression's generic type annotation.
-                        //
-                        // Example:
-                        //   /** @var list<User> $users */
-                        //   foreach ($users as $user) { $user-> }
-                        //
-                        // Here `$user` is resolved to `User`.
-                        //
-                        // Similarly, when the variable is the foreach *key*
-                        // variable, try to infer its type from the key
-                        // position of a two-parameter generic annotation.
-                        //
-                        // Example:
-                        //   /** @var SplObjectStorage<Request, Response> $storage */
-                        //   foreach ($storage as $req => $res) { $req-> }
-                        //
-                        // Here `$req` is resolved to `Request`.
-                        Self::try_resolve_foreach_value_type(foreach, ctx, results, conditional);
-                        Self::try_resolve_foreach_key_type(foreach, ctx, results, conditional);
-
-                        match &foreach.body {
-                            ForeachBody::Statement(inner) => {
-                                Self::check_statement_for_assignments(inner, ctx, results, true);
-                            }
-                            ForeachBody::ColonDelimited(body) => {
-                                Self::walk_statements_for_assignments(
-                                    body.statements.iter(),
-                                    ctx,
-                                    results,
-                                    true,
-                                );
-                            }
-                        }
-                    }
+                    Self::walk_foreach_statement(foreach, ctx, results, conditional);
                 }
-                Statement::While(while_stmt) => match &while_stmt.body {
-                    WhileBody::Statement(inner) => {
-                        // ── instanceof narrowing for while-body ──
-                        Self::try_apply_instanceof_narrowing(
-                            while_stmt.condition,
-                            inner.span(),
-                            ctx,
-                            results,
-                        );
-                        Self::try_apply_assert_condition_narrowing(
-                            while_stmt.condition,
-                            inner.span(),
-                            ctx,
-                            results,
-                            false,
-                        );
-                        Self::check_statement_for_assignments(inner, ctx, results, true);
-                    }
-                    WhileBody::ColonDelimited(body) => {
-                        let body_span = mago_span::Span::new(
-                            body.colon.file_id,
-                            body.colon.start,
-                            mago_span::Position::new(body.end_while.span().start.offset),
-                        );
-                        Self::try_apply_instanceof_narrowing(
-                            while_stmt.condition,
-                            body_span,
-                            ctx,
-                            results,
-                        );
-                        Self::try_apply_assert_condition_narrowing(
-                            while_stmt.condition,
-                            body_span,
-                            ctx,
-                            results,
-                            false,
-                        );
-                        Self::walk_statements_for_assignments(
-                            body.statements.iter(),
-                            ctx,
-                            results,
-                            true,
-                        );
-                    }
-                },
+                Statement::While(while_stmt) => {
+                    Self::walk_while_statement(while_stmt, ctx, results);
+                }
                 Statement::For(for_stmt) => match &for_stmt.body {
                     ForBody::Statement(inner) => {
                         Self::check_statement_for_assignments(inner, ctx, results, true);
@@ -657,51 +379,342 @@ impl Backend {
                     Self::check_statement_for_assignments(dw.statement, ctx, results, true);
                 }
                 Statement::Try(try_stmt) => {
-                    Self::walk_statements_for_assignments(
-                        try_stmt.block.statements.iter(),
-                        ctx,
-                        results,
-                        true,
-                    );
-                    for catch in try_stmt.catch_clauses.iter() {
-                        // Seed the catch variable's type from the catch
-                        // clause's type hint(s) before recursing into the
-                        // block.  Handles single types like
-                        // `catch (ValidationException $e)` and multi-catch
-                        // like `catch (TypeA | TypeB $e)`.
-                        if let Some(ref var) = catch.variable
-                            && var.name == ctx.var_name
-                        {
-                            let hint_str = Self::extract_hint_string(&catch.hint);
-                            let resolved = Self::type_hint_to_classes(
-                                &hint_str,
-                                &ctx.current_class.name,
-                                ctx.all_classes,
-                                ctx.class_loader,
-                            );
-                            ClassInfo::extend_unique(results, resolved);
-                        }
-                        Self::walk_statements_for_assignments(
-                            catch.block.statements.iter(),
-                            ctx,
-                            results,
-                            true,
-                        );
-                    }
-                    if let Some(finally) = &try_stmt.finally_clause {
-                        Self::walk_statements_for_assignments(
-                            finally.block.statements.iter(),
-                            ctx,
-                            results,
-                            true,
-                        );
-                    }
+                    Self::walk_try_statement(try_stmt, ctx, results);
                 }
                 _ => {}
             }
         }
     }
 
+    /// Handle `if` / `elseif` / `else` statements during variable
+    /// assignment walking.
+    ///
+    /// Applies instanceof and `@phpstan-assert-if-true/false` narrowing
+    /// for each branch, recurses into the branch bodies with
+    /// `conditional = true`, and applies guard-clause narrowing when the
+    /// cursor is after the if-statement.
+    fn walk_if_statement<'b>(
+        if_stmt: &'b If<'b>,
+        enclosing_stmt: &'b Statement<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        match &if_stmt.body {
+            IfBody::Statement(body) => {
+                // ── instanceof narrowing for then-body ──
+                Self::try_apply_instanceof_narrowing(
+                    if_stmt.condition,
+                    body.statement.span(),
+                    ctx,
+                    results,
+                );
+                // ── @phpstan-assert-if-true/false narrowing for then-body ──
+                Self::try_apply_assert_condition_narrowing(
+                    if_stmt.condition,
+                    body.statement.span(),
+                    ctx,
+                    results,
+                    false, // not inverted — this is the then-body
+                );
+                Self::check_statement_for_assignments(body.statement, ctx, results, true);
+
+                for else_if in body.else_if_clauses.iter() {
+                    // ── instanceof narrowing for elseif-body ──
+                    Self::try_apply_instanceof_narrowing(
+                        else_if.condition,
+                        else_if.statement.span(),
+                        ctx,
+                        results,
+                    );
+                    Self::try_apply_assert_condition_narrowing(
+                        else_if.condition,
+                        else_if.statement.span(),
+                        ctx,
+                        results,
+                        false,
+                    );
+                    Self::check_statement_for_assignments(else_if.statement, ctx, results, true);
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    // ── inverse instanceof narrowing for else-body ──
+                    // `if ($v instanceof Foo) { … } else { ← here }`
+                    // means $v is NOT Foo in the else branch.
+                    Self::try_apply_instanceof_narrowing_inverse(
+                        if_stmt.condition,
+                        else_clause.statement.span(),
+                        ctx,
+                        results,
+                    );
+                    Self::try_apply_assert_condition_narrowing(
+                        if_stmt.condition,
+                        else_clause.statement.span(),
+                        ctx,
+                        results,
+                        true, // inverted — this is the else-body
+                    );
+                    Self::check_statement_for_assignments(
+                        else_clause.statement,
+                        ctx,
+                        results,
+                        true,
+                    );
+                }
+            }
+            IfBody::ColonDelimited(body) => {
+                // Determine the then-body span: from the colon to
+                // the first elseif / else / endif keyword.
+                let then_end = if !body.else_if_clauses.is_empty() {
+                    body.else_if_clauses
+                        .first()
+                        .unwrap()
+                        .elseif
+                        .span()
+                        .start
+                        .offset
+                } else if let Some(ref ec) = body.else_clause {
+                    ec.r#else.span().start.offset
+                } else {
+                    body.endif.span().start.offset
+                };
+                let then_span = mago_span::Span::new(
+                    body.colon.file_id,
+                    body.colon.start,
+                    mago_span::Position::new(then_end),
+                );
+                Self::try_apply_instanceof_narrowing(if_stmt.condition, then_span, ctx, results);
+                Self::try_apply_assert_condition_narrowing(
+                    if_stmt.condition,
+                    then_span,
+                    ctx,
+                    results,
+                    false,
+                );
+                Self::walk_statements_for_assignments(body.statements.iter(), ctx, results, true);
+                for else_if in body.else_if_clauses.iter() {
+                    let ei_span = mago_span::Span::new(
+                        else_if.colon.file_id,
+                        else_if.colon.start,
+                        mago_span::Position::new(
+                            else_if
+                                .statements
+                                .span(else_if.colon.file_id, else_if.colon.end)
+                                .end
+                                .offset,
+                        ),
+                    );
+                    Self::try_apply_instanceof_narrowing(else_if.condition, ei_span, ctx, results);
+                    Self::try_apply_assert_condition_narrowing(
+                        else_if.condition,
+                        ei_span,
+                        ctx,
+                        results,
+                        false,
+                    );
+                    Self::walk_statements_for_assignments(
+                        else_if.statements.iter(),
+                        ctx,
+                        results,
+                        true,
+                    );
+                }
+                if let Some(else_clause) = &body.else_clause {
+                    // ── inverse instanceof narrowing for else-body ──
+                    let else_span = mago_span::Span::new(
+                        else_clause.colon.file_id,
+                        else_clause.colon.start,
+                        mago_span::Position::new(
+                            else_clause
+                                .statements
+                                .span(else_clause.colon.file_id, else_clause.colon.end)
+                                .end
+                                .offset,
+                        ),
+                    );
+                    Self::try_apply_instanceof_narrowing_inverse(
+                        if_stmt.condition,
+                        else_span,
+                        ctx,
+                        results,
+                    );
+                    Self::try_apply_assert_condition_narrowing(
+                        if_stmt.condition,
+                        else_span,
+                        ctx,
+                        results,
+                        true, // inverted — else-body
+                    );
+                    Self::walk_statements_for_assignments(
+                        else_clause.statements.iter(),
+                        ctx,
+                        results,
+                        true,
+                    );
+                }
+            }
+        }
+
+        // ── Guard clause narrowing (early return / throw) ──
+        // When the cursor is *after* a guard clause (an `if`
+        // whose then-body unconditionally exits via return /
+        // throw / continue / break, with no else / elseif),
+        // apply the inverse narrowing so subsequent code sees
+        // the narrowed type.
+        //
+        // Example:
+        //   if (!$var instanceof Foo) { return; }
+        //   $var-> // narrowed to Foo here
+        if enclosing_stmt.span().end.offset < ctx.cursor_offset {
+            Self::apply_guard_clause_narrowing(if_stmt, ctx, results);
+        }
+    }
+
+    /// Handle `foreach` statements during variable assignment walking.
+    ///
+    /// Only resolves the foreach value/key variable and recurses into the
+    /// body when the cursor is actually inside the loop body (iteration
+    /// variables are out of scope outside the loop).
+    fn walk_foreach_statement<'b>(
+        foreach: &'b Foreach<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+        conditional: bool,
+    ) {
+        let body_span = foreach.body.span();
+        if ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset
+        {
+            // ── Foreach value/key type from generic iterables ──
+            // When the variable we're resolving is the foreach
+            // *value* variable, try to infer its type from the
+            // iterated expression's generic type annotation.
+            //
+            // Example:
+            //   /** @var list<User> $users */
+            //   foreach ($users as $user) { $user-> }
+            //
+            // Here `$user` is resolved to `User`.
+            //
+            // Similarly, when the variable is the foreach *key*
+            // variable, try to infer its type from the key
+            // position of a two-parameter generic annotation.
+            //
+            // Example:
+            //   /** @var SplObjectStorage<Request, Response> $storage */
+            //   foreach ($storage as $req => $res) { $req-> }
+            //
+            // Here `$req` is resolved to `Request`.
+            Self::try_resolve_foreach_value_type(foreach, ctx, results, conditional);
+            Self::try_resolve_foreach_key_type(foreach, ctx, results, conditional);
+
+            match &foreach.body {
+                ForeachBody::Statement(inner) => {
+                    Self::check_statement_for_assignments(inner, ctx, results, true);
+                }
+                ForeachBody::ColonDelimited(body) => {
+                    Self::walk_statements_for_assignments(
+                        body.statements.iter(),
+                        ctx,
+                        results,
+                        true,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Handle `while` statements during variable assignment walking.
+    ///
+    /// Applies instanceof and `@phpstan-assert` narrowing based on the
+    /// while condition and recurses into the loop body.
+    fn walk_while_statement<'b>(
+        while_stmt: &'b While<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        match &while_stmt.body {
+            WhileBody::Statement(inner) => {
+                Self::try_apply_instanceof_narrowing(
+                    while_stmt.condition,
+                    inner.span(),
+                    ctx,
+                    results,
+                );
+                Self::try_apply_assert_condition_narrowing(
+                    while_stmt.condition,
+                    inner.span(),
+                    ctx,
+                    results,
+                    false,
+                );
+                Self::check_statement_for_assignments(inner, ctx, results, true);
+            }
+            WhileBody::ColonDelimited(body) => {
+                let body_span = mago_span::Span::new(
+                    body.colon.file_id,
+                    body.colon.start,
+                    mago_span::Position::new(body.end_while.span().start.offset),
+                );
+                Self::try_apply_instanceof_narrowing(while_stmt.condition, body_span, ctx, results);
+                Self::try_apply_assert_condition_narrowing(
+                    while_stmt.condition,
+                    body_span,
+                    ctx,
+                    results,
+                    false,
+                );
+                Self::walk_statements_for_assignments(body.statements.iter(), ctx, results, true);
+            }
+        }
+    }
+
+    /// Handle `try` / `catch` / `finally` statements during variable
+    /// assignment walking.
+    ///
+    /// Recurses into the try block, seeds the catch variable's type from
+    /// the catch clause's type hint(s), recurses into each catch block,
+    /// and recurses into the finally block if present.
+    fn walk_try_statement<'b>(
+        try_stmt: &'b Try<'b>,
+        ctx: &VarResolutionCtx<'_>,
+        results: &mut Vec<ClassInfo>,
+    ) {
+        Self::walk_statements_for_assignments(try_stmt.block.statements.iter(), ctx, results, true);
+        for catch in try_stmt.catch_clauses.iter() {
+            // Seed the catch variable's type from the catch
+            // clause's type hint(s) before recursing into the
+            // block.  Handles single types like
+            // `catch (ValidationException $e)` and multi-catch
+            // like `catch (TypeA | TypeB $e)`.
+            if let Some(ref var) = catch.variable
+                && var.name == ctx.var_name
+            {
+                let hint_str = Self::extract_hint_string(&catch.hint);
+                let resolved = Self::type_hint_to_classes(
+                    &hint_str,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+                ClassInfo::extend_unique(results, resolved);
+            }
+            Self::walk_statements_for_assignments(
+                catch.block.statements.iter(),
+                ctx,
+                results,
+                true,
+            );
+        }
+        if let Some(finally) = &try_stmt.finally_clause {
+            Self::walk_statements_for_assignments(
+                finally.block.statements.iter(),
+                ctx,
+                results,
+                true,
+            );
+        }
+    }
+
+    /// Convenience wrapper that walks a single statement for assignments
+    /// to the target variable, delegating to `walk_statements_for_assignments`.
     pub(super) fn check_statement_for_assignments<'b>(
         stmt: &'b Statement<'b>,
         ctx: &VarResolutionCtx<'_>,
@@ -995,414 +1008,419 @@ impl Backend {
         expr: &'b Expression<'b>,
         ctx: &VarResolutionCtx<'_>,
     ) -> Vec<ClassInfo> {
+        match expr {
+            Expression::Instantiation(inst) => Self::resolve_rhs_instantiation(inst, ctx),
+            Expression::ArrayAccess(array_access) => {
+                Self::resolve_rhs_array_access(array_access, expr, ctx)
+            }
+            Expression::Call(call) => Self::resolve_rhs_call(call, expr, ctx),
+            Expression::Access(access) => Self::resolve_rhs_property_access(access, ctx),
+            Expression::Match(match_expr) => {
+                let mut combined = Vec::new();
+                for arm in match_expr.arms.iter() {
+                    let arm_results = Self::resolve_rhs_expression(arm.expression(), ctx);
+                    ClassInfo::extend_unique(&mut combined, arm_results);
+                }
+                combined
+            }
+            Expression::Conditional(cond_expr) => {
+                let mut combined = Vec::new();
+                let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
+                ClassInfo::extend_unique(
+                    &mut combined,
+                    Self::resolve_rhs_expression(then_expr, ctx),
+                );
+                ClassInfo::extend_unique(
+                    &mut combined,
+                    Self::resolve_rhs_expression(cond_expr.r#else, ctx),
+                );
+                combined
+            }
+            Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
+                let mut combined = Vec::new();
+                ClassInfo::extend_unique(
+                    &mut combined,
+                    Self::resolve_rhs_expression(binary.lhs, ctx),
+                );
+                ClassInfo::extend_unique(
+                    &mut combined,
+                    Self::resolve_rhs_expression(binary.rhs, ctx),
+                );
+                combined
+            }
+            Expression::Clone(clone_expr) => Self::resolve_rhs_clone(clone_expr, ctx),
+            _ => vec![],
+        }
+    }
+
+    /// Resolve `new ClassName(…)` to the instantiated class.
+    fn resolve_rhs_instantiation(
+        inst: &Instantiation<'_>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        let class_name = match inst.class {
+            Expression::Self_(_) => Some("self"),
+            Expression::Static(_) => Some("static"),
+            Expression::Identifier(ident) => Some(ident.value()),
+            _ => None,
+        };
+        if let Some(name) = class_name {
+            return Self::type_hint_to_classes(
+                name,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+        }
+        vec![]
+    }
+
+    /// Resolve `$arr[0]` / `$arr[$key]` by extracting the generic element
+    /// type from the base array's annotation.
+    fn resolve_rhs_array_access<'b>(
+        array_access: &ArrayAccess<'b>,
+        expr: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        if let Expression::Variable(Variable::Direct(base_dv)) = array_access.array {
+            let base_var = base_dv.name.to_string();
+            let access_offset = expr.span().start.offset as usize;
+            if let Some(raw_type) =
+                docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
+                && let Some(element_type) = docblock::types::extract_generic_value_type(&raw_type)
+            {
+                return Self::type_hint_to_classes(
+                    &element_type,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+            }
+        }
+        vec![]
+    }
+
+    /// Resolve function, method, and static method calls to their return
+    /// types.
+    fn resolve_rhs_call<'b>(
+        call: &'b Call<'b>,
+        expr: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        match call {
+            Call::Function(func_call) => Self::resolve_rhs_function_call(func_call, expr, ctx),
+            Call::Method(method_call) => Self::resolve_rhs_method_call(method_call, expr, ctx),
+            Call::StaticMethod(static_call) => Self::resolve_rhs_static_call(static_call, ctx),
+            _ => vec![],
+        }
+    }
+
+    /// Resolve a plain function call: `someFunc()`, array functions, variable
+    /// invocations (`$fn()`), and conditional return types.
+    fn resolve_rhs_function_call<'b>(
+        func_call: &'b FunctionCall<'b>,
+        expr: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
         let current_class_name: &str = &ctx.current_class.name;
         let all_classes = ctx.all_classes;
         let content = ctx.content;
         let class_loader = ctx.class_loader;
         let function_loader = ctx.function_loader;
 
-        // ── Instantiation: `new ClassName(…)` ──
-        if let Expression::Instantiation(inst) = expr {
-            let class_name = match inst.class {
-                Expression::Self_(_) => Some("self"),
-                Expression::Static(_) => Some("static"),
-                Expression::Identifier(ident) => Some(ident.value()),
-                _ => None,
-            };
-            if let Some(name) = class_name {
+        let func_name = match func_call.function {
+            Expression::Identifier(ident) => Some(ident.value().to_string()),
+            _ => None,
+        };
+
+        // ── Known array functions ────────────────────────
+        // For element-extracting functions (array_pop, etc.)
+        // resolve to the element ClassInfo directly.
+        if let Some(ref name) = func_name
+            && let Some(element_type) =
+                Self::resolve_array_func_element_type(name, &func_call.argument_list, ctx)
+        {
+            let resolved = Self::type_hint_to_classes(
+                &element_type,
+                current_class_name,
+                all_classes,
+                class_loader,
+            );
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
+
+        if let Some(name) = func_name
+            && let Some(fl) = function_loader
+            && let Some(func_info) = fl(&name)
+        {
+            // Try conditional return type first
+            if let Some(ref cond) = func_info.conditional_return {
+                let resolved_type = resolve_conditional_with_args(
+                    cond,
+                    &func_info.parameters,
+                    &func_call.argument_list,
+                );
+                if let Some(ref ty) = resolved_type {
+                    let resolved = Self::type_hint_to_classes(
+                        ty,
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    );
+                    if !resolved.is_empty() {
+                        return resolved;
+                    }
+                }
+            }
+            if let Some(ref ret) = func_info.return_type {
                 return Self::type_hint_to_classes(
-                    name,
+                    ret,
                     current_class_name,
                     all_classes,
                     class_loader,
                 );
             }
-            return vec![];
         }
 
-        // ── Array access: `$arr[0]` or `$arr[$key]` ──
-        // Resolve the base array's generic/iterable type and extract
-        // the element type.
-        if let Expression::ArrayAccess(array_access) = expr {
-            if let Expression::Variable(Variable::Direct(base_dv)) = array_access.array {
-                let base_var = base_dv.name.to_string();
-                let access_offset = expr.span().start.offset as usize;
-                if let Some(raw_type) =
-                    docblock::find_iterable_raw_type_in_source(content, access_offset, &base_var)
-                    && let Some(element_type) =
-                        docblock::types::extract_generic_value_type(&raw_type)
-                {
-                    return Self::type_hint_to_classes(
-                        &element_type,
-                        current_class_name,
-                        all_classes,
-                        class_loader,
-                    );
-                }
-            }
-            return vec![];
-        }
+        // ── Variable invocation: $fn() ──────────────────
+        // When the callee is a variable (not a named function),
+        // resolve the variable's type annotation for a
+        // callable/Closure return type, or look for a
+        // closure/arrow-function literal in the assignment.
+        if let Expression::Variable(Variable::Direct(dv)) = func_call.function {
+            let var_name = dv.name.to_string();
+            let offset = expr.span().start.offset as usize;
 
-        // ── Function / method / static calls ──
-        if let Expression::Call(call) = expr {
-            match call {
-                Call::Function(func_call) => {
-                    let func_name = match func_call.function {
-                        Expression::Identifier(ident) => Some(ident.value().to_string()),
-                        _ => None,
-                    };
-                    // ── Known array functions ────────────────────────
-                    // For element-extracting functions (array_pop, etc.)
-                    // resolve to the element ClassInfo directly.
-                    if let Some(ref name) = func_name
-                        && let Some(element_type) = Self::resolve_array_func_element_type(
-                            name,
-                            &func_call.argument_list,
-                            ctx,
-                        )
-                    {
-                        let resolved = Self::type_hint_to_classes(
-                            &element_type,
-                            current_class_name,
-                            all_classes,
-                            class_loader,
-                        );
-                        if !resolved.is_empty() {
-                            return resolved;
-                        }
-                    }
-                    if let Some(name) = func_name
-                        && let Some(fl) = function_loader
-                        && let Some(func_info) = fl(&name)
-                    {
-                        // Try conditional return type first
-                        if let Some(ref cond) = func_info.conditional_return {
-                            let resolved_type = resolve_conditional_with_args(
-                                cond,
-                                &func_info.parameters,
-                                &func_call.argument_list,
-                            );
-                            if let Some(ref ty) = resolved_type {
-                                let resolved = Self::type_hint_to_classes(
-                                    ty,
-                                    current_class_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                                if !resolved.is_empty() {
-                                    return resolved;
-                                }
-                            }
-                        }
-                        if let Some(ref ret) = func_info.return_type {
-                            return Self::type_hint_to_classes(
-                                ret,
-                                current_class_name,
-                                all_classes,
-                                class_loader,
-                            );
-                        }
-                    }
-
-                    // ── Variable invocation: $fn() ──────────────────
-                    // When the callee is a variable (not a named function),
-                    // resolve the variable's type annotation for a
-                    // callable/Closure return type, or look for a
-                    // closure/arrow-function literal in the assignment.
-                    if let Expression::Variable(Variable::Direct(dv)) = func_call.function {
-                        let var_name = dv.name.to_string();
-                        let offset = expr.span().start.offset as usize;
-
-                        // 1. Try docblock annotation:
-                        //    `@var Closure(): User $fn` or
-                        //    `@param callable(int): Response $fn`
-                        if let Some(raw_type) = crate::docblock::find_iterable_raw_type_in_source(
-                            content, offset, &var_name,
-                        ) && let Some(ret) =
-                            crate::docblock::extract_callable_return_type(&raw_type)
-                        {
-                            let resolved = Self::type_hint_to_classes(
-                                &ret,
-                                current_class_name,
-                                all_classes,
-                                class_loader,
-                            );
-                            if !resolved.is_empty() {
-                                return resolved;
-                            }
-                        }
-
-                        // 2. Scan for closure literal assignment and
-                        //    extract native return type hint.
-                        if let Some(ret) = Self::extract_closure_return_type_from_assignment(
-                            &var_name,
-                            content,
-                            ctx.cursor_offset,
-                        ) {
-                            let resolved = Self::type_hint_to_classes(
-                                &ret,
-                                current_class_name,
-                                all_classes,
-                                class_loader,
-                            );
-                            if !resolved.is_empty() {
-                                return resolved;
-                            }
-                        }
-                    }
-                }
-                Call::Method(method_call) => {
-                    if let Expression::Variable(Variable::Direct(dv)) = method_call.object
-                        && dv.name == "$this"
-                        && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
-                    {
-                        let method_name = ident.value.to_string();
-                        if let Some(owner) =
-                            all_classes.iter().find(|c| c.name == current_class_name)
-                        {
-                            // Extract argument text from the AST span so that
-                            // conditional return types and method-level
-                            // @template substitutions can use it.
-                            let text_args =
-                                Self::extract_argument_text(&method_call.argument_list, content);
-                            let current_class =
-                                all_classes.iter().find(|c| c.name == current_class_name);
-                            let rctx = ResolutionCtx {
-                                current_class,
-                                all_classes,
-                                content,
-                                cursor_offset: ctx.cursor_offset,
-                                class_loader,
-                                function_loader,
-                            };
-                            let template_subs = if !text_args.is_empty() {
-                                Self::build_method_template_subs(
-                                    owner,
-                                    &method_name,
-                                    &text_args,
-                                    &rctx,
-                                    class_loader,
-                                )
-                            } else {
-                                std::collections::HashMap::new()
-                            };
-                            return Self::resolve_method_return_types_with_args(
-                                owner,
-                                &method_name,
-                                &text_args,
-                                all_classes,
-                                class_loader,
-                                &template_subs,
-                            );
-                        }
-                    } else {
-                        // General case: extract the call expression text and
-                        // delegate to text-based resolution.
-                        let rhs_span = expr.span();
-                        let start = rhs_span.start.offset as usize;
-                        let end = rhs_span.end.offset as usize;
-                        if end <= content.len() {
-                            let rhs_text = content[start..end].trim();
-                            if rhs_text.ends_with(')')
-                                && let Some((call_body, args_text)) = split_call_subject(rhs_text)
-                            {
-                                let current_class =
-                                    all_classes.iter().find(|c| c.name == current_class_name);
-                                let rctx = ResolutionCtx {
-                                    current_class,
-                                    all_classes,
-                                    content,
-                                    cursor_offset: ctx.cursor_offset,
-                                    class_loader,
-                                    function_loader,
-                                };
-                                return Self::resolve_call_return_types(
-                                    call_body, args_text, &rctx,
-                                );
-                            }
-                        }
-                    }
-                }
-                Call::StaticMethod(static_call) => {
-                    let class_name = match static_call.class {
-                        Expression::Self_(_) => Some(current_class_name.to_string()),
-                        Expression::Static(_) => Some(current_class_name.to_string()),
-                        Expression::Identifier(ident) => Some(ident.value().to_string()),
-                        _ => None,
-                    };
-                    if let Some(cls_name) = class_name
-                        && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
-                    {
-                        let method_name = ident.value.to_string();
-                        let owner = all_classes
-                            .iter()
-                            .find(|c| c.name == cls_name)
-                            .cloned()
-                            .or_else(|| class_loader(&cls_name));
-                        if let Some(ref owner) = owner {
-                            let text_args =
-                                Self::extract_argument_text(&static_call.argument_list, content);
-                            let current_class =
-                                all_classes.iter().find(|c| c.name == current_class_name);
-                            let rctx = ResolutionCtx {
-                                current_class,
-                                all_classes,
-                                content,
-                                cursor_offset: ctx.cursor_offset,
-                                class_loader,
-                                function_loader,
-                            };
-                            let template_subs = if !text_args.is_empty() {
-                                Self::build_method_template_subs(
-                                    owner,
-                                    &method_name,
-                                    &text_args,
-                                    &rctx,
-                                    class_loader,
-                                )
-                            } else {
-                                std::collections::HashMap::new()
-                            };
-                            return Self::resolve_method_return_types_with_args(
-                                owner,
-                                &method_name,
-                                &text_args,
-                                all_classes,
-                                class_loader,
-                                &template_subs,
-                            );
-                        }
-                    }
-                }
-                _ => {}
-            }
-            return vec![];
-        }
-
-        // ── Property access: `$this->prop` or `$obj->prop` ──
-        if let Expression::Access(access) = expr {
-            let (object_expr, prop_selector) = match access {
-                Access::Property(pa) => (Some(pa.object), Some(&pa.property)),
-                Access::NullSafeProperty(pa) => (Some(pa.object), Some(&pa.property)),
-                _ => (None, None),
-            };
-            if let Some(obj) = object_expr
-                && let Some(sel) = prop_selector
+            // 1. Try docblock annotation:
+            //    `@var Closure(): User $fn` or
+            //    `@param callable(int): Response $fn`
+            if let Some(raw_type) =
+                crate::docblock::find_iterable_raw_type_in_source(content, offset, &var_name)
+                && let Some(ret) = crate::docblock::extract_callable_return_type(&raw_type)
             {
-                let prop_name = match sel {
-                    ClassLikeMemberSelector::Identifier(ident) => Some(ident.value.to_string()),
-                    _ => None,
-                };
-                if let Some(prop_name) = prop_name {
-                    let owner_classes: Vec<ClassInfo> =
-                        if let Expression::Variable(Variable::Direct(dv)) = obj
-                            && dv.name == "$this"
-                        {
-                            all_classes
-                                .iter()
-                                .find(|c| c.name == current_class_name)
-                                .cloned()
-                                .into_iter()
-                                .collect()
-                        } else if let Expression::Variable(Variable::Direct(dv)) = obj {
-                            let var = dv.name.to_string();
-                            Self::resolve_target_classes(
-                                &var,
-                                crate::types::AccessKind::Arrow,
-                                &ctx.as_resolution_ctx(),
-                            )
-                        } else {
-                            vec![]
-                        };
+                let resolved =
+                    Self::type_hint_to_classes(&ret, current_class_name, all_classes, class_loader);
+                if !resolved.is_empty() {
+                    return resolved;
+                }
+            }
 
-                    for owner in &owner_classes {
-                        let resolved = Self::resolve_property_types(
-                            &prop_name,
-                            owner,
-                            all_classes,
-                            class_loader,
-                        );
-                        if !resolved.is_empty() {
-                            return resolved;
-                        }
+            // 2. Scan for closure literal assignment and
+            //    extract native return type hint.
+            if let Some(ret) = Self::extract_closure_return_type_from_assignment(
+                &var_name,
+                content,
+                ctx.cursor_offset,
+            ) {
+                let resolved =
+                    Self::type_hint_to_classes(&ret, current_class_name, all_classes, class_loader);
+                if !resolved.is_empty() {
+                    return resolved;
+                }
+            }
+        }
+
+        vec![]
+    }
+
+    /// Resolve an instance method call: `$this->method()` (fast path) or
+    /// general `$obj->method()` (text-based fallback).
+    fn resolve_rhs_method_call<'b>(
+        method_call: &'b MethodCall<'b>,
+        expr: &'b Expression<'b>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        if let Expression::Variable(Variable::Direct(dv)) = method_call.object
+            && dv.name == "$this"
+            && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
+        {
+            let method_name = ident.value.to_string();
+            if let Some(owner) = ctx
+                .all_classes
+                .iter()
+                .find(|c| c.name == ctx.current_class.name)
+            {
+                let text_args =
+                    Self::extract_argument_text(&method_call.argument_list, ctx.content);
+                let rctx = ctx.as_resolution_ctx();
+                let template_subs = if !text_args.is_empty() {
+                    Self::build_method_template_subs(
+                        owner,
+                        &method_name,
+                        &text_args,
+                        &rctx,
+                        ctx.class_loader,
+                    )
+                } else {
+                    HashMap::new()
+                };
+                return Self::resolve_method_return_types_with_args(
+                    owner,
+                    &method_name,
+                    &text_args,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                    &template_subs,
+                );
+            }
+        } else {
+            // General case: extract the call expression text and
+            // delegate to text-based resolution.
+            let rhs_span = expr.span();
+            let start = rhs_span.start.offset as usize;
+            let end = rhs_span.end.offset as usize;
+            if end <= ctx.content.len() {
+                let rhs_text = ctx.content[start..end].trim();
+                if rhs_text.ends_with(')')
+                    && let Some((call_body, args_text)) = split_call_subject(rhs_text)
+                {
+                    let rctx = ctx.as_resolution_ctx();
+                    return Self::resolve_call_return_types(call_body, args_text, &rctx);
+                }
+            }
+        }
+        vec![]
+    }
+
+    /// Resolve a static method call: `ClassName::method()`, `self::method()`,
+    /// `static::method()`.
+    fn resolve_rhs_static_call(
+        static_call: &StaticMethodCall<'_>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        let current_class_name: &str = &ctx.current_class.name;
+
+        let class_name = match static_call.class {
+            Expression::Self_(_) => Some(current_class_name.to_string()),
+            Expression::Static(_) => Some(current_class_name.to_string()),
+            Expression::Identifier(ident) => Some(ident.value().to_string()),
+            _ => None,
+        };
+        if let Some(cls_name) = class_name
+            && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
+        {
+            let method_name = ident.value.to_string();
+            let owner = ctx
+                .all_classes
+                .iter()
+                .find(|c| c.name == cls_name)
+                .cloned()
+                .or_else(|| (ctx.class_loader)(&cls_name));
+            if let Some(ref owner) = owner {
+                let text_args =
+                    Self::extract_argument_text(&static_call.argument_list, ctx.content);
+                let rctx = ctx.as_resolution_ctx();
+                let template_subs = if !text_args.is_empty() {
+                    Self::build_method_template_subs(
+                        owner,
+                        &method_name,
+                        &text_args,
+                        &rctx,
+                        ctx.class_loader,
+                    )
+                } else {
+                    HashMap::new()
+                };
+                return Self::resolve_method_return_types_with_args(
+                    owner,
+                    &method_name,
+                    &text_args,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                    &template_subs,
+                );
+            }
+        }
+        vec![]
+    }
+
+    /// Resolve property access: `$this->prop`, `$obj->prop`, `$obj?->prop`.
+    fn resolve_rhs_property_access(
+        access: &Access<'_>,
+        ctx: &VarResolutionCtx<'_>,
+    ) -> Vec<ClassInfo> {
+        let current_class_name: &str = &ctx.current_class.name;
+        let all_classes = ctx.all_classes;
+        let class_loader = ctx.class_loader;
+
+        let (object_expr, prop_selector) = match access {
+            Access::Property(pa) => (Some(pa.object), Some(&pa.property)),
+            Access::NullSafeProperty(pa) => (Some(pa.object), Some(&pa.property)),
+            _ => (None, None),
+        };
+        if let Some(obj) = object_expr
+            && let Some(sel) = prop_selector
+        {
+            let prop_name = match sel {
+                ClassLikeMemberSelector::Identifier(ident) => Some(ident.value.to_string()),
+                _ => None,
+            };
+            if let Some(prop_name) = prop_name {
+                let owner_classes: Vec<ClassInfo> =
+                    if let Expression::Variable(Variable::Direct(dv)) = obj
+                        && dv.name == "$this"
+                    {
+                        all_classes
+                            .iter()
+                            .find(|c| c.name == current_class_name)
+                            .cloned()
+                            .into_iter()
+                            .collect()
+                    } else if let Expression::Variable(Variable::Direct(dv)) = obj {
+                        let var = dv.name.to_string();
+                        Self::resolve_target_classes(
+                            &var,
+                            crate::types::AccessKind::Arrow,
+                            &ctx.as_resolution_ctx(),
+                        )
+                    } else {
+                        vec![]
+                    };
+
+                for owner in &owner_classes {
+                    let resolved =
+                        Self::resolve_property_types(&prop_name, owner, all_classes, class_loader);
+                    if !resolved.is_empty() {
+                        return resolved;
                     }
                 }
             }
         }
+        vec![]
+    }
 
-        // ── Match expression ──
-        if let Expression::Match(match_expr) = expr {
-            let mut combined = Vec::new();
-            for arm in match_expr.arms.iter() {
-                let arm_results = Self::resolve_rhs_expression(arm.expression(), ctx);
-                ClassInfo::extend_unique(&mut combined, arm_results);
+    /// Resolve `clone $expr` — preserves the cloned expression's type.
+    ///
+    /// First tries resolving the inner expression structurally (handles
+    /// `clone new Foo()`, `clone $this->getConfig()`, ternary, etc.).
+    /// If that yields nothing, falls back to text-based resolution by
+    /// extracting the source text of the cloned expression and resolving
+    /// it as a subject string via `resolve_target_classes`.
+    fn resolve_rhs_clone(clone_expr: &Clone<'_>, ctx: &VarResolutionCtx<'_>) -> Vec<ClassInfo> {
+        let structural = Self::resolve_rhs_expression(clone_expr.object, ctx);
+        if !structural.is_empty() {
+            return structural;
+        }
+        // Fallback: extract source text of the cloned expression
+        // and resolve it as a subject.  This handles cases like
+        // `clone $original` where `$original`'s type was set by a
+        // prior assignment or parameter type hint.
+        let obj_span = clone_expr.object.span();
+        let start = obj_span.start.offset as usize;
+        let end = obj_span.end.offset as usize;
+        if end <= ctx.content.len() {
+            let obj_text = ctx.content[start..end].trim();
+            if !obj_text.is_empty() {
+                let rctx = ctx.as_resolution_ctx();
+                return Self::resolve_target_classes(
+                    obj_text,
+                    crate::types::AccessKind::Arrow,
+                    &rctx,
+                );
             }
-            return combined;
         }
-
-        // ── Ternary expression ──
-        if let Expression::Conditional(cond_expr) = expr {
-            let mut combined = Vec::new();
-            let then_expr = cond_expr.then.unwrap_or(cond_expr.condition);
-            ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(then_expr, ctx));
-            ClassInfo::extend_unique(
-                &mut combined,
-                Self::resolve_rhs_expression(cond_expr.r#else, ctx),
-            );
-            return combined;
-        }
-
-        // ── Null-coalescing expression ──
-        if let Expression::Binary(binary) = expr
-            && binary.operator.is_null_coalesce()
-        {
-            let mut combined = Vec::new();
-            ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(binary.lhs, ctx));
-            ClassInfo::extend_unique(&mut combined, Self::resolve_rhs_expression(binary.rhs, ctx));
-            return combined;
-        }
-
-        // ── Clone expression: `clone $expr` preserves the type ──
-        // First try resolving the inner expression structurally (handles
-        // `clone new Foo()`, `clone $this->getConfig()`, ternary, etc.).
-        // If that yields nothing and the inner expression is a variable,
-        // fall back to text-based resolution by extracting the source
-        // text of the cloned expression and resolving it as a subject
-        // string via `resolve_target_classes`.
-        if let Expression::Clone(clone_expr) = expr {
-            let structural = Self::resolve_rhs_expression(clone_expr.object, ctx);
-            if !structural.is_empty() {
-                return structural;
-            }
-            // Fallback: extract source text of the cloned expression
-            // and resolve it as a subject.  This handles cases like
-            // `clone $original` where `$original`'s type was set by a
-            // prior assignment or parameter type hint.
-            let obj_span = clone_expr.object.span();
-            let start = obj_span.start.offset as usize;
-            let end = obj_span.end.offset as usize;
-            if end <= content.len() {
-                let obj_text = content[start..end].trim();
-                if !obj_text.is_empty() {
-                    let current_class = all_classes.iter().find(|c| c.name == current_class_name);
-                    let rctx = ResolutionCtx {
-                        current_class,
-                        all_classes,
-                        content,
-                        cursor_offset: ctx.cursor_offset,
-                        class_loader,
-                        function_loader: ctx.function_loader,
-                    };
-                    return Self::resolve_target_classes(
-                        obj_text,
-                        crate::types::AccessKind::Arrow,
-                        &rctx,
-                    );
-                }
-            }
-            return vec![];
-        }
-
         vec![]
     }
 

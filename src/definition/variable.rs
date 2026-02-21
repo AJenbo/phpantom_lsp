@@ -17,6 +17,7 @@
 /// in it (e.g. `HtmlString` in `HtmlString|string $content`).
 use tower_lsp::lsp_types::*;
 
+use super::point_location;
 use crate::Backend;
 use crate::composer;
 use crate::util::short_name;
@@ -289,13 +290,7 @@ impl Backend {
                         Self::find_definition_position(&target_content, sn)
                         && let Ok(target_uri) = Url::from_file_path(&file_path)
                     {
-                        return Some(Location {
-                            uri: target_uri,
-                            range: Range {
-                                start: target_position,
-                                end: target_position,
-                            },
-                        });
+                        return Some(point_location(target_uri, target_position));
                     }
                 }
             }

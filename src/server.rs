@@ -207,17 +207,7 @@ impl LanguageServer for Backend {
             files.remove(&uri);
         }
 
-        if let Ok(mut map) = self.ast_map.lock() {
-            map.remove(&uri);
-        }
-
-        if let Ok(mut map) = self.use_map.lock() {
-            map.remove(&uri);
-        }
-
-        if let Ok(mut map) = self.namespace_map.lock() {
-            map.remove(&uri);
-        }
+        self.clear_file_maps(&uri);
 
         self.log(MessageType::INFO, format!("Closed file: {}", uri))
             .await;

@@ -615,10 +615,9 @@ fn parse_params(params_str: &str) -> Vec<(Option<String>, String)> {
                 break;
             }
             // Otherwise it's (part of) the type hint
-            if type_hint.is_some() {
+            if let Some(existing) = type_hint {
                 // Union/intersection types with spaces shouldn't happen,
                 // but handle it gracefully
-                let existing = type_hint.unwrap();
                 type_hint = Some(format!("{}{}", existing, t));
             } else {
                 type_hint = Some(t.to_string());

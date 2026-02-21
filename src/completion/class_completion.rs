@@ -114,7 +114,7 @@ impl Backend {
     /// identifier (at the cursor) is `throw new` (with optional
     /// whitespace).  This tells the handler to restrict completion to
     /// Throwable descendants only and skip constants / functions.
-    pub fn is_throw_new_context(content: &str, position: Position) -> bool {
+    pub(crate) fn is_throw_new_context(content: &str, position: Position) -> bool {
         let lines: Vec<&str> = content.lines().collect();
         if position.line as usize >= lines.len() {
             return false;
@@ -243,6 +243,8 @@ impl Backend {
     /// re-request as the user types more characters.
     const MAX_CLASS_COMPLETIONS: usize = 100;
 
+    /// Build completion items for class, interface, trait, and enum names
+    /// matching `prefix`.
     pub(crate) fn build_class_name_completions(
         &self,
         file_use_map: &HashMap<String, String>,
@@ -506,38 +508,7 @@ impl Backend {
         }
 
         // Look up ClassInfo from ast_map (no disk I/O).
-        let last_segment = short_name(normalized);
-        let expected_ns: Option<&str> = if normalized.contains('\\') {
-            Some(&normalized[..normalized.len() - last_segment.len() - 1])
-        } else {
-            None
-        };
-
-        let cls = {
-            let Some(map) = self.ast_map.lock().ok() else {
-                return false;
-            };
-            let nmap = self.namespace_map.lock().ok();
-            let mut found: Option<ClassInfo> = None;
-            for (uri, classes) in map.iter() {
-                if let Some(c) = classes.iter().find(|c| c.name == last_segment) {
-                    if let Some(exp_ns) = expected_ns {
-                        let file_ns = nmap
-                            .as_ref()
-                            .and_then(|nm| nm.get(uri))
-                            .and_then(|opt| opt.as_deref());
-                        if file_ns != Some(exp_ns) {
-                            continue;
-                        }
-                    }
-                    found = Some(c.clone());
-                    break;
-                }
-            }
-            found
-        };
-
-        match cls {
+        match self.find_class_in_ast_map(class_name) {
             Some(ci) => match &ci.parent_class {
                 Some(parent) => self.is_throwable_descendant(parent, depth + 1),
                 None => false, // no parent, not a Throwable type
@@ -557,34 +528,10 @@ impl Backend {
     /// interface, trait, enum, or abstract class.  This never triggers
     /// disk I/O.
     fn is_instantiable_or_unloaded(&self, class_name: &str) -> bool {
-        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
-        let last_segment = short_name(normalized);
-        let expected_ns: Option<&str> = if normalized.contains('\\') {
-            Some(&normalized[..normalized.len() - last_segment.len() - 1])
-        } else {
-            None
-        };
-
-        let Some(map) = self.ast_map.lock().ok() else {
-            return true;
-        };
-        let nmap = self.namespace_map.lock().ok();
-        for (uri, classes) in map.iter() {
-            if let Some(c) = classes.iter().find(|c| c.name == last_segment) {
-                if let Some(exp_ns) = expected_ns {
-                    let file_ns = nmap
-                        .as_ref()
-                        .and_then(|nm| nm.get(uri))
-                        .and_then(|opt| opt.as_deref());
-                    if file_ns != Some(exp_ns) {
-                        continue;
-                    }
-                }
-                return c.kind == ClassLikeKind::Class && !c.is_abstract;
-            }
+        match self.find_class_in_ast_map(class_name) {
+            Some(c) => c.kind == ClassLikeKind::Class && !c.is_abstract,
+            None => true, // not found in ast_map — unloaded, so allow it
         }
-        // Not found in ast_map — unloaded, so allow it.
-        true
     }
 
     /// Check whether the class identified by `class_name` is a concrete,
@@ -595,33 +542,8 @@ impl Backend {
     /// and classes that are not currently loaded.  This never triggers
     /// disk I/O.
     fn is_concrete_class_in_ast_map(&self, class_name: &str) -> bool {
-        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
-        let last_segment = short_name(normalized);
-        let expected_ns: Option<&str> = if normalized.contains('\\') {
-            Some(&normalized[..normalized.len() - last_segment.len() - 1])
-        } else {
-            None
-        };
-
-        let Some(map) = self.ast_map.lock().ok() else {
-            return false;
-        };
-        let nmap = self.namespace_map.lock().ok();
-        for (uri, classes) in map.iter() {
-            if let Some(c) = classes.iter().find(|c| c.name == last_segment) {
-                if let Some(exp_ns) = expected_ns {
-                    let file_ns = nmap
-                        .as_ref()
-                        .and_then(|nm| nm.get(uri))
-                        .and_then(|opt| opt.as_deref());
-                    if file_ns != Some(exp_ns) {
-                        continue;
-                    }
-                }
-                return c.kind == ClassLikeKind::Class && !c.is_abstract;
-            }
-        }
-        false
+        self.find_class_in_ast_map(class_name)
+            .is_some_and(|c| c.kind == ClassLikeKind::Class && !c.is_abstract)
     }
 
     /// Collect the FQN of every class that is currently loaded in the
@@ -923,6 +845,7 @@ impl Backend {
     /// is truncated and `is_incomplete` is `true`.
     const MAX_CONSTANT_COMPLETIONS: usize = 100;
 
+    /// Build completion items for global constants matching `prefix`.
     pub(crate) fn build_constant_completions(&self, prefix: &str) -> (Vec<CompletionItem>, bool) {
         let prefix_lower = prefix.strip_prefix('\\').unwrap_or(prefix).to_lowercase();
         let mut seen: HashSet<String> = HashSet::new();
@@ -1032,6 +955,7 @@ impl Backend {
     /// is truncated and `is_incomplete` is `true`.
     const MAX_FUNCTION_COMPLETIONS: usize = 100;
 
+    /// Build completion items for global functions matching `prefix`.
     pub(crate) fn build_function_completions(&self, prefix: &str) -> (Vec<CompletionItem>, bool) {
         let prefix_lower = prefix.strip_prefix('\\').unwrap_or(prefix).to_lowercase();
         let mut seen: HashSet<String> = HashSet::new();

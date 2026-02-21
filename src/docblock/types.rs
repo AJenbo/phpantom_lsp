@@ -966,6 +966,7 @@ pub fn extract_callable_return_type(type_str: &str) -> Option<String> {
     Some(ret_tok.to_string())
 }
 
+/// Return `true` if `type_str` is an object shape type (e.g. `object{name: string}`).
 pub fn is_object_shape(type_str: &str) -> bool {
     let s = type_str.strip_prefix('\\').unwrap_or(type_str);
     let s = s.strip_prefix('?').unwrap_or(s);

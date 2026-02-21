@@ -540,7 +540,7 @@ async fn test_class_name_completion_from_classmap() {
     // Populate classmap
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
     assert_eq!(classmap.len(), 3);
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
@@ -602,7 +602,7 @@ async fn test_class_name_completion_from_class_index() {
     let backend = create_test_backend_with_stubs();
 
     // Manually populate the class_index with a discovered class
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert(
             "App\\Models\\User".to_string(),
             "file:///app/Models/User.php".to_string(),
@@ -671,12 +671,12 @@ async fn test_class_name_completion_deduplicates_by_fqn() {
 
     // Add to classmap
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
     // Also add to class_index (same FQN)
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert(
             "Acme\\Duplicated".to_string(),
             "file:///acme/src/Duplicated.php".to_string(),
@@ -850,16 +850,16 @@ async fn test_class_name_completion_combines_all_sources() {
         "<?php\nclass StubClass {\n    public function stubMethod(): void {}\n}\n",
     );
     let backend = Backend::new_test_with_stubs(stubs);
-    *backend.workspace_root.lock().unwrap() = Some(dir.path().to_path_buf());
+    *backend.workspace_root().lock().unwrap() = Some(dir.path().to_path_buf());
 
     // Populate classmap
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
     // Add a class_index entry
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert(
             "App\\IndexedClass".to_string(),
             "file:///app/IndexedClass.php".to_string(),
@@ -934,7 +934,7 @@ async fn test_class_name_completion_insert_text_is_short_name() {
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
@@ -990,7 +990,7 @@ async fn test_auto_import_classmap_class_adds_use_statement() {
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
@@ -1038,7 +1038,7 @@ async fn test_auto_import_classmap_class_adds_use_statement() {
 async fn test_auto_import_class_index_adds_use_statement() {
     let backend = create_test_backend_with_stubs();
 
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert(
             "App\\Services\\PaymentService".to_string(),
             "file:///app/Services/PaymentService.php".to_string(),
@@ -1131,7 +1131,7 @@ async fn test_no_auto_import_for_already_imported_class() {
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
@@ -1161,7 +1161,7 @@ async fn test_no_auto_import_for_already_imported_class() {
 async fn test_auto_import_inserts_after_php_open_tag() {
     let backend = create_test_backend_with_stubs();
 
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert(
             "Vendor\\Lib\\Widget".to_string(),
             "file:///vendor/lib/Widget.php".to_string(),
@@ -1200,7 +1200,7 @@ async fn test_auto_import_inserts_after_php_open_tag() {
 async fn test_auto_import_not_confused_by_trait_use_in_class_body() {
     let backend = create_test_backend_with_stubs();
 
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert(
             "Cassandra\\DefaultCluster".to_string(),
             "file:///vendor/cassandra/DefaultCluster.php".to_string(),
@@ -1602,10 +1602,10 @@ async fn test_new_context_demotes_likely_non_instantiable_classmap() {
     .expect("failed to write autoload_classmap.php");
 
     let backend = Backend::new_test();
-    *backend.workspace_root.lock().unwrap() = Some(dir.path().to_path_buf());
+    *backend.workspace_root().lock().unwrap() = Some(dir.path().to_path_buf());
 
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
@@ -1800,7 +1800,7 @@ async fn test_new_context_excludes_class_index_abstract() {
         .await;
 
     // Also put it in the class_index.
-    if let Ok(mut idx) = backend.class_index.lock() {
+    if let Ok(mut idx) = backend.class_index().lock() {
         idx.insert("App\\AbstractRepo".to_string(), abs_uri.to_string());
     }
 

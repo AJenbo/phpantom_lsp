@@ -16,6 +16,7 @@
 /// source file.
 use tower_lsp::lsp_types::*;
 
+use super::point_location;
 use crate::Backend;
 use crate::completion::resolver::ResolutionCtx;
 use crate::subject_extraction::{extract_arrow_subject, extract_double_colon_subject};
@@ -62,7 +63,7 @@ impl Backend {
         let (subject, access_kind) = Self::extract_member_access_context(content, position)?;
 
         // 2. Gather context needed for class resolution.
-        let cursor_offset = Self::position_to_offset(content, position)?;
+        let cursor_offset = Self::position_to_offset(content, position);
         let ctx = self.file_context(uri);
 
         let current_class = Self::find_class_at_offset(&ctx.classes, cursor_offset).cloned();
@@ -112,13 +113,7 @@ impl Backend {
                     Self::find_member_position(&class_content, &effective_name, MemberKind::Method)
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
             {
-                return Some(Location {
-                    uri: parsed_uri,
-                    range: Range {
-                        start: member_position,
-                        end: member_position,
-                    },
-                });
+                return Some(point_location(parsed_uri, member_position));
             }
 
             let declaring_class =
@@ -139,13 +134,7 @@ impl Backend {
                     Self::find_member_position(&class_content, &effective_name, member_kind)
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
             {
-                return Some(Location {
-                    uri: parsed_uri,
-                    range: Range {
-                        start: member_position,
-                        end: member_position,
-                    },
-                });
+                return Some(point_location(parsed_uri, member_position));
             }
         }
 
@@ -165,13 +154,7 @@ impl Backend {
                 Self::find_member_position(&class_content, &effective_name, MemberKind::Method)
             && let Ok(parsed_uri) = Url::parse(&class_uri)
         {
-            return Some(Location {
-                uri: parsed_uri,
-                range: Range {
-                    start: member_position,
-                    end: member_position,
-                },
-            });
+            return Some(point_location(parsed_uri, member_position));
         }
 
         let declaring_class =
@@ -187,13 +170,7 @@ impl Backend {
             Self::find_member_position(&class_content, &effective_name, member_kind)?;
 
         let parsed_uri = Url::parse(&class_uri).ok()?;
-        Some(Location {
-            uri: parsed_uri,
-            range: Range {
-                start: member_position,
-                end: member_position,
-            },
-        })
+        Some(point_location(parsed_uri, member_position))
     }
 
     // ─── Member Access Context Extraction ───────────────────────────────────
@@ -420,8 +397,6 @@ impl Backend {
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> Option<ClassInfo> {
-        const MAX_DEPTH: usize = 20;
-
         // Check if this class directly declares the member.
         if Self::classify_member(class, member_name, MemberAccessHint::Unknown).is_some() {
             return Some(class.clone());
@@ -436,7 +411,7 @@ impl Backend {
 
         // Walk up the parent chain.
         let mut current = class.clone();
-        for _ in 0..MAX_DEPTH {
+        for _ in 0..MAX_INHERITANCE_DEPTH {
             let parent_name = match current.parent_class.as_ref() {
                 Some(name) => name.clone(),
                 None => break,
@@ -467,7 +442,7 @@ impl Backend {
         // Also check @mixin classes declared on ancestor classes.
         // e.g. `User extends Model` where `Model` has `@mixin Builder`.
         let mut ancestor = class.clone();
-        for _ in 0..MAX_DEPTH {
+        for _ in 0..MAX_INHERITANCE_DEPTH {
             let parent_name = match ancestor.parent_class.as_ref() {
                 Some(name) => name.clone(),
                 None => break,
@@ -498,8 +473,7 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: usize,
     ) -> Option<ClassInfo> {
-        const MAX_TRAIT_DEPTH: usize = 20;
-        if depth > MAX_TRAIT_DEPTH {
+        if depth > MAX_TRAIT_DEPTH as usize {
             return None;
         }
 
@@ -530,7 +504,7 @@ impl Backend {
             let mut parent_depth = depth;
             while let Some(ref parent_name) = current.parent_class {
                 parent_depth += 1;
-                if parent_depth > MAX_TRAIT_DEPTH {
+                if parent_depth > MAX_TRAIT_DEPTH as usize {
                     break;
                 }
                 let parent = if let Some(p) = class_loader(parent_name) {
@@ -570,8 +544,7 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: usize,
     ) -> Option<ClassInfo> {
-        const MAX_MIXIN_DEPTH: usize = 10;
-        if depth > MAX_MIXIN_DEPTH {
+        if depth > MAX_MIXIN_DEPTH as usize {
             return None;
         }
 
@@ -647,20 +620,7 @@ impl Backend {
             // stub_index instead.
             self.stub_index.get(class_name).map(|s| s.to_string())?
         } else {
-            // Try open files first, then read from disk.
-            let from_open = self
-                .open_files
-                .lock()
-                .ok()
-                .and_then(|files| files.get(&uri).cloned());
-
-            if let Some(c) = from_open {
-                c
-            } else {
-                // Parse the URI to a file path and read from disk.
-                let path = Url::parse(&uri).ok()?.to_file_path().ok()?;
-                std::fs::read_to_string(path).ok()?
-            }
+            self.get_file_content(&uri)?
         };
 
         Some((uri, file_content))

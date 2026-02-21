@@ -26,9 +26,6 @@ pub struct CatchContext {
     pub partial: String,
     /// Exception type names found in the corresponding try block.
     pub suggested_types: Vec<String>,
-    /// Types already listed in this catch clause (for multi-catch `|`).
-    #[allow(dead_code)]
-    pub already_listed: Vec<String>,
     /// Whether specific thrown types were discovered in the try block.
     /// When `false`, the caller should fall back to generic class
     /// completion instead of showing only `Throwable`.
@@ -156,7 +153,6 @@ pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchCo
     Some(CatchContext {
         partial,
         suggested_types,
-        already_listed,
         has_specific_types,
     })
 }
@@ -722,7 +718,6 @@ mod tests {
                 "RuntimeException".to_string(),
                 "InvalidArgumentException".to_string(),
             ],
-            already_listed: vec![],
             has_specific_types: true,
         };
         let items = build_catch_completions(&ctx);
@@ -738,7 +733,6 @@ mod tests {
                 "RuntimeException".to_string(),
                 "InvalidArgumentException".to_string(),
             ],
-            already_listed: vec![],
             has_specific_types: true,
         };
         let items = build_catch_completions(&ctx);
@@ -762,7 +756,6 @@ mod tests {
         let ctx = detect_catch_context(content, pos);
         assert!(ctx.is_some());
         let ctx = ctx.unwrap();
-        assert_eq!(ctx.already_listed, vec!["IOException"]);
         // IOException should be filtered out since it's already listed
         assert!(
             !ctx.suggested_types.contains(&"IOException".to_string()),

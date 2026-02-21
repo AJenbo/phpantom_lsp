@@ -901,7 +901,7 @@ async fn test_cross_file_classmap_resolution() {
     // Populate the classmap from the autoload_classmap.php file
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
     assert_eq!(classmap.len(), 1, "Should parse 1 classmap entry");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 
@@ -1012,7 +1012,7 @@ async fn test_cross_file_classmap_double_colon() {
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
-    if let Ok(mut cm) = backend.classmap.lock() {
+    if let Ok(mut cm) = backend.classmap().lock() {
         *cm = classmap;
     }
 

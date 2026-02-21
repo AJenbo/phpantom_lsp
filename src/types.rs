@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-/// The return type of [`Backend::extract_class_like_members`].
+/// The return type of `Backend::extract_class_like_members`.
 ///
 /// Contains `(methods, properties, constants, used_traits, trait_precedences, trait_aliases)`
 /// extracted from the members of a class-like declaration.
@@ -488,7 +488,7 @@ impl ClassInfo {
     /// Push a `ClassInfo` into `results` only if no existing entry shares
     /// the same class name.  This is the single place where completion /
     /// resolution code deduplicates candidate classes.
-    pub fn push_unique(results: &mut Vec<ClassInfo>, cls: ClassInfo) {
+    pub(crate) fn push_unique(results: &mut Vec<ClassInfo>, cls: ClassInfo) {
         if !results.iter().any(|c| c.name == cls.name) {
             results.push(cls);
         }
@@ -496,7 +496,7 @@ impl ClassInfo {
 
     /// Extend `results` with entries from `new_classes`, skipping any whose
     /// name already appears in `results`.
-    pub fn extend_unique(results: &mut Vec<ClassInfo>, new_classes: Vec<ClassInfo>) {
+    pub(crate) fn extend_unique(results: &mut Vec<ClassInfo>, new_classes: Vec<ClassInfo>) {
         for cls in new_classes {
             Self::push_unique(results, cls);
         }
@@ -522,3 +522,26 @@ pub(crate) struct FileContext {
     /// The file's declared namespace, if any (from `namespace_map`).
     pub namespace: Option<String>,
 }
+
+// ─── Recursion Depth Limits ─────────────────────────────────────────────────
+//
+// Centralised constants for the maximum recursion depth allowed when
+// walking inheritance chains, trait hierarchies, mixin graphs, and type
+// alias resolution.  Defining them in one place ensures that the same
+// limit is used consistently across the inheritance, definition, and
+// completion modules.
+
+/// Maximum depth when walking the `extends` parent chain
+/// (class → parent → grandparent → …).
+pub(crate) const MAX_INHERITANCE_DEPTH: u32 = 20;
+
+/// Maximum depth when recursing into `use Trait` hierarchies
+/// (a trait can itself `use` other traits).
+pub(crate) const MAX_TRAIT_DEPTH: u32 = 20;
+
+/// Maximum depth when recursing into `@mixin` class graphs.
+pub(crate) const MAX_MIXIN_DEPTH: u32 = 10;
+
+/// Maximum depth when resolving `@phpstan-type` / `@psalm-type` aliases
+/// (an alias can reference another alias).
+pub(crate) const MAX_ALIAS_DEPTH: u8 = 10;

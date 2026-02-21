@@ -154,7 +154,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
     // Register the standalone function in global_functions so the resolver
     // can look up its return type.
     {
-        let mut fmap = backend.global_functions.lock().unwrap();
+        let mut fmap = backend.global_functions().lock().unwrap();
         fmap.insert(
             "getAnimal".to_string(),
             (

@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::docblock;
-use crate::types::ClassInfo;
+use crate::types::FileContext;
 use crate::util::find_semicolon_balanced;
 
 /// Well-known keys for the `$_SERVER` superglobal.
@@ -258,16 +258,14 @@ impl Backend {
         ctx: &ArrayKeyContext,
         content: &str,
         position: Position,
-        classes: &[ClassInfo],
-        file_use_map: &std::collections::HashMap<String, String>,
-        file_namespace: &Option<String>,
+        file_ctx: &FileContext,
     ) -> Vec<CompletionItem> {
         // ── $_SERVER superglobal — hardcoded keys ────────────────────
         if ctx.var_name == "$_SERVER" && ctx.prefix_keys.is_empty() {
             return self.build_server_key_completions(ctx, content, position);
         }
 
-        let cursor_offset = Self::position_to_offset(content, position).unwrap_or(0);
+        let cursor_offset = Self::position_to_offset(content, position);
 
         // Try to find the raw type annotation for this variable.
         // We also track which set of classes was used for resolution so
@@ -277,9 +275,7 @@ impl Backend {
             &ctx.var_name,
             content,
             cursor_offset as usize,
-            classes,
-            file_use_map,
-            file_namespace,
+            file_ctx,
         );
 
         // If initial resolution failed, the content likely has a syntax
@@ -288,21 +284,24 @@ impl Backend {
         // the array access, re-parse, and retry.
         let patched_classes_storage;
         let (raw_type, effective_classes) = match raw_type {
-            Some(t) => (t, classes),
+            Some(t) => (t, file_ctx.classes.as_slice()),
             None => {
                 let patched = patch_array_access_at_cursor(content, position);
                 if patched == content {
                     return vec![];
                 }
                 patched_classes_storage = self.parse_php(&patched);
-                let patched_offset = Self::position_to_offset(&patched, position).unwrap_or(0);
+                let patched_offset = Self::position_to_offset(&patched, position);
+                let patched_ctx = FileContext {
+                    classes: patched_classes_storage.clone(),
+                    use_map: file_ctx.use_map.clone(),
+                    namespace: file_ctx.namespace.clone(),
+                };
                 match self.resolve_variable_raw_type(
                     &ctx.var_name,
                     &patched,
                     patched_offset as usize,
-                    &patched_classes_storage,
-                    file_use_map,
-                    file_namespace,
+                    &patched_ctx,
                 ) {
                     Some(t) => (t, patched_classes_storage.as_slice()),
                     None => return vec![],
@@ -323,7 +322,8 @@ impl Backend {
         // resolves to `array{name: string, email: string}`.
         // Uses `effective_classes` which may be the patched classes when
         // the original parse failed due to syntax errors.
-        let class_loader = self.class_loader_with(effective_classes, file_use_map, file_namespace);
+        let class_loader =
+            self.class_loader_with(effective_classes, &file_ctx.use_map, &file_ctx.namespace);
         let effective_type =
             Self::resolve_type_alias(&effective_type, "", effective_classes, &class_loader)
                 .unwrap_or(effective_type);
@@ -494,9 +494,7 @@ impl Backend {
         var_name: &str,
         content: &str,
         cursor_offset: usize,
-        classes: &[ClassInfo],
-        file_use_map: &std::collections::HashMap<String, String>,
-        file_namespace: &Option<String>,
+        file_ctx: &FileContext,
     ) -> Option<String> {
         // 1. Direct @var / @param annotation on the variable.
         if let Some(raw) =
@@ -508,14 +506,14 @@ impl Backend {
         // 2. Delegate to the shared text-based assignment resolver which
         //    handles array literals, method/function calls, chained calls,
         //    `new` expressions, array functions, and property access.
-        let current_class = Self::find_class_at_offset(classes, cursor_offset as u32);
-        let class_loader = self.class_loader_with(classes, file_use_map, file_namespace);
+        let current_class = Self::find_class_at_offset(&file_ctx.classes, cursor_offset as u32);
+        let class_loader = self.class_loader(file_ctx);
         Self::extract_raw_type_from_assignment_text(
             var_name,
             content,
             cursor_offset,
             current_class,
-            classes,
+            &file_ctx.classes,
             &class_loader,
         )
     }

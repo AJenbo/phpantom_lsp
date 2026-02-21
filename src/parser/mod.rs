@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// PHP parsing and AST extraction.
 ///
 /// This module contains the logic for parsing PHP source text using the
@@ -248,9 +250,9 @@ impl Backend {
     ///   - Mixed grouped use: `use Foo\{Bar, function baz, const QUX};`
     ///     (function / const imports are skipped — we only track classes)
     ///   - Use statements inside namespace bodies
-    pub fn parse_use_statements(&self, content: &str) -> std::collections::HashMap<String, String> {
+    pub(crate) fn parse_use_statements(&self, content: &str) -> HashMap<String, String> {
         with_parsed_program(content, "parse_use_statements", |program, _content| {
-            let mut use_map = std::collections::HashMap::new();
+            let mut use_map = HashMap::new();
             Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
             use_map
         })
@@ -260,7 +262,7 @@ impl Backend {
     ///
     /// Returns the namespace string (e.g. `"Klarna\Rest\Checkout"`) or
     /// `None` if the file has no namespace declaration.
-    pub fn parse_namespace(&self, content: &str) -> Option<String> {
+    pub(crate) fn parse_namespace(&self, content: &str) -> Option<String> {
         with_parsed_program(content, "parse_namespace", |program, _content| {
             Self::extract_namespace_from_statements(program.statements.iter())
         })

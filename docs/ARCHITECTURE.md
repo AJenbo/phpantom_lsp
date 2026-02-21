@@ -33,7 +33,9 @@ src/
 │   └── ast_update.rs       # update_ast orchestrator and name resolution helpers
 ├── docblock/
 │   ├── mod.rs              # Re-exports from submodules
-│   ├── tags.rs             # PHPDoc tag extraction (@return, @var, @property, @mixin, …)
+│   ├── tags.rs             # PHPDoc tag extraction (@return, @var, @mixin, @deprecated, …)
+│   ├── templates.rs        # Template/generics/type-alias tags (@template, @extends, …)
+│   ├── virtual_members.rs  # Virtual member tags (@property, @method)
 │   ├── conditional.rs      # PHPStan conditional return type parsing
 │   └── types.rs            # Type cleaning utilities (clean_type, strip_nullable, …)
 ├── completion/
@@ -53,6 +55,7 @@ src/
 │   ├── array_shape.rs      # Array shape key completion and raw variable type resolution
 │   ├── named_args.rs       # Named argument completion inside function/method call parens
 │   ├── phpdoc.rs           # PHPDoc tag completion inside /** … */ blocks
+│   ├── phpdoc_context.rs   # PHPDoc context detection and symbol info extraction
 │   ├── comment_position.rs # Comment and docblock position detection
 │   ├── throws_analysis.rs  # Shared throw-statement scanning and @throws tag lookup
 │   ├── catch_completion.rs # Smart exception type completion inside catch() clauses

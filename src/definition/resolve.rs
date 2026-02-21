@@ -12,8 +12,11 @@
 ///
 /// Variable definition resolution (`$var` → most recent assignment /
 /// declaration) is handled by the sibling [`super::variable`] module.
+use std::collections::HashMap;
+
 use tower_lsp::lsp_types::*;
 
+use super::point_location;
 use crate::Backend;
 use crate::composer;
 use crate::util::short_name;
@@ -140,13 +143,7 @@ impl Backend {
                             Self::find_definition_position(&target_content, sn)
                             && let Ok(target_uri) = Url::from_file_path(&file_path)
                         {
-                            return Some(Location {
-                                uri: target_uri,
-                                range: Range {
-                                    start: target_position,
-                                    end: target_position,
-                                },
-                            });
+                            return Some(point_location(target_uri, target_position));
                         }
                     }
                 }
@@ -198,26 +195,12 @@ impl Backend {
         let (const_name, file_uri) = file_uri?;
 
         // Read the file content (try open files first, then disk).
-        let file_content = self
-            .open_files
-            .lock()
-            .ok()
-            .and_then(|files| files.get(&file_uri).cloned())
-            .or_else(|| {
-                let path = Url::parse(&file_uri).ok()?.to_file_path().ok()?;
-                std::fs::read_to_string(path).ok()
-            })?;
+        let file_content = self.get_file_content(&file_uri)?;
 
         let position = Self::find_define_position(&file_content, &const_name)?;
         let parsed_uri = Url::parse(&file_uri).ok()?;
 
-        Some(Location {
-            uri: parsed_uri,
-            range: Range {
-                start: position,
-                end: position,
-            },
-        })
+        Some(point_location(parsed_uri, position))
     }
 
     /// Find the position of a `define('NAME'` or `define("NAME"` call in
@@ -312,26 +295,12 @@ impl Backend {
         }
 
         // Read the file content (try open files first, then disk).
-        let file_content = self
-            .open_files
-            .lock()
-            .ok()
-            .and_then(|files| files.get(&file_uri).cloned())
-            .or_else(|| {
-                let path = Url::parse(&file_uri).ok()?.to_file_path().ok()?;
-                std::fs::read_to_string(path).ok()
-            })?;
+        let file_content = self.get_file_content(&file_uri)?;
 
         let position = Self::find_function_position(&file_content, &func_info.name)?;
         let parsed_uri = Url::parse(&file_uri).ok()?;
 
-        Some(Location {
-            uri: parsed_uri,
-            range: Range {
-                start: position,
-                end: position,
-            },
-        })
+        Some(point_location(parsed_uri, position))
     }
 
     /// Find the position of a standalone `function name(` declaration in
@@ -466,7 +435,7 @@ impl Backend {
     ///     3. Fall back to the bare name (global namespace).
     pub fn resolve_to_fqn(
         name: &str,
-        use_map: &std::collections::HashMap<String, String>,
+        use_map: &HashMap<String, String>,
         namespace: &Option<String>,
     ) -> String {
         // Already fully-qualified (leading `\` was stripped earlier).
@@ -543,13 +512,7 @@ impl Backend {
         // Build a file URI from the current URI string.
         let parsed_uri = Url::parse(uri).ok()?;
 
-        Some(Location {
-            uri: parsed_uri,
-            range: Range {
-                start: position,
-                end: position,
-            },
-        })
+        Some(point_location(parsed_uri, position))
     }
 
     /// Find the position (line, character) of a class / interface / trait / enum
@@ -577,7 +540,7 @@ impl Backend {
         position: Position,
         keyword: &str,
     ) -> Option<Location> {
-        let cursor_offset = Self::position_to_offset(content, position)?;
+        let cursor_offset = Self::position_to_offset(content, position);
 
         let classes = self
             .ast_map
@@ -592,13 +555,7 @@ impl Backend {
             // Jump to the enclosing class definition in the current file.
             let target_position = Self::find_definition_position(content, &current_class.name)?;
             let parsed_uri = Url::parse(uri).ok()?;
-            return Some(Location {
-                uri: parsed_uri,
-                range: Range {
-                    start: target_position,
-                    end: target_position,
-                },
-            });
+            return Some(point_location(parsed_uri, target_position));
         }
 
         // keyword == "parent"
@@ -607,13 +564,7 @@ impl Backend {
         // Try to find the parent class in the current file first.
         if let Some(pos) = Self::find_definition_position(content, parent_name) {
             let parsed_uri = Url::parse(uri).ok()?;
-            return Some(Location {
-                uri: parsed_uri,
-                range: Range {
-                    start: pos,
-                    end: pos,
-                },
-            });
+            return Some(point_location(parsed_uri, pos));
         }
 
         // Resolve the parent class name to a FQN using use-map / namespace.
@@ -627,13 +578,7 @@ impl Backend {
             && let Some(pos) = Self::find_definition_position(&class_content, sn)
             && let Ok(parsed_uri) = Url::parse(&class_uri)
         {
-            return Some(Location {
-                uri: parsed_uri,
-                range: Range {
-                    start: pos,
-                    end: pos,
-                },
-            });
+            return Some(point_location(parsed_uri, pos));
         }
 
         // Try PSR-4 resolution as a last resort.
@@ -657,13 +602,7 @@ impl Backend {
                         Self::find_definition_position(&target_content, name)
                         && let Ok(target_uri) = Url::from_file_path(&file_path)
                     {
-                        return Some(Location {
-                            uri: target_uri,
-                            range: Range {
-                                start: target_position,
-                                end: target_position,
-                            },
-                        });
+                        return Some(point_location(target_uri, target_position));
                     }
                 }
             }
@@ -672,6 +611,8 @@ impl Backend {
         None
     }
 
+    /// Find the source position where a class, interface, trait, or enum is
+    /// defined within the given file content.
     pub fn find_definition_position(content: &str, class_name: &str) -> Option<Position> {
         let keywords = ["class", "interface", "trait", "enum"];
 

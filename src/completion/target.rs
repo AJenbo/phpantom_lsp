@@ -56,12 +56,4 @@ impl Backend {
             None
         }
     }
-
-    /// Kept for backward-compat with existing tests that call it directly.
-    pub fn detect_access_kind(content: &str, position: Position) -> AccessKind {
-        match Self::extract_completion_target(content, position) {
-            Some(ct) => ct.access_kind,
-            None => AccessKind::Other,
-        }
-    }
 }
