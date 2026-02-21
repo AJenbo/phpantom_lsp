@@ -2,144 +2,69 @@
 
 > Last updated: 2026-02-21
 
+Items are ordered by recommended implementation sequence: quick wins
+first, then high-impact items, then competitive-parity features, then
+long-tail polish. Resolved items are collected at the bottom of each
+section.
+
 ---
 
-### Trait property completion/goto-definition gap: InteractsWithIO::$output and createProgressBar()
+## Completion & Go-to-Definition Gaps
 
-We are unable to go to `createProgressBar()` and can't provide completion for `$this->output` when a trait defines a property with a docblock type, and a class uses that trait:
+### Quick wins
 
-```php
-trait InteractsWithIO
-{
-    /**
-     * @var \Illuminate\Console\OutputStyle
-     */
-    protected $output;
-}
+#### 28. Parenthesized RHS expression not unwrapped in variable resolution ✅ **[DONE]**
 
-class Command extends SymfonyCommand
-{
-    use Concerns\InteractsWithIO;
-}
+**Completed:**  
+`resolve_rhs_expression` now correctly unwraps `Expression::Parenthesized` nodes, so assignments like `$var = (new Foo())` and `$var = ($condition ? $a : $b)` resolve through the AST-based path.
 
-final class ReindexSelectedCommand extends Command
-{
-    public function handle(): int
-    {
-        $bar = $this->output->createProgressBar();
-    }
-}
-```
+---
 
-- Completion for `$this->output` does not resolve to `OutputStyle`
-- Go-to-definition for `createProgressBar()` fails
+#### 29 / 35. Namespace-level `const` declarations not indexed
 
-
-## Completion Gaps
-
-### ~~16. Multi-line method chain completion~~ ✅
-
-Resolved. Added `collapse_continuation_lines` to `subject_extraction.rs`
-that detects when the cursor is on a continuation line (starting with
-`->` or `?->` after optional whitespace) and joins it with preceding
-lines to form a single flattened expression.  Both `extract_completion_target`
-in `completion/target.rs` and `extract_member_access_context` in
-`definition/member.rs` now use this helper, so completion and
-go-to-definition work correctly on multi-line fluent chains.
-
-### ~~17. Switch statement variable type tracking~~ ✅
-
-Resolved. Added a `Statement::Switch` arm to `walk_statements_for_assignments`
-that iterates each case's statement list with `conditional = true`.
-Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms
-are handled via `switch.body.cases()`.
-
-### ~~18. `?->` chaining loses intermediate segments~~ ✅
-
-Resolved. The `->` branch already handled `?->` correctly via the `?`
-skip at the top of `extract_arrow_subject`, so the described bug did not
-manifest in practice. The `?->` fallback branch was still changed from
-`extract_simple_variable` to `extract_arrow_subject` for correctness,
-and unit tests were added to `subject_extraction.rs` covering nullsafe
-chains with calls, properties, and simple variables.
-
-### 19. `static` return type not resolved to concrete class at call sites
-**Priority: Medium**
-
-When a method declares `@return static` (common in builder/factory
-patterns), `type_hint_to_classes` resolves `static` to
-`owning_class_name` — the class that *declares* the method, not the
-class it is called on:
+Only `define('NAME', value)` calls are extracted and stored in
+`global_defines`. PHP's `const NAME = value;` syntax at namespace or
+top level is not indexed, so these constants don't appear in completion
+and can't be navigated to via go-to-definition.
 
 ```php
-class Builder {
-    /** @return static */
-    public function configure(): static { return $this; }
-}
-class AppBuilder extends Builder {}
+namespace App\Config;
 
-$builder = new AppBuilder();
-$builder->configure()->  // resolves to Builder, not AppBuilder
+const MAX_RETRIES = 3;   // ← not indexed, no completion or go-to-definition
+define('APP_NAME', '…');  // ← works fine
 ```
 
-The resolution works correctly when the subject is `$this` or `self`,
-but when the method return type is `static` and the call is on a variable
-typed as a subclass, the declaring class is used instead of the
-variable's concrete type.
+**Fix:** in `extract_defines_from_statements`, also handle
+`Statement::Constant` nodes and store their names (namespace-qualified)
+in `global_defines`. This fixes both completion and go-to-definition
+(§35) in one change.
 
-**Fix:** when `resolve_method_return_types_with_args` encounters a
-`static` (or `$this`) return type, substitute the caller's class name
-(the class the subject resolved to) rather than the class that declares
-the method.
+---
 
-### ~~15. `unset()` tracking (variable scope)~~ ✅
+#### 25. No completion after `$var::` where variable holds a class-string
 
-Variable scope tracking is complete. After `unset($x)`, the variable `$x`
-no longer appears in variable name suggestions and `$x->` does not resolve
-to the type it had before the `unset`. Re-assignment after `unset` restores
-the variable with its new type. Conditional `unset` (inside `if` blocks)
-is treated conservatively: the variable is kept because it might still exist.
-
-**Remaining:** Array shape key removal (`unset($config['host'])` removing
-the `host` key from `$config['` key completions) is not yet tracked.
-
-### 20. Non-`$this` property access in text-based assignment path
-**Priority: Low**
-
-In `extract_raw_type_from_assignment_text` (`completion/text_resolution.rs`),
-property access on the RHS is only handled for `$this->propName`.  When
-the RHS is `$otherVar->propName`, it falls through to `None`:
+When a variable holds a class-string value (e.g. from `$cls = User::class`),
+using the `::` operator on it (`$cls::`) does not offer static members of
+the referenced class. The subject `$cls` is passed to `resolve_target_classes`
+which resolves it to its *value type* (`string` / `class-string`) rather than
+the *referenced class* (`User`).
 
 ```php
-$user = getUser();
-$address = $user->address;  // text-based path returns None
-$address->  // ← no completion (unless the AST-based path catches it)
+$cls = User::class;
+$cls::  // ← no completion (should offer User's static members/constants)
 ```
 
-The AST-based path in `resolve_rhs_expression` handles this correctly,
-so the gap only surfaces in the text-based fallback used for intermediate
-chained assignments and some edge cases.
+**Fix:** in `resolve_target_classes`, when the subject is a bare `$var`
+and `access_kind` is `DoubleColon`, check if the variable was assigned a
+`Foo::class` literal (or a union of `::class` literals from a match
+expression). If so, resolve to those class(es) instead of the variable's
+value type.
 
-**Fix:** after the `$this->propName` check, add a branch that resolves
-`$var->propName` by first resolving `$var`'s type via
-`extract_raw_type_from_assignment_text` (recursively), then looking up
-the property on the resulting class.
+---
 
-### ~~22. Template parameter bounds not used for property type resolution~~ ✅
+### High impact
 
-Resolved. Added `extract_template_params_with_bounds` to
-`docblock/templates.rs` that extracts both the parameter name and its
-optional `of` bound. A new `template_param_bounds: HashMap<String, String>`
-field on `ClassInfo` stores the bounds, populated during parsing. In
-`type_hint_to_classes_depth` in `completion/resolver.rs`, when a type
-hint does not match any known class, the resolver now checks whether it
-is a template parameter declared on the owning class and, if it has an
-`of` bound, resolves the bound type instead. This covers
-`@template`, `@template-covariant`, `@template-contravariant`, and
-`@phpstan-template` variants.
-
-### 23. Match-expression class-string not forwarded to conditional return types
-**Priority: Medium**
+#### 23. Match-expression class-string not forwarded to conditional return types
 
 When a variable is assigned a `::class` value through a `match` expression
 and then passed to a function whose return type depends on that argument
@@ -173,8 +98,39 @@ Two pieces are needed:
    for template substitution, producing a union of the possible return
    types.
 
-### 24. Namespaced class breaks `static` return type chain resolution
-**Priority: Medium**
+---
+
+#### 19. `static` return type not resolved to concrete class at call sites
+
+When a method declares `@return static` (common in builder/factory
+patterns), `type_hint_to_classes` resolves `static` to
+`owning_class_name` — the class that *declares* the method, not the
+class it is called on:
+
+```php
+class Builder {
+    /** @return static */
+    public function configure(): static { return $this; }
+}
+class AppBuilder extends Builder {}
+
+$builder = new AppBuilder();
+$builder->configure()->  // resolves to Builder, not AppBuilder
+```
+
+The resolution works correctly when the subject is `$this` or `self`,
+but when the method return type is `static` and the call is on a variable
+typed as a subclass, the declaring class is used instead of the
+variable's concrete type.
+
+**Fix:** when `resolve_method_return_types_with_args` encounters a
+`static` (or `$this`) return type, substitute the caller's class name
+(the class the subject resolved to) rather than the class that declares
+the method.
+
+---
+
+#### 24. Namespaced class breaks `static` return type chain resolution
 
 When a class lives in a namespace and calls a static method whose return
 type is `Builder<static>`, the chain resolution breaks. The same code
@@ -215,10 +171,135 @@ FQN resolution of `Model` when a namespace is involved.
 
 ---
 
-## Go-to-Definition Gaps
+#### Trait property completion/goto-definition gap: InteractsWithIO::$output and createProgressBar()
 
-### 21. No reverse jump: implementation → interface method declaration
-**Priority: Medium**
+We are unable to go to `createProgressBar()` and can't provide completion
+for `$this->output` when a trait defines a property with a docblock type,
+and a class uses that trait:
+
+```php
+trait InteractsWithIO
+{
+    /**
+     * @var \Illuminate\Console\OutputStyle
+     */
+    protected $output;
+}
+
+class Command extends SymfonyCommand
+{
+    use Concerns\InteractsWithIO;
+}
+
+final class ReindexSelectedCommand extends Command
+{
+    public function handle(): int
+    {
+        $bar = $this->output->createProgressBar();
+    }
+}
+```
+
+- Completion for `$this->output` does not resolve to `OutputStyle`
+- Go-to-definition for `createProgressBar()` fails
+
+---
+
+### Competitive parity (close the gap with PHPStorm / Intelephense)
+
+#### 30. No completion or go-to-definition inside anonymous classes
+
+Anonymous classes (`new class { ... }`) are not parsed by
+`extract_classes_from_statements`, which only handles named
+`Statement::Class` / `Statement::Interface` / `Statement::Trait` /
+`Statement::Enum` nodes. Because anonymous classes are expression-level
+constructs (`Expression::AnonymousClass`), they are invisible to the
+AST extraction pass.
+
+This means:
+- `$this->` inside an anonymous class body does not resolve to the
+  anonymous class's own members.
+- Members declared in the anonymous class are not available for
+  completion.
+- Go-to-definition for members of the anonymous class fails.
+
+```php
+$handler = new class($dependency) extends BaseHandler {
+    public function handle(): Response {
+        $this->  // ← no completion for anonymous class's own members
+    }
+};
+```
+
+**Fix:** in `extract_classes_from_statements`, walk expression
+statements and detect `Expression::AnonymousClass` nodes. Synthesize a
+`ClassInfo` with a unique internal name (e.g. `__anonymous@<offset>`)
+so that `find_class_at_offset` resolves `$this` correctly.
+
+---
+
+#### 26. First-class callable syntax not tracked
+
+PHP 8.1's first-class callable syntax (`$fn = strlen(...)`,
+`$fn = $obj->method(...)`, `$fn = ClassName::staticMethod(...)`) creates
+a `Closure` object, but the assignment scanner does not recognise the
+`(...)` token. The variable `$fn` gets no type, so neither `$fn()` return
+type resolution nor `$fn->` (for `Closure` methods like `bindTo()`) works.
+
+```php
+$fn = strlen(...);
+$fn();  // ← return type not resolved (should be int)
+
+$fn2 = $user->getName(...);
+$fn2();  // ← return type not resolved
+```
+
+**Fix:** in `resolve_rhs_expression`, handle the first-class callable AST
+node by resolving the referenced function/method and wrapping its return
+type information so that `$fn()` resolves correctly.
+
+---
+
+#### 31. No context-aware filtering for class name completions
+
+Class name completion always offers the full unfiltered list of known
+classes, interfaces, traits, and enums regardless of syntactic context.
+In practice this means:
+
+- `extends ` suggests interfaces, traits, enums, and final classes
+  (only non-final classes are valid)
+- `implements ` suggests classes, traits, and enums (only interfaces
+  are valid)
+- `use ` (trait use inside a class body) suggests classes, interfaces,
+  and enums (only traits are valid)
+- `#[` (attribute) suggests non-attribute classes
+- `instanceof ` suggests traits (which are not valid on the RHS)
+
+Completion technically *works* in all these positions (the correct item
+is in the list), but the results contain many invalid suggestions.
+
+**Fix:** detect these syntactic contexts in the completion handler
+(similar to `is_new_context` / `is_throw_new_context`) and pass a
+filter to `build_class_name_completions` that restricts by
+`ClassLikeKind` and/or `is_final` / `is_abstract`.
+
+---
+
+#### 32. No namespace-segment completion in `use` import statements
+
+When typing `use App\Models\`, the class name completion path offers
+full class FQNs that match the prefix. It does not offer intermediate
+namespace segments as standalone suggestions (e.g. offering `Models\`
+as a navigable segment when typing `use App\`).
+
+Most PHP LSPs show namespace segments as folder-like completions so the
+user can incrementally drill into the namespace tree. PHPantom jumps
+straight to full class names, which works but can be overwhelming in
+large projects with deep namespace hierarchies.
+
+---
+
+#### 21. No reverse jump: implementation → interface method declaration
 
 Go-to-implementation lets you jump from an interface method to its concrete
 implementations, but there is no way to jump from a concrete implementation
@@ -234,19 +315,94 @@ target.
 
 ---
 
+### Remaining by user need
+
+#### 27. No completion inside string interpolation
+
+Inside double-quoted strings with variable interpolation, member access
+completion does not work. PHP supports `"Hello $user->name"` and
+`"Hello {$user->getName()}"`, but the completion handler has no
+string-interpolation awareness. The subject extraction may accidentally
+work in trivial cases but is not reliable because the surrounding quote
+characters can confuse offset calculation and the patched content.
+
+```php
+$greeting = "Hello {$user->}";
+//                         ^ no completion
+```
+
+---
+
+#### 20. Non-`$this` property access in text-based assignment path
+
+In `extract_raw_type_from_assignment_text` (`completion/text_resolution.rs`),
+property access on the RHS is only handled for `$this->propName`.  When
+the RHS is `$otherVar->propName`, it falls through to `None`:
+
+```php
+$user = getUser();
+$address = $user->address;  // text-based path returns None
+$address->  // ← no completion (unless the AST-based path catches it)
+```
+
+The AST-based path in `resolve_rhs_expression` handles this correctly,
+so the gap only surfaces in the text-based fallback used for intermediate
+chained assignments and some edge cases.
+
+**Fix:** after the `$this->propName` check, add a branch that resolves
+`$var->propName` by first resolving `$var`'s type via
+`extract_raw_type_from_assignment_text` (recursively), then looking up
+the property on the resulting class.
+
+---
+
+#### 34 / 36. No go-to-definition for built-in (stub) functions and constants
+
+Clicking on a built-in function name like `array_map`, `strlen`, or
+`json_decode` does not navigate anywhere. `resolve_function_definition`
+finds the function in `stub_function_index` and caches it under a
+synthetic `phpantom-stub-fn://` URI, but then explicitly skips navigation
+because the URI is not a real file path. The same applies to built-in
+constants like `PHP_EOL`, `SORT_ASC`, `PHP_INT_MAX` — they exist in
+`stub_constant_index` for completion but `resolve_constant_definition`
+only checks `global_defines`.
+
+User-defined functions and `define()` constants work correctly. Only
+built-in PHP symbols from stubs are affected.
+
+**Fix:** either embed the stub source files as navigable resources (e.g.
+write them to a temporary directory and use real file URIs), or accept
+that stub go-to-definition is out of scope and document it as a known
+limitation.
+
+---
+
+#### 33. Generator yield type not inferred inside generator bodies
+
+When a method is annotated `@return Generator<int, User>`, the yield
+value type (`User`) is correctly extracted when iterating the generator
+with `foreach`. However, *inside* the generator body itself, there is
+no inference from the declared return type back to the yielded values.
+
+```php
+class UserRepository {
+    /** @return \Generator<int, User> */
+    public function findAll(): \Generator {
+        // Inside this body, `$user` should be typed as User
+        // based on the Generator return annotation, but it isn't.
+        yield $user;
+        $user->  // ← no completion
+    }
+}
+```
+
+This is a niche scenario (the developer writing the generator usually
+knows the types), but it would help when the generator body grows large
+and variables are passed around before being yielded.
+
+---
+
 ## Go-to-Implementation Gaps
-
-### ~~5a. Transitive interface inheritance~~ ✅
-
-Resolved. Added `interface_extends_target` helper in
-`definition/implementation.rs` that recursively walks an interface's
-parent chain (both `parent_class` and `interfaces` fields) up to
-`MAX_INHERITANCE_DEPTH`. `class_implements_or_extends` now calls this
-helper for every directly-implemented interface and for interfaces found
-on parent classes. Also fixed the interface parser to store all extended
-interfaces in the `interfaces` field (not just the first one in
-`parent_class`), so multi-extends interfaces like
-`interface C extends A, B` are fully represented.
 
 ### 5b. Short-name collisions in `find_implementors`
 **Priority: Low**
