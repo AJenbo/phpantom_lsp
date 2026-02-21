@@ -326,6 +326,25 @@ limitation.
 
 ---
 
+#### 35. No go-to-definition for static properties and constants via `::`
+
+`User::$defaultRole` and `User::TYPE_ADMIN` do not navigate to the
+property or constant definition. Go-to-definition for instance members
+(`$user->name`, `$user->getName()`) works, but the `::` access path
+for static properties and class constants is not handled.
+
+```php
+User::$defaultRole;   // ← no go-to-definition
+User::TYPE_ADMIN;     // ← no go-to-definition
+```
+
+**Fix:** extend the definition resolver to handle `ClassName::$prop`
+and `ClassName::CONST` subjects, resolving the class via the same
+pipeline used for `::` completion and then locating the member
+definition in the resolved file.
+
+---
+
 #### 33. Generator yield type not inferred inside generator bodies
 
 When a method is annotated `@return Generator<int, User>`, the yield
