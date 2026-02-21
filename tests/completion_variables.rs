@@ -6,6 +6,72 @@ use common::{
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
+/// Test parenthesized RHS expression in variable assignment completion
+#[tokio::test]
+async fn test_completion_parenthesized_rhs_variable() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///paren_rhs.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class ParenDemo {\n",
+        "    public function foo(): void {}\n",
+        "    public function test() {\n",
+        "        $p = (new ParenDemo());\n",
+        "        $p->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 12,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $p = (new ParenDemo())"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+            assert!(
+                method_names.contains(&"foo"),
+                "Should include 'foo' method from ParenDemo"
+            );
+            assert!(
+                method_names.contains(&"test"),
+                "Should include 'test' method from ParenDemo"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 #[tokio::test]
 async fn test_completion_new_self_variable() {
     let backend = create_test_backend();

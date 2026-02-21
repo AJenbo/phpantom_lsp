@@ -38,6 +38,19 @@ $user->hasPermission('x');   // @method magic
 $user->output;               // @property-read (Renderable interface)
 $user->render();             // @method (Renderable interface)
 
+// ── Parenthesized RHS Assignment ─────────────────────────────────────────────
+// Try completion after -> on $parenUser, which is assigned from a parenthesized expression.
+
+$parenUser = (new User('Bob', 'bob@example.com'));
+$parenUser->getEmail();      // resolves correctly after fix
+$parenUser->getName();       // inherited method
+
+// Parenthesized ternary assignment
+$ternaryUser = (rand(0, 1) ? new User('Carol', 'carol@example.com') : new AdminUser('Dave', 'dave@example.com'));
+$ternaryUser->getEmail();    // available on both branches
+$ternaryUser->grantPermission('edit'); // only on AdminUser branch
+
+
 
 // ── Static & Enum Completion ────────────────────────────────────────────────
 

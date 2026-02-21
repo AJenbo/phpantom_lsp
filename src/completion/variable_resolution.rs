@@ -1043,6 +1043,7 @@ impl Backend {
             }
             Expression::Call(call) => Self::resolve_rhs_call(call, expr, ctx),
             Expression::Access(access) => Self::resolve_rhs_property_access(access, ctx),
+            Expression::Parenthesized(p) => Self::resolve_rhs_expression(p.expression, ctx),
             Expression::Match(match_expr) => {
                 let mut combined = Vec::new();
                 for arm in match_expr.arms.iter() {
