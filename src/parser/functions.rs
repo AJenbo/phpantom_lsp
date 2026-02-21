@@ -223,6 +223,12 @@ impl Backend {
                         defines.push(name);
                     }
                 }
+                // Handle namespace-level const declarations
+                Statement::Constant(const_decl) => {
+                    for item in const_decl.items.iter() {
+                        defines.push(item.name.value.to_string());
+                    }
+                }
                 Statement::Namespace(namespace) => {
                     Self::extract_defines_from_statements(namespace.statements().iter(), defines);
                 }

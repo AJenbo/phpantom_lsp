@@ -51,6 +51,17 @@ $ternaryUser->getEmail();    // available on both branches
 $ternaryUser->grantPermission('edit'); // only on AdminUser branch
 
 
+// ── Class-String Variable Static Access ─────────────────────────────────────
+// When a variable holds a class-string from `Foo::class`, using `$var::`
+// resolves to the referenced class and offers its static members.
+
+$cls = User::class;
+$cls::findByEmail('a@b.c');  // static method from User
+$cls::TYPE_ADMIN;            // class constant
+$cls::$defaultRole;          // static property
+
+$ref = self::class;          // also works with self::class / static::class
+
 
 // ── Static & Enum Completion ────────────────────────────────────────────────
 

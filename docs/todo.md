@@ -11,57 +11,6 @@ section.
 
 ## Completion & Go-to-Definition Gaps
 
-### Quick wins
-
-#### 28. Parenthesized RHS expression not unwrapped in variable resolution ✅ **[DONE]**
-
-**Completed:**  
-`resolve_rhs_expression` now correctly unwraps `Expression::Parenthesized` nodes, so assignments like `$var = (new Foo())` and `$var = ($condition ? $a : $b)` resolve through the AST-based path.
-
----
-
-#### 29 / 35. Namespace-level `const` declarations not indexed
-
-Only `define('NAME', value)` calls are extracted and stored in
-`global_defines`. PHP's `const NAME = value;` syntax at namespace or
-top level is not indexed, so these constants don't appear in completion
-and can't be navigated to via go-to-definition.
-
-```php
-namespace App\Config;
-
-const MAX_RETRIES = 3;   // ← not indexed, no completion or go-to-definition
-define('APP_NAME', '…');  // ← works fine
-```
-
-**Fix:** in `extract_defines_from_statements`, also handle
-`Statement::Constant` nodes and store their names (namespace-qualified)
-in `global_defines`. This fixes both completion and go-to-definition
-(§35) in one change.
-
----
-
-#### 25. No completion after `$var::` where variable holds a class-string
-
-When a variable holds a class-string value (e.g. from `$cls = User::class`),
-using the `::` operator on it (`$cls::`) does not offer static members of
-the referenced class. The subject `$cls` is passed to `resolve_target_classes`
-which resolves it to its *value type* (`string` / `class-string`) rather than
-the *referenced class* (`User`).
-
-```php
-$cls = User::class;
-$cls::  // ← no completion (should offer User's static members/constants)
-```
-
-**Fix:** in `resolve_target_classes`, when the subject is a bare `$var`
-and `access_kind` is `DoubleColon`, check if the variable was assigned a
-`Foo::class` literal (or a union of `::class` literals from a match
-expression). If so, resolve to those class(es) instead of the variable's
-value type.
-
----
-
 ### High impact
 
 #### 23. Match-expression class-string not forwarded to conditional return types

@@ -37,7 +37,7 @@ async fn test_completion_parenthesized_rhs_variable() {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 6,
+                line: 5,
                 character: 12,
             },
         },
@@ -66,6 +66,284 @@ async fn test_completion_parenthesized_rhs_variable() {
             assert!(
                 method_names.contains(&"test"),
                 "Should include 'test' method from ParenDemo"
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var::` completion where variable holds a class-string from `Foo::class`
+#[tokio::test]
+async fn test_completion_class_string_variable_static_access() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///classstring.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Gadget {\n",
+        "    public static function build(): void {}\n",
+        "    public const VERSION = '1.0';\n",
+        "    public static string $label = 'gadget';\n",
+        "    public function test() {\n",
+        "        $cls = Gadget::class;\n",
+        "        $cls::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $cls = Gadget::class; $cls::"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"build"),
+                "Should include static method 'build', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"VERSION"),
+                "Should include constant 'VERSION', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"$label"),
+                "Should include static property '$label', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var::` with self::class inside a class method
+#[tokio::test]
+async fn test_completion_class_string_self_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///selfclass.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public static function create(): void {}\n",
+        "    public const NAME = 'widget';\n",
+        "    public function test() {\n",
+        "        $ref = self::class;\n",
+        "        $ref::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $ref = self::class; $ref::"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"create"),
+                "Should include static method 'create', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"NAME"),
+                "Should include constant 'NAME', got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var::` with ternary assignment of class-strings
+#[tokio::test]
+async fn test_completion_class_string_ternary() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///classstring_ternary.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Alpha {\n",
+        "    public static function alphaMethod(): void {}\n",
+        "}\n",
+        "class Beta {\n",
+        "    public static function betaMethod(): void {}\n",
+        "    public function test() {\n",
+        "        $cls = rand(0, 1) ? Alpha::class : Beta::class;\n",
+        "        $cls::\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for ternary class-string"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"alphaMethod"),
+                "Should include Alpha's static method, got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"betaMethod"),
+                "Should include Beta's static method, got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var::` at top level (outside any class)
+#[tokio::test]
+async fn test_completion_class_string_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///classstring_toplevel.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Svc {\n",
+        "    public static function start(): void {}\n",
+        "    public const MAX = 10;\n",
+        "}\n",
+        "$svc = Svc::class;\n",
+        "$svc::\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 6,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for top-level $svc = Svc::class; $svc::"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"start"),
+                "Should include static method 'start', got: {:?}",
+                names
+            );
+            assert!(
+                names.contains(&"MAX"),
+                "Should include constant 'MAX', got: {:?}",
+                names
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

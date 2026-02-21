@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Parenthesized RHS expressions now resolved.** Assignments like `$var = (new Foo())` and `$var = ($cond ? $a : $b)` now resolve correctly through the AST path. Previously the `Expression::Parenthesized` wrapper was not unwrapped in `resolve_rhs_expression`.
+- **`$var::` completion for class-string variables.** When a variable holds a class-string (e.g. `$cls = User::class`), using `$cls::` now offers the referenced class's static members, constants, and static properties. Handles `self::class`, `static::class`, `parent::class`, and unions from match/ternary/null-coalescing expressions.
 - **`?->` chaining fallback now recurses correctly.** The `?->` fallback branch in subject extraction called `extract_simple_variable` instead of `extract_arrow_subject`. The primary `->` branch already handled `?->` chains correctly via a `?` skip, so this was not user-visible, but the fallback is now consistent.
 - **Multi-extends interfaces now fully stored.** Interfaces extending multiple parents (e.g. `interface C extends A, B`) now store all parent names, not just the first one.
 

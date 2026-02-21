@@ -297,6 +297,26 @@ impl Backend {
                     &dummy_class
                 }
             };
+
+            // ── `$var::` where `$var` holds a class-string ──
+            // When the access kind is `::`, the user wants static members
+            // of the class that the variable *references*, not the value
+            // type (`string`).  Scan for `$var = Foo::class` assignments
+            // and resolve to those class(es).
+            if _access_kind == AccessKind::DoubleColon {
+                let class_string_targets = Self::resolve_class_string_targets(
+                    subject,
+                    effective_class,
+                    all_classes,
+                    ctx.content,
+                    ctx.cursor_offset,
+                    class_loader,
+                );
+                if !class_string_targets.is_empty() {
+                    return class_string_targets;
+                }
+            }
+
             return Self::resolve_variable_types(
                 subject,
                 effective_class,
