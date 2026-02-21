@@ -723,16 +723,12 @@ impl Backend {
         // properties are visible.  For example, if `ConfigWrapper extends
         // Wrapper<Config>` and `Wrapper` has `/** @var T */ public $value`,
         // the merged class will have `$value` with type `Config`.
-        let merged = Self::resolve_class_with_inheritance(class_info, class_loader);
-        let prop = match merged.properties.iter().find(|p| p.name == prop_name) {
-            Some(p) => p,
-            None => return vec![],
-        };
-        let type_hint = match prop.type_hint.as_deref() {
+        let type_hint = match Self::resolve_property_type_hint(class_info, prop_name, class_loader)
+        {
             Some(h) => h,
             None => return vec![],
         };
-        Self::type_hint_to_classes(type_hint, &class_info.name, all_classes, class_loader)
+        Self::type_hint_to_classes(&type_hint, &class_info.name, all_classes, class_loader)
     }
 
     /// Map a type-hint string to all matching `ClassInfo` values.

@@ -594,11 +594,11 @@ impl Backend {
                 && let ClassLikeMemberSelector::Identifier(ident) = &method_call.method
             {
                 let method_name = ident.value.to_string();
-                if let Some(owner) = all_classes.iter().find(|c| c.name == current_class_name) {
-                    let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-                    if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
-                        return method.return_type.clone();
-                    }
+                if let Some(owner) = all_classes.iter().find(|c| c.name == current_class_name)
+                    && let Some(rt) =
+                        Self::resolve_method_return_type(owner, &method_name, class_loader)
+                {
+                    return Some(rt);
                 }
             } else {
                 // General case: resolve the object, then look up the method.
@@ -630,12 +630,10 @@ impl Backend {
                                 &rctx,
                             );
                             for cls in &obj_classes {
-                                let merged =
-                                    Self::resolve_class_with_inheritance(cls, class_loader);
-                                if let Some(method) =
-                                    merged.methods.iter().find(|m| m.name == method_name)
+                                if let Some(rt) =
+                                    Self::resolve_method_return_type(cls, method_name, class_loader)
                                 {
-                                    return method.return_type.clone();
+                                    return Some(rt);
                                 }
                             }
                         }
@@ -661,11 +659,11 @@ impl Backend {
                     .find(|c| c.name == cls_name)
                     .cloned()
                     .or_else(|| class_loader(&cls_name));
-                if let Some(ref owner) = owner {
-                    let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-                    if let Some(method) = merged.methods.iter().find(|m| m.name == method_name) {
-                        return method.return_type.clone();
-                    }
+                if let Some(ref owner) = owner
+                    && let Some(rt) =
+                        Self::resolve_method_return_type(owner, &method_name, class_loader)
+                {
+                    return Some(rt);
                 }
             }
         }
@@ -706,11 +704,10 @@ impl Backend {
                             vec![]
                         };
                     for owner in &owner_classes {
-                        let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-                        if let Some(prop) = merged.properties.iter().find(|p| p.name == prop_name)
-                            && let Some(ref hint) = prop.type_hint
+                        if let Some(hint) =
+                            Self::resolve_property_type_hint(owner, &prop_name, class_loader)
                         {
-                            return Some(hint.clone());
+                            return Some(hint);
                         }
                     }
                 }

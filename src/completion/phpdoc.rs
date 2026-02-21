@@ -34,9 +34,8 @@ use crate::completion::use_edit::{build_use_edit, find_use_insert_position};
 
 // Re-export comment-position helpers so existing consumers (tests,
 // handler, catch_completion) that import from `phpdoc::` keep working.
-pub use super::comment_position::{
-    is_inside_docblock, is_inside_non_doc_comment, position_to_byte_offset,
-};
+pub(crate) use super::comment_position::position_to_byte_offset;
+pub use super::comment_position::{is_inside_docblock, is_inside_non_doc_comment};
 
 // Re-export all public items from `phpdoc_context` so that existing
 // consumers (`handler.rs`, tests) that import from `phpdoc::` keep

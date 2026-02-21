@@ -251,12 +251,7 @@ impl Backend {
             // Method call: `$this->methodName(…)`
             if let Some(method_name) = callee.strip_prefix("$this->") {
                 let owner = current_class?;
-                let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-                return merged
-                    .methods
-                    .iter()
-                    .find(|m| m.name == method_name)
-                    .and_then(|m| m.return_type.clone());
+                return Self::resolve_method_return_type(owner, method_name, class_loader);
             }
 
             // Static call: `ClassName::methodName(…)`
@@ -267,12 +262,7 @@ impl Backend {
                     class_loader(class_part)
                 };
                 if let Some(cls) = resolved_class {
-                    let merged = Self::resolve_class_with_inheritance(&cls, class_loader);
-                    return merged
-                        .methods
-                        .iter()
-                        .find(|m| m.name == method_part)
-                        .and_then(|m| m.return_type.clone());
+                    return Self::resolve_method_return_type(&cls, method_part, class_loader);
                 }
             }
 
@@ -301,12 +291,7 @@ impl Backend {
             && prop_name.chars().all(|c| c.is_alphanumeric() || c == '_')
             && let Some(owner) = current_class
         {
-            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-            return merged
-                .properties
-                .iter()
-                .find(|p| p.name == prop_name)
-                .and_then(|p| p.type_hint.clone());
+            return Self::resolve_property_type_hint(owner, prop_name, class_loader);
         }
 
         None
@@ -415,12 +400,7 @@ impl Backend {
             && prop_name.chars().all(|c| c.is_alphanumeric() || c == '_')
         {
             let owner = current_class?;
-            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-            return merged
-                .properties
-                .iter()
-                .find(|p| p.name == prop_name)
-                .and_then(|p| p.type_hint.clone());
+            return Self::resolve_property_type_hint(owner, prop_name, class_loader);
         }
 
         None
@@ -541,12 +521,7 @@ impl Backend {
 
         // Resolve LHS to a class.
         let owner = Self::resolve_lhs_to_class(lhs, current_class, all_classes, class_loader)?;
-        let merged = Self::resolve_class_with_inheritance(&owner, class_loader);
-        merged
-            .methods
-            .iter()
-            .find(|m| m.name == method_name)
-            .and_then(|m| m.return_type.clone())
+        Self::resolve_method_return_type(&owner, method_name, class_loader)
     }
 
     /// Resolve the left-hand side of a chained expression to a `ClassInfo`.
@@ -613,12 +588,7 @@ impl Backend {
                     .or_else(|| inner_callee.strip_prefix("$this?->"))
                 {
                     let owner = current_class?;
-                    let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-                    return merged
-                        .methods
-                        .iter()
-                        .find(|mi| mi.name == m)
-                        .and_then(|mi| mi.return_type.clone());
+                    return Self::resolve_method_return_type(owner, m, class_loader);
                 }
                 // `ClassName::method`
                 if let Some((cls_part, m_part)) = inner_callee.rsplit_once("::") {
@@ -633,12 +603,7 @@ impl Backend {
                             .or_else(|| class_loader(cls_part))
                     };
                     if let Some(cls) = resolved {
-                        let merged = Self::resolve_class_with_inheritance(&cls, class_loader);
-                        return merged
-                            .methods
-                            .iter()
-                            .find(|mi| mi.name == m_part)
-                            .and_then(|mi| mi.return_type.clone());
+                        return Self::resolve_method_return_type(&cls, m_part, class_loader);
                     }
                 }
                 None
@@ -661,12 +626,7 @@ impl Backend {
             && prop.chars().all(|c| c.is_alphanumeric() || c == '_')
         {
             let owner = current_class?;
-            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-            let type_str = merged
-                .properties
-                .iter()
-                .find(|p| p.name == prop)
-                .and_then(|p| p.type_hint.clone())?;
+            let type_str = Self::resolve_property_type_hint(owner, prop, class_loader)?;
             let clean = crate::docblock::types::clean_type(&type_str);
             let lookup = short_name(&clean);
             return all_classes

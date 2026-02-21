@@ -1510,12 +1510,7 @@ impl Backend {
             .or_else(|| callee.strip_prefix("$this?->"))
         {
             let owner = current_class?;
-            let merged = Self::resolve_class_with_inheritance(owner, class_loader);
-            return merged
-                .methods
-                .iter()
-                .find(|m| m.name == method_name)
-                .and_then(|m| m.return_type.clone());
+            return Self::resolve_method_return_type(owner, method_name, class_loader);
         }
 
         // Static call: `ClassName::methodName(…)`
@@ -1531,12 +1526,7 @@ impl Backend {
                     .or_else(|| class_loader(class_part))
             };
             if let Some(cls) = resolved_class {
-                let merged = Self::resolve_class_with_inheritance(&cls, class_loader);
-                return merged
-                    .methods
-                    .iter()
-                    .find(|m| m.name == method_part)
-                    .and_then(|m| m.return_type.clone());
+                return Self::resolve_method_return_type(&cls, method_part, class_loader);
             }
         }
 

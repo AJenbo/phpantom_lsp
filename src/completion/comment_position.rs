@@ -11,23 +11,10 @@
 
 use tower_lsp::lsp_types::Position;
 
-/// Convert an LSP `Position` (line, character) to a byte offset in
-/// `content`.
-///
-/// Characters are treated as single-byte (sufficient for the vast
-/// majority of PHP source).  If the position is past the end of the
-/// file, the content length is returned.
-pub fn position_to_byte_offset(content: &str, position: Position) -> usize {
-    let mut offset = 0usize;
-    for (line_idx, line) in content.lines().enumerate() {
-        if line_idx == position.line as usize {
-            offset += (position.character as usize).min(line.len());
-            return offset;
-        }
-        offset += line.len() + 1; // +1 for newline
-    }
-    offset
-}
+// Re-export the canonical position-to-byte-offset helper so that existing
+// `use super::comment_position::position_to_byte_offset` imports continue
+// to work without modification.
+pub(crate) use crate::util::position_to_byte_offset;
 
 /// Returns `true` if the given position is inside a `/** … */` docblock.
 ///
