@@ -1777,6 +1777,338 @@ class MyController {
     }
 }
 
+/// Class constant via `ClassName::CONST` at the top level (outside any class).
+/// This mirrors the `example.php` playground where `User::TYPE_ADMIN` is used
+/// at file scope, not inside a method body.
+#[tokio::test]
+async fn test_goto_definition_class_constant_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///top_level_const.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    public const string TYPE_ADMIN = 'admin';\n",
+        "    public const string TYPE_USER = 'user';\n",
+        "}\n",
+        "\n",
+        "User::TYPE_ADMIN;\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "TYPE_ADMIN" in `User::TYPE_ADMIN` on line 6
+    let line_text = "User::TYPE_ADMIN;";
+    let name_pos = line_text.find("TYPE_ADMIN").unwrap();
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 6,
+                character: name_pos as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve User::TYPE_ADMIN at top level to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "const TYPE_ADMIN is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Inherited constant via `ClassName::CONST` at the top level.
+/// The constant is declared in a parent class.
+#[tokio::test]
+async fn test_goto_definition_inherited_constant_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inherited_const_top.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Model {\n",
+        "    public const string CONNECTION = 'default';\n",
+        "}\n",
+        "class User extends Model {\n",
+        "}\n",
+        "\n",
+        "User::CONNECTION;\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "CONNECTION" in `User::CONNECTION` on line 7
+    let line_text = "User::CONNECTION;";
+    let name_pos = line_text.find("CONNECTION").unwrap();
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 7,
+                character: name_pos as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve User::CONNECTION (inherited) at top level to Model's declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "const CONNECTION is declared on line 2 in Model"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_static_property_via_classname() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///static_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public static string $defaultLocale = 'en';\n",
+        "    protected static int $timeout = 30;\n",
+        "}\n",
+        "\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $locale = Config::$defaultLocale;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "defaultLocale" in `Config::$defaultLocale` on line 8
+    // The `$` is at character 26, so 'd' starts at character 27.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 8,
+                character: 27,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve Config::$defaultLocale to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "$defaultLocale is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Static property via `::` accessed from outside the class, cross-file.
+#[tokio::test]
+async fn test_goto_definition_static_property_via_classname_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/Config.php",
+            concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "class Config {\n",
+                "    public static string $appName = 'PHPantom';\n",
+                "    public static bool $debug = false;\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///consumer.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use App\\Config;\n",
+        "class Consumer {\n",
+        "    public function run(): void {\n",
+        "        $name = Config::$appName;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Click on "appName" in `Config::$appName` on line 4
+    let line_text = "        $name = Config::$appName;";
+    let dollar_pos = line_text.find("::$appName").unwrap() + 3; // position of '$'
+    let name_pos = dollar_pos + 1; // position of 'a' in appName
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: name_pos as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve Config::$appName cross-file to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            // Should jump to the Config.php file, line 3 (0-indexed)
+            assert!(
+                location.uri.as_str().contains("Config.php"),
+                "Should jump to Config.php, got: {}",
+                location.uri
+            );
+            assert_eq!(
+                location.range.start.line, 3,
+                "$appName is declared on line 3 of Config.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+/// Static property via `self::$prop` inside the same class.
+#[tokio::test]
+async fn test_goto_definition_static_property_via_self() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///self_static_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Registry {\n",
+        "    private static array $items = [];\n",
+        "\n",
+        "    public static function count(): int {\n",
+        "        return count(self::$items);\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "items" in `self::$items` on line 5
+    let line_text = "        return count(self::$items);";
+    let dollar_pos = line_text.find("::$items").unwrap() + 3;
+    let name_pos = dollar_pos + 1; // 'i' in items
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: name_pos as u32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve self::$items to its declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(location.range.start.line, 2, "$items is declared on line 2");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+// ─── Member Definition: Unresolvable Members ────────────────────────────────
+
 #[tokio::test]
 async fn test_goto_definition_unresolvable_member_returns_none() {
     let backend = create_test_backend();

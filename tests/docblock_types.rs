@@ -1733,8 +1733,8 @@ async fn test_parse_php_class_method_tags() {
         .expect("Should have mock method from @method tag");
     assert_eq!(
         mock_method.return_type.as_deref(),
-        Some("Mockery\\MockInterface"),
-        "FQN return type should have leading backslash stripped"
+        Some("\\Mockery\\MockInterface"),
+        "FQN return type should preserve leading backslash"
     );
     assert!(!mock_method.is_static, "mock should not be static");
     assert_eq!(mock_method.parameters.len(), 2);

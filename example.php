@@ -415,6 +415,13 @@ echo APP_VERSION;                         // Ctrl+Click → jumps to define()
 $retries = MAX_RETRIES;
 
 
+// ── Static Property & Class Constant Go-to-Definition ───────────────────────
+
+User::$defaultRole;                       // Ctrl+Click → jumps to static property declaration
+User::TYPE_ADMIN;                         // Ctrl+Click → jumps to class constant declaration
+Model::CONNECTION;                        // Ctrl+Click → jumps to inherited constant
+
+
 // ── Variable Go-to-Definition ───────────────────────────────────────────────
 
 $typed = getUnknownValue();

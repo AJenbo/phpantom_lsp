@@ -4,8 +4,7 @@
 
 Items are ordered by recommended implementation sequence: quick wins
 first, then high-impact items, then competitive-parity features, then
-long-tail polish. Resolved items are collected at the bottom of each
-section.
+long-tail polish.
 
 ---
 
@@ -255,25 +254,6 @@ limitation.
 
 ---
 
-#### 35. No go-to-definition for static properties and constants via `::`
-
-`User::$defaultRole` and `User::TYPE_ADMIN` do not navigate to the
-property or constant definition. Go-to-definition for instance members
-(`$user->name`, `$user->getName()`) works, but the `::` access path
-for static properties and class constants is not handled.
-
-```php
-User::$defaultRole;   // ← no go-to-definition
-User::TYPE_ADMIN;     // ← no go-to-definition
-```
-
-**Fix:** extend the definition resolver to handle `ClassName::$prop`
-and `ClassName::CONST` subjects, resolving the class via the same
-pipeline used for `::` completion and then locating the member
-definition in the resolved file.
-
----
-
 #### 33. Generator yield type not inferred inside generator bodies
 
 When a method is annotated `@return Generator<int, User>`, the yield
@@ -296,23 +276,6 @@ class UserRepository {
 This is a niche scenario (the developer writing the generator usually
 knows the types), but it would help when the generator body grows large
 and variables are passed around before being yielded.
-
----
-
-### Resolved
-
-- **19. `static` return type not resolved to concrete class at call sites.**
-  When a method declares `@return static` and the call is on a subclass
-  variable, the resolver now substitutes the caller's concrete class
-  rather than the declaring (parent) class. Chained fluent calls preserve
-  the subclass through multiple `static` returns.
-
-- **24. Namespaced class breaks `static` return type chain resolution.**
-  `clean_type` now preserves the leading `\` on fully-qualified names so
-  that `resolve_type_string` does not incorrectly prepend the current
-  file's namespace. Cross-file FQN return types (e.g.
-  `@return \Illuminate\Database\Eloquent\Builder`) resolve correctly
-  regardless of the caller's namespace.
 
 ---
 

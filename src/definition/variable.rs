@@ -60,7 +60,17 @@ impl Backend {
         if start == 0 {
             return false;
         }
-        chars[start - 1] == '$'
+        if chars[start - 1] != '$' {
+            return false;
+        }
+
+        // If the `$` is preceded by `::`, this is a static property access
+        // (e.g. `Config::$defaultLocale`), not a local variable.
+        if start >= 3 && chars[start - 2] == ':' && chars[start - 3] == ':' {
+            return false;
+        }
+
+        true
     }
 
     /// Find the most recent assignment or declaration of `$var_name` before

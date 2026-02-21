@@ -671,13 +671,15 @@ impl Backend {
                     }
                 }
                 MemberKind::Constant => {
-                    // Look for `const CONSTANT_NAME` with word boundaries.
-                    let pattern = format!("const {}", member_name);
-                    if let Some(col) = line.find(&pattern) {
-                        // Make sure `const` is preceded by a word boundary
-                        // (not part of another identifier).
+                    // Look for the constant name on a line containing `const`.
+                    // Handles both untyped (`const NAME`) and typed
+                    // (`const string NAME`, PHP 8.3+) declarations.
+                    if !line.contains("const ") {
+                        // Fast reject — skip lines without `const` entirely
+                        // before checking for the constant name.
+                    } else if let Some(col) = line.find(member_name) {
                         let before_ok = col == 0 || is_word_boundary(line.as_bytes()[col - 1]);
-                        let after_pos = col + pattern.len();
+                        let after_pos = col + member_name.len();
                         let after_ok =
                             after_pos >= line.len() || is_word_boundary(line.as_bytes()[after_pos]);
                         if before_ok && after_ok {
