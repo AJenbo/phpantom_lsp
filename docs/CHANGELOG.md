@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Switch statement variable type tracking.** Variables assigned inside `switch` case bodies now resolve their types. Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms are supported, and all cases contribute to a union type.
+
 ### Changed
 
 ## [0.3.0] - 2026-02-21

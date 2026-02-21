@@ -381,6 +381,16 @@ impl Backend {
                 Statement::Try(try_stmt) => {
                     Self::walk_try_statement(try_stmt, ctx, results);
                 }
+                Statement::Switch(switch) => {
+                    for case in switch.body.cases().iter() {
+                        Self::walk_statements_for_assignments(
+                            case.statements().iter(),
+                            ctx,
+                            results,
+                            true,
+                        );
+                    }
+                }
                 _ => {}
             }
         }

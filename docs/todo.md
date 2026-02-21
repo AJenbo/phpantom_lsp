@@ -65,34 +65,12 @@ the cursor.  Lines that start with `->` or `?->` (after optional
 whitespace) should be joined with the preceding line, then the extraction
 runs on the flattened text.
 
-### 17. Switch statement variable type tracking
-**Priority: Medium**
+### ~~17. Switch statement variable type tracking~~ ✅
 
-`walk_statements_for_assignments` in `completion/variable_resolution.rs`
-handles `If`, `Foreach`, `While`, `For`, `DoWhile`, `Try`, `Block`, and
-`Expression`, but `Statement::Switch` falls into the `_ => {}` catch-all
-and is silently skipped.  Variables assigned inside switch cases are
-invisible to the type resolver:
-
-```php
-switch ($type) {
-    case 'user':
-        $result = new User();
-        break;
-    case 'admin':
-        $result = new Admin();
-        break;
-}
-$result->  // ← no completion
-```
-
-The variable *name* collector in `completion/variable_completion.rs`
-already handles `Statement::Switch`, so `$result` appears in variable
-name suggestions, but its type is not resolved.
-
-**Fix:** add a `Statement::Switch` arm to `walk_statements_for_assignments`
-that iterates the switch cases and recurses into each case's statement
-list with `conditional = true` (same pattern as `if` branches).
+Resolved. Added a `Statement::Switch` arm to `walk_statements_for_assignments`
+that iterates each case's statement list with `conditional = true`.
+Both brace-delimited and colon-delimited (`switch(): … endswitch;`) forms
+are handled via `switch.body.cases()`.
 
 ### 18. `?->` chaining loses intermediate segments
 **Priority: Medium**

@@ -639,6 +639,37 @@ class ExpressionTypeDemo
 }
 
 
+// ── Switch Statement Type Tracking ──────────────────────────────────────────
+
+class SwitchDemo
+{
+    public function switchNewInstantiation(string $type): void
+    {
+        switch ($type) {
+            case 'reviews':
+                $service = new ElasticProductReviewIndexService();
+                break;
+            case 'brands':
+                $service = new ElasticBrandIndexService();
+                break;
+        }
+        $service->index();                // on both classes
+        $service->reindex();              // ElasticProductReviewIndexService only
+        $service->bulkDelete([]);         // ElasticBrandIndexService only
+    }
+
+    public function switchInsideCase(string $driver): void
+    {
+        switch ($driver) {
+            case 'mysql':
+                $conn = new Response(200, 'OK');
+                $conn->getStatusCode();   // resolves inside the case body
+                break;
+        }
+    }
+}
+
+
 // ── Foreach, Key Types, and Destructuring ───────────────────────────────────
 
 class IterationDemo
