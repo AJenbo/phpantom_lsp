@@ -29,15 +29,12 @@
 /// Type narrowing (instanceof, assert, custom type guards) is delegated
 /// to the [`super::type_narrowing`] module.  Closure/arrow-function scope
 /// handling is delegated to [`super::closure_resolution`].
-use std::panic;
-
-use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
-use mago_syntax::parser::parse_file_content;
 
 use crate::Backend;
 use crate::docblock;
+use crate::parser::with_parsed_program;
 use crate::types::ClassInfo;
 use crate::util::{
     ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS, find_semicolon_balanced, short_name,
@@ -66,13 +63,7 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         function_loader: FunctionLoaderFn<'_>,
     ) -> Vec<ClassInfo> {
-        // Wrap in catch_unwind so a mago-syntax parser panic doesn't
-        // crash the LSP server (producing a zombie process).
-        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            let arena = Bump::new();
-            let file_id = mago_database::file::FileId::new("input.php");
-            let program = parse_file_content(&arena, file_id, content);
-
+        with_parsed_program(content, "resolve_variable_types", |program, _content| {
             let ctx = VarResolutionCtx {
                 var_name,
                 current_class,
@@ -86,18 +77,7 @@ impl Backend {
             // Walk top-level (and namespace-nested) statements to find the
             // class + method containing the cursor.
             Self::resolve_variable_in_statements(program.statements.iter(), &ctx)
-        }));
-
-        match result {
-            Ok(classes) => classes,
-            Err(_) => {
-                log::error!(
-                    "PHPantom: parser panicked during variable resolution for '{}'",
-                    var_name
-                );
-                vec![]
-            }
-        }
+        })
     }
 
     pub(super) fn resolve_variable_in_statements<'b>(

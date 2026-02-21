@@ -5,15 +5,13 @@
 /// position, respecting PHP scoping rules (function, method, closure, and
 /// top-level scope).
 use std::collections::HashSet;
-use std::panic;
 
-use bumpalo::Bump;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
-use mago_syntax::parser::parse_file_content;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::parser::with_parsed_program;
 
 impl Backend {
     /// PHP superglobal variable names (always available in any scope).
@@ -206,25 +204,15 @@ impl Backend {
 /// The returned set contains variable names including the `$` prefix
 /// (e.g. `"$user"`, `"$this"`).
 fn collect_variables_in_scope(content: &str, cursor_offset: u32) -> HashSet<String> {
-    // Wrap in catch_unwind so a mago-syntax parser panic doesn't
-    // crash the LSP server (producing a zombie process).
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let arena = Bump::new();
-        let file_id = mago_database::file::FileId::new("input.php");
-        let program = parse_file_content(&arena, file_id, content);
-
-        let mut vars = HashSet::new();
-        find_scope_and_collect(program.statements.iter(), cursor_offset, &mut vars);
-        vars
-    }));
-
-    match result {
-        Ok(vars) => vars,
-        Err(_) => {
-            log::error!("PHPantom: parser panicked during variable scope collection");
-            HashSet::new()
-        }
-    }
+    with_parsed_program(
+        content,
+        "collect_variables_in_scope",
+        |program, _content| {
+            let mut vars = HashSet::new();
+            find_scope_and_collect(program.statements.iter(), cursor_offset, &mut vars);
+            vars
+        },
+    )
 }
 
 /// Walk top-level statements to find the scope enclosing the cursor,
