@@ -487,12 +487,25 @@ impl Backend {
                         if !results.is_empty() {
                             return results;
                         }
+                    } else {
+                        // Cursor is not inside this method's body —
+                        // skip to the next method so we don't
+                        // accidentally return parameter types from
+                        // a different method that happens to share
+                        // the same parameter name.
+                        continue;
                     }
                 }
 
-                // Cursor is outside the method body — return the
-                // parameter type hint as-is (no body to narrow in).
-                if !param_results.is_empty() {
+                // Abstract method (no concrete body) — return the
+                // parameter type hint only when the cursor falls
+                // within the method's overall span (signature region).
+                let method_start = method.span().start.offset;
+                let method_end = method.span().end.offset;
+                if !param_results.is_empty()
+                    && ctx.cursor_offset >= method_start
+                    && ctx.cursor_offset <= method_end
+                {
                     return param_results;
                 }
             }

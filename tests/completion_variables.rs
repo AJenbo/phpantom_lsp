@@ -14895,3 +14895,230 @@ async fn test_completion_variable_property_access_top_level() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Test that parameter resolution picks the correct method when multiple
+/// methods share the same parameter name but with different types.
+/// Regression: previously the resolver would return the parameter type
+/// from the first method encountered (by source order), even when the
+/// cursor was inside a later method.
+#[tokio::test]
+async fn test_completion_param_same_name_different_methods() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///param_same_name.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface IShoppingCart {}\n",
+        "/**\n",
+        " * @property int $customer_id\n",
+        " */\n",
+        "class ShoppingCart {\n",
+        "    public int $customer_id;\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "}\n",
+        "/**\n",
+        " * @property int $id\n",
+        " */\n",
+        "class Customer {\n",
+        "    public int $id;\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "class CurrentCart {\n",
+        "    private function handleGsmp(IShoppingCart $cart): void {}\n",
+        "    private function updateCartData(ShoppingCart $cart, Customer $customer): void {\n",
+        "        $cart->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 19,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for $cart-> in updateCartData (ShoppingCart, not IShoppingCart)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("customer_id")),
+                "Should include 'customer_id' from ShoppingCart, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTotal")),
+                "Should include 'getTotal' from ShoppingCart, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Same as above but verifying the second parameter ($customer) also
+/// resolves correctly when a prior method has a different $customer.
+#[tokio::test]
+async fn test_completion_param_same_name_second_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///param_same_name2.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface ICustomer {}\n",
+        "class Customer {\n",
+        "    public int $id;\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "class Service {\n",
+        "    private function other(ICustomer $customer): void {}\n",
+        "    private function process(Customer $customer): void {\n",
+        "        $customer->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for $customer-> in process (Customer, not ICustomer)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("id")),
+                "Should include 'id' from Customer, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include 'getName' from Customer, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Verify the fix also works when the matching method comes first in
+/// source order (the cursor's method is declared before the other).
+#[tokio::test]
+async fn test_completion_param_same_name_cursor_in_first_method() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///param_first_method.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Alpha {\n",
+        "    public string $name;\n",
+        "    public function greet(): string { return ''; }\n",
+        "}\n",
+        "class Beta {\n",
+        "    public int $code;\n",
+        "}\n",
+        "class Handler {\n",
+        "    public function first(Alpha $item): void {\n",
+        "        $item->\n",
+        "    }\n",
+        "    public function second(Beta $item): void {}\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for $item-> in first method (Alpha)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("name")),
+                "Should include 'name' from Alpha, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("greet")),
+                "Should include 'greet' from Alpha, got: {:?}",
+                labels
+            );
+            assert!(
+                !labels.iter().any(|l| l.starts_with("code")),
+                "Should NOT include 'code' from Beta, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
