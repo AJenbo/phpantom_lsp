@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::completion::throws_analysis;
-use crate::completion::use_edit::{build_use_edit, find_use_insert_position};
+use crate::completion::use_edit::{analyze_use_block, build_use_edit};
 
 // Re-export comment-position helpers so existing consumers (tests,
 // handler, catch_completion) that import from `phpdoc::` keep working.
@@ -466,7 +466,7 @@ pub fn build_phpdoc_completions(
                     .collect();
 
                 if !missing.is_empty() {
-                    let use_insert_pos = find_use_insert_position(content);
+                    let use_block = analyze_use_block(content);
 
                     for (idx, exc_type) in missing.iter().enumerate() {
                         let insert = format!("throws {}", exc_type);
@@ -480,7 +480,7 @@ pub fn build_phpdoc_completions(
                             file_namespace,
                         )
                         .filter(|fqn| !throws_analysis::has_use_import(content, fqn))
-                        .and_then(|fqn| build_use_edit(&fqn, use_insert_pos, file_namespace));
+                        .and_then(|fqn| build_use_edit(&fqn, &use_block, file_namespace));
 
                         items.push(CompletionItem {
                             label,

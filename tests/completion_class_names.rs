@@ -1263,15 +1263,16 @@ async fn test_auto_import_not_confused_by_trait_use_in_class_body() {
 
     assert_eq!(edits.len(), 1);
     assert_eq!(edits[0].new_text, "use Cassandra\\DefaultCluster;\n",);
-    // Should insert after the last top-level `use` (line 5: `use Stringable;`),
+    // `Cassandra\DefaultCluster` sorts before `Exception` alphabetically,
+    // so it should be inserted before `use Exception;` (line 4),
     // NOT after `use HasSlug;` (line 10) which is a trait import inside the class.
     assert_eq!(
         edits[0].range.start,
         Position {
-            line: 6,
+            line: 4,
             character: 0,
         },
-        "Auto-import should go after top-level use statements, not after trait use in class body"
+        "Auto-import should be inserted alphabetically among top-level use statements"
     );
 }
 

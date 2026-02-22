@@ -153,17 +153,6 @@ large projects with deep namespace hierarchies.
 
 ---
 
-#### 40. Insert `use` statements in alphabetical order
-
-Auto-imported `use` statements are currently appended at the bottom of the
-existing `use` block. Most PHP coding standards (PSR-12, Symfony, Laravel)
-expect `use` statements to be sorted alphabetically. The LSP should scan
-the existing imports, find the correct insertion point to maintain
-alphabetical order, and place the new statement there instead of at the
-end.
-
----
-
 #### 21. No reverse jump: implementation → interface method declaration
 
 Go-to-implementation lets you jump from an interface method to its concrete

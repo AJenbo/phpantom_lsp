@@ -18,7 +18,7 @@ use crate::types::*;
 use crate::util::short_name;
 
 use super::builder::{
-    build_callable_snippet, build_use_edit, find_use_insert_position, use_import_conflicts,
+    analyze_use_block, build_callable_snippet, build_use_edit, use_import_conflicts,
 };
 
 /// The syntactic context in which a class name is being completed.
@@ -752,10 +752,10 @@ impl Backend {
         let mut seen_fqns: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
-        // Pre-compute the insertion position for `use` statements.
+        // Pre-compute the use-block info for alphabetical `use` insertion.
         // Only items from sources 3–5 (not already imported, not same
         // namespace) will carry an `additional_text_edits` entry.
-        let use_insert_pos = find_use_insert_position(content);
+        let use_block = analyze_use_block(content);
 
         // ── 1. Use-imported classes (highest priority) ──────────────
         for (short_name, fqn) in file_use_map {
@@ -993,7 +993,7 @@ impl Backend {
                         })
                     }),
                     additional_text_edits: use_import.as_ref().and_then(|import_fqn| {
-                        build_use_edit(import_fqn, use_insert_pos, file_namespace)
+                        build_use_edit(import_fqn, &use_block, file_namespace)
                     }),
                     ..CompletionItem::default()
                 });
@@ -1081,7 +1081,7 @@ impl Backend {
                         })
                     }),
                     additional_text_edits: use_import.as_ref().and_then(|import_fqn| {
-                        build_use_edit(import_fqn, use_insert_pos, file_namespace)
+                        build_use_edit(import_fqn, &use_block, file_namespace)
                     }),
                     ..CompletionItem::default()
                 });
@@ -1187,9 +1187,9 @@ impl Backend {
                         new_text: insert_text,
                     })
                 }),
-                additional_text_edits: use_import.as_ref().and_then(|import_fqn| {
-                    build_use_edit(import_fqn, use_insert_pos, file_namespace)
-                }),
+                additional_text_edits: use_import
+                    .as_ref()
+                    .and_then(|import_fqn| build_use_edit(import_fqn, &use_block, file_namespace)),
                 ..CompletionItem::default()
             });
         }
@@ -1445,7 +1445,7 @@ impl Backend {
         let mut seen_fqns: HashSet<String> = HashSet::new();
         let mut items: Vec<CompletionItem> = Vec::new();
 
-        let use_insert_pos = find_use_insert_position(content);
+        let use_block = analyze_use_block(content);
 
         // Build the set of every FQN currently in the ast_map so that
         // classmap / stub sources can exclude already-evaluated classes.
@@ -1653,7 +1653,7 @@ impl Backend {
                         })
                     }),
                     additional_text_edits: use_import.as_ref().and_then(|import_fqn| {
-                        build_use_edit(import_fqn, use_insert_pos, file_namespace)
+                        build_use_edit(import_fqn, &use_block, file_namespace)
                     }),
                     ..CompletionItem::default()
                 });
@@ -1727,7 +1727,7 @@ impl Backend {
                         })
                     }),
                     additional_text_edits: use_import.as_ref().and_then(|import_fqn| {
-                        build_use_edit(import_fqn, use_insert_pos, file_namespace)
+                        build_use_edit(import_fqn, &use_block, file_namespace)
                     }),
                     ..CompletionItem::default()
                 });
@@ -1796,9 +1796,9 @@ impl Backend {
                         new_text: insert_text,
                     })
                 }),
-                additional_text_edits: use_import.as_ref().and_then(|import_fqn| {
-                    build_use_edit(import_fqn, use_insert_pos, file_namespace)
-                }),
+                additional_text_edits: use_import
+                    .as_ref()
+                    .and_then(|import_fqn| build_use_edit(import_fqn, &use_block, file_namespace)),
                 ..CompletionItem::default()
             });
         }

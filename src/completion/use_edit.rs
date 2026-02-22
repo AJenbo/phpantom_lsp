@@ -5,27 +5,127 @@
 /// `TextEdit`.  These are shared by class-name completion, and will be
 /// needed by future features such as auto-import on hover, code actions,
 /// and refactoring.
+///
+/// New `use` statements are inserted at the alphabetically correct
+/// position among the existing imports so the use block stays sorted.
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
 use crate::util::short_name;
 
-/// Find the position where a new `use` statement should be inserted.
+/// Information about a file's existing `use` block, used to compute
+/// the correct alphabetical insertion position for new imports.
+#[derive(Debug, Clone)]
+pub(crate) struct UseBlockInfo {
+    /// Each existing top-level `use` import: `(line_number, sort_key)`.
+    /// `sort_key` is the lowercased FQN extracted from the statement,
+    /// used for case-insensitive alphabetical comparison.
+    /// Entries are in file order (sorted by line number).
+    existing: Vec<(u32, String)>,
+    /// The line to insert at when there are no existing `use` statements.
+    /// Points after the `namespace` declaration, or after `<?php`.
+    fallback_line: u32,
+}
+
+impl UseBlockInfo {
+    /// Compute the insertion `Position` for a new `use` statement that
+    /// imports the given FQN, maintaining alphabetical order among the
+    /// existing imports.
+    ///
+    /// If there are no existing imports, returns the fallback position
+    /// (after `namespace` or `<?php`).
+    pub(crate) fn insert_position_for(&self, fqn: &str) -> Position {
+        let key = fqn.to_lowercase();
+
+        if self.existing.is_empty() {
+            return Position {
+                line: self.fallback_line,
+                character: 0,
+            };
+        }
+
+        // Find the first existing use whose sort key is alphabetically
+        // after the new FQN — the new statement goes right before it.
+        for (line, existing_key) in &self.existing {
+            if *existing_key > key {
+                return Position {
+                    line: *line,
+                    character: 0,
+                };
+            }
+        }
+
+        // New FQN sorts after all existing imports — append after the last one.
+        let last_line = self.existing.last().expect("non-empty checked above").0;
+        Position {
+            line: last_line + 1,
+            character: 0,
+        }
+    }
+}
+
+/// Extract the sort key (lowercased FQN) from a `use` statement line.
 ///
-/// Scans the file content and returns a `Position` pointing to the
-/// beginning of the line **after** the best insertion point:
+/// Handles the common forms:
+///   - `use Foo\Bar;` → `foo\bar`
+///   - `use Foo\Bar as Alias;` → `foo\bar`
+///   - `use function Foo\bar;` → `function foo\bar` (preserves keyword prefix for grouping)
+///   - `use const Foo\BAR;` → `const foo\bar`
+///   - `use Foo\{Bar, Baz};` → `foo\`
 ///
-///   1. After the last existing `use` statement (so the new import is
-///      grouped with the others).
-///   2. After the `namespace` declaration (if present but no `use`
-///      statements exist yet).
-///   3. After the `<?php` opening tag (fallback).
+/// Returns `None` if the line does not look like a use statement.
+fn extract_use_sort_key(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let rest = trimmed
+        .strip_prefix("use ")
+        .or_else(|| trimmed.strip_prefix("use\t"))?;
+
+    // Skip `use (` / `use(` — those are closures, not imports.
+    if rest.starts_with('(') {
+        return None;
+    }
+
+    // Preserve `function`/`const` prefix so they sort into their own
+    // group naturally (all `const …` together, all `function …` together).
+    let (prefix, fqn_part) = if let Some(r) = rest.strip_prefix("function ") {
+        ("function ", r)
+    } else if let Some(r) = rest.strip_prefix("const ") {
+        ("const ", r)
+    } else {
+        ("", rest)
+    };
+
+    // Extract the FQN: everything up to `;`, ` as `, or `{`.
+    let fqn = fqn_part
+        .split(';')
+        .next()
+        .unwrap_or(fqn_part)
+        .split(" as ")
+        .next()
+        .unwrap_or(fqn_part)
+        .split('{')
+        .next()
+        .unwrap_or(fqn_part)
+        .trim()
+        .trim_start_matches('\\');
+
+    Some(format!("{}{}", prefix, fqn).to_lowercase())
+}
+
+/// Analyse the file content and return a [`UseBlockInfo`] describing the
+/// existing `use` block.
 ///
-/// The returned position is always at column 0 of the target line, so
-/// callers can insert `"use Foo\\Bar;\n"` directly.
-pub(crate) fn find_use_insert_position(content: &str) -> Position {
-    let mut last_use_line: Option<u32> = None;
+/// This replaces the older `find_use_insert_position` — instead of a
+/// single append-at-bottom position, callers get a structure that
+/// supports alphabetical insertion via
+/// [`UseBlockInfo::insert_position_for`].
+///
+/// The scanning logic distinguishes top-level `use` imports from trait
+/// `use` statements inside class/enum/trait bodies by tracking brace
+/// depth.
+pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
+    let mut existing: Vec<(u32, String)> = Vec::new();
     let mut namespace_line: Option<u32> = None;
     let mut php_open_line: Option<u32> = None;
 
@@ -82,20 +182,18 @@ pub(crate) fn find_use_insert_position(content: &str) -> Position {
             && (trimmed.starts_with("use ") || trimmed.starts_with("use\t"))
             && !trimmed.starts_with("use (")
             && !trimmed.starts_with("use(")
+            && let Some(sort_key) = extract_use_sort_key(trimmed)
         {
-            last_use_line = Some(i as u32);
+            existing.push((i as u32, sort_key));
         }
     }
 
-    // Insert after the last `use`, or after `namespace`, or after `<?php`.
-    let target_line = last_use_line
-        .or(namespace_line)
-        .or(php_open_line)
-        .unwrap_or(0);
+    // Fallback: insert after `namespace`, or after `<?php`.
+    let fallback_line = namespace_line.or(php_open_line).map(|l| l + 1).unwrap_or(0);
 
-    Position {
-        line: target_line + 1,
-        character: 0,
+    UseBlockInfo {
+        existing,
+        fallback_line,
     }
 }
 
@@ -138,7 +236,8 @@ pub(crate) fn use_import_conflicts(fqn: &str, file_use_map: &HashMap<String, Str
 }
 
 /// Build an `additional_text_edits` entry that inserts a `use` statement
-/// for the given fully-qualified class name.
+/// for the given fully-qualified class name at the alphabetically correct
+/// position in the file's existing use block.
 ///
 /// When the FQN has no namespace separator (e.g. `PDO`, `DateTime`),
 /// an import is only needed if the current file declares a namespace —
@@ -146,7 +245,7 @@ pub(crate) fn use_import_conflicts(fqn: &str, file_use_map: &HashMap<String, Str
 /// statement is required.  Returns `None` in that case.
 pub(crate) fn build_use_edit(
     fqn: &str,
-    insert_pos: Position,
+    use_block: &UseBlockInfo,
     file_namespace: &Option<String>,
 ) -> Option<Vec<TextEdit>> {
     // No namespace separator → this is a global class (e.g. `PDO`, `DateTime`).
@@ -155,6 +254,8 @@ pub(crate) fn build_use_edit(
     if !fqn.contains('\\') && file_namespace.is_none() {
         return None;
     }
+
+    let insert_pos = use_block.insert_position_for(fqn);
 
     Some(vec![TextEdit {
         range: Range {
@@ -168,6 +269,24 @@ pub(crate) fn build_use_edit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Backward-compatible helper for tests: returns the position **after**
+    /// the last existing `use` statement (or the appropriate fallback).
+    fn find_use_insert_position(content: &str) -> Position {
+        let info = analyze_use_block(content);
+        if info.existing.is_empty() {
+            Position {
+                line: info.fallback_line,
+                character: 0,
+            }
+        } else {
+            let last_line = info.existing.last().expect("non-empty checked above").0;
+            Position {
+                line: last_line + 1,
+                character: 0,
+            }
+        }
+    }
 
     // ── use_import_conflicts ────────────────────────────────────────
 
@@ -279,10 +398,210 @@ mod tests {
         assert!(!use_import_conflicts("App\\Collection", &use_map));
     }
 
-    // ── find_use_insert_position ────────────────────────────────────
+    // ── extract_use_sort_key ────────────────────────────────────────
 
     #[test]
-    fn insert_after_last_use_statement() {
+    fn sort_key_simple_use() {
+        assert_eq!(
+            extract_use_sort_key("use Foo\\Bar;"),
+            Some("foo\\bar".to_string())
+        );
+    }
+
+    #[test]
+    fn sort_key_with_alias() {
+        assert_eq!(
+            extract_use_sort_key("use Foo\\Bar as Baz;"),
+            Some("foo\\bar".to_string())
+        );
+    }
+
+    #[test]
+    fn sort_key_grouped_use() {
+        assert_eq!(
+            extract_use_sort_key("use Foo\\{Bar, Baz};"),
+            Some("foo\\".to_string())
+        );
+    }
+
+    #[test]
+    fn sort_key_function_use() {
+        assert_eq!(
+            extract_use_sort_key("use function Foo\\bar;"),
+            Some("function foo\\bar".to_string())
+        );
+    }
+
+    #[test]
+    fn sort_key_const_use() {
+        assert_eq!(
+            extract_use_sort_key("use const Foo\\BAR;"),
+            Some("const foo\\bar".to_string())
+        );
+    }
+
+    #[test]
+    fn sort_key_leading_backslash_stripped() {
+        assert_eq!(
+            extract_use_sort_key("use \\Foo\\Bar;"),
+            Some("foo\\bar".to_string())
+        );
+    }
+
+    #[test]
+    fn sort_key_not_a_use_statement() {
+        assert_eq!(extract_use_sort_key("class Foo {}"), None);
+    }
+
+    #[test]
+    fn sort_key_closure_use_ignored() {
+        assert_eq!(extract_use_sort_key("use ($var)"), None);
+    }
+
+    // ── analyze_use_block ───────────────────────────────────────────
+
+    #[test]
+    fn collects_existing_uses_with_sort_keys() {
+        let content = "<?php\nnamespace App;\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass X {}\n";
+        let info = analyze_use_block(content);
+        assert_eq!(info.existing.len(), 2);
+        assert_eq!(info.existing[0], (2, "foo\\bar".to_string()));
+        assert_eq!(info.existing[1], (3, "baz\\qux".to_string()));
+    }
+
+    #[test]
+    fn fallback_after_namespace_when_no_use() {
+        let content = "<?php\nnamespace App;\n\nclass X {}\n";
+        let info = analyze_use_block(content);
+        assert!(info.existing.is_empty());
+        assert_eq!(info.fallback_line, 2);
+    }
+
+    #[test]
+    fn fallback_after_php_open_tag_when_no_namespace() {
+        let content = "<?php\n\nclass X {}\n";
+        let info = analyze_use_block(content);
+        assert!(info.existing.is_empty());
+        assert_eq!(info.fallback_line, 1);
+    }
+
+    #[test]
+    fn trait_use_inside_class_not_collected() {
+        let content = "<?php\nnamespace App;\nuse Foo\\Bar;\n\nclass X {\n    use SomeTrait;\n}\n";
+        let info = analyze_use_block(content);
+        // Only the top-level `use Foo\Bar;` should be collected.
+        assert_eq!(info.existing.len(), 1);
+        assert_eq!(info.existing[0], (2, "foo\\bar".to_string()));
+    }
+
+    // ── UseBlockInfo::insert_position_for ───────────────────────────
+
+    #[test]
+    fn insert_alphabetically_before_first() {
+        // Existing: App\Zoo (line 2). Inserting App\Alpha should go before it.
+        let info = UseBlockInfo {
+            existing: vec![(2, "app\\zoo".to_string())],
+            fallback_line: 1,
+        };
+        assert_eq!(
+            info.insert_position_for("App\\Alpha"),
+            Position {
+                line: 2,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn insert_alphabetically_after_last() {
+        // Existing: App\Alpha (line 2). Inserting App\Zoo should go after it.
+        let info = UseBlockInfo {
+            existing: vec![(2, "app\\alpha".to_string())],
+            fallback_line: 1,
+        };
+        assert_eq!(
+            info.insert_position_for("App\\Zoo"),
+            Position {
+                line: 3,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn insert_alphabetically_in_the_middle() {
+        // Existing: App\Alpha (line 2), App\Zoo (line 3).
+        // Inserting App\Middle should go between them.
+        let info = UseBlockInfo {
+            existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
+            fallback_line: 1,
+        };
+        assert_eq!(
+            info.insert_position_for("App\\Middle"),
+            Position {
+                line: 3,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn insert_uses_fallback_when_no_existing() {
+        let info = UseBlockInfo {
+            existing: vec![],
+            fallback_line: 2,
+        };
+        assert_eq!(
+            info.insert_position_for("App\\Foo"),
+            Position {
+                line: 2,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn insert_case_insensitive_comparison() {
+        // Existing: app\alpha (line 2), app\zoo (line 3).
+        // Inserting App\Middle (mixed case) should still land between them.
+        let info = UseBlockInfo {
+            existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
+            fallback_line: 1,
+        };
+        assert_eq!(
+            info.insert_position_for("APP\\MIDDLE"),
+            Position {
+                line: 3,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn insert_among_three_existing() {
+        // Existing: A (line 2), C (line 3), E (line 4).
+        // Inserting D should go before E (line 4).
+        let info = UseBlockInfo {
+            existing: vec![
+                (2, "a\\a".to_string()),
+                (3, "c\\c".to_string()),
+                (4, "e\\e".to_string()),
+            ],
+            fallback_line: 1,
+        };
+        assert_eq!(
+            info.insert_position_for("D\\D"),
+            Position {
+                line: 4,
+                character: 0,
+            }
+        );
+    }
+
+    // ── find_use_insert_position (backward compat) ──────────────────
+
+    #[test]
+    fn compat_insert_after_last_use_statement() {
         let content = "<?php\nnamespace App;\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass X {}\n";
         let pos = find_use_insert_position(content);
         assert_eq!(
@@ -295,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_after_namespace_when_no_use() {
+    fn compat_insert_after_namespace_when_no_use() {
         let content = "<?php\nnamespace App;\n\nclass X {}\n";
         let pos = find_use_insert_position(content);
         assert_eq!(
@@ -308,7 +627,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_after_php_open_tag_when_no_namespace() {
+    fn compat_insert_after_php_open_tag_when_no_namespace() {
         let content = "<?php\n\nclass X {}\n";
         let pos = find_use_insert_position(content);
         assert_eq!(
@@ -321,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn trait_use_inside_class_not_treated_as_import() {
+    fn compat_trait_use_inside_class_not_treated_as_import() {
         let content = "<?php\nnamespace App;\nuse Foo\\Bar;\n\nclass X {\n    use SomeTrait;\n}\n";
         let pos = find_use_insert_position(content);
         // Should insert after `use Foo\Bar;` (line 2), not after `use SomeTrait;`
@@ -330,6 +649,131 @@ mod tests {
             Position {
                 line: 3,
                 character: 0
+            }
+        );
+    }
+
+    // ── build_use_edit (alphabetical) ───────────────────────────────
+
+    #[test]
+    fn build_edit_inserts_at_correct_alpha_position() {
+        let info = UseBlockInfo {
+            existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
+            fallback_line: 1,
+        };
+        let edits = build_use_edit("App\\Middle", &info, &Some("App".to_string()))
+            .expect("should produce edit");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "use App\\Middle;\n");
+        assert_eq!(
+            edits[0].range.start,
+            Position {
+                line: 3,
+                character: 0
+            }
+        );
+    }
+
+    #[test]
+    fn build_edit_skips_global_class_without_namespace() {
+        let info = UseBlockInfo {
+            existing: vec![],
+            fallback_line: 1,
+        };
+        assert!(build_use_edit("PDO", &info, &None).is_none());
+    }
+
+    #[test]
+    fn build_edit_includes_global_class_with_namespace() {
+        let info = UseBlockInfo {
+            existing: vec![],
+            fallback_line: 2,
+        };
+        let edits =
+            build_use_edit("PDO", &info, &Some("App".to_string())).expect("should produce edit");
+        assert_eq!(edits[0].new_text, "use PDO;\n");
+        assert_eq!(
+            edits[0].range.start,
+            Position {
+                line: 2,
+                character: 0
+            }
+        );
+    }
+
+    // ── End-to-end: analyze_use_block + build_use_edit ──────────────
+
+    #[test]
+    fn end_to_end_insert_before_existing_alphabetically() {
+        let content = concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "use Exception;\n",
+            "use Stringable;\n",
+            "\n",
+            "class X {}\n",
+        );
+        let info = analyze_use_block(content);
+        let edits = build_use_edit("Cassandra\\DefaultCluster", &info, &Some("App".to_string()))
+            .expect("should produce edit");
+
+        assert_eq!(edits[0].new_text, "use Cassandra\\DefaultCluster;\n");
+        // `Cassandra\DefaultCluster` < `Exception`, so insert before line 2.
+        assert_eq!(
+            edits[0].range.start,
+            Position {
+                line: 2,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn end_to_end_insert_after_all_existing() {
+        let content = concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "use App\\Alpha;\n",
+            "use App\\Beta;\n",
+            "\n",
+            "class X {}\n",
+        );
+        let info = analyze_use_block(content);
+        let edits = build_use_edit("App\\Zeta", &info, &Some("App".to_string()))
+            .expect("should produce edit");
+
+        assert_eq!(edits[0].new_text, "use App\\Zeta;\n");
+        // `App\Zeta` > `App\Beta`, so insert after line 3 → line 4.
+        assert_eq!(
+            edits[0].range.start,
+            Position {
+                line: 4,
+                character: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn end_to_end_insert_between_existing() {
+        let content = concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "use App\\Alpha;\n",
+            "use App\\Zeta;\n",
+            "\n",
+            "class X {}\n",
+        );
+        let info = analyze_use_block(content);
+        let edits = build_use_edit("App\\Middle", &info, &Some("App".to_string()))
+            .expect("should produce edit");
+
+        assert_eq!(edits[0].new_text, "use App\\Middle;\n");
+        // `App\Middle` > `App\Alpha` but < `App\Zeta`, so insert at line 3.
+        assert_eq!(
+            edits[0].range.start,
+            Position {
+                line: 3,
+                character: 0,
             }
         );
     }

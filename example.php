@@ -22,6 +22,11 @@ use Demo\UserProfile as Profile;
 //  PLAYGROUND — try completion and go-to-definition here
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ── Alphabetical Auto-Import ────────────────────────────────────────────────
+// Try: type `new DateT` and accept `DateTime`. The `use DateTime;` statement
+// will be inserted between `use Exception;` and `use Stringable;` to maintain
+// alphabetical order.
+
 // ── Use-Import Conflict Resolution ──────────────────────────────────────────
 // The `use Exception;` import above occupies the short name "Exception".
 // Try: type `throw new pq\Exception();` below and accept the auto-import for
