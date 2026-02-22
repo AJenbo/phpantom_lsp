@@ -199,6 +199,124 @@ target.
 
 ---
 
+#### 41. `find_class_file_content` short-name collision breaks go-to-definition for inherited members
+
+When a child class and its parent share the same short name (e.g.
+`App\Console\Kernel extends Illuminate\Foundation\Console\Kernel`),
+go-to-definition on an inherited member like `$this->load()` fails.
+Completion works correctly because the resolution pipeline uses
+`find_or_load_class`, which is namespace-aware. But the definition
+handler calls `find_class_file_content(declaring_class.name, ...)` with
+just the short name `"Kernel"`. That function checks the current file
+first, finds the child's `Kernel` (same short name), and returns the
+wrong file. Then `find_member_position` cannot find the inherited method
+in the child file and returns `None`.
+
+This commonly surfaces with aliased imports that exist precisely because
+the names collide:
+
+```php
+namespace App\Console;
+use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
+
+class Kernel extends ConsoleKernel {
+    protected function commands(): void {
+        $this->load(); // go-to-definition fails, completion works
+    }
+}
+```
+
+The alias itself is resolved correctly (the use-map stores
+`ConsoleKernel` to the FQN, and `resolve_parent_class_names` applies
+it). The problem is purely in `find_class_file_content` in
+`definition/member.rs`, which matches by short name without considering
+the file's namespace.
+
+**Fix:** make `find_class_file_content` namespace-aware, mirroring the
+logic in `find_class_in_ast_map` (which already cross-checks
+`namespace_map`). The function could accept the FQN instead of the short
+name, or it could take an optional expected namespace and skip files
+whose namespace does not match.
+
+---
+
+#### 43. Go-to-definition on foreach variable jumps to previous loop instead of recognising current definition site
+
+When the same variable name is used in consecutive `foreach` loops,
+go-to-definition on the `as $var` in the second loop incorrectly jumps
+to the first loop:
+
+```php
+foreach ($a as $b) {
+}
+foreach ($c as $b) { // go-to-definition on $b jumps to previous loop
+}
+```
+
+The cursor on `$b` in the second `foreach` is already at a definition
+site (the `as` clause assigns `$b`), so there should be no jump at all.
+
+The bug is in `resolve_variable_definition` in `definition/variable.rs`.
+The function skips the cursor line and scans backwards, assuming that if
+the cursor is at a definition site there will be nothing earlier to find.
+That assumption breaks when the same variable is redefined in a later
+scope. The backwards scan finds the previous `as $b` and returns it.
+
+**Fix:** before scanning backwards, check whether the cursor line itself
+defines the variable (using `line_defines_variable`). If it does, return
+`None` immediately so the caller falls through to type-hint resolution
+(or returns nothing for constructs like `foreach` that have no navigable
+type hint).
+
+---
+
+#### 42. Array element access (`$var[0]->`) fails when variable type comes from an assignment
+
+When a variable holds an array returned from a method call, `$var[0]->`
+offers no completion and go-to-definition on the subsequent method call
+fails. For example:
+
+```php
+$attributes = (new \ReflectionClass(static::class))
+    ->getAttributes(UseFactory::class);
+
+$attributes[0]->newInstance(); // no completion, no definition
+```
+
+`ReflectionClass::getAttributes()` returns `ReflectionAttribute<T>[]`,
+so `$attributes[0]` should resolve to `ReflectionAttribute`. Two
+independent gaps prevent this:
+
+1. **AST path (`resolve_rhs_array_access` in `variable_resolution.rs`)**
+   only checks docblock annotations (`@var` / `@param`) for the base
+   variable's iterable type. It does not fall back to assignment-based
+   type inference, so `$attributes[0]` gets nothing when there is no
+   explicit `@var` annotation.
+
+2. **Text path (`resolve_chained_array_access` via
+   `extract_raw_type_from_assignment_text`)** delegates to
+   `resolve_raw_type_from_call_chain`, which splits the callee at
+   `rfind("->")`. For multi-line chains this leaves trailing
+   whitespace/newlines in the LHS (e.g.
+   `"(new \\ReflectionClass(...))\n    "`), causing
+   `extract_new_expression_class` to fail its `ends_with(')')` check.
+   Even in the single-line case the text path works only when every
+   intermediate step resolves correctly; any gap in the chain aborts.
+
+**Fix (AST path):** after the docblock lookup returns nothing, fall back
+to resolving the base variable via the normal assignment scanner
+(`resolve_variable_types` or an equivalent), extract the resulting
+`ClassInfo`'s iterable element type (e.g. from its `@return` annotation
+or generic parameter), and use that as the element type.
+
+**Fix (text path):** trim whitespace from the LHS in
+`resolve_raw_type_from_call_chain` before passing it to
+`resolve_lhs_to_class`, and similarly trim in `resolve_lhs_to_class`
+before the `starts_with('(') && ends_with(')')` check in
+`extract_new_expression_class`.
+
+---
+
 ### Remaining by user need
 
 #### 27. No completion inside string interpolation
