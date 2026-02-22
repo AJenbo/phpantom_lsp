@@ -8,6 +8,133 @@ long-tail polish.
 
 ---
 
+## Composer Environment Detection & Warnings
+
+### 37. Warn when composer.json is missing or classmap is not optimized
+
+PHPantom relies on Composer artifacts (`vendor/composer/autoload_classmap.php`,
+`autoload_psr4.php`, `autoload_files.php`) for class discovery. When these
+are missing or incomplete, completions silently degrade. The user should be
+told what's wrong and offered help fixing it.
+
+#### Detection (during `initialized`)
+
+| Condition | Severity | Message |
+|---|---|---|
+| No `composer.json` in workspace root | Warning | "No composer.json found. Class completions will be limited to open files and stubs." |
+
+For the no-composer.json case, offer to generate a minimal one via
+`window/showMessageRequest`:
+
+1. **"Generate composer.json"** — create a `composer.json` that maps
+   the entire project root as a classmap (`"autoload": {"classmap": ["./"]}`).
+   Then run `composer dump-autoload -o` to build the classmap. This
+   covers legacy projects and single-directory setups that don't follow
+   PSR-4 conventions.
+2. **"Dismiss"** — do nothing.
+
+| `composer.json` exists but `vendor/` directory is missing | Warning | "No vendor directory found. Run `composer install` to enable full completions." |
+| PSR-4 prefixes exist but no user classes in classmap | Info | "Composer classmap does not contain your project classes. Run `composer dump-autoload -o` for full class completions." |
+
+The third condition needs care. The classmap is rarely empty because
+vendor packages like PHPUnit use `classmap` autoloading (not PSR-4), so
+there will be vendor entries even without `-o`. The real signal is:
+the project's `composer.json` declares PSR-4 prefixes (e.g. `App\`,
+`Tests\`), but none of the classmap FQNs start with any of those
+project prefixes. This means the user's own classes were not dumped
+into the classmap, which is exactly what `-o` fixes.
+
+Detection logic:
+1. Collect non-vendor PSR-4 prefixes from `psr4_mappings` (already
+   tagged with `is_vendor`).
+2. After loading the classmap, check whether any classmap FQN starts
+   with one of those prefixes.
+3. If there are project PSR-4 prefixes but zero matching classmap
+   entries, the autoloader is not optimized.
+
+#### Actions (via `window/showMessageRequest`)
+
+For the non-optimized classmap case, offer action buttons:
+
+1. **"Run composer dump-autoload -o"** — spawn the command in the
+   workspace root, reload the classmap on success, show a progress
+   notification.
+2. **"Add to composer.json & run"** — add
+   `"config": {"optimize-autoloader": true}` to `composer.json` so
+   future `composer install` / `composer update` always produce an
+   optimized classmap, then run `composer dump-autoload`.
+3. **"Dismiss"** — do nothing.
+
+#### UX guidelines
+
+- The no-composer.json and no-vendor warnings are safe to show via
+  `window/showMessage` (informational, no action taken).
+- The classmap warning should use `window/showMessageRequest` with
+  action buttons so the user explicitly opts in before we touch files
+  or run commands.
+- Only show once per session. Do not re-trigger on every `didOpen`.
+- Never modify `composer.json` or run commands without explicit user
+  confirmation via an action button.
+- If the spawned `composer` command fails (e.g. PHP not installed
+  locally, Docker-only setup), catch the error gracefully and show
+  "Composer command failed. You may need to run it manually."
+- Log the detection result to the output panel regardless (already done
+  for the "Loaded N classmap entries" message, just add context when
+  zero user classes are found).
+
+---
+
+### 38. File system watching for vendor and project changes
+
+PHPantom loads Composer artifacts (classmap, PSR-4 mappings, autoload
+files) once during `initialized` and caches them for the session. If
+the user runs `composer update`, `composer require`, or `composer remove`
+while the editor is open, the cached data goes stale. The user gets
+completions and go-to-definition based on the old package versions
+until they restart the editor.
+
+#### What to watch
+
+| Path | Trigger | Action |
+|---|---|---|
+| `vendor/composer/autoload_classmap.php` | Changed | Reload classmap |
+| `vendor/composer/autoload_psr4.php` | Changed | Reload PSR-4 mappings |
+| `vendor/composer/autoload_files.php` | Changed | Re-scan autoload files for global functions/constants |
+| `composer.json` | Changed | Reload project PSR-4 prefixes, re-check vendor dir |
+| `composer.lock` | Changed | Good secondary signal that packages changed |
+
+All three `autoload_*.php` files are rewritten atomically by Composer
+on every `install`, `update`, `require`, `remove`, and `dump-autoload`.
+Watching these is sufficient to catch any package change.
+
+#### Implementation options
+
+1. **LSP `workspace/didChangeWatchedFiles`** — register file watchers
+   via `client/registerCapability` during `initialized`. The editor
+   handles the OS-level watching and sends notifications. This is the
+   cleanest approach and works cross-platform. Register glob patterns
+   for the vendor Composer files and `composer.json`.
+
+2. **Server-side `notify` crate** — use the `notify` Rust crate to
+   watch the file system directly. More control but adds a dependency
+   and duplicates what the editor already provides.
+
+Option 1 is preferred. The LSP spec's `DidChangeWatchedFilesRegistrationOptions`
+supports glob patterns like `**/vendor/composer/autoload_*.php`.
+
+#### Reload strategy
+
+- On change notification, re-run the same parsing logic from
+  `initialized` for the affected artifact.
+- Invalidate `class_index` entries that came from vendor files (their
+  parsed AST may have changed).
+- Clear and re-populate `classmap` from the new `autoload_classmap.php`.
+- Log the reload to the output panel so the user knows it happened.
+- Debounce rapid changes (Composer writes multiple files in sequence)
+  with a short delay (e.g. 500ms) to avoid redundant reloads.
+
+---
+
 ## Completion & Go-to-Definition Gaps
 
 ### Competitive parity (close the gap with PHPStorm / Intelephense)
@@ -23,6 +150,36 @@ Most PHP LSPs show namespace segments as folder-like completions so the
 user can incrementally drill into the namespace tree. PHPantom jumps
 straight to full class names, which works but can be overwhelming in
 large projects with deep namespace hierarchies.
+
+---
+
+#### 39. Conflicting use-import resolution
+
+When auto-importing a class whose short name collides with an existing
+`use` statement, the LSP blindly inserts a second `use` with the same
+short name. For example, if the file already has `use Cassandra\Exception;`
+and the user accepts a completion for PHP's built-in `Exception`, the LSP
+inserts `use Exception;` which is a compile error.
+
+The correct behaviour is to detect the conflict and fall back to inserting
+a fully-qualified reference (`\Exception`) at the usage site instead of
+adding a `use` statement. As stretch behaviour, the LSP could try to
+generate a sensible alias (`use MongoDB\Driver\Exception\Exception as
+MongoDBException;`). Smart aliasing would be especially useful in the
+`use` completion context where the user is explicitly managing imports
+and would benefit from a suggested alias rather than a silent fallback
+to FQN.
+
+---
+
+#### 40. Insert `use` statements in alphabetical order
+
+Auto-imported `use` statements are currently appended at the bottom of the
+existing `use` block. Most PHP coding standards (PSR-12, Symfony, Laravel)
+expect `use` statements to be sorted alphabetically. The LSP should scan
+the existing imports, find the correct insertion point to maintain
+alphabetical order, and place the new statement there instead of at the
+end.
 
 ---
 
