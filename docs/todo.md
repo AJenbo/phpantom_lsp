@@ -199,36 +199,6 @@ target.
 
 ---
 
-#### 43. Go-to-definition on foreach variable jumps to previous loop instead of recognising current definition site
-
-When the same variable name is used in consecutive `foreach` loops,
-go-to-definition on the `as $var` in the second loop incorrectly jumps
-to the first loop:
-
-```php
-foreach ($a as $b) {
-}
-foreach ($c as $b) { // go-to-definition on $b jumps to previous loop
-}
-```
-
-The cursor on `$b` in the second `foreach` is already at a definition
-site (the `as` clause assigns `$b`), so there should be no jump at all.
-
-The bug is in `resolve_variable_definition` in `definition/variable.rs`.
-The function skips the cursor line and scans backwards, assuming that if
-the cursor is at a definition site there will be nothing earlier to find.
-That assumption breaks when the same variable is redefined in a later
-scope. The backwards scan finds the previous `as $b` and returns it.
-
-**Fix:** before scanning backwards, check whether the cursor line itself
-defines the variable (using `line_defines_variable`). If it does, return
-`None` immediately so the caller falls through to type-hint resolution
-(or returns nothing for constructs like `foreach` that have no navigable
-type hint).
-
----
-
 #### 42. Array element access (`$var[0]->`) fails when variable type comes from an assignment
 
 When a variable holds an array returned from a method call, `$var[0]->`

@@ -91,11 +91,19 @@ impl Backend {
         let lines: Vec<&str> = content.lines().collect();
         let cursor_line = position.line as usize;
 
-        // Scan backwards from the line *before* the cursor.  If the cursor
-        // line itself contains a definition we skip it — the user is
-        // presumably already looking at it.  (If the cursor is on the
-        // definition, there is nothing earlier to jump to, so we fall
-        // through and return None.)
+        // If the cursor line itself defines the variable (e.g. `as $b` in
+        // a foreach, or `$var = …`), the user is already at a definition
+        // site.  Return None so the caller can fall through to type-hint
+        // resolution or simply report "no further definition".  Without
+        // this check, the backwards scan below would find an *earlier*
+        // definition of the same variable (e.g. in a previous foreach
+        // loop) and jump there incorrectly.
+        if cursor_line < lines.len()
+            && Self::line_defines_variable(lines[cursor_line], var_name).is_some()
+        {
+            return None;
+        }
+
         let search_end = cursor_line;
 
         for line_idx in (0..search_end).rev() {

@@ -1685,3 +1685,179 @@ async fn test_goto_definition_property_at_definition_jumps_to_type_hint() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Foreach Variable: Consecutive Loops with Same Variable Name ────────────
+
+#[tokio::test]
+async fn test_goto_definition_foreach_consecutive_loops_same_var() {
+    // Reproduces issue #43: when the same variable name is used in
+    // consecutive foreach loops, clicking on `$b` inside the second
+    // loop body should jump to the second foreach's `as $b`, not the
+    // first loop's.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_consecutive.php").unwrap();
+    let text = concat!(
+        "<?php\n",                    // 0
+        "function demo(): void {\n",  // 1
+        "    foreach ($a as $b) {\n", // 2
+        "        echo $b;\n",         // 3
+        "    }\n",                    // 4
+        "    foreach ($c as $b) {\n", // 5
+        "        echo $b;\n",         // 6
+        "    }\n",                    // 7
+        "}\n",                        // 8
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$b` in `echo $b;` on line 6 (inside the second loop).
+    // Should jump to line 5 (`as $b` in the second foreach), NOT line 2.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 6,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $b to the second foreach declaration"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 5,
+                "$b should jump to line 5 (second foreach), not line 2 (first foreach)"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_foreach_on_as_variable_returns_none() {
+    // When the cursor is on `$b` in `as $b` (the definition site itself),
+    // go-to-definition should return None — the user is already at the
+    // definition.  Previously the backwards scan found an earlier foreach
+    // with the same variable and jumped there.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_on_as.php").unwrap();
+    let text = concat!(
+        "<?php\n",                    // 0
+        "function demo(): void {\n",  // 1
+        "    foreach ($a as $b) {\n", // 2
+        "    }\n",                    // 3
+        "    foreach ($c as $b) {\n", // 4
+        "    }\n",                    // 5
+        "}\n",                        // 6
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$b` in `as $b` on line 4 (the second foreach's
+    // definition site).
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 24,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Should return None when cursor is on `as $b` (already at definition site), \
+         but got: {:?}. This means it jumped to the first foreach incorrectly.",
+        result,
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_foreach_reassignment_inside_loop() {
+    // When $b is redefined by assignment inside a loop, the usage after
+    // the assignment should jump to the assignment, not the foreach.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_reassign.php").unwrap();
+    let text = concat!(
+        "<?php\n",                       // 0
+        "function demo(): void {\n",     // 1
+        "    foreach ($a as $b) {\n",    // 2
+        "        $b = 'overwritten';\n", // 3
+        "        echo $b;\n",            // 4
+        "    }\n",                       // 5
+        "}\n",                           // 6
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor on `$b` in `echo $b;` on line 4.
+    // Should jump to line 3 (the reassignment), not line 2 (the foreach).
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $b to the reassignment on line 3"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 3,
+                "$b should jump to the reassignment on line 3"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
