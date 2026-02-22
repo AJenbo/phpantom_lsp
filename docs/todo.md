@@ -199,53 +199,6 @@ target.
 
 ---
 
-#### 42. Array element access (`$var[0]->`) fails when variable type comes from an assignment
-
-When a variable holds an array returned from a method call, `$var[0]->`
-offers no completion and go-to-definition on the subsequent method call
-fails. For example:
-
-```php
-$attributes = (new \ReflectionClass(static::class))
-    ->getAttributes(UseFactory::class);
-
-$attributes[0]->newInstance(); // no completion, no definition
-```
-
-`ReflectionClass::getAttributes()` returns `ReflectionAttribute<T>[]`,
-so `$attributes[0]` should resolve to `ReflectionAttribute`. Two
-independent gaps prevent this:
-
-1. **AST path (`resolve_rhs_array_access` in `variable_resolution.rs`)**
-   only checks docblock annotations (`@var` / `@param`) for the base
-   variable's iterable type. It does not fall back to assignment-based
-   type inference, so `$attributes[0]` gets nothing when there is no
-   explicit `@var` annotation.
-
-2. **Text path (`resolve_chained_array_access` via
-   `extract_raw_type_from_assignment_text`)** delegates to
-   `resolve_raw_type_from_call_chain`, which splits the callee at
-   `rfind("->")`. For multi-line chains this leaves trailing
-   whitespace/newlines in the LHS (e.g.
-   `"(new \\ReflectionClass(...))\n    "`), causing
-   `extract_new_expression_class` to fail its `ends_with(')')` check.
-   Even in the single-line case the text path works only when every
-   intermediate step resolves correctly; any gap in the chain aborts.
-
-**Fix (AST path):** after the docblock lookup returns nothing, fall back
-to resolving the base variable via the normal assignment scanner
-(`resolve_variable_types` or an equivalent), extract the resulting
-`ClassInfo`'s iterable element type (e.g. from its `@return` annotation
-or generic parameter), and use that as the element type.
-
-**Fix (text path):** trim whitespace from the LHS in
-`resolve_raw_type_from_call_chain` before passing it to
-`resolve_lhs_to_class`, and similarly trim in `resolve_lhs_to_class`
-before the `starts_with('(') && ends_with(')')` check in
-`extract_new_expression_class`.
-
----
-
 ### Remaining by user need
 
 #### 27. No completion inside string interpolation

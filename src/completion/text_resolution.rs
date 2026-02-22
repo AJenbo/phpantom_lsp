@@ -559,8 +559,8 @@ impl Backend {
         // Split at the rightmost `->` to get the final method name and
         // the LHS expression that produces the owning object.
         let pos = callee.rfind("->")?;
-        let lhs = &callee[..pos];
-        let method_name = &callee[pos + 2..];
+        let lhs = callee[..pos].trim();
+        let method_name = callee[pos + 2..].trim();
 
         // Resolve LHS to a class.
         let owner = Self::resolve_lhs_to_class(lhs, current_class, all_classes, class_loader)?;
@@ -578,6 +578,11 @@ impl Backend {
         all_classes: &[ClassInfo],
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
     ) -> Option<ClassInfo> {
+        // Trim whitespace so that multi-line call chains (where
+        // `rfind("->")` leaves trailing newlines/spaces on the LHS)
+        // are handled correctly by all downstream checks.
+        let lhs = lhs.trim();
+
         // `$this` / `self` / `static`
         if lhs == "$this" || lhs == "self" || lhs == "static" {
             return current_class.cloned();

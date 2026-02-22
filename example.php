@@ -1502,6 +1502,35 @@ class FirstClassCallableDemo
 }
 
 
+// ── Array Element Access from Assignments ───────────────────────────────────
+
+class ArrayAccessDemo
+{
+    /** @return User[] */
+    public function getUsers(): array { return []; }
+
+    public function singleLine(): void
+    {
+        $users = $this->getUsers();
+        $users[0]->getName();             // resolves to User
+    }
+
+    public function multiLineChain(): void
+    {
+        $gifts = (new GiftShop())
+            ->getGifts();
+        $gifts[0]->open();                // resolves to Gift (element of Gift[])
+    }
+
+    public function intermediateVariable(): void
+    {
+        $users = $this->getUsers();
+        $first = $users[0];
+        $first->getEmail();               // resolves to User via $first = $users[0]
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃

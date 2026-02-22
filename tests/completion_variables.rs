@@ -12237,6 +12237,310 @@ async fn test_chained_method_call_extract_raw_type_chain() {
     }
 }
 
+// ─── Array element access from assignment (no docblock on variable) ─────────
+
+/// When `$attributes` is assigned from a multi-line `(new Foo())->method()`
+/// chain, `$attributes[0]->` should still resolve the element type.
+/// The text path must trim whitespace from the LHS when splitting at `->`.
+#[tokio::test]
+async fn test_array_access_multiline_new_expression_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///multiline_array_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class UseFactory {\n",
+        "    public function newInstance(): self { return new self(); }\n",
+        "    public function getName(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class MyReflectionClass {\n",
+        "    /** @return UseFactory[] */\n",
+        "    public function getAttributes(): array { return []; }\n",
+        "}\n",
+        "\n",
+        "class Handler {\n",
+        "    public function run(): void {\n",
+        "        $attributes = (new MyReflectionClass())\n",
+        "            ->getAttributes();\n",
+        "\n",
+        "        $attributes[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$attributes[0]->` on line 16
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 16,
+                character: 24,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for array element from multi-line new expression chain"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("newInstance")),
+                "Should include newInstance from UseFactory via multi-line chain, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getName")),
+                "Should include getName from UseFactory via multi-line chain, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// When `$this->repo->findAll()` returns `Product[]`, indexing into
+/// the result with `$items[0]->` should resolve the element type.
+/// This exercises the text path through `resolve_raw_type_from_call_chain`
+/// with a property-based LHS (`$this->repo`).
+#[tokio::test]
+async fn test_array_access_property_method_call_assignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///prop_array_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public function getTitle(): string { return ''; }\n",
+        "    public function getPrice(): float { return 0.0; }\n",
+        "}\n",
+        "\n",
+        "class ProductRepo {\n",
+        "    /** @return Product[] */\n",
+        "    public function findAll(): array { return []; }\n",
+        "}\n",
+        "\n",
+        "class ProductService {\n",
+        "    public ProductRepo $repo;\n",
+        "\n",
+        "    public function doStuff(): void {\n",
+        "        $items = $this->repo->findAll();\n",
+        "        $items[0]->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$items[0]->` on line 16
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 16,
+                character: 19,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $items[0]-> after $this->repo->findAll()"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTitle")),
+                "Should include getTitle from Product, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getPrice")),
+                "Should include getPrice from Product, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// AST path: when `$first = $items[0]` and `$items` was assigned from a
+/// method returning `User[]`, `$first->` should resolve to User.
+/// This exercises the `resolve_rhs_array_access` fallback.
+#[tokio::test]
+async fn test_array_access_intermediate_assignment_ast_path() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ast_array_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public function getId(): int { return 0; }\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "}\n",
+        "\n",
+        "class OrderService {\n",
+        "    /** @return Order[] */\n",
+        "    public function getOrders(): array { return []; }\n",
+        "\n",
+        "    public function process(): void {\n",
+        "        $orders = $this->getOrders();\n",
+        "        $first = $orders[0];\n",
+        "        $first->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$first->` on line 13
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $first after $first = $orders[0]"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getId")),
+                "Should include getId from Order via intermediate $first = $orders[0], got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getTotal")),
+                "Should include getTotal from Order via intermediate $first = $orders[0], got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// AST path with generic syntax: `@return array<int, User>` should also
+/// work through the intermediate assignment fallback.
+#[tokio::test]
+async fn test_array_access_intermediate_assignment_generic_syntax() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///ast_array_access_generic.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Task {\n",
+        "    public function run(): void {}\n",
+        "    public function getStatus(): string { return ''; }\n",
+        "}\n",
+        "\n",
+        "class TaskQueue {\n",
+        "    /** @return array<int, Task> */\n",
+        "    public function pending(): array { return []; }\n",
+        "\n",
+        "    public function processNext(): void {\n",
+        "        $tasks = $this->pending();\n",
+        "        $task = $tasks[0];\n",
+        "        $task->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `$task->` on line 13
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return completions for $task after $task = $tasks[0] with generic return type"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("run")),
+                "Should include run from Task via array<int, Task>[0], got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getStatus")),
+                "Should include getStatus from Task via array<int, Task>[0], got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ─── Named key destructuring from array shapes ─────────────────────────────
 
 /// `['user' => $person] = $data` where `$data` is `array{user: User, active: bool}`

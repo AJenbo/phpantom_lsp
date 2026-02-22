@@ -1356,7 +1356,7 @@ impl Backend {
     }
 
     /// Resolve `$arr[0]` / `$arr[$key]` by extracting the generic element
-    /// type from the base array's annotation.
+    /// type from the base array's annotation or assignment.
     fn resolve_rhs_array_access<'b>(
         array_access: &ArrayAccess<'b>,
         expr: &'b Expression<'b>,
@@ -1365,9 +1365,34 @@ impl Backend {
         if let Expression::Variable(Variable::Direct(base_dv)) = array_access.array {
             let base_var = base_dv.name.to_string();
             let access_offset = expr.span().start.offset as usize;
+
+            // Strategy 1: docblock annotation (`@var`, `@param`).
             if let Some(raw_type) =
                 docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
                 && let Some(element_type) = docblock::types::extract_generic_value_type(&raw_type)
+            {
+                return Self::type_hint_to_classes(
+                    &element_type,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+            }
+
+            // Strategy 2: resolve the base variable's type via assignment
+            // scanning (text path) and extract the iterable element type.
+            // This handles cases like `$attrs = $ref->getAttributes();`
+            // where there is no explicit `@var` annotation but the method
+            // return type is `ReflectionAttribute[]`.
+            let current_class = Some(ctx.current_class);
+            if let Some(raw_type) = Self::extract_raw_type_from_assignment_text(
+                &base_var,
+                ctx.content,
+                access_offset,
+                current_class,
+                ctx.all_classes,
+                ctx.class_loader,
+            ) && let Some(element_type) = docblock::types::extract_generic_value_type(&raw_type)
             {
                 return Self::type_hint_to_classes(
                     &element_type,
