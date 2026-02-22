@@ -2530,7 +2530,7 @@ async fn test_fqn_leading_backslash_single_segment_same_namespace() {
 /// end with a semicolon so the statement is complete.
 #[tokio::test]
 async fn test_use_function_no_parentheses() {
-    let backend = create_test_backend_with_stubs();
+    let backend = create_test_backend_with_function_stubs();
 
     let uri = Url::parse("file:///use_func_parens.php").unwrap();
     let text = concat!("<?php\n", "use function array_ma\n",);
