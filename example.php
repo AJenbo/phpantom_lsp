@@ -689,6 +689,30 @@ class PropertyChainDemo
 }
 
 
+// ── Variable Property Access via Intermediate Variables ──────────────────────
+
+class VariablePropertyAccessDemo
+{
+    public Order $order;
+
+    public function fromNewInstance(): void
+    {
+        $customer = new Customer('a@b.com', new Address());
+        $addr = $customer->address;
+        $addr->city;                      // Address::$city
+        $addr->format();                  // Address::format()
+    }
+
+    public function fromThisProperty(): void
+    {
+        $o = $this->order;
+        $c = $o->customer;
+        $c->email;                        // Customer::$email
+        $c->address->zip;                 // chained from resolved variable
+    }
+}
+
+
 // ── Match / Ternary / Null-Coalescing Type Accumulation ─────────────────────
 
 class ExpressionTypeDemo

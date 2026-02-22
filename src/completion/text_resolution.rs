@@ -146,7 +146,7 @@ impl Backend {
     /// - Static calls (`ClassName::methodName(…)`)
     /// - Chained calls (`$this->getRepo()->findAll()`)
     /// - `new ClassName(…)` expressions
-    /// - Property access (`$this->propName`)
+    /// - Property access (`$this->propName`, `$var->propName`)
     /// - Known array functions (`array_filter`, `array_map`, etc.)
     pub(super) fn extract_raw_type_from_assignment_text(
         base_var: &str,
@@ -335,6 +335,38 @@ impl Backend {
             && let Some(owner) = current_class
         {
             return Self::resolve_property_type_hint(owner, prop_name, class_loader);
+        }
+
+        // RHS is a property access on another variable: `$var->propName`
+        if let Some(arrow_pos) = rhs_text.find("->") {
+            let var_part = rhs_text[..arrow_pos].trim();
+            let prop_part = rhs_text[arrow_pos + 2..].trim();
+            if var_part.starts_with('$')
+                && var_part != "$this"
+                && !prop_part.is_empty()
+                && prop_part.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
+                // Recursively resolve the variable's type.
+                if let Some(var_type) = Self::extract_raw_type_from_assignment_text(
+                    var_part,
+                    content,
+                    cursor_offset,
+                    current_class,
+                    all_classes,
+                    class_loader,
+                ) {
+                    let clean = crate::docblock::types::clean_type(&var_type);
+                    let lookup = short_name(&clean);
+                    let owner_class = all_classes
+                        .iter()
+                        .find(|c| c.name == lookup)
+                        .cloned()
+                        .or_else(|| class_loader(&clean));
+                    if let Some(owner) = owner_class {
+                        return Self::resolve_property_type_hint(&owner, prop_part, class_loader);
+                    }
+                }
+            }
         }
 
         None

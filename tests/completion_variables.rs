@@ -14528,3 +14528,370 @@ async fn test_completion_foreach_array_filter_this_property_arg() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Test that `$var->propName` resolves via the text-based path when `$var`
+/// is assigned from `new ClassName()`.
+#[tokio::test]
+async fn test_completion_variable_property_access_text_path() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_prop_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Address {\n",
+        "    public string $city;\n",
+        "    public function getZip(): string { return ''; }\n",
+        "}\n",
+        "class Person {\n",
+        "    public Address $address;\n",
+        "    public function test() {\n",
+        "        $user = new Person();\n",
+        "        $addr = $user->address;\n",
+        "        $addr->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for $addr = $user->address; $addr->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("city")),
+                "Should include 'city' property from Address, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("getZip")),
+                "Should include 'getZip' method from Address, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var->propName` where `$var` is resolved from `$this->prop`.
+#[tokio::test]
+async fn test_completion_variable_property_access_from_this() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_prop_from_this.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Engine {\n",
+        "    public int $horsepower;\n",
+        "    public function start(): void {}\n",
+        "}\n",
+        "class Car {\n",
+        "    public Engine $engine;\n",
+        "    public function test() {\n",
+        "        $e = $this->engine;\n",
+        "        $hp = $e->horsepower;\n",
+        "        // This tests that $e->horsepower resolves Engine first\n",
+        "        $e->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for $e = $this->engine; $e->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("horsepower")),
+                "Should include 'horsepower' property from Engine, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("start")),
+                "Should include 'start' method from Engine, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var->propName` resolves through an intermediate variable
+/// assignment chain (two hops).
+#[tokio::test]
+async fn test_completion_variable_property_access_chained_assignments() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_prop_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Wheel {\n",
+        "    public string $brand;\n",
+        "    public function rotate(): void {}\n",
+        "}\n",
+        "class Axle {\n",
+        "    public Wheel $frontLeft;\n",
+        "}\n",
+        "class Chassis {\n",
+        "    public Axle $axle;\n",
+        "    public function test() {\n",
+        "        $a = $this->axle;\n",
+        "        $w = $a->frontLeft;\n",
+        "        $w->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for chained $a->frontLeft; $w->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("brand")),
+                "Should include 'brand' property from Wheel, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("rotate")),
+                "Should include 'rotate' method from Wheel, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test `$var->propName` cross-file: the variable and property types
+/// come from a different file loaded via PSR-4.
+#[tokio::test]
+async fn test_completion_variable_property_access_cross_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Models/Address.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Models;\n",
+                    "class Address {\n",
+                    "    public string $street;\n",
+                    "    public function format(): string { return ''; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Models/Customer.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App\\Models;\n",
+                    "class Customer {\n",
+                    "    public Address $address;\n",
+                    "    public function test() {\n",
+                    "        $c = new Customer();\n",
+                    "        $a = $c->address;\n",
+                    "        $a->\n",
+                    "    }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let cust_path = _dir.path().join("src/Models/Customer.php");
+    let uri = Url::from_file_path(&cust_path).unwrap();
+    let text = std::fs::read_to_string(&cust_path).unwrap();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for $a = $c->address; $a-> (cross-file)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("street")),
+                "Should include 'street' property from Address, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("format")),
+                "Should include 'format' method from Address, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Test top-level (outside class) `$var->propName` resolution.
+#[tokio::test]
+async fn test_completion_variable_property_access_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///var_prop_top_level.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public string $dsn;\n",
+        "    public function validate(): bool { return true; }\n",
+        "}\n",
+        "class AppContext {\n",
+        "    public Config $config;\n",
+        "}\n",
+        "$app = new AppContext();\n",
+        "$cfg = $app->config;\n",
+        "$cfg->\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should return results for top-level $cfg = $app->config; $cfg->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("dsn")),
+                "Should include 'dsn' property from Config, got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("validate")),
+                "Should include 'validate' method from Config, got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

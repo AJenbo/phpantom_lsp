@@ -187,29 +187,6 @@ $greeting = "Hello {$user->}";
 
 ---
 
-#### 20. Non-`$this` property access in text-based assignment path
-
-In `extract_raw_type_from_assignment_text` (`completion/text_resolution.rs`),
-property access on the RHS is only handled for `$this->propName`.  When
-the RHS is `$otherVar->propName`, it falls through to `None`:
-
-```php
-$user = getUser();
-$address = $user->address;  // text-based path returns None
-$address->  // ← no completion (unless the AST-based path catches it)
-```
-
-The AST-based path in `resolve_rhs_expression` handles this correctly,
-so the gap only surfaces in the text-based fallback used for intermediate
-chained assignments and some edge cases.
-
-**Fix:** after the `$this->propName` check, add a branch that resolves
-`$var->propName` by first resolving `$var`'s type via
-`extract_raw_type_from_assignment_text` (recursively), then looking up
-the property on the resulting class.
-
----
-
 #### 34 / 36. No go-to-definition for built-in (stub) functions and constants
 
 Clicking on a built-in function name like `array_map`, `strlen`, or
