@@ -406,6 +406,11 @@ impl Backend {
         if let Ok(mut map) = self.namespace_map.lock() {
             map.remove(uri);
         }
+        // Remove class_index entries that belonged to this file so
+        // stale FQNs don't linger after the file is closed.
+        if let Ok(mut idx) = self.class_index.lock() {
+            idx.retain(|_, file_uri| file_uri != uri);
+        }
     }
 
     pub(crate) async fn log(&self, typ: MessageType, message: String) {

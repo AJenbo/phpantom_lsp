@@ -28,6 +28,9 @@ pub struct Psr4Mapping {
     pub prefix: String,
     /// The base directory path relative to the workspace root (e.g. `"src/Klarna/"`).
     pub base_path: String,
+    /// Whether this mapping comes from a vendor package (as opposed to
+    /// the project's own `composer.json`).
+    pub is_vendor: bool,
 }
 
 /// Parse a `composer.json` file at the given workspace root and extract all
@@ -152,6 +155,7 @@ pub fn parse_vendor_autoload_psr4(workspace_root: &Path, vendor_dir: &str) -> Ve
                     mappings.push(Psr4Mapping {
                         prefix: normalised_prefix.clone(),
                         base_path: normalise_path(&base_path),
+                        is_vendor: true,
                     });
                 }
             }
@@ -320,6 +324,7 @@ fn extract_psr4_entries(prefix: &str, paths: &serde_json::Value, mappings: &mut 
             mappings.push(Psr4Mapping {
                 prefix: normalised_prefix.clone(),
                 base_path: normalise_path(path),
+                is_vendor: false,
             });
         }
         serde_json::Value::Array(arr) => {
@@ -328,6 +333,7 @@ fn extract_psr4_entries(prefix: &str, paths: &serde_json::Value, mappings: &mut 
                     mappings.push(Psr4Mapping {
                         prefix: normalised_prefix.clone(),
                         base_path: normalise_path(path),
+                        is_vendor: false,
                     });
                 }
             }

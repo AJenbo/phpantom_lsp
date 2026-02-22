@@ -447,6 +447,15 @@ try { typeHintGtdParam(new User('', '')); } catch (NotFoundException|ValidationE
 
 // Extends / implements — Ctrl+Click User, Renderable, or Loggable in scaffolding below.
 
+// ── Context-Aware Class Name Filtering ──────────────────────────────────────
+// Completions are filtered by syntactic context. Only valid suggestions appear.
+// Try: erase the class name after each keyword and re-type a prefix to see filtering.
+//   extends (class)     → non-final classes only (no interfaces, traits, enums, or final classes)
+//   extends (interface) → interfaces only
+//   implements          → interfaces only
+//   use (inside class)  → traits only
+//   instanceof          → classes, interfaces, and enums (no traits)
+//   new                 → concrete non-abstract classes only
 
 // ── Go-to-Implementation ────────────────────────────────────────────────────
 // Right-click → "Go to Implementations" (or editor shortcut) on an interface

@@ -106,7 +106,7 @@ impl<'a> VarResolutionCtx<'a> {
     /// Create a [`ResolutionCtx`] from this variable resolution context.
     ///
     /// The non-optional `current_class` is wrapped in `Some(…)`.
-    pub fn as_resolution_ctx(&self) -> ResolutionCtx<'a> {
+    pub(crate) fn as_resolution_ctx(&self) -> ResolutionCtx<'a> {
         ResolutionCtx {
             current_class: Some(self.current_class),
             all_classes: self.all_classes,

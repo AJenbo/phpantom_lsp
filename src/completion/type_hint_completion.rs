@@ -21,14 +21,14 @@ use tower_lsp::lsp_types::Position;
 /// `str`.  The list deliberately omits PHPStan-only pseudo-types like
 /// `class-string`, `positive-int`, `non-empty-string`, etc. that are
 /// not valid in native PHP declarations.
-pub const PHP_NATIVE_TYPES: &[&str] = &[
+pub(crate) const PHP_NATIVE_TYPES: &[&str] = &[
     "string", "int", "float", "bool", "array", "object", "mixed", "void", "null", "callable",
     "iterable", "never", "self", "static", "parent", "true", "false",
 ];
 
 /// Context returned when the cursor is at a type-hint position.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeHintContext {
+pub(crate) struct TypeHintContext {
     /// The partial identifier the user has typed so far (may be empty).
     pub partial: String,
 }
@@ -39,7 +39,10 @@ pub struct TypeHintContext {
 ///
 /// Returns `Some(TypeHintContext)` with the partial text when the cursor
 /// is eligible for type-hint completion, or `None` otherwise.
-pub fn detect_type_hint_context(content: &str, position: Position) -> Option<TypeHintContext> {
+pub(crate) fn detect_type_hint_context(
+    content: &str,
+    position: Position,
+) -> Option<TypeHintContext> {
     let chars: Vec<char> = content.chars().collect();
     let cursor = position_to_char_offset(&chars, position)?;
 

@@ -199,7 +199,19 @@ impl Backend {
         // don't follow PSR-4 conventions (e.g. classes defined in Composer
         // autoload_files.php entries).
         if let Ok(mut idx) = self.class_index.lock() {
+            // Remove stale entries from previous parses of this file.
+            // When a file's namespace changes (e.g. while the user is
+            // typing a namespace declaration), old FQNs linger under
+            // the previous namespace and pollute completions.
+            idx.retain(|_, uri| uri != &uri_string);
+
             for class in &classes {
+                // Anonymous classes (named `__anonymous@<offset>`) are
+                // internal bookkeeping — they should never appear in
+                // cross-file lookups or completion results.
+                if class.name.starts_with("__anonymous@") {
+                    continue;
+                }
                 let fqn = if let Some(ref ns) = namespace {
                     format!("{}\\{}", ns, &class.name)
                 } else {

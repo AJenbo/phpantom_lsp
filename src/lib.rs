@@ -247,6 +247,12 @@ impl Backend {
         &self.global_functions
     }
 
+    /// Borrow the global defines mutex (used by integration tests to
+    /// inject user-defined constants or inspect the cache).
+    pub fn global_defines(&self) -> &Arc<Mutex<HashMap<String, String>>> {
+        &self.global_defines
+    }
+
     /// Borrow the class index mutex (used by integration tests to
     /// populate discovered class entries).
     pub fn class_index(&self) -> &Arc<Mutex<HashMap<String, String>>> {

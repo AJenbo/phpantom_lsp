@@ -26,6 +26,7 @@
 /// Helper methods `patch_content_at_cursor` and `resolve_named_arg_params`
 /// are also housed here because they are exclusively used by the
 /// completion handler.
+use std::collections::{HashMap, HashSet};
 use std::panic;
 
 use super::resolver::ResolutionCtx;
@@ -34,6 +35,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::completion::class_completion::{ClassNameContext, detect_class_name_context};
 use crate::types::FileContext;
 
 /// PHP scalar and built-in types offered in docblock type positions.
@@ -71,6 +73,123 @@ const PHPDOC_SCALAR_TYPES: &[&str] = &[
     "scalar",
     "numeric",
 ];
+
+/// Filter out completion items for classes defined in the current file.
+///
+/// When writing a `use` statement it makes no sense to import a class
+/// from the file you are already in.  The `detail` field of each item
+/// carries the FQN, which is matched against the FQNs of classes in the
+/// file's `ctx.classes` (from the ast_map).
+fn filter_current_file_classes(
+    items: Vec<CompletionItem>,
+    ctx: &FileContext,
+) -> Vec<CompletionItem> {
+    if ctx.classes.is_empty() {
+        return items;
+    }
+    let current_fqns: HashSet<String> = ctx
+        .classes
+        .iter()
+        .map(|cls| {
+            if let Some(ref ns) = ctx.namespace {
+                format!("{}\\{}", ns, cls.name)
+            } else {
+                cls.name.clone()
+            }
+        })
+        .collect();
+    items
+        .into_iter()
+        .filter(|item| {
+            item.detail
+                .as_ref()
+                .is_none_or(|d| !current_fqns.contains(d))
+        })
+        .collect()
+}
+
+/// Filter out completion items for functions defined in the current file.
+fn filter_current_file_functions(
+    items: Vec<CompletionItem>,
+    current_uri: &str,
+    backend: &Backend,
+) -> Vec<CompletionItem> {
+    let current_funcs: HashSet<String> = backend
+        .global_functions()
+        .lock()
+        .ok()
+        .map(|fmap| {
+            fmap.iter()
+                .filter(|(_, (uri, _))| uri == current_uri)
+                .map(|(_, (_, info))| info.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    if current_funcs.is_empty() {
+        return items;
+    }
+    items
+        .into_iter()
+        .filter(|item| {
+            item.filter_text
+                .as_ref()
+                .is_none_or(|ft| !current_funcs.contains(ft))
+        })
+        .collect()
+}
+
+/// Filter out completion items for constants defined in the current file.
+fn filter_current_file_constants(
+    items: Vec<CompletionItem>,
+    current_uri: &str,
+    backend: &Backend,
+) -> Vec<CompletionItem> {
+    let current_consts: HashSet<String> = backend
+        .global_defines()
+        .lock()
+        .ok()
+        .map(|dmap| {
+            dmap.iter()
+                .filter(|(_, uri)| uri.as_str() == current_uri)
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    if current_consts.is_empty() {
+        return items;
+    }
+    items
+        .into_iter()
+        .filter(|item| {
+            item.filter_text
+                .as_ref()
+                .is_none_or(|ft| !current_consts.contains(ft))
+        })
+        .collect()
+}
+
+/// Append a semicolon to the `insert_text` of each completion item.
+///
+/// Used for `use`, `use function`, and `use const` completions so that
+/// accepting a suggestion produces a complete statement (e.g. `use Foo\Bar;`).
+fn append_semicolon_to_insert_text(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
+    items
+        .into_iter()
+        .map(|mut item| {
+            if let Some(ref mut text) = item.insert_text
+                && !text.ends_with(';')
+            {
+                text.push(';');
+            }
+            if let Some(CompletionTextEdit::Edit(ref mut edit)) = item.text_edit
+                && !edit.new_text.ends_with(';')
+            {
+                edit.new_text.push(';');
+            }
+            item
+        })
+        .collect()
+}
 
 impl Backend {
     /// Main completion handler — called by `LanguageServer::completion`.
@@ -124,7 +243,7 @@ impl Backend {
             if let Some(th_ctx) = crate::completion::type_hint_completion::detect_type_hint_context(
                 &content, position,
             ) {
-                return Ok(self.complete_type_hint(&content, &th_ctx, &ctx));
+                return Ok(self.complete_type_hint(&content, &th_ctx, &ctx, position));
             }
 
             // ── Named argument completion ───────────────────────────
@@ -159,7 +278,7 @@ impl Backend {
 
             // ── Class name + constant + function completion ─────────
             if let Some(response) =
-                self.try_class_constant_function_completion(&content, position, &ctx)
+                self.try_class_constant_function_completion(&content, position, &ctx, &uri)
             {
                 return Ok(Some(response));
             }
@@ -241,7 +360,8 @@ impl Backend {
                     &ctx.namespace,
                     &partial,
                     content,
-                    false, // not a `new` context
+                    ClassNameContext::Any,
+                    position,
                 );
                 items.extend(class_items);
 
@@ -313,6 +433,7 @@ impl Backend {
         content: &str,
         th_ctx: &crate::completion::type_hint_completion::TypeHintContext,
         ctx: &FileContext,
+        position: Position,
     ) -> Option<CompletionResponse> {
         let partial_lower = th_ctx.partial.to_lowercase();
         let mut items: Vec<CompletionItem> =
@@ -336,7 +457,8 @@ impl Backend {
             &ctx.namespace,
             &th_ctx.partial,
             content,
-            false, // not a `new` context
+            ClassNameContext::Any,
+            position,
         );
         items.extend(class_items);
 
@@ -667,6 +789,7 @@ impl Backend {
             &partial,
             content,
             false,
+            position,
         );
         let mut all_items = items; // Throwable item (if matched)
         for ci in class_items {
@@ -708,6 +831,7 @@ impl Backend {
             &partial,
             content,
             true,
+            position,
         );
         if class_items.is_empty() {
             None
@@ -736,20 +860,110 @@ impl Backend {
         content: &str,
         position: Position,
         ctx: &FileContext,
+        current_uri: &str,
     ) -> Option<CompletionResponse> {
         let partial = Self::extract_partial_class_name(content, position)?;
-        let is_new = Self::is_new_context(content, position);
+        let class_ctx = detect_class_name_context(content, position);
+
+        // ── `use function` → only functions ─────────────────────────
+        if matches!(class_ctx, ClassNameContext::UseFunction) {
+            let (function_items, func_incomplete) = self.build_function_completions(&partial, true);
+            // Filter out functions defined in the current file.
+            let function_items = filter_current_file_functions(function_items, current_uri, self);
+            let items = append_semicolon_to_insert_text(function_items);
+            return Some(CompletionResponse::List(CompletionList {
+                is_incomplete: func_incomplete,
+                items,
+            }));
+        }
+
+        // ── `use const` → only constants ────────────────────────────
+        if matches!(class_ctx, ClassNameContext::UseConst) {
+            let (constant_items, const_incomplete) = self.build_constant_completions(&partial);
+            // Filter out constants defined in the current file.
+            let constant_items = filter_current_file_constants(constant_items, current_uri, self);
+            let items = append_semicolon_to_insert_text(constant_items);
+            return Some(CompletionResponse::List(CompletionList {
+                is_incomplete: const_incomplete,
+                items,
+            }));
+        }
+
+        // ── `namespace` declaration → only namespace names ──────────
+        if matches!(class_ctx, ClassNameContext::NamespaceDeclaration) {
+            let (ns_items, ns_incomplete) = self.build_namespace_completions(&partial, position);
+            return Some(CompletionResponse::List(CompletionList {
+                is_incomplete: ns_incomplete,
+                items: ns_items,
+            }));
+        }
+
+        // For `use` imports, pass an empty use_map: the file's own
+        // use_map contains the half-typed line (e.g. `use c` → "c")
+        // which would appear as a bogus completion item.  Existing
+        // imports are irrelevant when writing a new use statement.
+        let use_map_for_completion = if matches!(class_ctx, ClassNameContext::UseImport) {
+            &HashMap::new()
+        } else {
+            &ctx.use_map
+        };
+
         let (class_items, class_incomplete) = self.build_class_name_completions(
-            &ctx.use_map,
+            use_map_for_completion,
             &ctx.namespace,
             &partial,
             content,
-            is_new,
+            class_ctx,
+            position,
         );
 
-        // After `new`, only class names are valid — skip
-        // constants and functions.
-        if is_new {
+        // ── `use` (class import) → classes + keyword hints ──────────
+        if matches!(class_ctx, ClassNameContext::UseImport) {
+            // Filter out classes defined in the current file.
+            let class_items = filter_current_file_classes(class_items, ctx);
+            let mut items = append_semicolon_to_insert_text(class_items);
+            // Inject `function` / `const` keyword suggestions when the
+            // partial is a case-sensitive prefix of the keyword.  This
+            // lets the user type `use f` → select "function" → continue
+            // with a function name.
+            if "function".starts_with(&partial) {
+                items.insert(
+                    0,
+                    CompletionItem {
+                        label: "function".to_string(),
+                        kind: Some(CompletionItemKind::KEYWORD),
+                        detail: Some("use function import".to_string()),
+                        insert_text: Some("function ".to_string()),
+                        filter_text: Some("function".to_string()),
+                        sort_text: Some("0_!function".to_string()),
+                        ..CompletionItem::default()
+                    },
+                );
+            }
+            if "const".starts_with(&partial) {
+                items.insert(
+                    0,
+                    CompletionItem {
+                        label: "const".to_string(),
+                        kind: Some(CompletionItemKind::KEYWORD),
+                        detail: Some("use const import".to_string()),
+                        insert_text: Some("const ".to_string()),
+                        filter_text: Some("const".to_string()),
+                        sort_text: Some("0_!const".to_string()),
+                        ..CompletionItem::default()
+                    },
+                );
+            }
+            return Some(CompletionResponse::List(CompletionList {
+                is_incomplete: class_incomplete,
+                items,
+            }));
+        }
+
+        // In restricted contexts (new, extends, implements, use,
+        // instanceof), only class names are valid — skip constants
+        // and functions.
+        if class_ctx.is_class_only() {
             if class_items.is_empty() {
                 return None;
             }
@@ -760,7 +974,7 @@ impl Backend {
         }
 
         let (constant_items, const_incomplete) = self.build_constant_completions(&partial);
-        let (function_items, func_incomplete) = self.build_function_completions(&partial);
+        let (function_items, func_incomplete) = self.build_function_completions(&partial, false);
 
         if class_items.is_empty() && constant_items.is_empty() && function_items.is_empty() {
             return None;

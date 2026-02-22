@@ -1,6 +1,6 @@
 # PHPantom — Remaining Work
 
-> Last updated: 2025-07-09
+> Last updated: 2026-02-22
 
 Items are ordered by recommended implementation sequence: quick wins
 first, then high-impact items, then competitive-parity features, then
@@ -11,31 +11,6 @@ long-tail polish.
 ## Completion & Go-to-Definition Gaps
 
 ### Competitive parity (close the gap with PHPStorm / Intelephense)
-
-#### 31. No context-aware filtering for class name completions
-
-Class name completion always offers the full unfiltered list of known
-classes, interfaces, traits, and enums regardless of syntactic context.
-In practice this means:
-
-- `extends ` suggests interfaces, traits, enums, and final classes
-  (only non-final classes are valid)
-- `implements ` suggests classes, traits, and enums (only interfaces
-  are valid)
-- `use ` (trait use inside a class body) suggests classes, interfaces,
-  and enums (only traits are valid)
-- `#[` (attribute) suggests non-attribute classes
-- `instanceof ` suggests traits (which are not valid on the RHS)
-
-Completion technically *works* in all these positions (the correct item
-is in the list), but the results contain many invalid suggestions.
-
-**Fix:** detect these syntactic contexts in the completion handler
-(similar to `is_new_context` / `is_throw_new_context`) and pass a
-filter to `build_class_name_completions` that restricts by
-`ClassLikeKind` and/or `is_final` / `is_abstract`.
-
----
 
 #### 32. No namespace-segment completion in `use` import statements
 

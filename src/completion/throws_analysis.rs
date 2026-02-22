@@ -33,7 +33,7 @@ use crate::util::short_name;
 /// Information about a `throw` statement (or throw-expression) found in
 /// a block of PHP source code.
 #[derive(Debug)]
-pub struct ThrowInfo {
+pub(crate) struct ThrowInfo {
     /// The exception type name as written in source (e.g.
     /// `"InvalidArgumentException"`, `"\\RuntimeException"`,
     /// `"Exceptions\\Custom"`).
@@ -49,7 +49,7 @@ pub struct ThrowInfo {
 ///
 /// Returns a [`ThrowInfo`] for each statement with the type name and the
 /// byte offset of the `throw` keyword within `body`.
-pub fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
+pub(crate) fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
     let bytes = body.as_bytes();
     let len = bytes.len();
@@ -112,7 +112,7 @@ pub fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
 /// return type from its declaration or docblock in the same file.
 ///
 /// Returns a [`ThrowInfo`] for each resolved throw-expression.
-pub fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<ThrowInfo> {
+pub(crate) fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
     let patterns: &[&str] = &["$this->", "self::", "static::"];
 
@@ -185,7 +185,7 @@ pub fn find_throw_expression_types(body: &str, file_content: &str) -> Vec<ThrowI
 ///
 /// Returns a [`ThrowInfo`] for each propagated throw, with the byte
 /// offset set to the call site so that catch-block filtering works.
-pub fn find_propagated_throws(body: &str, file_content: &str) -> Vec<ThrowInfo> {
+pub(crate) fn find_propagated_throws(body: &str, file_content: &str) -> Vec<ThrowInfo> {
     let mut results = Vec::new();
     let mut seen_methods = std::collections::HashSet::new();
     let patterns: &[&str] = &["$this->", "self::", "static::"];
@@ -256,7 +256,7 @@ pub fn find_propagated_throws(body: &str, file_content: &str) -> Vec<ThrowInfo> 
 /// doesn't have `@throws` annotations itself.
 ///
 /// Returns the short type names found.
-pub fn find_inline_throws_annotations(body: &str) -> Vec<String> {
+pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<String> {
     let mut results = Vec::new();
     let bytes = body.as_bytes();
     let len = bytes.len();
@@ -321,7 +321,7 @@ pub fn find_inline_throws_annotations(body: &str) -> Vec<String> {
 ///
 /// Returns the short type name (last segment after `\`), or `None` if
 /// the method is not found or has no resolvable return type.
-pub fn find_method_return_type(file_content: &str, method_name: &str) -> Option<String> {
+pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> Option<String> {
     let search = format!("function {}", method_name);
 
     let mut search_start = 0;
@@ -401,7 +401,7 @@ pub fn find_method_return_type(file_content: &str, method_name: &str) -> Option<
 /// `function` keyword.
 ///
 /// Returns the short type names declared in `@throws` tags.
-pub fn find_method_throws_tags(file_content: &str, method_name: &str) -> Vec<String> {
+pub(crate) fn find_method_throws_tags(file_content: &str, method_name: &str) -> Vec<String> {
     let mut throws = Vec::new();
     let search = format!("function {}", method_name);
 
@@ -872,7 +872,7 @@ fn parse_catch_types(paren_content: &str) -> Vec<String> {
 ///    docblock declares `@throws ExceptionType` -- propagated throws
 ///
 /// Returns a deduplicated list of short exception type names.
-pub fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<String> {
+pub(crate) fn find_uncaught_throw_types(content: &str, position: Position) -> Vec<String> {
     let body = match extract_function_body(content, position) {
         Some(b) => b,
         None => return Vec::new(),

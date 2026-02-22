@@ -352,6 +352,116 @@ gives the developer a visual hint. A future enhancement could sort
 intersection members above branch-only members or add an explicit marker
 (see todo item 35).
 
+## Context-Aware Class Name Completion
+
+When the user types a class name outside of a member-access chain (`->`, `::`), the LSP needs to decide which symbols to offer. PHP reuses many of the same keywords in positions that accept very different kinds of symbols. `new` only makes sense with concrete classes. `implements` only accepts interfaces. `use` inside a class body only accepts traits. Offering the wrong kind of symbol is noisy at best and confusing at worst. This section explains how the LSP detects the context, selects which symbols to show, and handles the many edge cases that arise from incomplete information.
+
+### Context Detection
+
+`detect_class_name_context()` in `class_completion.rs` walks backward from the cursor through whitespace and comma-separated identifier lists to find the keyword that governs the completion position. It recognises eleven contexts:
+
+| Context | Trigger | What is shown |
+|---|---|---|
+| `Any` | Bare identifier (e.g. `$x = DateT\|`) | All class-likes, constants, and functions |
+| `New` | `new \|` | Concrete (non-abstract) classes only |
+| `ExtendsClass` | `class A extends \|` | Non-final classes (abstract is OK) |
+| `ExtendsInterface` | `interface B extends \|` | Interfaces only |
+| `Implements` | `class C implements \|` | Interfaces only |
+| `TraitUse` | `class D { use \|` | Traits only |
+| `Instanceof` | `$x instanceof \|` | Classes, interfaces, enums (not traits) |
+| `UseImport` | `use \|` (top level) | All class-likes + `function`/`const` keyword hints |
+| `UseFunction` | `use function \|` | Functions only |
+| `UseConst` | `use const \|` | Constants only |
+| `NamespaceDeclaration` | `namespace \|` | Namespace names only |
+
+Comma-separated lists are handled by walking past `Identifier,` sequences so that `implements Foo, Bar, \|` still resolves to `Implements`. Multi-line declarations work the same way because the backward walk skips all whitespace including newlines.
+
+`TraitUse` vs `UseImport` is distinguished by brace depth: `use` at brace depth >= 1 is inside a class body (trait use), while brace depth 0 is a top-level import.
+
+### Handler Routing
+
+`try_class_constant_function_completion()` in `handler.rs` is the entry point. It extracts the partial identifier, detects the context, and branches:
+
+- **`UseFunction`** and **`UseConst`** short-circuit to dedicated builders (`build_function_completions`, `build_constant_completions`). These bypass class-name logic entirely. Items from the current file are filtered out (importing a function from the file you are editing is pointless). A semicolon is appended to the insert text.
+
+- **`NamespaceDeclaration`** short-circuits to `build_namespace_completions`, which produces namespace-path items from PSR-4 prefixes and known class FQNs.
+
+- **`UseImport`** calls `build_class_name_completions` with an **empty use-map** (the file's own use-map contains the half-typed `use` line, which the parser interprets as a real import and would appear as a bogus completion item). The results are post-processed: classes defined in the current file are removed, a semicolon is appended, and `function`/`const` keyword hints are injected when the partial matches.
+
+- **All other class-only contexts** (`New`, `ExtendsClass`, `ExtendsInterface`, `Implements`, `TraitUse`, `Instanceof`) call `build_class_name_completions` normally. Constants and functions are suppressed.
+
+- **`Any`** calls all three builders (classes, constants, functions) and merges the results.
+
+### Class Name Sources and Priority
+
+`build_class_name_completions` collects candidates from five sources in priority order. Earlier sources get better `sort_text` prefixes so the editor ranks them higher. Deduplication is by FQN (`seen_fqns` set).
+
+1. **Use-imported classes** (sort prefix `0_`). The file's `use` map entries. Highest priority because the developer has explicitly imported these names.
+2. **Same-namespace classes** (sort prefix `1_`). Classes from the `ast_map` whose file declares the same namespace as the cursor file. These are available without a `use` statement.
+3. **Class index** (sort prefix `2_`). Classes discovered during parsing of opened files (`class_index`).
+4. **Composer classmap** (sort prefix `3_`). Classes from `vendor/composer/autoload_classmap.php`.
+5. **PHP stubs** (sort prefix `4_`). Built-in classes from the embedded phpstorm-stubs.
+
+The result set is capped at 100 items. When truncated, `is_incomplete` is set to `true` so the editor re-requests completions as the user types more characters. Items are sorted by `sort_text` before truncation so higher-priority sources survive.
+
+### Kind Filtering
+
+Each context defines which class-like kinds are valid through `matches_kind_flags(kind, is_abstract, is_final)`. For example, `TraitUse` only matches `ClassLikeKind::Trait`, and `New` only matches non-abstract classes. This filter is applied at every source, but the amount of information available varies by source, which creates a layered filtering strategy.
+
+**Loaded classes** (in `ast_map`). The full `ClassInfo` is available, so the filter is exact. An interface will never appear in `TraitUse` completions if it has been parsed.
+
+**Unloaded stubs** (in `stub_index` but not yet parsed into `ast_map`). The raw PHP source is available. `detect_stub_class_kind` scans it for the declaration keyword (`class`, `interface`, `trait`, `enum`) and modifiers (`abstract`, `final`, `readonly`). This is fast (string search, no tree-sitter parse) and gives accurate kind information for filtering.
+
+**Unloaded project classes** (in `class_index` or `classmap` but not parsed). No kind information is available. These are allowed through the filter with benefit of the doubt. A naming-convention heuristic (`likely_mismatch`) demotes but does not remove suspicious names (e.g. `FooInterface` is demoted in `ExtendsClass` context).
+
+### Use-Map Validation
+
+The file's `use` map is the most problematic source because it can contain entries that are not class-likes at all:
+
+- **Namespace aliases** (`use App\Models as M;` puts `M -> App\Models` in the map, but `App\Models` is a namespace, not a class).
+- **Non-existent imports** (the user may have typed `use Vendor\Something;` for a class the LSP has never seen).
+- **Half-typed lines** (the parser interprets `use c` as importing `"c"`).
+
+Three filters run on use-map entries, in order:
+
+1. **`is_likely_namespace_not_class`**. Checks all four class sources (ast_map, class_index, classmap, stubs). If the FQN is found in any of them, it is a real class and passes. If not found, the function looks for positive namespace evidence: is the FQN declared as a namespace in `namespace_map`, or do known classes exist under it as a prefix (e.g. `Cassandra\Exception\AlreadyExistsException` proves `Cassandra\Exception` is a namespace)? If positive evidence is found, the entry is rejected. If there is no evidence either way, the entry passes (benefit of the doubt).
+
+2. **`matches_context_or_unloaded`**. If the class is loaded in `ast_map`, applies exact kind filtering. If not loaded but present in `stub_index`, scans the stub source for the declaration keyword. If truly unknown, allows through. This catches stub interfaces appearing in `TraitUse` and similar mismatches.
+
+3. **`is_known_class_like`** (narrow contexts only). For contexts that expect a very specific kind (`TraitUse`, `Implements`, `ExtendsInterface`), an additional check rejects use-map entries whose FQN cannot be found in any class source at all. The reasoning: if we are looking specifically for traits and we have never seen this FQN anywhere, it is almost certainly not a trait. This is deliberately not applied to broader contexts like `New` or `Instanceof`, where an imported-but-not-yet-indexed class should still appear.
+
+The half-typed-line problem is solved at a higher level: the `UseImport` handler passes an empty use-map to `build_class_name_completions`, so the parser's misinterpretation never enters the candidate set.
+
+### UseImport Special Handling
+
+The `UseImport` context (`use |` at top level) has several differences from other contexts:
+
+- **FQN insertion**. The insert text is always the full qualified name, not a short name. Writing `use User;` is invalid PHP even if `User` is in the current namespace. The `is_fqn_prefix` flag is forced to `true` and `effective_namespace` is set to `None` to prevent namespace-relative simplification.
+
+- **No auto-import text edits**. In other contexts, selecting a class from a different namespace generates an `additional_text_edits` entry that inserts a `use` statement. In `UseImport` context this would be circular (you are already writing the `use` statement), so no text edit is generated.
+
+- **Semicolons**. All class items get a `;` appended to the insert text so accepting a completion produces `use App\Models\User;`.
+
+- **Keyword hints**. When the partial matches, `function` and `const` keyword items are injected with a trailing space (not a semicolon) so the user can continue typing the function or constant name.
+
+- **Current-file exclusion**. Classes defined in the cursor file are filtered out. The same applies to `UseFunction` (functions from the current file) and `UseConst` (constants from the current file).
+
+### Unloaded Stub Scanning
+
+Many stubs are never parsed into `ast_map` during a session. Rather than parse thousands of stub files eagerly, the LSP scans the raw PHP source on demand. `detect_stub_class_kind` finds the short name in the source, checks that it is preceded by a declaration keyword (`class`, `interface`, `trait`, `enum`), and extracts `abstract`/`final` modifiers. This gives accurate filtering without the cost of a full parse.
+
+The scan handles PHP 8.2 `readonly` classes (`final readonly class Foo`) by stripping `readonly` before checking for `abstract`/`final`. Multi-class stub files (e.g. V8Js which declares both `V8Js` and `V8JsException`) are handled by searching for each name independently.
+
+### Naming-Convention Heuristics
+
+When a class is not loaded and not a stub (typically a classmap or class_index entry whose file has not been opened), the LSP has no kind information. Rather than guess, it uses naming conventions to adjust sort order:
+
+- Names ending in `Interface` are demoted in `ExtendsClass` and `New`.
+- Names ending in `Trait` are demoted in `Implements`, `ExtendsInterface`, and `New`.
+- Names starting with `Abstract` are demoted in `New`.
+
+Demotion means a worse sort prefix (`9_` instead of the source's normal prefix), pushing the item to the bottom of the list. The item is never removed, because naming conventions are not reliable enough to exclude candidates entirely.
+
 ## Name Resolution
 
 PHP class names go through resolution at parse time (`resolve_parent_class_names`):

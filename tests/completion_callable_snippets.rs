@@ -587,68 +587,6 @@ async fn test_snippet_class_name_no_new_context() {
     }
 }
 
-// ─── `new` Context Detection Tests ──────────────────────────────────────────
-
-/// `is_new_context` should return true for `new ClassName`.
-#[tokio::test]
-async fn test_is_new_context_basic() {
-    assert!(phpantom_lsp::Backend::is_new_context(
-        "<?php\nnew Foo",
-        Position {
-            line: 1,
-            character: 7
-        }
-    ));
-}
-
-/// `is_new_context` should return false for bare class names.
-#[tokio::test]
-async fn test_is_new_context_false_for_bare_name() {
-    assert!(!phpantom_lsp::Backend::is_new_context(
-        "<?php\nFoo",
-        Position {
-            line: 1,
-            character: 3
-        }
-    ));
-}
-
-/// `is_new_context` should not match partial keywords like `renew`.
-#[tokio::test]
-async fn test_is_new_context_not_partial_keyword() {
-    assert!(!phpantom_lsp::Backend::is_new_context(
-        "<?php\nrenew Foo",
-        Position {
-            line: 1,
-            character: 9
-        }
-    ));
-}
-
-/// `is_new_context` should handle extra whitespace between `new` and name.
-#[tokio::test]
-async fn test_is_new_context_extra_whitespace() {
-    assert!(phpantom_lsp::Backend::is_new_context(
-        "<?php\nnew    Foo",
-        Position {
-            line: 1,
-            character: 10
-        }
-    ));
-}
-
-/// `is_new_context` should work at start of line.
-#[tokio::test]
-async fn test_is_new_context_start_of_statement() {
-    assert!(phpantom_lsp::Backend::is_new_context(
-        "<?php\n$x = new Bar",
-        Position {
-            line: 1,
-            character: 12
-        }
-    ));
-}
-
 // ─── Inherited Method Snippet Tests ─────────────────────────────────────────
 
 /// Methods inherited from a parent class should also get snippets.

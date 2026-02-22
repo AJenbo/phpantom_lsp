@@ -21,7 +21,7 @@ use super::throws_analysis;
 
 /// Information about the catch clause context at the cursor position.
 #[derive(Debug)]
-pub struct CatchContext {
+pub(crate) struct CatchContext {
     /// The partial class name the user has typed so far (may be empty).
     pub partial: String,
     /// Exception type names found in the corresponding try block.
@@ -37,7 +37,7 @@ pub struct CatchContext {
 /// thrown exception types.
 ///
 /// Returns `None` if the cursor is not in a catch clause type position.
-pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchContext> {
+pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<CatchContext> {
     let byte_offset = position_to_byte_offset(content, position);
     let before_cursor = &content[..byte_offset.min(content.len())];
 
@@ -161,7 +161,7 @@ pub fn detect_catch_context(content: &str, position: Position) -> Option<CatchCo
 ///
 /// Smart exception suggestions sort before any fallback items.
 /// `\Throwable` is always offered but sorted last among the suggestions.
-pub fn build_catch_completions(ctx: &CatchContext) -> Vec<CompletionItem> {
+pub(crate) fn build_catch_completions(ctx: &CatchContext) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     let partial_lower = ctx.partial.to_lowercase();
 
