@@ -1,7 +1,7 @@
 <?php
 
 /**
- * PHPantom — Feature Showcase
+ * PHP Showcase
  *
  * A single-file playground for every completion and go-to-definition feature.
  * Trigger completion after -> / :: / $, or Ctrl+Click for go-to-definition.
@@ -22,6 +22,11 @@ use Demo\UserProfile as Profile;
 //  PLAYGROUND — try completion and go-to-definition here
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ── Use-Import Conflict Resolution ──────────────────────────────────────────
+// The `use Exception;` import above occupies the short name "Exception".
+// Try: type `throw new pq\Exception();` below and accept the auto-import for
+// pq\Exception. The auto-import should insert `\pq\Exception` at the usage site
+// instead of adding `use pq\Exception;` (which would conflict).
 
 // ── Instance Completion ─────────────────────────────────────────────────────
 
@@ -109,8 +114,8 @@ $maybe?->getProfile()
 
 
 // ── Chained Method Calls in Variable Assignment ─────────────────────────────
-// When a variable is assigned from a chained call, the LSP walks the full
-// chain to resolve the stored type.
+// When a variable is assigned from a chained call, the full chain is walked
+// to resolve the stored type.
 
 $storedProfile = $user->getProfile();
 $storedName = $storedProfile->getUser()->getName(); // $var->method()->method()
@@ -494,7 +499,7 @@ $r = new Response(200);                   // → Response(${1:$statusCode})
 
 // ── Type Hint Completion in Definitions ─────────────────────────────────────
 // When typing a type hint inside a function/method definition, return type,
-// or property declaration, PHPantom offers PHP native scalar types
+// or property declaration, completion offers PHP native scalar types
 // (string, int, float, bool, …) alongside class-name completions.
 // Constants and standalone functions are excluded since they're invalid
 // in type positions.
@@ -1469,8 +1474,8 @@ class UnsetDemo
 
 /**
  * PHP 8.1 first-class callable syntax creates a Closure from any
- * function or method reference.  PHPantom resolves the return type of
- * the underlying callable so that invoking the Closure gives completion
+ * function or method reference.  The return type of the underlying
+ * callable is resolved so that invoking the Closure gives completion
  * on the result.
  */
 class FirstClassCallableDemo
@@ -2305,7 +2310,7 @@ class FluentCollection
 {
     /**
      * Multi-line @return with conditionals inside generics.
-     * PHPantom joins the lines and parses the full type.
+     * The lines are joined and the full type is parsed.
      *
      * @template TGroupKey of array-key
      *

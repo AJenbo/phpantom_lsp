@@ -153,25 +153,6 @@ large projects with deep namespace hierarchies.
 
 ---
 
-#### 39. Conflicting use-import resolution
-
-When auto-importing a class whose short name collides with an existing
-`use` statement, the LSP blindly inserts a second `use` with the same
-short name. For example, if the file already has `use Cassandra\Exception;`
-and the user accepts a completion for PHP's built-in `Exception`, the LSP
-inserts `use Exception;` which is a compile error.
-
-The correct behaviour is to detect the conflict and fall back to inserting
-a fully-qualified reference (`\Exception`) at the usage site instead of
-adding a `use` statement. As stretch behaviour, the LSP could try to
-generate a sensible alias (`use MongoDB\Driver\Exception\Exception as
-MongoDBException;`). Smart aliasing would be especially useful in the
-`use` completion context where the user is explicitly managing imports
-and would benefit from a suggested alias rather than a silent fallback
-to FQN.
-
----
-
 #### 40. Insert `use` statements in alphabetical order
 
 Auto-imported `use` statements are currently appended at the bottom of the

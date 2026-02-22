@@ -63,7 +63,7 @@ pub(crate) fn build_callable_snippet(name: &str, params: &[ParameterInfo]) -> St
 
 // Re-export use-statement helpers so existing `use crate::completion::builder::{…}`
 // imports continue to work.
-pub(crate) use super::use_edit::{build_use_edit, find_use_insert_position};
+pub(crate) use super::use_edit::{build_use_edit, find_use_insert_position, use_import_conflicts};
 
 /// PHP magic methods that should not appear in completion results.
 /// These are invoked implicitly by the language runtime rather than

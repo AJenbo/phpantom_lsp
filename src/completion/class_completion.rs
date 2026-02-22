@@ -17,7 +17,9 @@ use crate::completion::named_args::position_to_char_offset;
 use crate::types::*;
 use crate::util::short_name;
 
-use super::builder::{build_callable_snippet, build_use_edit, find_use_insert_position};
+use super::builder::{
+    build_callable_snippet, build_use_edit, find_use_insert_position, use_import_conflicts,
+};
 
 /// The syntactic context in which a class name is being completed.
 ///
@@ -930,12 +932,37 @@ impl Backend {
                     effective_namespace,
                     &prefix_lower,
                 );
+                let mut was_shortened = false;
                 if should_shorten_via_imports
                     && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
                 {
                     label = shortened.clone();
                     base_name = shortened;
                     use_import = None;
+                    was_shortened = true;
+                }
+                // When the short name conflicts with an existing import,
+                // fall back to a fully-qualified reference at the usage
+                // site instead of inserting a duplicate `use` statement.
+                if let Some(ref import_fqn) = use_import
+                    && use_import_conflicts(import_fqn, file_use_map)
+                {
+                    base_name = format!("\\{}", import_fqn);
+                    use_import = None;
+                }
+                // In FQN mode, if the first namespace segment of the
+                // insert text matches an existing alias (and we didn't
+                // intentionally shorten through that alias), prepend `\`
+                // so PHP resolves the name from the global namespace.
+                if is_fqn_prefix
+                    && !was_shortened
+                    && !base_name.starts_with('\\')
+                    && let Some(first_seg) = base_name.split('\\').next()
+                    && file_use_map
+                        .keys()
+                        .any(|a| a.eq_ignore_ascii_case(first_seg))
+                {
+                    base_name = format!("\\{}", base_name);
                 }
                 let (insert_text, insert_text_format) = if is_new {
                     // class_index is a FQN → URI map; the class may or
@@ -995,12 +1022,37 @@ impl Backend {
                     effective_namespace,
                     &prefix_lower,
                 );
+                let mut was_shortened = false;
                 if should_shorten_via_imports
                     && let Some(shortened) = shorten_fqn_via_use_map(fqn, file_use_map)
                 {
                     label = shortened.clone();
                     base_name = shortened;
                     use_import = None;
+                    was_shortened = true;
+                }
+                // When the short name conflicts with an existing import,
+                // fall back to a fully-qualified reference at the usage
+                // site instead of inserting a duplicate `use` statement.
+                if let Some(ref import_fqn) = use_import
+                    && use_import_conflicts(import_fqn, file_use_map)
+                {
+                    base_name = format!("\\{}", import_fqn);
+                    use_import = None;
+                }
+                // In FQN mode, if the first namespace segment of the
+                // insert text matches an existing alias (and we didn't
+                // intentionally shorten through that alias), prepend `\`
+                // so PHP resolves the name from the global namespace.
+                if is_fqn_prefix
+                    && !was_shortened
+                    && !base_name.starts_with('\\')
+                    && let Some(first_seg) = base_name.split('\\').next()
+                    && file_use_map
+                        .keys()
+                        .any(|a| a.eq_ignore_ascii_case(first_seg))
+                {
+                    base_name = format!("\\{}", base_name);
                 }
                 let (insert_text, insert_text_format) = if is_new {
                     Self::build_new_insert(&base_name, None)
@@ -1075,12 +1127,37 @@ impl Backend {
                 effective_namespace,
                 &prefix_lower,
             );
+            let mut was_shortened = false;
             if should_shorten_via_imports
                 && let Some(shortened) = shorten_fqn_via_use_map(name, file_use_map)
             {
                 label = shortened.clone();
                 base_name = shortened;
                 use_import = None;
+                was_shortened = true;
+            }
+            // When the short name conflicts with an existing import,
+            // fall back to a fully-qualified reference at the usage
+            // site instead of inserting a duplicate `use` statement.
+            if let Some(ref import_fqn) = use_import
+                && use_import_conflicts(import_fqn, file_use_map)
+            {
+                base_name = format!("\\{}", import_fqn);
+                use_import = None;
+            }
+            // In FQN mode, if the first namespace segment of the
+            // insert text matches an existing alias (and we didn't
+            // intentionally shorten through that alias), prepend `\`
+            // so PHP resolves the name from the global namespace.
+            if is_fqn_prefix
+                && !was_shortened
+                && !base_name.starts_with('\\')
+                && let Some(first_seg) = base_name.split('\\').next()
+                && file_use_map
+                    .keys()
+                    .any(|a| a.eq_ignore_ascii_case(first_seg))
+            {
+                base_name = format!("\\{}", base_name);
             }
             let (insert_text, insert_text_format) = if is_new {
                 // Stub classes are not parsed yet — just insert empty
@@ -1527,7 +1604,7 @@ impl Backend {
                 if !self.is_throwable_descendant(fqn, 0) {
                     continue;
                 }
-                let (label, base_name, filter, use_import) = class_completion_texts(
+                let (label, mut base_name, filter, mut use_import) = class_completion_texts(
                     sn,
                     fqn,
                     is_fqn_prefix,
@@ -1535,6 +1612,27 @@ impl Backend {
                     file_namespace,
                     &prefix_lower,
                 );
+                // When the short name conflicts with an existing import,
+                // fall back to a fully-qualified reference at the usage
+                // site instead of inserting a duplicate `use` statement.
+                if let Some(ref import_fqn) = use_import
+                    && use_import_conflicts(import_fqn, file_use_map)
+                {
+                    base_name = format!("\\{}", import_fqn);
+                    use_import = None;
+                }
+                // In FQN mode, if the first namespace segment of the
+                // insert text matches an existing alias, prepend `\`
+                // so PHP resolves the name from the global namespace.
+                if is_fqn_prefix
+                    && !base_name.starts_with('\\')
+                    && let Some(first_seg) = base_name.split('\\').next()
+                    && file_use_map
+                        .keys()
+                        .any(|a| a.eq_ignore_ascii_case(first_seg))
+                {
+                    base_name = format!("\\{}", base_name);
+                }
                 let (insert_text, insert_text_format) = if is_new {
                     (format!("{base_name}()$0"), Some(InsertTextFormat::SNIPPET))
                 } else {
@@ -1580,7 +1678,7 @@ impl Backend {
                     continue;
                 }
                 let prefix_num = if sn.ends_with("Exception") { "3" } else { "5" };
-                let (label, base_name, filter, use_import) = class_completion_texts(
+                let (label, mut base_name, filter, mut use_import) = class_completion_texts(
                     sn,
                     fqn,
                     is_fqn_prefix,
@@ -1588,6 +1686,27 @@ impl Backend {
                     file_namespace,
                     &prefix_lower,
                 );
+                // When the short name conflicts with an existing import,
+                // fall back to a fully-qualified reference at the usage
+                // site instead of inserting a duplicate `use` statement.
+                if let Some(ref import_fqn) = use_import
+                    && use_import_conflicts(import_fqn, file_use_map)
+                {
+                    base_name = format!("\\{}", import_fqn);
+                    use_import = None;
+                }
+                // In FQN mode, if the first namespace segment of the
+                // insert text matches an existing alias, prepend `\`
+                // so PHP resolves the name from the global namespace.
+                if is_fqn_prefix
+                    && !base_name.starts_with('\\')
+                    && let Some(first_seg) = base_name.split('\\').next()
+                    && file_use_map
+                        .keys()
+                        .any(|a| a.eq_ignore_ascii_case(first_seg))
+                {
+                    base_name = format!("\\{}", base_name);
+                }
                 let (insert_text, insert_text_format) = if is_new {
                     (format!("{base_name}()$0"), Some(InsertTextFormat::SNIPPET))
                 } else {
@@ -1629,7 +1748,7 @@ impl Backend {
                 continue;
             }
             let prefix_num = if sn.ends_with("Exception") { "4" } else { "6" };
-            let (label, base_name, filter, use_import) = class_completion_texts(
+            let (label, mut base_name, filter, mut use_import) = class_completion_texts(
                 sn,
                 name,
                 is_fqn_prefix,
@@ -1637,6 +1756,27 @@ impl Backend {
                 file_namespace,
                 &prefix_lower,
             );
+            // When the short name conflicts with an existing import,
+            // fall back to a fully-qualified reference at the usage
+            // site instead of inserting a duplicate `use` statement.
+            if let Some(ref import_fqn) = use_import
+                && use_import_conflicts(import_fqn, file_use_map)
+            {
+                base_name = format!("\\{}", import_fqn);
+                use_import = None;
+            }
+            // In FQN mode, if the first namespace segment of the
+            // insert text matches an existing alias, prepend `\`
+            // so PHP resolves the name from the global namespace.
+            if is_fqn_prefix
+                && !base_name.starts_with('\\')
+                && let Some(first_seg) = base_name.split('\\').next()
+                && file_use_map
+                    .keys()
+                    .any(|a| a.eq_ignore_ascii_case(first_seg))
+            {
+                base_name = format!("\\{}", base_name);
+            }
             let (insert_text, insert_text_format) = if is_new {
                 (format!("{base_name}()$0"), Some(InsertTextFormat::SNIPPET))
             } else {

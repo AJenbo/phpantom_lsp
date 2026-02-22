@@ -3148,3 +3148,472 @@ async fn test_undiscovered_use_import_still_shown() {
         labels
     );
 }
+
+// ─── Use-import conflict resolution ────────────────────────────────────────
+
+/// When the file already has `use Cassandra\Exception;` and a class_index
+/// class `App\Exception` is suggested, the LSP must NOT insert a second
+/// `use ... Exception;`.  Instead it should insert `\App\Exception` at
+/// the usage site.
+#[tokio::test]
+async fn test_conflicting_use_import_class_index_falls_back_to_fqn() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index().lock() {
+        idx.insert(
+            "App\\Exception".to_string(),
+            "file:///app/Exception.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "new Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 7).await;
+    let app_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Exception"))
+        .expect("Should have App\\Exception completion");
+
+    // Must NOT have additional_text_edits (no `use` statement).
+    assert!(
+        app_exc.additional_text_edits.is_none(),
+        "Conflicting import should not produce a use statement, got: {:?}",
+        app_exc.additional_text_edits
+    );
+
+    // Insert text should be the FQN with leading backslash.
+    let insert = app_exc.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.starts_with("\\App\\Exception"),
+        "Should insert FQN with leading backslash, got: {:?}",
+        insert
+    );
+}
+
+/// Same conflict scenario but with the class coming from the classmap.
+#[tokio::test]
+async fn test_conflicting_use_import_classmap_falls_back_to_fqn() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(
+        dir.path().join("composer.json"),
+        r#"{"name": "test/project"}"#,
+    )
+    .expect("failed to write composer.json");
+
+    let composer_dir = dir.path().join("vendor").join("composer");
+    fs::create_dir_all(&composer_dir).expect("failed to create vendor/composer");
+    fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        concat!(
+            "<?php\n",
+            "$vendorDir = dirname(__DIR__);\n",
+            "return array(\n",
+            "    'App\\\\Exception' => $vendorDir . '/app/Exception.php',\n",
+            ");\n",
+        ),
+    )
+    .expect("failed to write autoload_classmap.php");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    let classmap = parse_autoload_classmap(dir.path(), "vendor");
+    if let Ok(mut cm) = backend.classmap().lock() {
+        *cm = classmap;
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "new Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 7).await;
+    let app_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Exception"))
+        .expect("Should have App\\Exception completion from classmap");
+
+    assert!(
+        app_exc.additional_text_edits.is_none(),
+        "Conflicting classmap import should not produce a use statement, got: {:?}",
+        app_exc.additional_text_edits
+    );
+
+    let insert = app_exc.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.starts_with("\\App\\Exception"),
+        "Classmap conflict should insert FQN with leading backslash, got: {:?}",
+        insert
+    );
+}
+
+/// When a stub class short name conflicts with an existing import, the
+/// stub completion should also fall back to FQN.
+#[tokio::test]
+async fn test_conflicting_use_import_stub_falls_back_to_fqn() {
+    // Register a stub class called "Exception".
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert("Exception", "<?php\nclass Exception {}\n");
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "new Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 7).await;
+    let stub_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("Exception") && i.label != "Exception")
+        .or_else(|| {
+            // The label might stay "Exception" — look for the one that
+            // has FQN insert text and no additional edits.
+            items.iter().find(|i| {
+                i.detail.as_deref() == Some("Exception")
+                    && i.additional_text_edits.is_none()
+                    && i.insert_text
+                        .as_deref()
+                        .is_some_and(|t| t.starts_with("\\Exception"))
+            })
+        })
+        .expect("Should have stub Exception completion with FQN fallback");
+
+    assert!(
+        stub_exc.additional_text_edits.is_none(),
+        "Conflicting stub import should not produce a use statement"
+    );
+
+    let insert = stub_exc.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.starts_with("\\Exception"),
+        "Stub conflict should insert FQN with leading backslash, got: {:?}",
+        insert
+    );
+}
+
+/// When there is no conflict, auto-import should still work normally.
+#[tokio::test]
+async fn test_no_conflict_auto_import_still_works() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index().lock() {
+        idx.insert(
+            "App\\Services\\PaymentService".to_string(),
+            "file:///app/Services/PaymentService.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "new Payment\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 11).await;
+    let payment = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Services\\PaymentService"))
+        .expect("Should have PaymentService completion");
+
+    // No conflict — should still have a normal use statement.
+    let edits = payment
+        .additional_text_edits
+        .as_ref()
+        .expect("Non-conflicting import should have additional_text_edits");
+
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "use App\\Services\\PaymentService;\n",);
+}
+
+/// Conflict resolution with `new` keyword should produce `\FQN()` snippet.
+#[tokio::test]
+async fn test_conflicting_use_import_with_new_keyword_inserts_fqn_snippet() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index().lock() {
+        idx.insert(
+            "App\\Exception".to_string(),
+            "file:///app/Exception.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "new Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 7).await;
+    let app_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Exception"))
+        .expect("Should have App\\Exception completion");
+
+    let insert = app_exc.insert_text.as_deref().unwrap_or("");
+    // In new context, the insert text should include parentheses.
+    assert!(
+        insert.starts_with("\\App\\Exception("),
+        "new + conflict should insert \\FQN() snippet, got: {:?}",
+        insert
+    );
+    assert!(
+        app_exc.additional_text_edits.is_none(),
+        "Conflict with new keyword should not produce a use statement"
+    );
+}
+
+/// When the same FQN is already imported (exact match), it should NOT
+/// be treated as a conflict.  This verifies the function itself — in
+/// practice the dedup logic in source 1 would prevent this from
+/// reaching sources 3-5.
+#[tokio::test]
+async fn test_same_fqn_already_imported_is_not_a_conflict() {
+    let backend = create_test_backend_with_stubs();
+
+    // Put the class in class_index with a FQN that matches the import.
+    if let Ok(mut idx) = backend.class_index().lock() {
+        idx.insert(
+            "Cassandra\\Exception".to_string(),
+            "file:///vendor/cassandra/Exception.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 3).await;
+    // The use-imported entry (source 1) should appear with the short
+    // name — no FQN fallback needed.
+    let exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("Cassandra\\Exception"))
+        .expect("Should have Cassandra\\Exception completion");
+
+    let insert = exc.insert_text.as_deref().unwrap_or("");
+    assert!(
+        !insert.starts_with('\\'),
+        "Same-FQN import should use short name, got: {:?}",
+        insert
+    );
+}
+
+/// Multiple conflicting classes: both App\Exception and Domain\Exception
+/// should each fall back to FQN when Cassandra\Exception is imported.
+#[tokio::test]
+async fn test_multiple_conflicting_classes_all_use_fqn() {
+    let backend = create_test_backend_with_stubs();
+
+    if let Ok(mut idx) = backend.class_index().lock() {
+        idx.insert(
+            "App\\Exception".to_string(),
+            "file:///app/Exception.php".to_string(),
+        );
+        idx.insert(
+            "Domain\\Exception".to_string(),
+            "file:///domain/Exception.php".to_string(),
+        );
+    }
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Controllers;\n",
+        "use Cassandra\\Exception;\n",
+        "\n",
+        "Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 3).await;
+
+    for fqn in &["App\\Exception", "Domain\\Exception"] {
+        let item = items
+            .iter()
+            .find(|i| i.detail.as_deref() == Some(*fqn))
+            .unwrap_or_else(|| panic!("Should have {} completion", fqn));
+
+        assert!(
+            item.additional_text_edits.is_none(),
+            "{} should not produce a use statement",
+            fqn
+        );
+
+        let insert = item.insert_text.as_deref().unwrap_or("");
+        assert!(
+            insert.starts_with(&format!("\\{}", fqn)),
+            "{} should insert FQN with leading backslash, got: {:?}",
+            fqn,
+            insert
+        );
+    }
+}
+
+// ─── FQN-mode leading-segment alias collision ──────────────────────────────
+
+/// When the user types a namespace-qualified name like `pq\Exc` (FQN mode)
+/// and an existing alias matches the first segment (`use Exception as pq;`),
+/// the insert text must get a leading `\` so PHP resolves from the global
+/// namespace instead of through the alias.
+#[tokio::test]
+async fn test_fqn_mode_leading_segment_alias_collision() {
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert(
+        "pq\\Exception",
+        "<?php\nnamespace pq;\nclass Exception {}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    // `use Exception as pq;` — the alias `pq` collides with the
+    // first segment of `pq\Exception`.
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "use Exception as pq;\n",
+        "\n",
+        "throw new pq\\Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 17).await;
+    let pq_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("pq\\Exception"))
+        .expect("Should have pq\\Exception completion");
+
+    let insert = pq_exc.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.starts_with("\\pq\\Exception"),
+        "FQN mode with alias collision should prepend \\, got: {:?}",
+        insert
+    );
+
+    // The text_edit range must cover the full typed prefix (`pq\Exc`,
+    // 6 chars) so the editor replaces it entirely with `\pq\Exception`.
+    // Without this, the editor only replaces `Exc` and you get
+    // `pq\\pq\Exception`.
+    let edit = pq_exc
+        .text_edit
+        .as_ref()
+        .expect("FQN mode should produce a text_edit");
+    match edit {
+        CompletionTextEdit::Edit(te) => {
+            let replaced_len = te.range.end.character - te.range.start.character;
+            assert_eq!(
+                replaced_len,
+                "pq\\Exc".len() as u32,
+                "text_edit range should cover the full pq\\Exc prefix, got range {:?}",
+                te.range
+            );
+            assert!(
+                te.new_text.starts_with("\\pq\\Exception"),
+                "text_edit new_text should start with \\pq\\Exception, got: {:?}",
+                te.new_text
+            );
+        }
+        _ => panic!("Expected CompletionTextEdit::Edit"),
+    }
+}
+
+/// When the alias does NOT collide with the first segment, the FQN is
+/// inserted as-is (no leading `\` added).
+#[tokio::test]
+async fn test_fqn_mode_no_alias_collision_keeps_bare_fqn() {
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert(
+        "pq\\Exception",
+        "<?php\nnamespace pq;\nclass Exception {}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    // `use Exception;` — alias is `Exception`, not `pq`, so no
+    // leading-segment collision.
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "use Exception;\n",
+        "\n",
+        "throw new pq\\Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 17).await;
+    let pq_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("pq\\Exception"))
+        .expect("Should have pq\\Exception completion");
+
+    let insert = pq_exc.insert_text.as_deref().unwrap_or("");
+    // No leading-segment collision, but there IS a short-name collision
+    // (alias `Exception` vs short name `Exception` of `pq\Exception`).
+    // In FQN mode, use_import is None so the short-name conflict check
+    // does not apply. The insert text stays as the bare FQN.
+    assert!(
+        !insert.starts_with('\\'),
+        "No alias collision should keep bare FQN, got: {:?}",
+        insert
+    );
+}
+
+/// FQN mode with leading `\` typed by the user: the insert text already
+/// has `\`, so no extra prefixing is needed regardless of aliases.
+#[tokio::test]
+async fn test_fqn_mode_user_typed_leading_backslash_unaffected() {
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert(
+        "pq\\Exception",
+        "<?php\nnamespace pq;\nclass Exception {}\n",
+    );
+    let backend = Backend::new_test_with_stubs(stubs);
+
+    let uri = Url::parse("file:///controller.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "use Exception as pq;\n",
+        "\n",
+        "throw new \\pq\\Exc\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 18).await;
+    let pq_exc = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("pq\\Exception"))
+        .expect("Should have pq\\Exception completion");
+
+    let insert = pq_exc.insert_text.as_deref().unwrap_or("");
+    assert!(
+        insert.starts_with("\\pq\\Exception"),
+        "User-typed leading \\ should be preserved, got: {:?}",
+        insert
+    );
+    // Must not double the backslash.
+    assert!(
+        !insert.starts_with("\\\\"),
+        "Should not double the leading \\, got: {:?}",
+        insert
+    );
+}
