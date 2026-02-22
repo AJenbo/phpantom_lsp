@@ -199,47 +199,6 @@ target.
 
 ---
 
-#### 41. `find_class_file_content` short-name collision breaks go-to-definition for inherited members
-
-When a child class and its parent share the same short name (e.g.
-`App\Console\Kernel extends Illuminate\Foundation\Console\Kernel`),
-go-to-definition on an inherited member like `$this->load()` fails.
-Completion works correctly because the resolution pipeline uses
-`find_or_load_class`, which is namespace-aware. But the definition
-handler calls `find_class_file_content(declaring_class.name, ...)` with
-just the short name `"Kernel"`. That function checks the current file
-first, finds the child's `Kernel` (same short name), and returns the
-wrong file. Then `find_member_position` cannot find the inherited method
-in the child file and returns `None`.
-
-This commonly surfaces with aliased imports that exist precisely because
-the names collide:
-
-```php
-namespace App\Console;
-use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-
-class Kernel extends ConsoleKernel {
-    protected function commands(): void {
-        $this->load(); // go-to-definition fails, completion works
-    }
-}
-```
-
-The alias itself is resolved correctly (the use-map stores
-`ConsoleKernel` to the FQN, and `resolve_parent_class_names` applies
-it). The problem is purely in `find_class_file_content` in
-`definition/member.rs`, which matches by short name without considering
-the file's namespace.
-
-**Fix:** make `find_class_file_content` namespace-aware, mirroring the
-logic in `find_class_in_ast_map` (which already cross-checks
-`namespace_map`). The function could accept the FQN instead of the short
-name, or it could take an optional expected namespace and skip files
-whose namespace does not match.
-
----
-
 #### 43. Go-to-definition on foreach variable jumps to previous loop instead of recognising current definition site
 
 When the same variable name is used in consecutive `foreach` loops,

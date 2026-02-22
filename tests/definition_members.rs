@@ -2161,3 +2161,271 @@ async fn test_goto_definition_unresolvable_member_returns_none() {
         result,
     );
 }
+
+// ─── Short-Name Collision: Child & Parent Share Same Simple Name ────────────
+
+#[tokio::test]
+async fn test_goto_definition_inherited_method_same_short_name() {
+    // Reproduces issue #41: when a child class and its parent share the
+    // same short name (e.g. App\Console\Kernel extends
+    // Illuminate\Foundation\Console\Kernel), go-to-definition on an
+    // inherited member should jump to the parent file, not get confused
+    // by the child's matching short name.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/",
+                    "Framework\\": "vendor/framework/src/"
+                }
+            }
+        }"#,
+        &[(
+            "vendor/framework/src/Console/Kernel.php",
+            concat!(
+                "<?php\n",
+                "namespace Framework\\Console;\n",
+                "\n",
+                "class Kernel {\n",
+                "    protected function load(string $path): void {}\n",
+                "    protected function commands(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///app_kernel.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Console;\n",
+        "\n",
+        "use Framework\\Console\\Kernel as ConsoleKernel;\n",
+        "\n",
+        "class Kernel extends ConsoleKernel {\n",
+        "    protected function commands(): void {\n",
+        "        $this->load('routes');\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "load" in `$this->load('routes')` on line 7
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve inherited $this->load() to parent Framework\\Console\\Kernel"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("vendor/framework/src/Console/Kernel.php"),
+                "Should point to Framework\\Console\\Kernel.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "function load is on line 4 of Framework\\Console\\Kernel.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_inherited_method_same_short_name_no_alias() {
+    // Variant of #41 without a use-alias: parent is referenced by its
+    // FQN directly in the extends clause.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/",
+                    "Vendor\\": "vendor/src/"
+                }
+            }
+        }"#,
+        &[(
+            "vendor/src/Kernel.php",
+            concat!(
+                "<?php\n",
+                "namespace Vendor;\n",
+                "\n",
+                "class Kernel {\n",
+                "    public function bootstrap(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///app_kernel2.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class Kernel extends \\Vendor\\Kernel {\n",
+        "    public function run(): void {\n",
+        "        $this->bootstrap();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "bootstrap" in `$this->bootstrap()` on line 5
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve inherited $this->bootstrap() to parent Vendor\\Kernel"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("vendor/src/Kernel.php"),
+                "Should point to Vendor\\Kernel.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "function bootstrap is on line 4 of Vendor\\Kernel.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_own_method_same_short_name_as_parent() {
+    // When the child overrides the method, go-to-definition should still
+    // find the child's own declaration even though a parent with the same
+    // short name exists.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/",
+                    "Framework\\": "vendor/framework/src/"
+                }
+            }
+        }"#,
+        &[(
+            "vendor/framework/src/Console/Kernel.php",
+            concat!(
+                "<?php\n",
+                "namespace Framework\\Console;\n",
+                "\n",
+                "class Kernel {\n",
+                "    protected function commands(): void {}\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///app_kernel3.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Console;\n",
+        "\n",
+        "use Framework\\Console\\Kernel as ConsoleKernel;\n",
+        "\n",
+        "class Kernel extends ConsoleKernel {\n",
+        "    protected function commands(): void {\n",
+        "        // overridden\n",
+        "    }\n",
+        "\n",
+        "    public function run(): void {\n",
+        "        $this->commands();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "commands" in `$this->commands()` on line 11
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->commands() to the child's own override"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            // The child overrides commands(), so it should point to the
+            // current file, not the parent.
+            assert_eq!(
+                location.uri.as_str(),
+                uri.as_str(),
+                "Should point to current file (child override)"
+            );
+            assert_eq!(
+                location.range.start.line, 6,
+                "function commands is on line 6 of child Kernel"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

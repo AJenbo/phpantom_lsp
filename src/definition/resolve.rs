@@ -574,7 +574,7 @@ impl Backend {
 
         // Try class_index / ast_map lookup via find_class_file_content.
         let sn = short_name(&fqn);
-        if let Some((class_uri, class_content)) = self.find_class_file_content(sn, uri, content)
+        if let Some((class_uri, class_content)) = self.find_class_file_content(&fqn, uri, content)
             && let Some(pos) = Self::find_definition_position(&class_content, sn)
             && let Ok(parsed_uri) = Url::parse(&class_uri)
         {

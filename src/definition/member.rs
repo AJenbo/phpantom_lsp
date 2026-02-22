@@ -23,6 +23,7 @@ use crate::subject_extraction::{
     collapse_continuation_lines, extract_arrow_subject, extract_double_colon_subject,
 };
 use crate::types::*;
+use crate::util::short_name;
 
 /// The kind of class member being resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,7 +111,7 @@ impl Backend {
                 && let Some(trait_info) = class_loader(trait_name)
                 && Self::classify_member(&trait_info, &effective_name, access_hint).is_some()
                 && let Some((class_uri, class_content)) =
-                    self.find_class_file_content(&trait_info.name, uri, content)
+                    self.find_class_file_content(trait_name, uri, content)
                 && let Some(member_position) =
                     Self::find_member_position(&class_content, &effective_name, MemberKind::Method)
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
@@ -118,9 +119,9 @@ impl Backend {
                 return Some(point_location(parsed_uri, member_position));
             }
 
-            let declaring_class =
+            let (declaring_class, declaring_fqn) =
                 Self::find_declaring_class(target_class, &effective_name, &class_loader)
-                    .unwrap_or_else(|| target_class.clone());
+                    .unwrap_or_else(|| (target_class.clone(), target_class.name.clone()));
 
             // Check that the member is actually present on the declaring class.
             let member_kind =
@@ -131,7 +132,7 @@ impl Backend {
 
             // Locate the file that contains the declaring class.
             if let Some((class_uri, class_content)) =
-                self.find_class_file_content(&declaring_class.name, uri, content)
+                self.find_class_file_content(&declaring_fqn, uri, content)
                 && let Some(member_position) =
                     Self::find_member_position(&class_content, &effective_name, member_kind)
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
@@ -149,9 +150,9 @@ impl Backend {
 
         // Direct trait lookup for aliased members in the fallback path.
         if let Some(ref trait_name) = alias_trait
-            && let Some(trait_info) = class_loader(trait_name)
+            && let Some(_trait_info) = class_loader(trait_name)
             && let Some((class_uri, class_content)) =
-                self.find_class_file_content(&trait_info.name, uri, content)
+                self.find_class_file_content(trait_name, uri, content)
             && let Some(member_position) =
                 Self::find_member_position(&class_content, &effective_name, MemberKind::Method)
             && let Ok(parsed_uri) = Url::parse(&class_uri)
@@ -159,14 +160,14 @@ impl Backend {
             return Some(point_location(parsed_uri, member_position));
         }
 
-        let declaring_class =
+        let (declaring_class, declaring_fqn) =
             Self::find_declaring_class(target_class, &effective_name, &class_loader)
-                .unwrap_or_else(|| target_class.clone());
+                .unwrap_or_else(|| (target_class.clone(), target_class.name.clone()));
 
         let member_kind = Self::classify_member(&declaring_class, &effective_name, access_hint)?;
 
         let (class_uri, class_content) =
-            self.find_class_file_content(&declaring_class.name, uri, content)?;
+            self.find_class_file_content(&declaring_fqn, uri, content)?;
 
         let member_position =
             Self::find_member_position(&class_content, &effective_name, member_kind)?;
@@ -404,14 +405,22 @@ impl Backend {
         (member_name.to_string(), None)
     }
 
+    /// Walk up the inheritance chain to find the class that actually declares
+    /// the given member and the FQN (or best-known name) used to load it.
+    ///
+    /// Returns `Some((ClassInfo, fqn))` of the declaring class, or `None` if
+    /// the member cannot be found in any ancestor.  The `fqn` is the name
+    /// that was passed to `class_loader` to obtain the `ClassInfo`, which is
+    /// a fully-qualified name for parents and traits.  For the class itself
+    /// (when the member is declared directly), the short name is returned.
     fn find_declaring_class(
         class: &ClassInfo,
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
-    ) -> Option<ClassInfo> {
+    ) -> Option<(ClassInfo, String)> {
         // Check if this class directly declares the member.
         if Self::classify_member(class, member_name, MemberAccessHint::Unknown).is_some() {
-            return Some(class.clone());
+            return Some((class.clone(), class.name.clone()));
         }
 
         // Check traits used by this class.
@@ -433,7 +442,7 @@ impl Backend {
                 None => break,
             };
             if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some() {
-                return Some(parent);
+                return Some((parent, parent_name));
             }
             // Check traits used by the parent class.
             if let Some(found) =
@@ -479,12 +488,15 @@ impl Backend {
     ///
     /// Traits can themselves `use` other traits, so this recurses up to a
     /// depth limit to handle trait composition.
+    ///
+    /// Returns `(ClassInfo, fqn)` where `fqn` is the fully-qualified name
+    /// that was used to load the declaring class from `class_loader`.
     fn find_declaring_in_traits(
         trait_names: &[String],
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: usize,
-    ) -> Option<ClassInfo> {
+    ) -> Option<(ClassInfo, String)> {
         if depth > MAX_TRAIT_DEPTH as usize {
             return None;
         }
@@ -497,7 +509,7 @@ impl Backend {
             };
             if Self::classify_member(&trait_info, member_name, MemberAccessHint::Unknown).is_some()
             {
-                return Some(trait_info);
+                return Some((trait_info, trait_name.clone()));
             }
             // Recurse into traits used by this trait.
             if let Some(found) = Self::find_declaring_in_traits(
@@ -526,7 +538,7 @@ impl Backend {
                 };
                 if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some()
                 {
-                    return Some(parent);
+                    return Some((parent, parent_name.clone()));
                 }
                 if let Some(found) = Self::find_declaring_in_traits(
                     &parent.used_traits,
@@ -550,12 +562,15 @@ impl Backend {
     /// members are considered since mixins proxy via magic methods.
     /// Mixin classes can themselves declare `@mixin`, so this recurses up
     /// to a depth limit.
+    ///
+    /// Returns `(ClassInfo, fqn)` where `fqn` is the fully-qualified name
+    /// that was used to load the declaring class from `class_loader`.
     fn find_declaring_in_mixins(
         mixin_names: &[String],
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
         depth: usize,
-    ) -> Option<ClassInfo> {
+    ) -> Option<(ClassInfo, String)> {
         if depth > MAX_MIXIN_DEPTH as usize {
             return None;
         }
@@ -594,6 +609,13 @@ impl Backend {
 
     /// Find the file URI and content for the file that contains a given class.
     ///
+    /// `class_name` can be a short name (e.g. `"Kernel"`) or a
+    /// fully-qualified name (e.g. `"Illuminate\\Foundation\\Console\\Kernel"`).
+    /// When a namespace prefix is present the file's namespace (from
+    /// `namespace_map`) must match for the class to be returned.  This
+    /// prevents short-name collisions when a child class and its parent
+    /// share the same simple name but live in different namespaces.
+    ///
     /// Searches the `ast_map` (which includes files loaded via PSR-4 by
     /// `find_or_load_class`) and returns `(uri, content)`.
     pub(crate) fn find_class_file_content(
@@ -602,23 +624,49 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<(String, String)> {
+        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
+        let last_segment = short_name(normalized);
+        let expected_ns: Option<&str> = if normalized.contains('\\') {
+            Some(&normalized[..normalized.len() - last_segment.len() - 1])
+        } else {
+            None
+        };
+
         // Search the ast_map for the file containing this class.
         let uri = {
             let map = self.ast_map.lock().ok()?;
+            let nmap = self.namespace_map.lock().ok();
+
+            let matches_ns = |file_uri: &str| -> bool {
+                match expected_ns {
+                    None => true,
+                    Some(exp) => {
+                        let file_ns = nmap
+                            .as_ref()
+                            .and_then(|nm| nm.get(file_uri))
+                            .and_then(|opt| opt.as_deref());
+                        file_ns == Some(exp)
+                    }
+                }
+            };
 
             // Check the current file first (common case: $this->method).
             if let Some(classes) = map.get(current_uri) {
-                if classes.iter().any(|c| c.name == class_name) {
+                if classes.iter().any(|c| c.name == last_segment) && matches_ns(current_uri) {
                     Some(current_uri.to_string())
                 } else {
                     // Search other files.
                     map.iter()
-                        .find(|(_, classes)| classes.iter().any(|c| c.name == class_name))
+                        .find(|(u, classes)| {
+                            classes.iter().any(|c| c.name == last_segment) && matches_ns(u)
+                        })
                         .map(|(u, _)| u.clone())
                 }
             } else {
                 map.iter()
-                    .find(|(_, classes)| classes.iter().any(|c| c.name == class_name))
+                    .find(|(u, classes)| {
+                        classes.iter().any(|c| c.name == last_segment) && matches_ns(u)
+                    })
                     .map(|(u, _)| u.clone())
             }
         }?;
@@ -630,7 +678,7 @@ impl Backend {
             // Embedded stubs are stored under synthetic URIs and have no
             // on-disk file.  Retrieve the raw stub source from the
             // stub_index instead.
-            self.stub_index.get(class_name).map(|s| s.to_string())?
+            self.stub_index.get(last_segment).map(|s| s.to_string())?
         } else {
             self.get_file_content(&uri)?
         };
