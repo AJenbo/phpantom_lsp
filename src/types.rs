@@ -336,6 +336,15 @@ pub struct MethodInfo {
     /// public-facing scope name (e.g. `#[Scope] protected function active()`
     /// becomes `User::active()`).
     pub has_scope_attribute: bool,
+    /// Whether this method is a virtual (synthesized) member.
+    ///
+    /// Virtual methods come from `@method` docblock tags, `@mixin` classes,
+    /// or framework-specific providers (e.g. Laravel model scopes).  They
+    /// have no real declaration in source code.
+    ///
+    /// Set to `true` by [`MethodInfo::virtual_method`] and by providers;
+    /// set to `false` by the parser for real declared methods.
+    pub is_virtual: bool,
 }
 
 impl MethodInfo {
@@ -370,6 +379,7 @@ impl MethodInfo {
             template_params: Vec::new(),
             template_bindings: Vec::new(),
             has_scope_attribute: false,
+            is_virtual: true,
         }
     }
 }
@@ -412,6 +422,17 @@ pub struct PropertyInfo {
     /// `None` means not deprecated. `Some("")` means deprecated without a
     /// message. `Some("Use foo() instead")` includes the explanation.
     pub deprecation_message: Option<String>,
+    /// Whether this property is a virtual (synthesized) member.
+    ///
+    /// Virtual properties come from `@property` / `@property-read` /
+    /// `@property-write` docblock tags, `@mixin` classes, or
+    /// framework-specific providers (e.g. Laravel model columns).
+    /// They have no real declaration in source code.
+    ///
+    /// Set to `true` by [`PropertyInfo::virtual_property`] and by
+    /// providers; set to `false` by the parser for real declared
+    /// properties.
+    pub is_virtual: bool,
 }
 
 impl PropertyInfo {
@@ -438,6 +459,7 @@ impl PropertyInfo {
             is_static: false,
             visibility: Visibility::Public,
             deprecation_message: None,
+            is_virtual: true,
         }
     }
 }
@@ -478,6 +500,14 @@ pub struct ConstantInfo {
     /// `const LIMIT = 100;`).  `None` when the constant has no initializer
     /// or the source text could not be extracted.
     pub value: Option<String>,
+    /// Whether this constant is a virtual (synthesized) member.
+    ///
+    /// Virtual constants come from `@mixin` classes or framework-specific
+    /// providers.  They have no real declaration in source code.
+    ///
+    /// Set to `true` by providers; set to `false` by the parser for real
+    /// declared constants.
+    pub is_virtual: bool,
 }
 
 /// Describes the access operator that triggered completion.

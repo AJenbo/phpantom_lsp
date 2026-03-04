@@ -215,6 +215,7 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             template_params: Vec::new(),
             template_bindings: Vec::new(),
             has_scope_attribute: false,
+            is_virtual: true,
         });
     }
 

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hover origin indicators.** Hovering a method, property, or constant now shows whether it overrides a parent class member, implements an interface contract, or is a virtual (synthesized) member. Multiple origins combine when applicable (e.g. "↑ overrides **BaseView** · ◆ implements **Renderable**").
+- **Enum case listing in hover.** Hovering an enum name shows all cases inside the code block, with values for backed enums. Regular class constants on enums are excluded.
+- **Trait method signatures in hover.** Hovering a trait name shows its public methods, properties, and constants as a scannable summary inside the code block.
 - **Deprecation messages in hover.** Hovering a deprecated method, property, constant, function, or class now shows the explanation text from the `@deprecated` tag (e.g. `🪦 **deprecated** Use collect() instead`) instead of a bare label.
 - **Constant values in hover.** Hovering a class constant now shows its initializer value inline (e.g. `const STATUS_ACTIVE = 'active';`). Works for all constant types including strings, integers, arrays, and expressions. Typed constants (PHP 8.3+) show both the type and value.
 - **PHP version-aware stubs.** PHPantom detects the target PHP version from `composer.json` (`config.platform.php` or `require.php`) and filters built-in stub signatures accordingly. Functions, methods, and parameters annotated with `#[PhpStormStubsElementAvailable]` (including aliased forms used in some stub files) that do not apply to the detected version are excluded. For example, `array_map` on PHP 8.4 shows `array $array` instead of the untyped `$arrays` parameter from PHP 7.4. When no version is detected, PHP 8.5 is assumed.

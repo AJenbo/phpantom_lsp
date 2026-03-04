@@ -21,6 +21,161 @@ use crate::util::{find_class_at_offset, position_to_offset};
 
 use formatting::*;
 
+// ─── Origin Indicators ─────────────────────────────────────────────────────
+
+/// Describes the origin of a member relative to the class it appears on.
+///
+/// Used to render a subtle indicator line above the code block in hover
+/// popups so that the user can see at a glance whether a member overrides
+/// a parent, implements an interface contract, or was synthesized.
+enum MemberOrigin {
+    /// The member overrides a parent class method/property/constant.
+    Override(String),
+    /// The member implements an interface method/constant.
+    Implements(String),
+    /// The member is virtual (synthesized from `@method`, `@property`,
+    /// `@mixin`, or a framework provider).
+    Virtual,
+}
+
+/// Check whether the **raw** (unmerged) class declares a member with the
+/// given name and kind.
+///
+/// The `owner` passed to hover methods is fully resolved (inheritance +
+/// virtual providers merged in).  To distinguish "this class overrides
+/// the parent's method" from "this class merely inherits it", we load
+/// the raw class from the class_loader and check its own member lists.
+fn raw_class_has_member(
+    owner: &ClassInfo,
+    member_name: &str,
+    member_kind: &MemberKindForOrigin,
+    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+) -> bool {
+    // Build the FQN the same way the class loader expects.
+    let fqn = match &owner.file_namespace {
+        Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, owner.name),
+        _ => owner.name.clone(),
+    };
+
+    // Load the raw class.  If the loader returns None (e.g. the class
+    // is only known through the current file's AST and not yet indexed),
+    // fall back to assuming the member is declared — this avoids hiding
+    // indicators when the project is only partially indexed.
+    let raw = match class_loader(&fqn) {
+        Some(c) => c,
+        None => return true,
+    };
+
+    match member_kind {
+        MemberKindForOrigin::Method => raw
+            .methods
+            .iter()
+            .any(|m| m.name.eq_ignore_ascii_case(member_name)),
+        MemberKindForOrigin::Property => raw.properties.iter().any(|p| p.name == member_name),
+        MemberKindForOrigin::Constant => raw.constants.iter().any(|c| c.name == member_name),
+    }
+}
+
+/// Build the origin indicator lines for a member.
+///
+/// Checks whether the member is actually declared on the owner class
+/// (not just inherited), then inspects the parent class and implemented
+/// interfaces (via `class_loader`) to determine whether the member
+/// overrides a parent or implements an interface contract.  Also checks
+/// `is_virtual` for synthesized members.
+///
+/// Returns a (possibly empty) string of Markdown lines to prepend to the
+/// hover content.
+fn build_origin_lines(
+    member_name: &str,
+    owner: &ClassInfo,
+    is_virtual: bool,
+    member_kind: MemberKindForOrigin,
+    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+) -> String {
+    let mut origins: Vec<MemberOrigin> = Vec::new();
+
+    if is_virtual {
+        origins.push(MemberOrigin::Virtual);
+    }
+
+    // Only check for override / implements when the member is actually
+    // declared on the owner class itself (not merely inherited from a
+    // parent).  Without this gate, an inherited method would incorrectly
+    // show "overrides ParentClass".
+    let declared_on_owner = raw_class_has_member(owner, member_name, &member_kind, class_loader);
+
+    if declared_on_owner {
+        // Check parent class for override.
+        if let Some(ref parent_name) = owner.parent_class
+            && let Some(parent) = class_loader(parent_name)
+        {
+            let has_member = match member_kind {
+                MemberKindForOrigin::Method => parent
+                    .methods
+                    .iter()
+                    .any(|m| m.name.eq_ignore_ascii_case(member_name)),
+                MemberKindForOrigin::Property => {
+                    parent.properties.iter().any(|p| p.name == member_name)
+                }
+                MemberKindForOrigin::Constant => {
+                    parent.constants.iter().any(|c| c.name == member_name)
+                }
+            };
+            if has_member {
+                origins.push(MemberOrigin::Override(short_name(parent_name).to_string()));
+            }
+        }
+
+        // Check interfaces for implements.
+        for iface_name in &owner.interfaces {
+            if let Some(iface) = class_loader(iface_name) {
+                let has_member = match member_kind {
+                    MemberKindForOrigin::Method => iface
+                        .methods
+                        .iter()
+                        .any(|m| m.name.eq_ignore_ascii_case(member_name)),
+                    MemberKindForOrigin::Property => {
+                        iface.properties.iter().any(|p| p.name == member_name)
+                    }
+                    MemberKindForOrigin::Constant => {
+                        iface.constants.iter().any(|c| c.name == member_name)
+                    }
+                };
+                if has_member {
+                    origins.push(MemberOrigin::Implements(short_name(iface_name).to_string()));
+                }
+            }
+        }
+    }
+
+    if origins.is_empty() {
+        return String::new();
+    }
+
+    let parts: Vec<String> = origins
+        .iter()
+        .map(|o| match o {
+            MemberOrigin::Override(name) => format!("↑ overrides **{}**", name),
+            MemberOrigin::Implements(name) => format!("◆ implements **{}**", name),
+            MemberOrigin::Virtual => "👻 virtual".to_string(),
+        })
+        .collect();
+
+    // Join with " · " when multiple apply (e.g. override + implements).
+    format!("{}\n\n", parts.join(" · "))
+}
+
+/// The kind of member being checked for origin indicators.
+///
+/// This is separate from `MemberKind` in the definition module because
+/// origin checking only needs the three broad categories.
+enum MemberKindForOrigin {
+    Method,
+    Property,
+    Constant,
+}
+
 // Re-export `pub(crate)` items so external callers keep using `crate::hover::`.
 pub(crate) use formatting::{
     extract_docblock_description, extract_var_description, types_equivalent,
@@ -139,19 +294,19 @@ impl Backend {
                             .iter()
                             .find(|m| m.name.eq_ignore_ascii_case(member_name))
                         {
-                            return Some(self.hover_for_method(method, &merged));
+                            return Some(self.hover_for_method(method, &merged, &class_loader));
                         }
                     } else {
                         // Try property first, then constant
                         if let Some(prop) =
                             merged.properties.iter().find(|p| p.name == *member_name)
                         {
-                            return Some(self.hover_for_property(prop, &merged));
+                            return Some(self.hover_for_property(prop, &merged, &class_loader));
                         }
                         if let Some(constant) =
                             merged.constants.iter().find(|c| c.name == *member_name)
                         {
-                            return Some(self.hover_for_constant(constant, &merged));
+                            return Some(self.hover_for_constant(constant, &merged, &class_loader));
                         }
                         // Could also be a method reference without call parens
                         if let Some(method) = merged
@@ -159,7 +314,7 @@ impl Backend {
                             .iter()
                             .find(|m| m.name.eq_ignore_ascii_case(member_name))
                         {
-                            return Some(self.hover_for_method(method, &merged));
+                            return Some(self.hover_for_method(method, &merged, &class_loader));
                         }
                     }
                 }
@@ -196,7 +351,7 @@ impl Backend {
                         .iter()
                         .find(|m| m.name.eq_ignore_ascii_case("__construct"))
                     {
-                        return Some(self.hover_for_method(constructor, &merged));
+                        return Some(self.hover_for_method(constructor, &merged, &class_loader));
                     }
                 }
 
@@ -414,7 +569,12 @@ impl Backend {
     }
 
     /// Build hover content for a method.
-    fn hover_for_method(&self, method: &MethodInfo, owner: &ClassInfo) -> Hover {
+    fn hover_for_method(
+        &self,
+        method: &MethodInfo,
+        owner: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Hover {
         let visibility = format_visibility(method.visibility);
         let static_kw = if method.is_static { "static " } else { "" };
         let native_params = format_native_params(&method.parameters);
@@ -432,6 +592,19 @@ impl Backend {
         );
 
         let mut lines = Vec::new();
+
+        // Origin indicator (override / implements / virtual).
+        let origin = build_origin_lines(
+            &method.name,
+            owner,
+            method.is_virtual,
+            MemberKindForOrigin::Method,
+            class_loader,
+        );
+        if !origin.is_empty() {
+            // `build_origin_lines` already includes a trailing "\n\n".
+            lines.push(origin.trim_end().to_string());
+        }
 
         if let Some(ref desc) = method.description {
             lines.push(desc.clone());
@@ -468,7 +641,12 @@ impl Backend {
     }
 
     /// Build hover content for a property.
-    fn hover_for_property(&self, property: &PropertyInfo, owner: &ClassInfo) -> Hover {
+    fn hover_for_property(
+        &self,
+        property: &PropertyInfo,
+        owner: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Hover {
         let visibility = format_visibility(property.visibility);
         let static_kw = if property.is_static { "static " } else { "" };
 
@@ -493,6 +671,18 @@ impl Backend {
 
         let mut lines = Vec::new();
 
+        // Origin indicator (override / implements / virtual).
+        let origin = build_origin_lines(
+            &property.name,
+            owner,
+            property.is_virtual,
+            MemberKindForOrigin::Property,
+            class_loader,
+        );
+        if !origin.is_empty() {
+            lines.push(origin.trim_end().to_string());
+        }
+
         if let Some(ref desc) = property.description {
             lines.push(desc.clone());
         }
@@ -515,7 +705,12 @@ impl Backend {
     }
 
     /// Build hover content for a class constant.
-    fn hover_for_constant(&self, constant: &ConstantInfo, owner: &ClassInfo) -> Hover {
+    fn hover_for_constant(
+        &self,
+        constant: &ConstantInfo,
+        owner: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    ) -> Hover {
         let member_line = if constant.is_enum_case {
             if let Some(ref val) = constant.enum_value {
                 format!("case {} = {};", constant.name, val)
@@ -541,6 +736,18 @@ impl Backend {
         };
 
         let mut lines = Vec::new();
+
+        // Origin indicator (implements / virtual).
+        let origin = build_origin_lines(
+            &constant.name,
+            owner,
+            constant.is_virtual,
+            MemberKindForOrigin::Constant,
+            class_loader,
+        );
+        if !origin.is_empty() {
+            lines.push(origin.trim_end().to_string());
+        }
 
         if let Some(ref desc) = constant.description {
             lines.push(desc.clone());
@@ -634,10 +841,150 @@ impl Backend {
             }
         }
 
-        lines.push(format!("```php\n<?php\n{}{}\n```", ns_line, signature));
+        // For enums, show cases inside the code block.
+        // For traits, show public method signatures inside the code block.
+        let body_lines = if cls.kind == ClassLikeKind::Enum {
+            build_enum_case_body(cls)
+        } else if cls.kind == ClassLikeKind::Trait {
+            build_trait_summary_body(cls)
+        } else {
+            String::new()
+        };
+
+        if body_lines.is_empty() {
+            lines.push(format!("```php\n<?php\n{}{}\n```", ns_line, signature));
+        } else {
+            lines.push(format!(
+                "```php\n<?php\n{}{} {{\n{}}}\n```",
+                ns_line, signature, body_lines
+            ));
+        }
 
         make_hover(lines.join("\n\n"))
     }
+}
+
+/// Maximum number of enum cases or trait methods to show before
+/// truncating with a "and N more…" comment.
+const MAX_BODY_ITEMS: usize = 30;
+
+/// Build the body lines for an enum hover showing its cases.
+///
+/// Only enum cases are shown (not regular class constants).
+/// Each case is rendered as `    case Name = 'value';` or `    case Name;`.
+/// If there are more than [`MAX_BODY_ITEMS`] cases, the list is truncated
+/// with a `// and N more…` comment.
+fn build_enum_case_body(cls: &ClassInfo) -> String {
+    let cases: Vec<&ConstantInfo> = cls.constants.iter().filter(|c| c.is_enum_case).collect();
+
+    if cases.is_empty() {
+        return String::new();
+    }
+
+    let mut body = String::new();
+    let shown = cases.len().min(MAX_BODY_ITEMS);
+
+    for case in &cases[..shown] {
+        if let Some(ref val) = case.enum_value {
+            body.push_str(&format!("    case {} = {};\n", case.name, val));
+        } else {
+            body.push_str(&format!("    case {};\n", case.name));
+        }
+    }
+
+    if cases.len() > MAX_BODY_ITEMS {
+        body.push_str(&format!(
+            "    // and {} more…\n",
+            cases.len() - MAX_BODY_ITEMS
+        ));
+    }
+
+    body
+}
+
+/// Build the body lines for a trait hover showing public member signatures.
+///
+/// Shows public methods (one-line signatures without bodies), public
+/// properties, and public constants. Uses native types only and short
+/// (unqualified) class names for a scannable summary.
+///
+/// If there are more than [`MAX_BODY_ITEMS`] members, the list is
+/// truncated with a `// and N more…` comment.
+fn build_trait_summary_body(cls: &ClassInfo) -> String {
+    let mut member_lines: Vec<String> = Vec::new();
+
+    // Public constants.
+    for constant in &cls.constants {
+        if constant.visibility != Visibility::Public {
+            continue;
+        }
+        let type_hint = constant
+            .type_hint
+            .as_ref()
+            .map(|t| format!(": {}", t))
+            .unwrap_or_default();
+        let value_suffix = constant
+            .value
+            .as_ref()
+            .map(|v| format!(" = {}", v))
+            .unwrap_or_default();
+        member_lines.push(format!(
+            "    const {}{}{};",
+            constant.name, type_hint, value_suffix
+        ));
+    }
+
+    // Public properties.
+    for prop in &cls.properties {
+        if prop.visibility != Visibility::Public {
+            continue;
+        }
+        let static_kw = if prop.is_static { "static " } else { "" };
+        let native_type = prop
+            .native_type_hint
+            .as_ref()
+            .map(|t| format!("{} ", t))
+            .unwrap_or_default();
+        member_lines.push(format!(
+            "    public {}{}${};",
+            static_kw, native_type, prop.name
+        ));
+    }
+
+    // Public methods.
+    for method in &cls.methods {
+        if method.visibility != Visibility::Public {
+            continue;
+        }
+        let static_kw = if method.is_static { "static " } else { "" };
+        let native_params = format_native_params(&method.parameters);
+        let native_ret = method
+            .native_return_type
+            .as_ref()
+            .map(|r| format!(": {}", r))
+            .unwrap_or_default();
+        member_lines.push(format!(
+            "    public {}function {}({}){};",
+            static_kw, method.name, native_params, native_ret
+        ));
+    }
+
+    if member_lines.is_empty() {
+        return String::new();
+    }
+
+    let shown = member_lines.len().min(MAX_BODY_ITEMS);
+    let mut body: String = member_lines[..shown].join("\n");
+    body.push('\n');
+
+    if member_lines.len() > MAX_BODY_ITEMS {
+        body.push_str(&format!(
+            "    // and {} more…\n",
+            member_lines.len() - MAX_BODY_ITEMS
+        ));
+    }
+
+    body
 }
 
 #[cfg(test)]

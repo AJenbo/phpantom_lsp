@@ -1601,6 +1601,7 @@ impl Backend {
                                     is_static: false,
                                     visibility: prop_visibility,
                                     deprecation_message: None,
+                                    is_virtual: false,
                                 });
                             }
                         }
@@ -1681,6 +1682,7 @@ impl Backend {
                         template_params: method_template_params,
                         template_bindings: method_template_bindings,
                         has_scope_attribute: has_scope_attr,
+                        is_virtual: false,
                     });
                 }
                 ClassLikeMember::Property(property) => {
@@ -1748,6 +1750,7 @@ impl Backend {
                             is_enum_case: false,
                             enum_value: None,
                             value,
+                            is_virtual: false,
                         });
                     }
                 }
@@ -1773,6 +1776,7 @@ impl Backend {
                         is_enum_case: true,
                         enum_value,
                         value: None,
+                        is_virtual: false,
                     });
                 }
                 ClassLikeMember::TraitUse(trait_use) => {

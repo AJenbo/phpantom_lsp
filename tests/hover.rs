@@ -3759,3 +3759,778 @@ function test(Printer $p) {
         text
     );
 }
+
+// ─── Origin indicator tests ─────────────────────────────────────────────────
+
+#[test]
+fn hover_method_override_shows_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Animal {
+    public function speak(): string { return ''; }
+}
+class Dog extends Animal {
+    public function speak(): string { return 'woof'; }
+    public function run(): void {
+        $this->speak();
+    }
+}
+"#;
+
+    // Hover on `speak` called on `$this` inside Dog (line 7).
+    let hover = hover_at(&backend, uri, content, 7, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **Animal**"),
+        "should show override indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_method_implements_shows_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface Loggable {
+    public function log(string $msg): void;
+}
+class FileLogger implements Loggable {
+    public function log(string $msg): void {}
+    public function run(): void {
+        $this->log('hi');
+    }
+}
+"#;
+
+    // Hover on `log` called on `$this` inside FileLogger (line 7).
+    let hover = hover_at(&backend, uri, content, 7, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("implements **Loggable**"),
+        "should show implements indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_method_override_and_implements_shows_both() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface Renderable {
+    public function render(): string;
+}
+class BaseView {
+    public function render(): string { return ''; }
+}
+class HtmlView extends BaseView implements Renderable {
+    public function render(): string { return '<html>'; }
+    public function test(): void {
+        $this->render();
+    }
+}
+"#;
+
+    // Hover on `render` called on `$this` inside HtmlView (line 10).
+    let hover = hover_at(&backend, uri, content, 10, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **BaseView**"),
+        "should show override indicator, got: {}",
+        text
+    );
+    assert!(
+        text.contains("implements **Renderable**"),
+        "should show implements indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_shows_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @method string getName()
+ */
+class Magic {
+    public function test(): void {
+        $this->getName();
+    }
+}
+"#;
+
+    // Hover on `getName` called on `$this` inside Magic (line 6).
+    let hover = hover_at(&backend, uri, content, 6, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("virtual"),
+        "should show virtual indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_property_shows_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @property string $title
+ */
+class Document {
+    public function test(): void {
+        $this->title;
+    }
+}
+"#;
+
+    // Hover on `title` accessed on `$this` inside Document (line 6).
+    let hover = hover_at(&backend, uri, content, 6, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("virtual"),
+        "should show virtual indicator for property, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_non_overriding_method_has_no_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Simple {
+    public function doStuff(): void {}
+    public function test(): void {
+        $this->doStuff();
+    }
+}
+"#;
+
+    // Hover on `doStuff` called on `$this` (line 4).
+    let hover = hover_at(&backend, uri, content, 4, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("overrides"),
+        "should NOT show override indicator, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("implements"),
+        "should NOT show implements indicator, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("virtual"),
+        "should NOT show virtual indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_constant_implements_interface_shows_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface HasVersion {
+    const VERSION = '1.0';
+}
+class App implements HasVersion {
+    const VERSION = '2.0';
+    public function test(): void {
+        self::VERSION;
+    }
+}
+"#;
+
+    // Hover on `VERSION` via `self::VERSION` (line 7).
+    let hover = hover_at(&backend, uri, content, 7, 15).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("implements **HasVersion**"),
+        "should show implements indicator for constant, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_property_override_shows_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Base {
+    public string $label = '';
+}
+class Child extends Base {
+    public string $label = 'child';
+    public function test(): void {
+        $this->label;
+    }
+}
+"#;
+
+    // Hover on `label` on `$this` inside Child (line 7).
+    let hover = hover_at(&backend, uri, content, 7, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **Base**"),
+        "should show override indicator for property, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_inherited_method_no_override_indicator() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class ParentClass {
+    public function inherited(): void {}
+}
+class ChildClass extends ParentClass {
+    public function test(): void {
+        $this->inherited();
+    }
+}
+"#;
+
+    // Hover on `inherited` called on `$this` in ChildClass (line 6).
+    // The method is inherited (not overridden), so no indicator.
+    let hover = hover_at(&backend, uri, content, 6, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("overrides"),
+        "inherited method should NOT show override, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_cross_file_method_override_shows_indicator() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": { "App\\": "src/" }
+            }
+        }"#,
+        &[
+            (
+                "src/Base.php",
+                r#"<?php
+namespace App;
+class Base {
+    public function process(): void {}
+}
+"#,
+            ),
+            (
+                "src/Child.php",
+                r#"<?php
+namespace App;
+class Child extends Base {
+    public function process(): void {}
+    public function test(): void {
+        $this->process();
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let base_uri = format!("file://{}", _dir.path().join("src/Base.php").display());
+    let base_content = std::fs::read_to_string(_dir.path().join("src/Base.php")).unwrap();
+    backend.update_ast(&base_uri, &base_content);
+
+    let child_uri = format!("file://{}", _dir.path().join("src/Child.php").display());
+    let child_content = std::fs::read_to_string(_dir.path().join("src/Child.php")).unwrap();
+
+    // Hover on `process` called on `$this` inside Child (line 5).
+    let hover = hover_at(&backend, &child_uri, &child_content, 5, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **Base**"),
+        "cross-file override should show indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_cross_file_method_implements_shows_indicator() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": { "App\\": "src/" }
+            }
+        }"#,
+        &[
+            (
+                "src/Loggable.php",
+                r#"<?php
+namespace App;
+interface Loggable {
+    public function log(string $msg): void;
+}
+"#,
+            ),
+            (
+                "src/FileLogger.php",
+                r#"<?php
+namespace App;
+class FileLogger implements Loggable {
+    public function log(string $msg): void {}
+    public function test(): void {
+        $this->log('hi');
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let iface_uri = format!("file://{}", _dir.path().join("src/Loggable.php").display());
+    let iface_content = std::fs::read_to_string(_dir.path().join("src/Loggable.php")).unwrap();
+    backend.update_ast(&iface_uri, &iface_content);
+
+    let impl_uri = format!(
+        "file://{}",
+        _dir.path().join("src/FileLogger.php").display()
+    );
+    let impl_content = std::fs::read_to_string(_dir.path().join("src/FileLogger.php")).unwrap();
+
+    // Hover on `log` called on `$this` inside FileLogger (line 5).
+    let hover = hover_at(&backend, &impl_uri, &impl_content, 5, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("implements **Loggable**"),
+        "cross-file implements should show indicator, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_implements_indicator_same_file_with_namespace() {
+    // Mimics example.php's HoverOriginsDemo scenario: interface and class
+    // in the same namespace block of the same file.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Demo;
+
+interface Renderable {
+    public function format(string $template): string;
+}
+
+abstract class Model {
+    abstract public function toArray(): array;
+}
+
+class HoverOriginsDemo extends Model implements Renderable {
+    public function format(string $template): string { return ''; }
+    public function toArray(): array { return []; }
+    public function demo(): void {
+        $this->format('x');
+        $this->toArray();
+    }
+}
+"#;
+
+    // Hover on `format` called on `$this` (line 15).
+    let hover = hover_at(&backend, uri, content, 15, 16).expect("expected hover on format");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("implements **Renderable**"),
+        "should show implements indicator for format(), got: {}",
+        text
+    );
+
+    // Hover on `toArray` called on `$this` (line 16).
+    let hover = hover_at(&backend, uri, content, 16, 16).expect("expected hover on toArray");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **Model**"),
+        "should show overrides indicator for toArray(), got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_implements_indicator_multi_namespace_block_file() {
+    // Mirrors example.php's structure: a single file with one big
+    // `namespace Demo { ... }` block containing both the interface
+    // and the implementing class.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Demo {
+
+interface Renderable {
+    public function format(string $template): string;
+}
+
+abstract class Model {
+    abstract public function toArray(): array;
+    public function getName(): string { return ''; }
+}
+
+class HoverOriginsDemo extends Model implements Renderable {
+    public function format(string $template): string { return ''; }
+    public function toArray(): array { return []; }
+    public function demo(): void {
+        $this->format('x');
+        $this->toArray();
+        $this->getName();
+    }
+}
+
+}
+"#;
+
+    // Hover on `format` called on `$this` (line 16).
+    // `format` is declared on Renderable, so should show implements indicator.
+    let hover = hover_at(&backend, uri, content, 16, 16).expect("expected hover on format");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("implements **Renderable**"),
+        "should show implements indicator for format(), got: {}",
+        text
+    );
+
+    // Hover on `toArray` called on `$this` (line 17).
+    // `toArray` is declared on Model, so should show overrides indicator.
+    let hover = hover_at(&backend, uri, content, 17, 16).expect("expected hover on toArray");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **Model**"),
+        "should show overrides indicator for toArray(), got: {}",
+        text
+    );
+
+    // Hover on `getName` called on `$this` (line 18).
+    // `getName` is inherited from Model (not overridden), so NO indicator.
+    let hover = hover_at(&backend, uri, content, 18, 16).expect("expected hover on getName");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("overrides"),
+        "inherited method should NOT show overrides, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("implements"),
+        "inherited method should NOT show implements, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_implements_indicator_on_example_php() {
+    // Load the actual example.php and verify the implements indicator fires
+    // on HoverOriginsDemo.format(), which implements Renderable::format().
+    let backend = create_test_backend();
+    let uri = "file:///example.php";
+    let content = std::fs::read_to_string("example.php").expect("example.php must exist");
+
+    // Parse the file so all classes are available.
+    backend.update_ast(uri, &content);
+
+    // Find the line containing `$this->format()` inside HoverOriginsDemo::demo().
+    let (format_line, format_col) = content
+        .lines()
+        .enumerate()
+        .find_map(|(i, line)| {
+            if line.contains("$this->format()") && i > 1710 && i < 1730 {
+                let col = line.find("format").unwrap();
+                Some((i as u32, col as u32))
+            } else {
+                None
+            }
+        })
+        .expect("should find $this->format() in HoverOriginsDemo");
+
+    let hover = hover_at(&backend, uri, &content, format_line, format_col)
+        .expect("expected hover on format");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("implements **Renderable**"),
+        "HoverOriginsDemo.format() should show implements Renderable, got: {}",
+        text
+    );
+
+    // Also verify toArray shows overrides Model.
+    let (toarray_line, toarray_col) = content
+        .lines()
+        .enumerate()
+        .find_map(|(i, line)| {
+            if line.contains("$this->toArray()") && i > 1710 && i < 1730 {
+                let col = line.find("toArray").unwrap();
+                Some((i as u32, col as u32))
+            } else {
+                None
+            }
+        })
+        .expect("should find $this->toArray() in HoverOriginsDemo");
+
+    let hover = hover_at(&backend, uri, &content, toarray_line, toarray_col)
+        .expect("expected hover on toArray");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("overrides **Model**"),
+        "HoverOriginsDemo.toArray() should show overrides Model, got: {}",
+        text
+    );
+}
+
+// ─── Enum case listing tests ────────────────────────────────────────────────
+
+#[test]
+fn hover_enum_shows_cases_in_code_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+enum Color {
+    case Red;
+    case Green;
+    case Blue;
+}
+function paint(Color $c): void {}
+"#;
+
+    // Hover on `Color` in the function parameter (line 6).
+    let hover = hover_at(&backend, uri, content, 6, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("case Red;"),
+        "should list Red case, got: {}",
+        text
+    );
+    assert!(
+        text.contains("case Green;"),
+        "should list Green case, got: {}",
+        text
+    );
+    assert!(
+        text.contains("case Blue;"),
+        "should list Blue case, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_backed_enum_shows_cases_with_values() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+enum Status: string {
+    case Active = 'active';
+    case Inactive = 'inactive';
+}
+function check(Status $s): void {}
+"#;
+
+    // Hover on `Status` in the function parameter (line 5).
+    let hover = hover_at(&backend, uri, content, 5, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("case Active = 'active';"),
+        "should list Active case with value, got: {}",
+        text
+    );
+    assert!(
+        text.contains("case Inactive = 'inactive';"),
+        "should list Inactive case with value, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_enum_does_not_show_regular_constants() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+enum Suit: string {
+    const TABLE = 'suits';
+    case Hearts = 'H';
+    case Diamonds = 'D';
+}
+function deal(Suit $s): void {}
+"#;
+
+    // Hover on `Suit` in the function parameter (line 6).
+    let hover = hover_at(&backend, uri, content, 6, 14).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("case Hearts"),
+        "should list Hearts case, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("const TABLE"),
+        "should NOT list regular constant TABLE in enum body, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_enum_with_no_cases_shows_plain_signature() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+enum Permission {
+    const ADMIN_ROLE = 'admin';
+    public function label(): string { return ''; }
+}
+function f(Permission $p): void {}
+"#;
+
+    // Hover on `Permission` in the function parameter (line 5).
+    let hover = hover_at(&backend, uri, content, 5, 13).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("enum Permission"),
+        "should show enum signature, got: {}",
+        text
+    );
+    // No enum cases exist, so no curly-brace body should be rendered.
+    assert!(
+        !text.contains('{'),
+        "should not have curly brace body when no cases, got: {}",
+        text
+    );
+}
+
+// ─── Trait method signature listing tests ───────────────────────────────────
+
+#[test]
+fn hover_trait_shows_public_method_signatures() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+trait Cacheable {
+    public function getCacheKey(): string { return ''; }
+    public static function flushCache(): void {}
+    protected function internalCache(): void {}
+}
+class Item {
+    use Cacheable;
+}
+"#;
+
+    // Hover on `Cacheable` in the use statement (line 7).
+    let hover = hover_at(&backend, uri, content, 7, 9).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("function getCacheKey(): string;"),
+        "should show getCacheKey signature, got: {}",
+        text
+    );
+    assert!(
+        text.contains("static function flushCache(): void;"),
+        "should show static flushCache signature, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("internalCache"),
+        "should NOT show protected method, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_trait_shows_public_properties() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+trait HasName {
+    public string $name;
+    protected int $id;
+    public function getName(): string { return $this->name; }
+}
+class Person {
+    use HasName;
+}
+"#;
+
+    // Hover on `HasName` in the use statement (line 7).
+    let hover = hover_at(&backend, uri, content, 7, 9).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("public string $name;"),
+        "should show public property, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("$id"),
+        "should NOT show protected property, got: {}",
+        text
+    );
+    assert!(
+        text.contains("function getName(): string;"),
+        "should show public method, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_trait_with_no_public_members_shows_plain_signature() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+trait Internal {
+    protected function secret(): void {}
+}
+class Box {
+    use Internal;
+}
+"#;
+
+    // Hover on `Internal` in the use statement (line 5).
+    let hover = hover_at(&backend, uri, content, 5, 9).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("trait Internal"),
+        "should show trait signature, got: {}",
+        text
+    );
+    assert!(
+        !text.contains('{'),
+        "should not have curly brace body when no public members, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_class_does_not_show_member_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Widget {
+    public string $label;
+    public function render(): string { return ''; }
+}
+function f(Widget $w): void {}
+"#;
+
+    // Hover on `Widget` in the function parameter (line 5).
+    let hover = hover_at(&backend, uri, content, 5, 12).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class Widget"),
+        "should show class name, got: {}",
+        text
+    );
+    // Regular classes should NOT show a member body.
+    assert!(
+        !text.contains("$label"),
+        "should NOT list properties for a regular class, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("function render"),
+        "should NOT list methods for a regular class, got: {}",
+        text
+    );
+}

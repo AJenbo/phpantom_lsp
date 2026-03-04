@@ -1716,6 +1716,39 @@ class DeprecationDemo
 }
 
 
+// ── Hover: Origin Indicators ────────────────────────────────────────────────
+
+class HoverOriginsDemo extends Model implements Renderable
+{
+    public function demo(): void
+    {
+        // Hover on `format` → "◆ implements Renderable"
+        $this->format();
+
+        // Hover on `toArray` → "↑ overrides Model"
+        $this->toArray();
+
+        // Hover on `getName` → no indicator (inherited, not overridden)
+        $this->getName();
+    }
+
+    // Implements Renderable (Model has no format method)
+    public function format(string $template): string { return ''; }
+
+    // Overrides the abstract toArray() from Model
+    public function toArray(): array { return []; }
+}
+
+
+// ── Hover: Enum Case Listing ────────────────────────────────────────────────
+// Hover on `Status` → shows all enum cases inside the code block.
+// Hover on `Priority` → shows backed enum cases with their string values.
+
+// ── Hover: Trait Method Signatures ──────────────────────────────────────────
+// Hover on `HasTimestamps` in a `use` statement → shows public method signatures.
+// Hover on `JsonSerializer` → shows public methods as a scannable summary.
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃

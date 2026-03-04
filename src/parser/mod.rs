@@ -389,6 +389,7 @@ pub(crate) fn extract_property_info(property: &Property) -> Vec<PropertyInfo> {
                 is_static,
                 visibility,
                 deprecation_message: None,
+                is_virtual: false,
             }
         })
         .collect()

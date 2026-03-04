@@ -49,6 +49,7 @@ fn virtual_members_not_empty_with_constant() {
             is_enum_case: false,
             enum_value: None,
             value: None,
+            is_virtual: true,
         }],
     };
     assert!(!vm.is_empty());

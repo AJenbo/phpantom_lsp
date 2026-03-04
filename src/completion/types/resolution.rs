@@ -177,6 +177,7 @@ fn type_hint_to_classes_depth(
                 is_static: false,
                 visibility: Visibility::Public,
                 deprecation_message: None,
+                is_virtual: true,
             })
             .collect();
 

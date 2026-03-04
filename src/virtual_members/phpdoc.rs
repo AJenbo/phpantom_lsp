@@ -125,6 +125,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                     is_static: false,
                     visibility: Visibility::Public,
                     deprecation_message: None,
+                    is_virtual: true,
                 })
                 .collect();
         }

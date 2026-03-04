@@ -29,24 +29,7 @@ with each step.
 
 ---
 
-## Sprint 1 — Finish hover & signature help
-
-Hover and signature help are functional but missing data that users
-expect. This sprint finishes both features so they feel complete.
-
-| # | Item | Effort | Domain | Doc Link |
-|---|---|---|---|---|
-| 1 | Member origin indicators in hover | Low-Medium | Hover | [todo-hover.md §3](todo-hover.md#3-member-origin-indicators) |
-| 2 | Enum case listing in enum hover | Low | Hover | [todo-hover.md §4](todo-hover.md#4-enum-case-listing-in-enum-hover) |
-| 3 | Trait hover shows public method signatures | Low | Hover | [todo-hover.md §5](todo-hover.md#5-trait-hover-shows-public-method-signatures) |
-
-**Why this order:** Hover items 1-3 are all low effort and surface data
-we already have or can cheaply derive. A few days of work for noticeably
-richer hover popups.
-
----
-
-## Sprint 2 — Code actions (imports & diagnostics)
+## Sprint 1 — Code actions (imports & diagnostics)
 
 Ship the first code actions. Import management is the single most
 requested code action in any PHP language server. Pair it with the
@@ -68,7 +51,7 @@ users. Item 14 builds on the code action infrastructure from 10-11.
 
 ---
 
-## Sprint 3 — Refactoring & references
+## Sprint 2 — Refactoring & references
 
 Rename and Extract Function are the two refactoring pillars. Find
 References is a prerequisite for Rename and broadly useful on its own.
@@ -86,7 +69,7 @@ infrastructure before tackling Extract Function.
 
 ---
 
-## Sprint 4 — Close the LSP feature gap
+## Sprint 3 — Close the LSP feature gap
 
 These items close the most commonly expected LSP feature surface gaps.
 Each one removes a reason someone might look elsewhere.
@@ -101,13 +84,13 @@ Each one removes a reason someone might look elsewhere.
 | 23 | Type Definition (`textDocument/typeDefinition`) | Low | LSP Features | [todo-lsp-features.md §14](todo-lsp-features.md#14-type-definition-textdocumenttypedefinition) |
 | 24 | PHPDoc block generation on `/**` | Medium | LSP Features | [todo-lsp-features.md §3](todo-lsp-features.md#3-phpdoc-block-generation-on-) |
 
-**After Sprint 4:** PHPantom covers every commonly expected LSP feature
+**After Sprint 3:** PHPantom covers every commonly expected LSP feature
 and surpasses the field on type intelligence, generics, Laravel, and
 performance. No feature gaps remain for typical day-to-day editing.
 
 ---
 
-## Sprint 5 — Type intelligence depth & polish
+## Sprint 4 — Type intelligence depth & polish
 
 Type intelligence depth is PHPantom's defining advantage. This sprint
 deepens that lead and rounds out the remaining feature surface.
@@ -138,7 +121,7 @@ formatting (not our domain).
 
 ---
 
-## Sprint 6 — Deep type accuracy & Laravel excellence
+## Sprint 5 — Deep type accuracy & Laravel excellence
 
 These items push type resolution accuracy beyond what any tool offers.
 They're the long tail that makes PHPantom the definitive choice for
@@ -173,7 +156,7 @@ complementary inbound direction.
 
 ---
 
-## Sprint 7 — Blade support
+## Sprint 6 — Blade support
 
 Blade is a multi-phase project tracked in [todo-blade.md](todo-blade.md).
 Shipping Blade support makes PHPantom the first open-source PHP language

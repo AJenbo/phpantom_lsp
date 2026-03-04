@@ -286,6 +286,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         template_params: Vec::new(),
         template_bindings: Vec::new(),
         has_scope_attribute: false,
+        is_virtual: false,
     };
 
     apply_substitution_to_method(&mut method, &subs);

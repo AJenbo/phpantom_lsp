@@ -94,6 +94,7 @@ pub fn make_constant(name: &str) -> ConstantInfo {
         is_enum_case: false,
         enum_value: None,
         value: None,
+        is_virtual: true,
     }
 }
 
