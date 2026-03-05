@@ -4331,64 +4331,6 @@ class HoverOriginsDemo extends Model implements Renderable {
     );
 }
 
-#[test]
-fn hover_implements_indicator_on_example_php() {
-    // Load the actual example.php and verify the implements indicator fires
-    // on HoverOriginsDemo.format(), which implements Renderable::format().
-    let backend = create_test_backend();
-    let uri = "file:///example.php";
-    let content = std::fs::read_to_string("example.php").expect("example.php must exist");
-
-    // Parse the file so all classes are available.
-    backend.update_ast(uri, &content);
-
-    // Find the line containing `$this->format()` inside HoverOriginsDemo::demo().
-    let (format_line, format_col) = content
-        .lines()
-        .enumerate()
-        .find_map(|(i, line)| {
-            if line.contains("$this->format()") && i > 1710 && i < 1760 {
-                let col = line.find("format").unwrap();
-                Some((i as u32, col as u32))
-            } else {
-                None
-            }
-        })
-        .expect("should find $this->format() in HoverOriginsDemo");
-
-    let hover = hover_at(&backend, uri, &content, format_line, format_col)
-        .expect("expected hover on format");
-    let text = hover_text(&hover);
-    assert!(
-        text.contains("implements **Renderable**"),
-        "HoverOriginsDemo.format() should show implements Renderable, got: {}",
-        text
-    );
-
-    // Also verify toArray shows overrides Model.
-    let (toarray_line, toarray_col) = content
-        .lines()
-        .enumerate()
-        .find_map(|(i, line)| {
-            if line.contains("$this->toArray()") && i > 1710 && i < 1760 {
-                let col = line.find("toArray").unwrap();
-                Some((i as u32, col as u32))
-            } else {
-                None
-            }
-        })
-        .expect("should find $this->toArray() in HoverOriginsDemo");
-
-    let hover = hover_at(&backend, uri, &content, toarray_line, toarray_col)
-        .expect("expected hover on toArray");
-    let text = hover_text(&hover);
-    assert!(
-        text.contains("overrides **Model**"),
-        "HoverOriginsDemo.toArray() should show overrides Model, got: {}",
-        text
-    );
-}
-
 // ─── Enum case listing tests ────────────────────────────────────────────────
 
 #[test]

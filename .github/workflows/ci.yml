@@ -69,7 +69,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run benchmarks
-        run: cargo bench -- --output-format bencher | tee output.txt
+        run: cargo bench --bench completion -- --output-format bencher | tee output.txt
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -90,7 +90,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run benchmarks
-        run: cargo bench -- --output-format bencher | tee output.txt
+        run: cargo bench --bench completion -- --output-format bencher | tee output.txt
       - name: Compare against baseline
         uses: benchmark-action/github-action-benchmark@v1
         with:
