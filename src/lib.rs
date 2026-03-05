@@ -25,6 +25,12 @@
 //!   class_index → ast_map → classmap → PSR-4 → stubs)
 //! - `subject_extraction` — Shared helpers for extracting the left-hand side of
 //!   `->`, `?->`, and `::` access operators (used by both completion and definition)
+//! - `highlight` — Document highlighting (`textDocument/documentHighlight`).
+//!   When the cursor lands on a symbol, returns all other occurrences in the
+//!   current file so the editor can highlight them.  Uses the precomputed
+//!   `SymbolMap` with no additional parsing.  Variables are scoped to their
+//!   enclosing function/closure; class names, members, functions, and constants
+//!   are file-global.
 //! - [`diagnostics`] — Diagnostics publishing (`textDocument/publishDiagnostics`).
 //!   Collects and publishes diagnostics on `didOpen` / `didChange`, clears on
 //!   `didClose`.  Currently implemented providers:
@@ -55,6 +61,7 @@ pub mod composer;
 mod definition;
 pub mod diagnostics;
 pub mod docblock;
+mod highlight;
 mod hover;
 pub(crate) mod inheritance;
 mod parser;
@@ -105,6 +112,7 @@ pub use virtual_members::resolve_class_fully;
 /// - `definition` — `resolve_definition`, member resolution, function resolution
 /// - `diagnostics` — `publish_diagnostics_for_file`, `clear_diagnostics_for_file`,
 ///   `collect_deprecated_diagnostics`, `collect_unused_import_diagnostics`
+/// - `highlight` — `handle_document_highlight` (same-file symbol occurrence highlighting)
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,

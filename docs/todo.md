@@ -76,7 +76,6 @@ Each one removes a reason someone might look elsewhere.
 
 | # | Item | Effort | Domain | Doc Link |
 |---|---|---|---|---|
-| 18 | Document Highlighting (`textDocument/documentHighlight`) | Low | LSP Features | [lsp-features.md §2](todo/lsp-features.md#2-document-highlighting-textdocumentdocumenthighlight) |
 | 19 | Document Symbols (`textDocument/documentSymbol`) | Low | LSP Features | [lsp-features.md §4](todo/lsp-features.md#4-document-symbols-textdocumentdocumentsymbol) |
 | 20 | Workspace Symbols (`workspace/symbol`) | Low-Medium | LSP Features | [lsp-features.md §5](todo/lsp-features.md#5-workspace-symbols-workspacesymbol) |
 | 21 | Folding Ranges (`textDocument/foldingRange`) | Low | LSP Features | [lsp-features.md §12](todo/lsp-features.md#12-folding-ranges-textdocumentfoldingrange) |

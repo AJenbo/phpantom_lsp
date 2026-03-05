@@ -109,6 +109,8 @@ src/
 ├── references/
 │   ├── mod.rs              # Find References handler: same-file and cross-file symbol scanning
 │   └── tests.rs            # Unit tests for find-references
+├── highlight/
+│   └── mod.rs              # Document highlighting: same-file symbol occurrence highlighting
 ├── diagnostics/
 │   ├── mod.rs              # Diagnostic collection and publishing (skips vendor files)
 │   ├── deprecated.rs       # @deprecated usage diagnostics (strikethrough)
@@ -122,6 +124,7 @@ tests/
 ├── hover.rs                # Hover integration tests
 ├── signature_help.rs       # Signature help integration tests
 ├── implementation.rs       # Go-to-implementation integration tests
+├── document_highlight.rs   # Document highlighting integration tests
 ├── docblock_*.rs           # Docblock parsing and type tests
 ├── parser.rs               # PHP parser / AST extraction tests
 ├── composer.rs             # Composer integration tests

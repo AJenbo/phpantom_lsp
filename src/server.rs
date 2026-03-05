@@ -65,6 +65,7 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -373,6 +374,35 @@ impl LanguageServer for Backend {
                 })
         {
             return Ok(sig_help);
+        }
+
+        Ok(None)
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        let content = self.get_file_content(&uri);
+
+        if let Some(content) = content {
+            let result = crate::util::catch_panic_unwind_safe(
+                "document_highlight",
+                &uri,
+                Some(position),
+                || self.handle_document_highlight(&uri, &content, position),
+            );
+
+            if let Some(highlights) = result {
+                return Ok(highlights);
+            }
         }
 
         Ok(None)
