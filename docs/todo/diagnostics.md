@@ -11,7 +11,7 @@ within the same impact tier.
 ---
 
 ## 2. Resolution-failure diagnostics
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Effort: Medium** *(partially done — unresolved class/interface implemented)*
 
 Report diagnostics only for symbols and types that PHPantom's own engine
 failed to resolve. This is **not** a general PHP linter — we don't check
@@ -34,7 +34,7 @@ unresolved types (the code may still run fine) and **Hint** or
 
 | Diagnostic | Trigger | Severity | Example |
 |---|---|---|---|
-| Unresolved class/interface | A type hint, `extends`, `implements`, `new`, or `::` reference that `find_or_load_class` cannot resolve after all phases (ast_map → classmap → PSR-4 → stubs) | Warning | `Class 'App\Foo' not found` |
+| ✅ Unresolved class/interface | A type hint, `extends`, `implements`, `new`, or `::` reference that `find_or_load_class` cannot resolve after all phases (ast_map → classmap → PSR-4 → stubs) | Warning | `Class 'App\Foo' not found` | *Done — `diagnostics::unknown_classes` module* |
 | Unresolved function | A function call that `find_or_load_function` cannot resolve (global functions, namespaced functions, stubs) | Warning | `Function 'do_thing' not found` |
 | Unresolved member access | `->method()` or `->property` on a type we *did* resolve, but the member doesn't exist after full resolution (inheritance + virtual providers) | Warning | `Method 'frobnicate' not found on class 'App\Bar'` |
 | Unresolved type in PHPDoc | A `@return`, `@param`, `@var`, `@throws`, `@mixin`, or `@extends` tag references a class that cannot be resolved | Information | `Type 'SomeAlias' in @return could not be resolved` |

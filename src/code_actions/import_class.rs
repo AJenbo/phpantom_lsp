@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
 
 use crate::symbol_map::SymbolKind;
 use crate::util::short_name;
@@ -120,6 +121,23 @@ impl Backend {
                 Err(_) => continue,
             };
 
+            // Find any unknown_class diagnostics from the request context
+            // that overlap this span so we can attach them to the code
+            // action.  This lets editors show the import action as a
+            // quick-fix for the diagnostic.
+            let matching_diagnostics: Vec<Diagnostic> = params
+                .context
+                .diagnostics
+                .iter()
+                .filter(|d| {
+                    matches!(
+                        &d.code,
+                        Some(NumberOrString::String(code)) if code == UNKNOWN_CLASS_CODE
+                    )
+                })
+                .cloned()
+                .collect();
+
             for fqn in &candidates {
                 // Skip candidates that would conflict with an existing
                 // import (e.g. a different class with the same short name
@@ -142,7 +160,11 @@ impl Backend {
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: None,
+                    diagnostics: if matching_diagnostics.is_empty() {
+                        None
+                    } else {
+                        Some(matching_diagnostics.clone())
+                    },
                     edit: Some(WorkspaceEdit {
                         changes: Some(changes),
                         document_changes: None,

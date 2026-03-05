@@ -1767,6 +1767,14 @@ class HoverOriginsDemo extends Model implements Renderable
 
 
 
+// ── Diagnostic: Unknown Class ───────────────────────────────────────────────
+// `MutateArrayInsertSpec` and `Cluster` below are not imported and cannot be
+// resolved — they get a yellow "Class 'X' not found" warning underline.
+// This diagnostic fires for any ClassReference that PHPantom cannot resolve
+// through use-map, local classes, same-namespace, class_index, classmap,
+// PSR-4, or stubs.  It pairs with the "Import Class" code action: press
+// Ctrl+. (Cmd+. on Mac) on the warning to import the class in one step.
+
 // ── Code Action: Import Class ───────────────────────────────────────────────
 // Place cursor on `MutateArrayInsertSpec` and press Ctrl+. (or Cmd+. on Mac)
 // to see "Import `Couchbase\MutateArrayInsertSpec`" in the quick-fix menu.

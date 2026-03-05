@@ -43,6 +43,9 @@
 //!     via `DiagnosticTag::Deprecated` on references to deprecated symbols)
 //!   - `diagnostics::unused_imports` — unused `use` dimming
 //!     (`DiagnosticTag::Unnecessary` on imports with no references in the file)
+//!   - `diagnostics::unknown_classes` — unknown class diagnostics
+//!     (`Severity::Warning` on `ClassReference` spans that cannot be resolved
+//!     through any resolution phase)
 //! - [`docblock`] — PHPDoc block parsing, split into submodules:
 //!   - `docblock::tags` — tag extraction (`@return`, `@var`, `@property`, `@method`,
 //!     `@mixin`, `@deprecated`, `@phpstan-assert`, docblock text retrieval)

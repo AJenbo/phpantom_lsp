@@ -8,8 +8,12 @@
 //!   strikethrough in most editors).
 //! - **Unused `use` dimming** — dim `use` declarations that are not
 //!   referenced anywhere in the file with `DiagnosticTag::Unnecessary`.
+//! - **Unknown class diagnostics** — report `ClassReference` spans that
+//!   cannot be resolved through any resolution phase (use-map, local
+//!   classes, same-namespace, class_index, classmap, PSR-4, stubs).
 
 mod deprecated;
+pub(crate) mod unknown_classes;
 mod unused_imports;
 
 use tower_lsp::lsp_types::*;
@@ -58,6 +62,9 @@ impl Backend {
 
         // ── Unused `use` dimming ────────────────────────────────────────
         self.collect_unused_import_diagnostics(uri_str, content, &mut diagnostics);
+
+        // ── Unknown class references ────────────────────────────────────
+        self.collect_unknown_class_diagnostics(uri_str, content, &mut diagnostics);
 
         client.publish_diagnostics(uri, diagnostics, None).await;
     }
