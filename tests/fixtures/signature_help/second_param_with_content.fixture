@@ -1,0 +1,14 @@
+// test: signature help with second parameter active and already-filled variable
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'function with parameters, 2nd active and already filled'
+// expect_sig_label: (string $foo, int $bar): mixed
+// expect_sig_active: 1
+// expect_sig_param: string $foo
+// expect_sig_param: int $bar
+---
+<?php
+
+function hello(string $foo, int $bar) {}
+
+$test = 123;
+hello("hello", $test<>);

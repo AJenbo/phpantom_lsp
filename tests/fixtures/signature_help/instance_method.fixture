@@ -1,0 +1,16 @@
+// test: signature help on instance method call shows parameters
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'instance method'
+// expect_sig_label: (string $foo, int $bar): mixed
+// expect_sig_active: 0
+// expect_sig_param: string $foo
+// expect_sig_param: int $bar
+---
+<?php
+
+class Foo {
+    public function hello(string $foo, int $bar) {}
+}
+
+$foo = new Foo();
+$foo->hello(<>);

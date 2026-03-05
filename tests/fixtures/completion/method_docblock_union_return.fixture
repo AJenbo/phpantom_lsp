@@ -1,0 +1,23 @@
+// test: public method with docblock union return type resolves members from return type
+// feature: completion
+// Adapted from phpactor WorseClassMemberCompletorTest 'Public method multiple return types'
+// expect: foo(
+---
+<?php
+
+class Barbar {
+    public function barMethod(): void {}
+}
+
+class Foobar
+{
+    /**
+     * @return Foobar|Barbar
+     */
+    public function foo()
+    {
+    }
+}
+
+$foobar = new Foobar();
+$foobar-><>

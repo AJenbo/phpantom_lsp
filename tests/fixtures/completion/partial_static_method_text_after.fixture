@@ -1,0 +1,17 @@
+// test: partially completed static method with text after cursor
+// feature: completion
+// Adapted from phpactor WorseClassMemberCompletorTest 'Partially completed static method with text after'
+// expect: bbb(
+---
+<?php
+
+class Foobar
+{
+    public function aaa()
+    {
+        self::bb<>new Foobar();
+    }
+
+    public static function bbb() {}
+    public static function ccc() {}
+}

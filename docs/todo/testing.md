@@ -488,14 +488,15 @@ Key files:
 
 | Test file | Cases | Relevance | Status |
 |---|---|---|---|
-| `WorseClassMemberCompletorTest.php` | ~60 yields | Member completion: visibility, static, virtual, parent::, nullable, union narrowing with completion | 🔶 12 fixtures converted |
-| `WorseLocalVariableCompletorTest.php` | ~12 yields | Variable completion: partial matching, array shape keys as variables, closure `use` vars | Not started |
-| `WorseSignatureHelperTest.php` | ~10 yields | Signature help edge cases | 🔶 3 fixtures converted |
-| `WorseNamedParameterCompletorTest.php` | ~10 yields | Named argument completion | Not started |
-| `WorseConstructorCompletorTest.php` | ? | Constructor completion | Not started |
-| `WorseFunctionCompletorTest.php` | ? | Standalone function completion | Not started |
-| `WorseSubscriptCompletorTest.php` | ~4 yields | Array subscript completion | Not started |
-| `DocblockCompletorTest.php` | ? | PHPDoc tag completion | Not started |
+| `WorseClassMemberCompletorTest.php` | ~60 yields | Member completion: visibility, static, virtual, parent::, nullable, union narrowing with completion | ✅ 19 fixtures converted |
+| `WorseLocalVariableCompletorTest.php` | ~12 yields | Variable completion: partial matching, array shape keys as variables, closure `use` vars | 🔶 4 fixtures converted |
+| `WorseSignatureHelperTest.php` | ~30 yields | Signature help edge cases | ✅ 15 fixtures converted |
+| `WorseNamedParameterCompletorTest.php` | ~10 yields | Named argument completion | ✅ 8 fixtures converted |
+| `WorseConstructorCompletorTest.php` | ~7 yields | Constructor parameter completion (context-aware variable suggestions) | ⏭️ Skip: tests Phpactor-specific parameter-matching completor |
+| `WorseFunctionCompletorTest.php` | 2 yields | Standalone function completion | ⏭️ Skip: tests bare function name completion (different architecture) |
+| `WorseSubscriptCompletorTest.php` | ~4 yields | Array subscript completion | 🔶 2 fixtures converted |
+| `DocblockCompletorTest.php` | ~12 yields | PHPDoc tag completion | ⏭️ Skip: tests Phpactor-specific tag searcher |
+| `WorseParameterCompletorTest.php` | ~12 yields | Context-aware variable suggestions for call arguments | ⏭️ Skip: tests Phpactor-specific parameter-matching completor |
 
 The conversion is straightforward:
 
@@ -528,11 +529,18 @@ $foobar->foo-><>
 
 - [x] Read through `WorseClassMemberCompletorTest.php` and note unique scenarios not in our `tests/completion_*.rs`
 - [x] Convert first batch of gaps into `.fixture` files in `completion/` directory (12 fixtures)
+- [x] Convert second batch: 7 more fixtures from WorseClassMemberCompletorTest (partial completion, static method text-after, virtual static, docblock union return, partial static property)
 - [x] Read through `WorseSignatureHelperTest.php` and convert 3 signature help fixtures
-- [x] Read through `WorseLocalVariableCompletorTest.php` — converted 2 fixtures: `variable/array_shape_key_variables.fixture` (ignored), `variable/closure_use_variable.fixture` (ignored)
-- [x] Read through `WorseNamedParameterCompletorTest.php` — converted 2 fixtures: `named_parameter/nested_call_context.fixture` ✅, `named_parameter/attribute_constructor.fixture` (ignored)
+- [x] Convert 6 more sig help fixtures: instance_method, constructor_first_param, self_static_method, string_with_comma, nested_outer_active, second_param_with_content, nested_array_in_param, attribute_second_param
+- [x] Read through `WorseLocalVariableCompletorTest.php` — converted 4 fixtures: `variable/array_shape_key_variables.fixture` (ignored), `variable/closure_use_variable.fixture` (ignored), `variable/docblock_override_type.fixture` ✅, `variable/closure_scope_isolation.fixture` (ignored)
+- [x] Read through `WorseNamedParameterCompletorTest.php` — converted 8 fixtures: `nested_call_context` ✅, `attribute_constructor` (ignored), `constructor_call` ✅, `instance_method` ✅, `static_method` ✅, `standalone_function` ✅, `no_completion_after_string` ✅, `no_named_param_on_variable` ✅, `no_named_in_member_access` ✅
 - [x] Read through `WorseSubscriptCompletorTest.php` — converted 2 fixtures: `subscript/array_shape_keys.fixture` (ignored), `subscript/nested_array_shape_keys.fixture` (ignored)
+- [x] Read through `WorseConstructorCompletorTest.php` — skip: tests Phpactor-specific parameter-matching completor (suggests variables matching expected parameter types)
+- [x] Read through `WorseFunctionCompletorTest.php` — skip: tests bare function name completion which uses different architecture in PHPantom
+- [x] Read through `WorseParameterCompletorTest.php` — skip: tests Phpactor-specific parameter-matching completor
+- [x] Read through `DocblockCompletorTest.php` — skip: tests Phpactor-specific tag searcher with external name search provider
 - [x] The `parent::` and `parent::__construct` completion tests are worth comparing against `completion_parent.rs` (✅ already converted as fixtures)
+- [x] Read through remaining inference `.test` files for `variable/pass-by-ref` — converted: `variable/pass_by_reference.fixture` (ignored)
 
 ---
 
@@ -595,34 +603,34 @@ When working on these todo.md items, check the corresponding Phpactor fixtures f
 | 2 | Audit: 261 Phpactor fixtures mapped to our existing coverage (use the checklists above) | ✅ All categories audited; remaining unchecked items marked as skip with reason |
 | 3 Tier 1 | Regression tests for existing features | ✅ 88 passing fixtures across 15 categories |
 | 3 Tier 2 | Ignored tests for planned features, with cross-references | ✅ 75 ignored fixtures converted with todo.md references |
-| 4 | Completion test mining from Phpactor | ✅ All 6 test files reviewed; 24 completion + 9 sig help + 2 named param + 2 subscript + 2 variable fixtures |
+| 4 | Completion test mining from Phpactor | ✅ All 9 test files reviewed; 30 completion + 17 sig help + 9 named param + 2 subscript + 5 variable fixtures |
 | 5 | Smoke test suite + benchmark suite | Not started |
 
-**Current fixture counts (163 total):**
+**Current fixture counts (187 total):**
 
 | Category | Passing | Ignored | Total |
 |---|---|---|---|
 | generics | 10 | 28 | 38 |
+| completion (from Phase 4 mining) | 26 | 4 | 30 |
 | narrowing (if-statement + narrowing/) | 21 | 9 | 30 |
-| completion (from Phase 4 mining) | 21 | 3 | 24 |
+| signature_help | 15 | 2 | 17 |
 | type | 6 | 5 | 11 |
+| named_parameter | 8 | 1 | 9 |
 | function | 1 | 8 | 9 |
-| signature_help | 8 | 1 | 9 |
 | reflection | 6 | 1 | 7 |
 | combination | 4 | 2 | 6 |
 | virtual_member | 3 | 3 | 6 |
 | enum | 3 | 2 | 5 |
+| variable | 1 | 4 | 5 |
 | foreach | 2 | 2 | 4 |
 | arrow_function | 0 | 2 | 2 |
 | call_expression | 0 | 2 | 2 |
 | catch_clause | 2 | 0 | 2 |
-| named_parameter | 1 | 1 | 2 |
 | subscript | 0 | 2 | 2 |
-| variable | 0 | 2 | 2 |
 | pipe_operator | 0 | 1 | 1 |
 | property_hooks | 0 | 1 | 1 |
 
-**Gaps discovered during conversion (not previously tracked):**
+**Gaps discovered during conversion (not previously tracked, oldest first):**
 - `@implements` generic resolution (class_implements_single, class_implements_multiple)
 - `@template-extends` syntax (only `@extends` is recognized)
 - `@template-implements` syntax (only `@implements` is recognized)
@@ -650,5 +658,6 @@ When working on these todo.md items, check the corresponding Phpactor fixtures f
 - `!!` double negation with `instanceof` not resolved
 - Attribute context: no named parameter completion or signature help
 - Generic `@phpstan-assert` with `class-string<T>` parameter inference not supported
+- Partial static property prefix filtering (`$foobar::$f<>`) returns empty results
 
 **Recommended next steps: Phase 5 (smoke tests and benchmarks)**

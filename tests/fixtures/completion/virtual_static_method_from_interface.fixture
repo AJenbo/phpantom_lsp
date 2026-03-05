@@ -1,0 +1,17 @@
+// test: virtual static method from interface shown on static :: access
+// feature: completion
+// Adapted from phpactor WorseClassMemberCompletorTest 'Virtual static method'
+// expect: foo(
+---
+<?php
+
+/**
+ * @method static \Foobar foo()
+ */
+interface Barfoo {}
+
+class Foobar implements Barfoo
+{
+}
+
+Foobar::<>

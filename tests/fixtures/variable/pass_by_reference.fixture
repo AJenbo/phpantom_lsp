@@ -1,0 +1,21 @@
+// test: pass-by-reference parameter sets type on variable after function call
+// feature: completion
+// Adapted from phpactor variable/pass-by-ref.test
+// After calling foo(&$bar) where $bar is typed as Baz, $bar should resolve to Baz
+// ignore: pass-by-reference parameter type inference not yet supported (todo.md backlog)
+// expect: doWork(
+---
+<?php
+
+class Baz {
+    public function doWork(): void {}
+}
+
+function foo(Baz &$bar): void
+{
+    $bar = new Baz();
+}
+
+foo($bar);
+
+$bar-><>

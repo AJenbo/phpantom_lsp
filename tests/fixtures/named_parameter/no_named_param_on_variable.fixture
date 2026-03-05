@@ -1,0 +1,14 @@
+// test: named parameter completion not shown when completing a variable prefix
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'Ignore when completing a variable'
+// When the user types $o, they want variable completion, not named parameters
+// expect_absent: one:
+---
+<?php
+
+class A {
+    public function bee(string $one) {}
+}
+
+$a = new A();
+$a->bee($o<>);

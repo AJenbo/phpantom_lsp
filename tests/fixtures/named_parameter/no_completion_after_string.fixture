@@ -1,0 +1,13 @@
+// test: no named parameter completion after string literal argument
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'no completion after string literal'
+// expect_absent: one:
+---
+<?php
+
+class A {
+    public function bee(string $one) {}
+}
+
+$a = new A();
+$a->bee('foo'<>);

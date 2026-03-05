@@ -1,0 +1,18 @@
+// test: partially completed instance method via $this shows matching members
+// feature: completion
+// Adapted from phpactor WorseClassMemberCompletorTest 'Partially completed 2'
+// Note: our LSP returns all members and relies on client-side prefix filtering
+// expect: bbb(
+---
+<?php
+
+class Foobar
+{
+    public function aaa()
+    {
+        $this->bb<>
+    }
+
+    public function bbb() {}
+    public function ccc() {}
+}

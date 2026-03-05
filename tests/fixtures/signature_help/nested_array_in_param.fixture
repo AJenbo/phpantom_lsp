@@ -1,0 +1,13 @@
+// test: signature help with nested array expression inside second parameter
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'function with parameters, 2nd active within other nodes'
+// expect_sig_label: (string $foo, int $bar): mixed
+// expect_sig_active: 1
+// expect_sig_param: string $foo
+// expect_sig_param: int $bar
+---
+<?php
+
+function hello(string $foo, int $bar) {}
+
+hello("hello", [1, [<>]]);

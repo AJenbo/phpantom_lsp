@@ -1,0 +1,19 @@
+// test: named parameter completion not shown when completing member access inside argument
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'Method call in partial method call'
+// When the cursor is on a member access chain inside an argument, named params should not appear
+// expect_absent: one:
+---
+<?php
+
+class B {
+    public function boo(): B {}
+}
+
+class A {
+    public function bee(string $one) {}
+}
+
+$b = new B();
+$a = new A();
+$a->bee($b->boo()-><>);

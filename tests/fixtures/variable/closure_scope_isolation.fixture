@@ -1,0 +1,20 @@
+// test: closure body does not see outer variables without use()
+// feature: completion
+// Adapted from phpactor WorseLocalVariableCompletorTest 'Use variables not in function body'
+// Variables declared outside a closure are not available inside unless captured via use()
+// ignore: variable scope isolation in closure bodies not enforced
+// expect_absent: $barfoo
+// expect_absent: $foobar
+---
+<?php
+
+class Outer {
+    public function outerMethod(): void {}
+}
+
+$barfoo = 12;
+$foobar = new Outer();
+
+$f = function () {
+    $<>
+};

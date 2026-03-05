@@ -1,0 +1,14 @@
+// test: signature help for constructor shows first parameter active
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'class with construct'
+// expect_sig_label: (string $foo): mixed
+// expect_sig_active: 0
+// expect_sig_param: string $foo
+---
+<?php
+
+class Foo {
+    public function __construct(string $foo) {}
+}
+
+new Foo(<>);

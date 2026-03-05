@@ -1,0 +1,17 @@
+// test: partially completed static property filters by prefix
+// feature: completion
+// Adapted from phpactor WorseClassMemberCompletorTest 'Partially completed 3'
+// ignore: partial static property prefix filtering ($foobar::$f<>) returns empty results
+// expect: $foobar
+// expect_absent: $barfoo
+---
+<?php
+
+class Foobar
+{
+    public static $foobar;
+    public static $barfoo;
+}
+
+$foobar = new Foobar();
+$foobar::$f<>

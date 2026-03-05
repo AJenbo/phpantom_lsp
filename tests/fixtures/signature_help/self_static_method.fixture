@@ -1,0 +1,17 @@
+// test: signature help with self:: static method call inside class
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'self method signature with no parameters inside another function'
+// expect_sig_label: (string $foo, int $bar): mixed
+// expect_sig_active: 0
+// expect_sig_param: string $foo
+// expect_sig_param: int $bar
+---
+<?php
+
+class Hi {
+    public static function hello(string $foo, int $bar) {}
+
+    public function f(): void {
+        self::hello(<>);
+    }
+}

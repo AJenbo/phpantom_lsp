@@ -1,0 +1,19 @@
+// test: signature help on attribute with second parameter active
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'attribute 2'
+// ignore: signature help in attribute context not yet supported
+// expect_sig_label: (string $bar, string $baz): mixed
+// expect_sig_active: 1
+// expect_sig_param: string $bar
+// expect_sig_param: string $baz
+---
+<?php
+
+#[Attribute]
+class FooAttr
+{
+    public function __construct(string $bar, string $baz) {}
+}
+
+#[FooAttr($bar,<>)]
+class Bar {}

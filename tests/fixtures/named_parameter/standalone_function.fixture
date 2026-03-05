@@ -1,0 +1,10 @@
+// test: named parameter completion on standalone function call
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'function'
+// expect: one:
+---
+<?php
+
+function bee(string $one) {}
+
+bee(<>);

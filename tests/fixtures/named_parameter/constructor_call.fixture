@@ -1,0 +1,12 @@
+// test: named parameter completion on constructor call
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'Constructor'
+// expect: one:
+---
+<?php
+
+class A {
+    public function __construct(string $one) {}
+}
+
+new A(<>);

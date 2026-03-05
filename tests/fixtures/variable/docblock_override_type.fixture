@@ -1,0 +1,17 @@
+// test: variable with @var docblock override resolves to the docblock type
+// feature: completion
+// Adapted from phpactor WorseLocalVariableCompletorTest 'Complete previously declared variable which had no type'
+// expect: doSomething(
+---
+<?php
+
+class Barfoo {
+    public function doSomething(): void {}
+}
+
+$callMe = foobar();
+
+/** @var Barfoo $callMe */
+$callMe = foobar();
+
+$callMe-><>

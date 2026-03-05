@@ -1,0 +1,14 @@
+// test: signature help correctly tracks active parameter when first arg contains a comma
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'function with parameters, 1st contains comma and 2nd active'
+// expect_sig_label: (string $foo, int $bar, bool $foobar): mixed
+// expect_sig_active: 1
+// expect_sig_param: string $foo
+// expect_sig_param: int $bar
+// expect_sig_param: bool $foobar
+---
+<?php
+
+function hello(string $foo, int $bar, bool $foobar) {}
+
+hello("hello, ",<>);

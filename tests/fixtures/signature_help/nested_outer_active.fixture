@@ -1,0 +1,17 @@
+// test: signature help targets outer function when cursor is on second arg after nested call
+// feature: signature_help
+// Adapted from phpactor WorseSignatureHelperTest 'nested function on the second function, 2nd arg of 1st call active'
+// expect_sig_label: (string $foo, int $bar): mixed
+// expect_sig_active: 1
+// expect_sig_param: string $foo
+// expect_sig_param: int $bar
+---
+<?php
+
+function hello(string $foo, int $bar) {}
+function goodbye(string $good, int $by) {}
+
+hello(
+    "hello",
+    goo<>dbye("good", "by")
+);

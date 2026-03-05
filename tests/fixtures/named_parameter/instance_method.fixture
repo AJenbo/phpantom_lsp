@@ -1,0 +1,13 @@
+// test: named parameter completion on instance method call
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'Method'
+// expect: one:
+---
+<?php
+
+class A {
+    public function bee(string $one) {}
+}
+
+$a = new A();
+$a->bee(<>);

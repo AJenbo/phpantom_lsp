@@ -1,0 +1,12 @@
+// test: named parameter completion on static method call
+// feature: completion
+// Adapted from phpactor WorseNamedParameterCompletorTest 'Static'
+// expect: one:
+---
+<?php
+
+class A {
+    public static function bee(string $one) {}
+}
+
+A::bee(<>);
