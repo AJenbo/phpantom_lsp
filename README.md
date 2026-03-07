@@ -15,13 +15,13 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Auto-import | ✅ | 💰 | ✅ | ✅ | ✅ |
 | `@mixin` completion | ✅ | 💰 | ✅ | ✅ | 🚧 |
 | Generics / `@template` | ✅ | 🚧 | ✅ | 🚧 | ✅ |
-| `@phpstan` annotations | ✅ | ❌ | 🚧 | ❌ | 🚧 |
-| Conditional return types | ✅ | ❌ | ✅ | ❌ | ❌ |
+| `@phpstan` annotations | ✅ | ❌ | 🚧 | ✅ | 🚧 |
+| Conditional return types | ✅ | ❌ | ✅ | ✅ | ❌ |
 | Laravel Eloquent | ✅ | ❌ | 🚧 | ❌ | 🧩 |
-| Array shape inference | ✅ | ❌ | ✅ | ❌ | 🚧 |
+| Array shape inference | ✅ | ❌ | ✅ | ✅ | 🚧 |
 | Object shape completion | ✅ | ❌ | ✅ | ❌ | 🚧 |
 | Closure param inference | ✅ | 🚧 | 🚧 | 🚧 | ❌ |
-| Generator body types | ✅ | ❌ | 🚧 | ❌ | ❌ |
+| Generator body types | ✅ | ❌ | 🚧 | ❌✅| ❌ |
 | Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Go-to-implementation | ✅ | ✅ | ❌ | ✅ | ✅ |
 | Hover | ✅ | ✅ | ✅ | ✅ | ✅ |
