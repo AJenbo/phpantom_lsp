@@ -15,7 +15,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Auto-import | ✅ | 💰 | ✅ | ✅ | ✅ |
 | `@mixin` completion | ✅ | 💰 | ✅ | ✅ | 🚧 |
 | Generics / `@template` | ✅ | 🚧 | ✅ | 🚧 | ✅ |
-| `@phpstan` annotations | ✅ | ❌ | 🚧 | ✅ | 🚧 |
+| `@phpstan` annotations | ✅ | ❌ | 🚧 | 🚧 | 🚧 |
 | Conditional return types | ✅ | ❌ | ✅ | ✅ | ❌ |
 | Laravel Eloquent | ✅ | ❌ | 🚧 | ❌ | 🧩 |
 | Array shape inference | ✅ | ❌ | ✅ | ✅ | 🚧 |
