@@ -6133,3 +6133,52 @@ namespace App {
         line
     );
 }
+
+// ── Crash regressions ───────────────────────────────────────────────────────
+
+/// Hovering on `$q` inside a nested closure that reuses the same variable
+/// name as the outer closure used to cause infinite recursion in the hover
+/// handler.  Fixed by a thread-local recursion depth guard in
+/// `infer_callable_params_from_receiver`.
+#[test]
+fn hover_nested_closure_reused_variable_does_not_crash() {
+    let backend = create_test_backend();
+    let uri = "file:///nested_closure.php";
+    let content = r#"<?php
+namespace App;
+
+class QueryBuilder {
+    public function where(string $col, mixed $val = null): static { return $this; }
+    public function whereNull(string $col): static { return $this; }
+    public function orWhere(mixed ...$args): static { return $this; }
+    public function whereHas(string $rel, \Closure $cb): static { return $this; }
+}
+
+class Repo {
+    public function list(): void {
+        $query = new QueryBuilder();
+        $query->where(function ($q) {
+            $q->whereNull('user_id')
+                ->orWhere('user_id', 1)
+                ->orWhere(function ($q): void {
+                    $q->where('is_public', 1)
+                        ->where('is_verified', 1);
+                });
+        });
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    // Line 17 is `->orWhere(function ($q): void {` — the crashing line.
+    // Hover at the midpoint which lands on `function` or `($q)`.
+    let line_text = content.lines().nth(17).unwrap();
+    let col = (line_text.len() / 2) as u32;
+    let position = Position {
+        line: 17,
+        character: col,
+    };
+
+    // This must not stack-overflow.
+    backend.handle_hover(uri, content, position);
+}
