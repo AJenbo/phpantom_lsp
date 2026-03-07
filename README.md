@@ -21,7 +21,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Array shape inference | ✅ | ❌ | ✅ | ✅ | 🚧 |
 | Object shape completion | ✅ | ❌ | ✅ | ❌ | 🚧 |
 | Closure param inference | ✅ | 🚧 | 🚧 | 🚧 | ❌ |
-| Generator body types | ✅ | ❌ | 🚧 | ❌✅| ❌ |
+| Generator body types | ✅ | ❌ | 🚧 | ✅| ❌ |
 | Go-to-definition | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Go-to-implementation | ✅ | ✅ | ❌ | ✅ | ✅ |
 | Hover | ✅ | ✅ | ✅ | ✅ | ✅ |
