@@ -249,13 +249,11 @@ pub(in crate::completion) fn try_extract_instanceof_with_negation<'b>(
             try_extract_instanceof_with_negation(inner.expression, var_name)
         }
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            // `!expr` — the inner expr should be a (possibly parenthesised) instanceof
-            try_extract_instanceof(prefix.operand, var_name)
-                .map(|cls| (cls, true))
-                .or_else(|| {
-                    // Also support `!is_a($var, ClassName::class)`
-                    try_extract_is_a(prefix.operand, var_name).map(|cls| (cls, true))
-                })
+            // `!expr` — recurse so that `!!expr` (double negation) and
+            // deeper chains like `!!!expr` are handled correctly: each
+            // `!` flips the negation flag.
+            try_extract_instanceof_with_negation(prefix.operand, var_name)
+                .map(|(cls, neg)| (cls, !neg))
         }
         _ => {
             try_extract_instanceof(expr, var_name)

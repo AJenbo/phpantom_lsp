@@ -1,7 +1,7 @@
 // test: double negation with instanceof narrows type
 // feature: completion
 // Adapted from phpactor if-statement/bangbang.test
-// ignore: double negation (!!) with instanceof not resolved
+
 // expect: fooMethod(
 ---
 <?php

@@ -75,6 +75,7 @@ PHPantom understands Composer projects out of the box:
 - **[Architecture](docs/ARCHITECTURE.md).** Symbol resolution, stub loading, and inheritance merging.
 - **[Contributing](docs/CONTRIBUTING.md)**
 - **[Changelog](docs/CHANGELOG.md)**
+- **[Benchmarks](https://ajenbo.github.io/phpantom_lsp/dev/bench/).** Completion latency tracked on every commit.
 - **[Roadmap](docs/todo.md).** Planned features and domain-specific plans.
 
 ## Acknowledgements

@@ -692,17 +692,6 @@ last assertion's narrowing applies.
 
 ---
 
-## 23. Double negated `instanceof` narrowing
-**Impact: Low · Effort: Low**
-
-`if (!!($x instanceof Foo))` and `if (!(!$x instanceof Foo) { return; }`
-do not resolve correctly. The double negation cancels out but the
-narrowing engine does not simplify it.
-
-**Discovered via:** fixture conversion (bangbang_instanceof).
-
----
-
 ## 24. Literal string conditional return type
 **Impact: Low · Effort: Low-Medium**
 

@@ -1,11 +1,11 @@
 # PHPantom — Ignored Fixture Tasks
 
-There are **228 fixture tests** in `tests/fixtures/`. Of these, **175
-pass** and **53 are ignored** because they exercise features or bug
+There are **228 fixture tests** in `tests/fixtures/`. Of these, **176
+pass** and **52 are ignored** because they exercise features or bug
 fixes that are not yet implemented. Each ignored fixture has a
 `// ignore:` comment explaining what is missing.
 
-This document groups the 53 ignored fixtures by the underlying work
+This document groups the 52 ignored fixtures by the underlying work
 needed to un-ignore them. Tasks are ordered by the number of fixtures
 they unblock (descending), then by estimated effort. Once a task is
 complete, remove the `// ignore:` line from each fixture, verify the
@@ -338,20 +338,6 @@ clauses.
 
 ---
 
-## 14. Double negated `instanceof` narrowing (1 fixture)
-
-**Ref:** [type-inference.md §23](type-inference.md#23-double-negated-instanceof-narrowing)
-**Impact: Low · Effort: Low**
-
-`if (!!($x instanceof Foo))` does not narrow. The double negation
-should cancel out.
-
-**Fixture:**
-
-- [ ] `narrowing/bangbang_instanceof.fixture` — `!!$x instanceof Foo` narrows inside the block
-
----
-
 ## 15. Negated `@phpstan-assert !Type` (1 fixture)
 
 **Ref:** [type-inference.md §19](type-inference.md#19-negated-phpstan-assert-type)
@@ -546,7 +532,6 @@ Quick wins (Low effort, 1 fixture each):
 
 | Task | Fixture |
 |---|---|
-| §14 Double negated `instanceof` | `narrowing/bangbang_instanceof` |
 | §17 Accessor on new line | `completion/accessor_on_new_line` |
 | §18 Partial static property prefix | `completion/partial_static_property` |
 | §23 `@phpstan-type` in foreach | `type/phpstan_type_alias` |
