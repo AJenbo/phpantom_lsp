@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Self-generated classmap.** PHPantom now works without running `composer dump-autoload -o`. When the Composer classmap is missing or incomplete, PHPantom scans the project's autoload directories itself to build a class index. Non-Composer projects are also supported by scanning all PHP files in the workspace. The strategy is configurable via `[indexing] strategy` in `.phpantom.toml` (`"composer"`, `"self"`, `"full"`, or `"none"`).
 - **Pipe operator (PHP 8.5).** `$input |> trim(...) |> createDate(...)` resolves through the chain, returning the last callable's return type. Completion works after assigning the pipe result to a variable.
 - **Pass-by-reference parameter type inference.** After calling a function that accepts a typed `&$var` parameter (e.g. `function foo(Baz &$bar)`), the variable acquires the parameter's type for subsequent completion.
 - **Generic `@phpstan-assert` with `class-string<T>`.** `@phpstan-assert T $value` combined with a `@template T` bound via `class-string<T>` now resolves the narrowed type from the call-site argument. For example, `Assert::assertInstanceOf(Foo::class, $obj)` narrows `$obj` to `Foo`.

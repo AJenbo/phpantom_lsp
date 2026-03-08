@@ -17,6 +17,7 @@ mago-database = "1.8"
 mago-span = "1.8"
 bumpalo = "3"
 ignore = "0.4"
+memchr = "2"
 toml = "0.8"
 
 [dev-dependencies]

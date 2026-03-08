@@ -521,6 +521,21 @@ PSR-4 mappings come exclusively from the project's own `composer.json`. Vendor P
 
 **Design principle:** if the classmap is missing or stale, vendor classes fail to resolve visibly rather than being silently papered over by PSR-4. This makes the problem obvious to the user (fix: run `composer dump-autoload`). User PSR-4 roots are walked by Go-to-implementation (Phase 5) and Find References because user files change between `dump-autoload` runs.
 
+### Self-Generated Classmap
+
+When Composer's `autoload_classmap.php` is missing or incomplete, PHPantom builds a classmap itself using a fast byte-level PHP scanner (`classmap_scanner.rs`). The scanner is a single-pass state machine that extracts `namespace\ClassName` pairs without a full AST parse, handling comments, strings, heredocs, and property accesses (`$node->class`). `memchr` provides SIMD-accelerated keyword pre-screening so files without class-like keywords are rejected immediately.
+
+The indexing strategy is configurable via `[indexing] strategy` in `.phpantom.toml`:
+
+- **`"composer"`** (default) — use Composer's classmap when available and complete; fall back to self-scan when it is missing or incomplete (i.e. the project's own PSR-4 namespaces have no entries in the classmap).
+- **`"self"`** — always self-scan, ignoring Composer's classmap entirely.
+- **`"full"`** — same as `"self"` for now; reserved for future background indexing.
+- **`"none"`** — no proactive scanning; uses Composer's classmap if present but never falls back to self-scan.
+
+When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats). When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root (excluding hidden directories, `node_modules`, `vendor`, and `target`).
+
+The result is a `HashMap<String, PathBuf>` in the same format as the existing `Backend.classmap`. Everything downstream (resolution, diagnostics, go-to-definition) works unchanged.
+
 **Vendor dir detection:** the `config.vendor-dir` setting is read from `composer.json` once during `initialized` (via `parse_composer_json`, which returns both the PSR-4 mappings and the vendor dir name). The vendor dir name is cached on `Backend.vendor_dir_name` and a `file://` URI prefix is stored in `Backend.vendor_uri_prefix` for fast vendor-file detection at runtime.
 
 ### Autoload Files

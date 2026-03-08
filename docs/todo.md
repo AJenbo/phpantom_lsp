@@ -39,21 +39,7 @@ diagnostics, unused-import dimming, and implement missing methods.
 
 ---
 
-## Sprint 2 — Self-generated classmap (0.5.0)
-
-PHPantom currently requires `composer dump-autoload -o` for cross-file
-resolution. When the classmap is missing or incomplete, the user gets
-no diagnostics, no cross-file completion, and no explanation why. The
-self-scan fallback builds a classmap ourselves so everything works out
-of the box. This also covers non-Composer projects.
-
-| # | Item | Effort | Domain | Doc Link |
-|---|---|---|---|---|
-| 80 | Self-generated classmap fallback | Medium-High | Indexing | [indexing.md — Phase 1](todo/indexing.md#phase-1-self-generated-classmap) |
-
-**After Sprint 2:** PHPantom works without any setup beyond opening a
-PHP project. The README can drop the `composer dump-autoload -o`
-requirement to a performance tip instead of a prerequisite.
+## Sprint 2 — Self-generated classmap (0.5.0) ✅
 
 ---
 

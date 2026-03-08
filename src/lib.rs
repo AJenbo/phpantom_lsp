@@ -73,6 +73,7 @@ use tower_lsp::Client;
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
+pub mod classmap_scanner;
 mod code_actions;
 pub mod completion;
 pub mod composer;

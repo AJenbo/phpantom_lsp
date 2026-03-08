@@ -20,6 +20,8 @@ pub struct Config {
     pub php: PhpConfig,
     /// Diagnostic toggles.
     pub diagnostics: DiagnosticsConfig,
+    /// Indexing strategy and file discovery settings.
+    pub indexing: IndexingConfig,
 }
 
 /// `[php]` section — PHP version override.
@@ -56,6 +58,80 @@ impl DiagnosticsConfig {
     }
 }
 
+/// `[indexing]` section — controls how PHPantom discovers classes across
+/// the workspace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct IndexingConfig {
+    /// The indexing strategy.
+    ///
+    /// - `"composer"` (default) — use Composer's classmap when available,
+    ///   fall back to self-scan when it is missing or incomplete.
+    /// - `"self"` — always build the classmap ourselves, ignoring
+    ///   Composer's generated classmap entirely.
+    /// - `"full"` — background-parse every PHP file for rich intelligence
+    ///   (not yet implemented, treated as `"self"` for now).
+    /// - `"none"` — no proactive scanning. Still uses Composer's classmap
+    ///   if present, still resolves on demand, but never falls back to
+    ///   self-scan.
+    pub strategy: IndexingStrategy,
+}
+
+impl Default for IndexingConfig {
+    fn default() -> Self {
+        Self {
+            strategy: IndexingStrategy::Composer,
+        }
+    }
+}
+
+/// The indexing strategy that controls class discovery behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IndexingStrategy {
+    /// Use Composer's classmap when available and complete. Fall back to
+    /// self-scan when the classmap is missing or incomplete.
+    #[default]
+    Composer,
+    /// Always build the classmap ourselves, ignoring Composer's generated
+    /// classmap.
+    SelfScan,
+    /// Background-parse every PHP file for rich intelligence.
+    Full,
+    /// No proactive scanning. Uses Composer's classmap if present but
+    /// never falls back to self-scan.
+    None,
+}
+
+impl<'de> Deserialize<'de> for IndexingStrategy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "composer" => Ok(IndexingStrategy::Composer),
+            "self" => Ok(IndexingStrategy::SelfScan),
+            "full" => Ok(IndexingStrategy::Full),
+            "none" => Ok(IndexingStrategy::None),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["composer", "self", "full", "none"],
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for IndexingStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IndexingStrategy::Composer => write!(f, "composer"),
+            IndexingStrategy::SelfScan => write!(f, "self"),
+            IndexingStrategy::Full => write!(f, "full"),
+            IndexingStrategy::None => write!(f, "none"),
+        }
+    }
+}
+
 /// The config file name that PHPantom looks for in the project root.
 pub const CONFIG_FILE_NAME: &str = ".phpantom.toml";
 
@@ -75,6 +151,14 @@ pub const DEFAULT_CONFIG_CONTENT: &str = r#"# PHPantom project configuration
 # Report member access on subjects whose type could not be resolved.
 # Useful for discovering gaps in type coverage. Off by default.
 # unresolved-member-access = true
+
+[indexing]
+# How PHPantom discovers classes across the workspace.
+#   "composer" (default) - use Composer classmap, self-scan on fallback
+#   "self"    - always self-scan, ignore Composer classmap
+#   "full"    - background-parse all project files (not yet implemented)
+#   "none"    - no proactive scanning, Composer classmap only
+# strategy = "composer"
 "#;
 
 /// Create a default `.phpantom.toml` in the given workspace root.
@@ -193,6 +277,7 @@ mod tests {
         let config: Config = toml::from_str(DEFAULT_CONFIG_CONTENT).unwrap();
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
     }
 
     #[test]
@@ -201,6 +286,7 @@ mod tests {
         let config = load_config(dir.path()).unwrap();
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
     }
 
     #[test]
@@ -211,6 +297,7 @@ mod tests {
         let config = load_config(dir.path()).unwrap();
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
     }
 
     #[test]
@@ -290,11 +377,77 @@ version = "8.2"
 
 [diagnostics]
 unresolved-member-access = true
+
+[indexing]
+strategy = "self"
 "#,
         )
         .unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.php.version.as_deref(), Some("8.2"));
         assert!(config.diagnostics.unresolved_member_access_enabled());
+        assert_eq!(config.indexing.strategy, IndexingStrategy::SelfScan);
+    }
+
+    #[test]
+    fn parses_indexing_strategy_composer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nstrategy = \"composer\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+    }
+
+    #[test]
+    fn parses_indexing_strategy_self() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nstrategy = \"self\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.strategy, IndexingStrategy::SelfScan);
+    }
+
+    #[test]
+    fn parses_indexing_strategy_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nstrategy = \"full\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.strategy, IndexingStrategy::Full);
+    }
+
+    #[test]
+    fn parses_indexing_strategy_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nstrategy = \"none\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.strategy, IndexingStrategy::None);
+    }
+
+    #[test]
+    fn invalid_indexing_strategy_returns_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nstrategy = \"bogus\"\n").unwrap();
+        let result = load_config(dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn indexing_strategy_defaults_to_composer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+    }
+
+    #[test]
+    fn indexing_strategy_display() {
+        assert_eq!(IndexingStrategy::Composer.to_string(), "composer");
+        assert_eq!(IndexingStrategy::SelfScan.to_string(), "self");
+        assert_eq!(IndexingStrategy::Full.to_string(), "full");
+        assert_eq!(IndexingStrategy::None.to_string(), "none");
     }
 }

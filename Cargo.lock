@@ -1222,6 +1222,7 @@ dependencies = [
  "mago-database",
  "mago-span",
  "mago-syntax",
+ "memchr",
  "serde",
  "serde_json",
  "tempfile",
