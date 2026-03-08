@@ -177,9 +177,8 @@ impl Backend {
             &namespace,
             Some(&doc_ctx),
         );
-        if !functions.is_empty()
-            && let Ok(mut fmap) = self.global_functions.lock()
-        {
+        if !functions.is_empty() {
+            let mut fmap = self.global_functions.write();
             for func_info in functions {
                 let fqn = if let Some(ref ns) = func_info.namespace {
                     format!("{}\\{}", ns, &func_info.name)
@@ -207,9 +206,8 @@ impl Backend {
             &mut define_entries,
             content,
         );
-        if !define_entries.is_empty()
-            && let Ok(mut dmap) = self.global_defines.lock()
-        {
+        if !define_entries.is_empty() {
+            let mut dmap = self.global_defines.write();
             for (name, offset, value) in define_entries {
                 dmap.entry(name)
                     .or_insert_with(|| crate::types::DefineInfo {
@@ -281,12 +279,12 @@ impl Backend {
         // entry is overwritten.  These are compared against the new classes
         // using `signature_eq` to decide whether each FQN's cache entry
         // actually needs eviction (signature-level cache invalidation).
-        let old_classes_snapshot: Vec<crate::types::ClassInfo> =
-            if let Ok(map) = self.ast_map.lock() {
-                map.get(&uri_string).cloned().unwrap_or_default()
-            } else {
-                Vec::new()
-            };
+        let old_classes_snapshot: Vec<crate::types::ClassInfo> = self
+            .ast_map
+            .read()
+            .get(&uri_string)
+            .cloned()
+            .unwrap_or_default();
         let old_fqns: Vec<String> = old_classes_snapshot
             .iter()
             .filter(|c| !c.name.starts_with("__anonymous@"))
@@ -303,7 +301,8 @@ impl Backend {
         //
         // Uses the per-class namespace (not the file-level namespace) so
         // that files with multiple namespace blocks produce correct FQNs.
-        if let Ok(mut idx) = self.class_index.lock() {
+        {
+            let mut idx = self.class_index.write();
             // Remove stale entries from previous parses of this file.
             // When a file's namespace changes (e.g. while the user is
             // typing a namespace declaration), old FQNs linger under
@@ -330,18 +329,12 @@ impl Backend {
         // This must happen before the `Program` (and its arena) are dropped.
         let symbol_map = extract_symbol_map(program, content);
 
-        if let Ok(mut map) = self.ast_map.lock() {
-            map.insert(uri_string.clone(), classes);
-        }
-        if let Ok(mut map) = self.symbol_maps.lock() {
-            map.insert(uri_string.clone(), symbol_map);
-        }
-        if let Ok(mut map) = self.use_map.lock() {
-            map.insert(uri_string.clone(), use_map);
-        }
-        if let Ok(mut map) = self.namespace_map.lock() {
-            map.insert(uri_string, namespace);
-        }
+        self.ast_map.write().insert(uri_string.clone(), classes);
+        self.symbol_maps
+            .write()
+            .insert(uri_string.clone(), symbol_map);
+        self.use_map.write().insert(uri_string.clone(), use_map);
+        self.namespace_map.write().insert(uri_string, namespace);
 
         // Selectively invalidate the resolved-class cache with
         // signature-level granularity.
@@ -360,7 +353,8 @@ impl Backend {
         // Dependents (classes that extend/use a changed class) may briefly
         // hold stale data, but they self-correct on the next edit because
         // re-resolution calls class_loader which returns the fresh class.
-        if let Ok(mut cache) = self.resolved_class_cache.lock() {
+        {
+            let mut cache = self.resolved_class_cache.lock();
             // Collect new FQNs from the classes we just parsed.
             let new_fqns: Vec<String> = classes_with_ns
                 .iter()

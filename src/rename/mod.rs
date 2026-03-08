@@ -221,12 +221,7 @@ impl Backend {
     /// definition URI starts with the vendor prefix, the rename is
     /// rejected.
     fn is_vendor_symbol(&self, uri: &str, content: &str, position: Position) -> bool {
-        let vendor_prefix = self
-            .vendor_uri_prefix
-            .lock()
-            .ok()
-            .map(|vp| vp.clone())
-            .unwrap_or_default();
+        let vendor_prefix = self.vendor_uri_prefix.lock().clone();
 
         if vendor_prefix.is_empty() {
             return false;

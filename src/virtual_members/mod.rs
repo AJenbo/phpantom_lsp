@@ -52,7 +52,9 @@ pub mod laravel;
 pub mod phpdoc;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::inheritance::{
     apply_substitution, apply_substitution_to_method, apply_substitution_to_property,
@@ -345,11 +347,11 @@ fn resolve_class_fully_inner(
     let cache_key: ResolvedClassCacheKey = (fqn.clone(), generic_args.to_vec());
 
     // ── Cache lookup ────────────────────────────────────────────────
-    if let Some(cache) = cache
-        && let Ok(map) = cache.lock()
-        && let Some(cached) = map.get(&cache_key)
-    {
-        return cached.clone();
+    if let Some(cache) = cache {
+        let map = cache.lock();
+        if let Some(cached) = map.get(&cache_key) {
+            return cached.clone();
+        }
     }
 
     // ── Uncached resolution ─────────────────────────────────────────
@@ -479,14 +481,14 @@ fn resolve_class_fully_inner(
             // for interfaces without generic substitutions.
             if iface_subs.is_empty() {
                 let iface_key: ResolvedClassCacheKey = (class_fqn(&iface), Vec::new());
-                if let Some(c) = cache
-                    && let Ok(map) = c.lock()
-                    && let Some(cached) = map.get(&iface_key)
-                {
-                    let resolved_iface = cached.clone();
-                    drop(map);
-                    merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
-                    continue;
+                if let Some(c) = cache {
+                    let map = c.lock();
+                    if let Some(cached) = map.get(&iface_key) {
+                        let resolved_iface = cached.clone();
+                        drop(map);
+                        merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
+                        continue;
+                    }
                 }
             }
 
@@ -519,10 +521,8 @@ fn resolve_class_fully_inner(
     }
 
     // ── Cache store ─────────────────────────────────────────────────
-    if let Some(cache) = cache
-        && let Ok(mut map) = cache.lock()
-    {
-        map.insert(cache_key, merged.clone());
+    if let Some(cache) = cache {
+        cache.lock().insert(cache_key, merged.clone());
     }
 
     merged

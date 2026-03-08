@@ -3817,7 +3817,8 @@ fn hover_define_constant_no_value_still_works() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     // Register a constant without a value (e.g. from autoload discovery).
-    if let Ok(mut dmap) = backend.global_defines().lock() {
+    {
+        let mut dmap = backend.global_defines().write();
         dmap.insert(
             "LEGACY_CONST".to_string(),
             phpantom_lsp::DefineInfo {

@@ -29,12 +29,9 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         // ── Gather the file's use map (short name → FQN) ────────────────
-        let file_use_map: HashMap<String, String> = match self.use_map.lock() {
-            Ok(m) => match m.get(uri) {
-                Some(map) => map.clone(),
-                None => return,
-            },
-            Err(_) => return,
+        let file_use_map: HashMap<String, String> = match self.use_map.read().get(uri) {
+            Some(map) => map.clone(),
+            None => return,
         };
 
         if file_use_map.is_empty() {
@@ -42,12 +39,9 @@ impl Backend {
         }
 
         // ── Gather the symbol map ───────────────────────────────────────
-        let symbol_map = match self.symbol_maps.lock() {
-            Ok(m) => match m.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            },
-            Err(_) => return,
+        let symbol_map = match self.symbol_maps.read().get(uri) {
+            Some(sm) => sm.clone(),
+            None => return,
         };
 
         // ── Compute byte ranges of `use` statement lines ────────────────

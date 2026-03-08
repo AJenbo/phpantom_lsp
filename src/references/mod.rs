@@ -197,10 +197,7 @@ impl Backend {
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
-        let maps = match self.symbol_maps.lock() {
-            Ok(m) => m,
-            Err(_) => return locations,
-        };
+        let maps = self.symbol_maps.read();
         let Some(symbol_map) = maps.get(uri) else {
             return locations;
         };
@@ -293,21 +290,13 @@ impl Backend {
         let _ = include_declaration; // $this has no "declaration site"
         let mut locations = Vec::new();
 
-        let maps = match self.symbol_maps.lock() {
-            Ok(m) => m,
-            Err(_) => return locations,
-        };
+        let maps = self.symbol_maps.read();
         let Some(symbol_map) = maps.get(uri) else {
             return locations;
         };
 
         // Determine the class body the cursor is in.
-        let ctx_classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let ctx_classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
         let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
@@ -366,28 +355,17 @@ impl Backend {
     fn user_file_symbol_maps(&self) -> Vec<(String, SymbolMap)> {
         self.ensure_workspace_indexed();
 
-        let vendor_prefix = self
-            .vendor_uri_prefix
-            .lock()
-            .ok()
-            .map(|v| v.clone())
-            .unwrap_or_default();
+        let vendor_prefix = self.vendor_uri_prefix.lock().clone();
 
-        self.symbol_maps
-            .lock()
-            .ok()
-            .map(|maps| {
-                maps.iter()
-                    .filter(|(uri, _)| {
-                        !uri.starts_with("phpantom-stub://")
-                            && !uri.starts_with("phpantom-stub-fn://")
-                            && (vendor_prefix.is_empty()
-                                || !uri.starts_with(vendor_prefix.as_str()))
-                    })
-                    .map(|(uri, map)| (uri.clone(), map.clone()))
-                    .collect()
+        let maps = self.symbol_maps.read();
+        maps.iter()
+            .filter(|(uri, _)| {
+                !uri.starts_with("phpantom-stub://")
+                    && !uri.starts_with("phpantom-stub-fn://")
+                    && (vendor_prefix.is_empty() || !uri.starts_with(vendor_prefix.as_str()))
             })
-            .unwrap_or_default()
+            .map(|(uri, map)| (uri.clone(), map.clone()))
+            .collect()
     }
 
     /// Find all references to a class/interface/trait/enum across all files.
@@ -408,16 +386,11 @@ impl Backend {
             // Get the file's use_map and namespace for FQN resolution.
             let file_use_map = self
                 .use_map
-                .lock()
-                .ok()
-                .and_then(|m| m.get(file_uri).cloned())
+                .read()
+                .get(file_uri)
+                .cloned()
                 .unwrap_or_default();
-            let file_namespace = self
-                .namespace_map
-                .lock()
-                .ok()
-                .and_then(|m| m.get(file_uri).cloned())
-                .flatten();
+            let file_namespace = self.namespace_map.read().get(file_uri).cloned().flatten();
 
             let parsed_uri = match Url::parse(file_uri) {
                 Ok(u) => u,
@@ -610,16 +583,11 @@ impl Backend {
         for (file_uri, symbol_map) in &snapshot {
             let file_use_map = self
                 .use_map
-                .lock()
-                .ok()
-                .and_then(|m| m.get(file_uri).cloned())
+                .read()
+                .get(file_uri)
+                .cloned()
                 .unwrap_or_default();
-            let file_namespace = self
-                .namespace_map
-                .lock()
-                .ok()
-                .and_then(|m| m.get(file_uri).cloned())
-                .flatten();
+            let file_namespace = self.namespace_map.read().get(file_uri).cloned().flatten();
 
             let parsed_uri = match Url::parse(file_uri) {
                 Ok(u) => u,
@@ -654,16 +622,17 @@ impl Backend {
             }
 
             // Include the function declaration site if requested.
-            if include_declaration
-                && let Ok(fmap) = self.global_functions.lock()
-                && let Some((func_uri, func_info)) = fmap.get(target)
-                && func_uri == file_uri
-                && func_info.name_offset != 0
-            {
-                let offset = func_info.name_offset;
-                let start = offset_to_position(&content, offset as usize);
-                let end = offset_to_position(&content, offset as usize + func_info.name.len());
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+            if include_declaration {
+                let fmap = self.global_functions.read();
+                if let Some((func_uri, func_info)) = fmap.get(target)
+                    && func_uri == file_uri
+                    && func_info.name_offset != 0
+                {
+                    let offset = func_info.name_offset;
+                    let start = offset_to_position(&content, offset as usize);
+                    let end = offset_to_position(&content, offset as usize + func_info.name.len());
+                    push_unique_location(&mut locations, &parsed_uri, start, end);
+                }
             }
         }
 
@@ -713,15 +682,16 @@ impl Backend {
             }
 
             // Include define() declaration sites if requested.
-            if include_declaration
-                && let Ok(dmap) = self.global_defines.lock()
-                && let Some(info) = dmap.get(target_name)
-                && info.file_uri == *file_uri
-            {
-                let start = offset_to_position(&content, info.name_offset as usize);
-                let end =
-                    offset_to_position(&content, info.name_offset as usize + target_name.len());
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+            if include_declaration {
+                let dmap = self.global_defines.read();
+                if let Some(info) = dmap.get(target_name)
+                    && info.file_uri == *file_uri
+                {
+                    let start = offset_to_position(&content, info.name_offset as usize);
+                    let end =
+                        offset_to_position(&content, info.name_offset as usize + target_name.len());
+                    push_unique_location(&mut locations, &parsed_uri, start, end);
+                }
             }
         }
 
@@ -745,12 +715,7 @@ impl Backend {
         namespace: &Option<String>,
         offset: u32,
     ) -> Option<String> {
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let current_class = crate::util::find_class_at_offset(&classes, offset)?;
 
@@ -777,41 +742,21 @@ impl Backend {
     fn ensure_workspace_indexed(&self) {
         // Snapshot ast_map keys before scanning so we can evict
         // transiently-loaded entries afterwards (see §13 in bugs.md).
-        let pre_scan_uris: HashSet<String> = self
-            .ast_map
-            .lock()
-            .ok()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default();
+        let pre_scan_uris: HashSet<String> = self.ast_map.read().keys().cloned().collect();
 
         // Collect URIs that already have symbol maps.
-        let existing_uris: HashSet<String> = self
-            .symbol_maps
-            .lock()
-            .ok()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default();
+        let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
         // Build the vendor URI prefix so we can skip vendor files in
         // Phase 1 (class_index may contain vendor URIs from prior
         // resolution, but we only need symbol maps for user files).
-        let vendor_prefix = self
-            .vendor_uri_prefix
-            .lock()
-            .ok()
-            .map(|v| v.clone())
-            .unwrap_or_default();
+        let vendor_prefix = self.vendor_uri_prefix.lock().clone();
 
         // ── Phase 1: class_index files (user only) ─────────────────────
         // These are files we already know about from update_ast calls,
         // ensuring their symbol maps are populated.  Vendor files are
         // skipped — find references only reports user code.
-        let index_uris: Vec<String> = self
-            .class_index
-            .lock()
-            .ok()
-            .map(|idx| idx.values().cloned().collect())
-            .unwrap_or_default();
+        let index_uris: Vec<String> = self.class_index.read().values().cloned().collect();
 
         for uri in &index_uris {
             if existing_uris.contains(uri) {
@@ -836,27 +781,13 @@ impl Backend {
         // respects .gitignore so that generated/cached directories (e.g.
         // storage/framework/views/, var/cache/, node_modules/) are
         // automatically excluded.
-        let workspace_root = self
-            .workspace_root
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let workspace_root = self.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
-            let vendor_dir_name = self
-                .vendor_dir_name
-                .lock()
-                .ok()
-                .map(|v| v.clone())
-                .unwrap_or_else(|| "vendor".to_string());
+            let vendor_dir_name = self.vendor_dir_name.lock().clone();
 
             // Re-read existing URIs after phase 1 may have added more.
-            let existing_uris: HashSet<String> = self
-                .symbol_maps
-                .lock()
-                .ok()
-                .map(|m| m.keys().cloned().collect())
-                .unwrap_or_default();
+            let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
             let php_files = collect_php_files_gitignore(&root, &vendor_dir_name);
             for path in &php_files {

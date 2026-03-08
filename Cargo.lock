@@ -1223,6 +1223,7 @@ dependencies = [
  "mago-span",
  "mago-syntax",
  "memchr",
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",

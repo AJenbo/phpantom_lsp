@@ -415,15 +415,10 @@ impl Backend {
     /// classmap / stub sources can skip classes we already evaluated.
     fn collect_loaded_fqns(&self) -> HashSet<String> {
         let mut loaded = HashSet::new();
-        let Ok(amap) = self.ast_map.lock() else {
-            return loaded;
-        };
-        let nmap = self.namespace_map.lock().ok();
+        let amap = self.ast_map.read();
+        let nmap = self.namespace_map.read();
         for (uri, classes) in amap.iter() {
-            let file_ns = nmap
-                .as_ref()
-                .and_then(|nm| nm.get(uri))
-                .and_then(|opt| opt.as_deref());
+            let file_ns = nmap.get(uri).and_then(|opt| opt.as_deref());
             for cls in classes {
                 let fqn = if let Some(ns) = file_ns {
                     format!("{}\\{}", ns, cls.name)
@@ -550,9 +545,8 @@ impl Backend {
         // Collect candidates while holding the lock, then drop the lock
         // before calling `is_throwable_descendant` (which re-locks
         // `ast_map` internally — Rust's Mutex is not re-entrant).
-        if let Some(ns) = file_namespace
-            && let Ok(nmap) = self.namespace_map.lock()
-        {
+        if let Some(ns) = file_namespace {
+            let nmap = self.namespace_map.read();
             let same_ns_uris: Vec<String> = nmap
                 .iter()
                 .filter_map(|(uri, opt_ns)| {
@@ -568,7 +562,8 @@ impl Backend {
             // Phase 1: collect candidate (name, fqn, deprecation_message)
             // tuples under the ast_map lock — only concrete classes.
             let mut candidates: Vec<(String, String, Option<String>)> = Vec::new();
-            if let Ok(amap) = self.ast_map.lock() {
+            {
+                let amap = self.ast_map.read();
                 for uri in &same_ns_uris {
                     if let Some(classes) = amap.get(uri) {
                         for cls in classes {
@@ -645,7 +640,8 @@ impl Backend {
         }
 
         // ── 1c. class_index (must be concrete + Throwable) ──────────
-        if let Ok(idx) = self.class_index.lock() {
+        {
+            let idx = self.class_index.read();
             for fqn in idx.keys() {
                 let sn = short_name(fqn);
                 if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix) {
@@ -690,7 +686,8 @@ impl Backend {
         // We collect both buckets in a single pass over the classmap and
         // assign different sort_text prefixes so "Exception" entries
         // appear first.
-        if let Ok(cmap) = self.classmap.lock() {
+        {
+            let cmap = self.classmap.read();
             for fqn in cmap.keys() {
                 if loaded_fqns.contains(fqn) {
                     continue;

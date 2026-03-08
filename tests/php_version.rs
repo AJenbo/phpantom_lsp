@@ -610,7 +610,7 @@ function array_map(
     // Manually inject the function into global_functions using versioned parsing
     let functions = backend.parse_functions_versioned(stub_content, Some(PhpVersion::new(8, 4)));
     {
-        let mut fmap = backend.global_functions().lock().unwrap();
+        let mut fmap = backend.global_functions().write();
         for func in functions {
             fmap.insert(
                 func.name.clone(),

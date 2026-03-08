@@ -627,7 +627,7 @@ impl Backend {
             None
         };
 
-        let map = self.ast_map.lock().ok()?;
+        let map = self.ast_map.read();
 
         for (_uri, classes) in map.iter() {
             // Iterate ALL classes with the matching short name, not just
@@ -660,12 +660,7 @@ impl Backend {
     /// `Url::to_file_path` + `std::fs::read_to_string`.  Three call sites
     /// in the definition modules used this exact sequence.
     pub(crate) fn get_file_content(&self, uri: &str) -> Option<String> {
-        if let Some(content) = self
-            .open_files
-            .lock()
-            .ok()
-            .and_then(|files| files.get(uri).cloned())
-        {
+        if let Some(content) = self.open_files.read().get(uri).cloned() {
             return Some(content);
         }
 
@@ -692,11 +687,7 @@ impl Backend {
 
     /// Public helper for tests: get the ast_map for a given URI.
     pub fn get_classes_for_uri(&self, uri: &str) -> Option<Vec<ClassInfo>> {
-        if let Ok(map) = self.ast_map.lock() {
-            map.get(uri).cloned()
-        } else {
-            None
-        }
+        self.ast_map.read().get(uri).cloned()
     }
 
     /// Gather the per-file context (classes, use-map, namespace) in one call.
@@ -708,26 +699,11 @@ impl Backend {
     /// blocks acquiring `ast_map`, `use_map`, and `namespace_map` locks
     /// and extracting the entry for a given URI.
     pub(crate) fn file_context(&self, uri: &str) -> FileContext {
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
-        let use_map = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let use_map = self.use_map.read().get(uri).cloned().unwrap_or_default();
 
-        let namespace = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
+        let namespace = self.namespace_map.read().get(uri).cloned().flatten();
 
         FileContext {
             classes,
@@ -742,23 +718,15 @@ impl Backend {
     /// method *reads* the three maps, this method *clears* them for a given URI.
     /// Called from `did_close` to clean up state when a file is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
-        if let Ok(mut map) = self.ast_map.lock() {
-            map.remove(uri);
-        }
-        if let Ok(mut map) = self.symbol_maps.lock() {
-            map.remove(uri);
-        }
-        if let Ok(mut map) = self.use_map.lock() {
-            map.remove(uri);
-        }
-        if let Ok(mut map) = self.namespace_map.lock() {
-            map.remove(uri);
-        }
+        self.ast_map.write().remove(uri);
+        self.symbol_maps.write().remove(uri);
+        self.use_map.write().remove(uri);
+        self.namespace_map.write().remove(uri);
         // Remove class_index entries that belonged to this file so
         // stale FQNs don't linger after the file is closed.
-        if let Ok(mut idx) = self.class_index.lock() {
-            idx.retain(|_, file_uri| file_uri != uri);
-        }
+        self.class_index
+            .write()
+            .retain(|_, file_uri| file_uri != uri);
     }
 
     /// Evict `ast_map` (and associated map) entries that were added
@@ -806,46 +774,32 @@ impl Backend {
         evict_symbol_maps: bool,
     ) {
         // Collect URIs that were added during the scan.
-        let new_uris: Vec<String> = self
-            .ast_map
-            .lock()
-            .ok()
-            .map(|m| {
-                m.keys()
-                    .filter(|uri| !pre_scan_uris.contains(*uri))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
+        let new_uris: Vec<String> = {
+            let map = self.ast_map.read();
+            map.keys()
+                .filter(|uri| !pre_scan_uris.contains(*uri))
+                .cloned()
+                .collect()
+        };
 
         if new_uris.is_empty() {
             return;
         }
 
         // Never evict files that are currently open in the editor.
-        let open: std::collections::HashSet<String> = self
-            .open_files
-            .lock()
-            .ok()
-            .map(|f| f.keys().cloned().collect())
-            .unwrap_or_default();
+        let open: std::collections::HashSet<String> =
+            self.open_files.read().keys().cloned().collect();
 
         for uri in &new_uris {
             if open.contains(uri) {
                 continue;
             }
-            if let Ok(mut map) = self.ast_map.lock() {
-                map.remove(uri);
+            self.ast_map.write().remove(uri);
+            if evict_symbol_maps {
+                self.symbol_maps.write().remove(uri);
             }
-            if evict_symbol_maps && let Ok(mut map) = self.symbol_maps.lock() {
-                map.remove(uri);
-            }
-            if let Ok(mut map) = self.use_map.lock() {
-                map.remove(uri);
-            }
-            if let Ok(mut map) = self.namespace_map.lock() {
-                map.remove(uri);
-            }
+            self.use_map.write().remove(uri);
+            self.namespace_map.write().remove(uri);
         }
     }
 

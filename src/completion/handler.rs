@@ -88,17 +88,13 @@ fn filter_current_file_functions(
     current_uri: &str,
     backend: &Backend,
 ) -> Vec<CompletionItem> {
-    let current_funcs: HashSet<String> = backend
-        .global_functions()
-        .lock()
-        .ok()
-        .map(|fmap| {
-            fmap.iter()
-                .filter(|(_, (uri, _))| uri == current_uri)
-                .map(|(key, _)| key.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let current_funcs: HashSet<String> = {
+        let fmap = backend.global_functions().read();
+        fmap.iter()
+            .filter(|(_, (uri, _))| uri == current_uri)
+            .map(|(key, _)| key.clone())
+            .collect()
+    };
     if current_funcs.is_empty() {
         return items;
     }
@@ -118,17 +114,13 @@ fn filter_current_file_constants(
     current_uri: &str,
     backend: &Backend,
 ) -> Vec<CompletionItem> {
-    let current_consts: HashSet<String> = backend
-        .global_defines()
-        .lock()
-        .ok()
-        .map(|dmap| {
-            dmap.iter()
-                .filter(|(_, info)| info.file_uri.as_str() == current_uri)
-                .map(|(name, _)| name.clone())
-                .collect()
-        })
-        .unwrap_or_default();
+    let current_consts: HashSet<String> = {
+        let dmap = backend.global_defines().read();
+        dmap.iter()
+            .filter(|(_, info)| info.file_uri.as_str() == current_uri)
+            .map(|(name, _)| name.clone())
+            .collect()
+    };
     if current_consts.is_empty() {
         return items;
     }
@@ -595,11 +587,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<NamedArgContext> {
-        let symbol_map = self
-            .symbol_maps
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())?;
+        let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
 
         let cursor_byte_offset = position_to_offset(content, position);
         let cs = symbol_map.find_enclosing_call_site(cursor_byte_offset)?;
@@ -1195,7 +1183,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionTarget> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         let cursor_offset = position_to_offset(content, position);
 

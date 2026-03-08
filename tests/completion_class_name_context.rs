@@ -792,7 +792,8 @@ async fn test_unloaded_classes_pass_through_filter() {
     let backend = create_test_backend_with_stubs();
 
     // Put a class in the class_index but do NOT load it into ast_map.
-    if let Ok(mut idx) = backend.class_index().lock() {
+    {
+        let mut idx = backend.class_index().write();
         idx.insert(
             "UnknownKind\\MysteryClass".to_string(),
             "file:///vendor/mystery.php".to_string(),
@@ -1550,7 +1551,8 @@ async fn test_classmap_loaded_interface_excluded_from_extends_class() {
         .await;
 
     // Put it in the classmap.
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\Contracts\\Searchable".to_string(),
             PathBuf::from(iface_uri.path()),
@@ -1588,7 +1590,8 @@ async fn test_classmap_loaded_trait_excluded_from_implements() {
         })
         .await;
 
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\Traits\\Sortable".to_string(),
             PathBuf::from(trait_uri.path()),
@@ -1620,7 +1623,8 @@ async fn test_extends_class_demotes_interface_looking_names() {
     // "ZxUserInterface" ends with "Interface" → demoted.
     // "IZxLogger" starts with I[A-Z] → demoted.
     // "ZxUserRepository" has no interface/abstract pattern → normal sort.
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\ZxUserInterface".to_string(),
             PathBuf::from("/vendor/a.php"),
@@ -1683,7 +1687,8 @@ async fn test_implements_demotes_abstract_looking_names() {
     // "YxLoggable" has no abstract pattern → normal sort.
     // "AbstractYxHandler" starts with "Abstract" → demoted.
     // "BaseYxController" starts with "Base[A-Z]" → demoted.
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\YxLoggable".to_string(),
             PathBuf::from("/vendor/a.php"),
@@ -1753,7 +1758,8 @@ async fn test_trait_use_demotes_non_trait_looking_names() {
     // "WxHasTimestamps" has no interface/abstract pattern → normal sort.
     // "WxUserInterface" ends with "Interface" → demoted (likely_non_instantiable).
     // "AbstractWxModel" starts with "Abstract" → demoted (likely_non_instantiable).
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\WxHasTimestamps".to_string(),
             PathBuf::from("/vendor/a.php"),
@@ -1816,7 +1822,8 @@ async fn test_trait_use_demotes_non_trait_looking_names() {
 async fn test_instanceof_no_heuristic_demotion() {
     let backend = create_test_backend();
 
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\UserInterface".to_string(),
             PathBuf::from("/vendor/a.php"),
@@ -1869,7 +1876,8 @@ async fn test_instanceof_no_heuristic_demotion() {
 async fn test_extends_interface_does_not_demote_interface_names() {
     let backend = create_test_backend();
 
-    if let Ok(mut cmap) = backend.classmap().lock() {
+    {
+        let mut cmap = backend.classmap().write();
         cmap.insert(
             "App\\LoggerInterface".to_string(),
             PathBuf::from("/vendor/a.php"),
@@ -2383,7 +2391,8 @@ async fn test_use_import_excludes_constants_and_functions() {
         .await;
 
     // Register a global function so we can verify it's excluded.
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             "some_widget_func".to_string(),
             (
@@ -2510,7 +2519,8 @@ async fn test_use_function_shows_only_functions() {
     let backend = create_test_backend_with_stubs();
 
     // Register a function that will match our partial.
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             "array_merge".to_string(),
             (
@@ -2565,7 +2575,8 @@ async fn test_use_const_shows_only_constants() {
     let backend = create_test_backend_with_stubs();
 
     // Register a constant that will match our partial.
-    if let Ok(mut dmap) = backend.global_defines().lock() {
+    {
+        let mut dmap = backend.global_defines().write();
         dmap.insert(
             "APP_VERSION".to_string(),
             phpantom_lsp::DefineInfo {

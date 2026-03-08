@@ -44,36 +44,20 @@ impl Backend {
     ) {
         // ── Gather context under locks ──────────────────────────────────
         let symbol_map = {
-            let maps = match self.symbol_maps.lock() {
-                Ok(m) => m,
-                Err(_) => return,
-            };
+            let maps = self.symbol_maps.read();
             match maps.get(uri) {
                 Some(sm) => sm.clone(),
                 None => return,
             }
         };
 
-        let file_use_map: HashMap<String, String> = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let file_use_map: HashMap<String, String> =
+            self.use_map.read().get(uri).cloned().unwrap_or_default();
 
-        let file_namespace: Option<String> = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
+        let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
 
-        let local_classes: Vec<ClassInfo> = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let local_classes: Vec<ClassInfo> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         // ── Collect type alias names from local classes ──────────────────
         // `@phpstan-type` / `@psalm-type` / `@phpstan-import-type` aliases
@@ -419,7 +403,8 @@ mod tests {
         let dep_uri = "file:///vendor/laravel/Request.php";
         let dep_content = "<?php\nnamespace Illuminate\\Http;\n\nclass Request {}\n";
         backend.update_ast(dep_uri, dep_content);
-        if let Ok(mut idx) = backend.class_index.lock() {
+        {
+            let mut idx = backend.class_index.write();
             idx.insert("Illuminate\\Http\\Request".to_string(), dep_uri.to_string());
         }
 
@@ -490,7 +475,8 @@ mod tests {
         backend.update_ast(uri_dep, content_dep);
 
         // Register in class_index so same-namespace lookup works.
-        if let Ok(mut idx) = backend.class_index.lock() {
+        {
+            let mut idx = backend.class_index.write();
             idx.insert("App\\Helper".to_string(), uri_dep.to_string());
         }
 
@@ -570,7 +556,8 @@ mod tests {
         let content_dep = "<?php\nclass GlobalHelper {}\n";
         backend.update_ast(uri_dep, content_dep);
 
-        if let Ok(mut idx) = backend.class_index.lock() {
+        {
+            let mut idx = backend.class_index.write();
             idx.insert("GlobalHelper".to_string(), uri_dep.to_string());
         }
 
@@ -720,7 +707,8 @@ mod tests {
             "class Scoring {}\n",
         );
         backend.update_ast(dep_uri, dep_content);
-        if let Ok(mut idx) = backend.class_index.lock() {
+        {
+            let mut idx = backend.class_index.write();
             idx.insert("Lib\\Scoring".to_string(), dep_uri.to_string());
         }
 

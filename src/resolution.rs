@@ -81,17 +81,12 @@ impl Backend {
         // (a single hash lookup) and covers classes that don't follow PSR-4
         // conventions.  When the user runs `composer install -o`, *all*
         // classes end up in the classmap, giving complete coverage.
-        if let Ok(cmap) = self.classmap.lock()
-            && let Some(file_path) = cmap.get(name)
+        if let Some(file_path) = self.classmap.read().get(name).cloned()
+            && let Some(classes) = self.parse_and_cache_file(&file_path)
         {
-            let file_path = file_path.clone();
-            drop(cmap); // release lock before doing I/O
-
-            if let Some(classes) = self.parse_and_cache_file(&file_path) {
-                let result = classes.iter().find(|c| c.name == last_segment).cloned();
-                if result.is_some() {
-                    return result;
-                }
+            let result = classes.iter().find(|c| c.name == last_segment).cloned();
+            if result.is_some() {
+                return result;
             }
         }
 
@@ -101,18 +96,18 @@ impl Backend {
         // vendor class is missing from the classmap, it fails visibly
         // rather than being silently resolved, making stale classmaps
         // obvious (fix: run `composer dump-autoload`).
-        if let Some(workspace_root) = self
-            .workspace_root
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
-            && let Ok(mappings) = self.psr4_mappings.lock()
-            && let Some(file_path) = composer::resolve_class_path(&mappings, &workspace_root, name)
-            && let Some(classes) = self.parse_and_cache_file(&file_path)
-        {
-            let result = classes.iter().find(|c| c.name == last_segment).cloned();
-            if result.is_some() {
-                return result;
+        if let Some(workspace_root) = self.workspace_root.read().clone() {
+            let file_path = {
+                let mappings = self.psr4_mappings.read();
+                composer::resolve_class_path(&mappings, &workspace_root, name)
+            };
+            if let Some(file_path) = file_path
+                && let Some(classes) = self.parse_and_cache_file(&file_path)
+            {
+                let result = classes.iter().find(|c| c.name == last_segment).cloned();
+                if result.is_some() {
+                    return result;
+                }
             }
         }
 
@@ -200,15 +195,11 @@ impl Backend {
             }
         }
 
-        if let Ok(mut map) = self.ast_map.lock() {
-            map.insert(uri.to_owned(), classes.clone());
-        }
-        if let Ok(mut map) = self.use_map.lock() {
-            map.insert(uri.to_owned(), file_use_map);
-        }
-        if let Ok(mut map) = self.namespace_map.lock() {
-            map.insert(uri.to_owned(), file_namespace);
-        }
+        self.ast_map.write().insert(uri.to_owned(), classes.clone());
+        self.use_map.write().insert(uri.to_owned(), file_use_map);
+        self.namespace_map
+            .write()
+            .insert(uri.to_owned(), file_namespace);
 
         // Selectively invalidate the resolved-class cache for the
         // classes defined in this file.  Loading a new file from disk
@@ -216,7 +207,8 @@ impl Backend {
         // for unrelated classes.  Only the FQNs we just parsed need
         // to be evicted — their old (if any) cache entries were built
         // without the members we just loaded.
-        if let Ok(mut cache) = self.resolved_class_cache.lock() {
+        {
+            let mut cache = self.resolved_class_cache.lock();
             for cls in &classes {
                 let fqn = match &cls.file_namespace {
                     Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, cls.name),
@@ -245,7 +237,8 @@ impl Backend {
     /// wins.
     pub fn find_or_load_function(&self, candidates: &[&str]) -> Option<FunctionInfo> {
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
-        if let Ok(fmap) = self.global_functions.lock() {
+        {
+            let fmap = self.global_functions.read();
             for &name in candidates {
                 if let Some((_, info)) = fmap.get(name) {
                     return Some(info.clone());
@@ -273,7 +266,8 @@ impl Backend {
                 let stub_uri = format!("phpantom-stub-fn://{}", lookup);
                 let mut result: Option<FunctionInfo> = None;
 
-                if let Ok(mut fmap) = self.global_functions.lock() {
+                {
+                    let mut fmap = self.global_functions.write();
                     for func in &functions {
                         let fqn = if let Some(ref ns) = func.namespace {
                             format!("{}\\{}", ns, &func.name)
@@ -303,9 +297,7 @@ impl Backend {
                     let stub_namespace = self.parse_namespace(stub_content);
                     Self::resolve_parent_class_names(&mut classes, &empty_use_map, &stub_namespace);
                     let class_uri = format!("phpantom-stub-fn://{}", lookup);
-                    if let Ok(mut map) = self.ast_map.lock() {
-                        map.insert(class_uri, classes);
-                    }
+                    self.ast_map.write().insert(class_uri, classes);
                 }
 
                 if result.is_some() {

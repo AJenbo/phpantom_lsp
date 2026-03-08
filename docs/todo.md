@@ -33,28 +33,16 @@ with each step.
 
 ---
 
-## Sprint 1 — Code actions (imports & diagnostics) ✅
-
-All items complete: import class, remove unused imports, deprecated-usage
-diagnostics, unused-import dimming, and implement missing methods.
-
----
-
-## Sprint 2 — Self-generated classmap (0.5.0) ✅
-
----
-
 ## Sprint 2.5 — Parallel file processing (0.5.0)
 
 This sprint delivers parallel file processing for workspace-wide
 operations (find references, go-to-implementation, self-scan,
-diagnostics). The three prerequisite items replace shared data
+diagnostics). The two prerequisite items replace shared data
 structures with concurrent-read-friendly wrappers so that parallel
 `spawn_blocking` tasks do not serialize on lock contention.
 
 | # | Item | Effort | Domain | Doc Link |
 |---|---|---|---|---|
-| 83 | `RwLock` for read-heavy maps | Low | Performance | [performance.md §3](todo/performance.md#3-rwlock-for-read-heavy-maps) |
 | 85 | `Arc<String>` for file content in `open_files` | Low | Performance | [performance.md §5](todo/performance.md#5-arcstring-for-file-content-in-open_files) |
 | 86 | `Arc<SymbolMap>` to avoid snapshot cloning | Low | Performance | [performance.md §6](todo/performance.md#6-arcsymbolmap-to-avoid-snapshot-cloning) |
 | 95 | Parallel file processing | Medium | Indexing | [indexing.md §3](todo/indexing.md#phase-3-parallel-file-processing) |

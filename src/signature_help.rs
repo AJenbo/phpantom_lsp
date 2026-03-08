@@ -349,11 +349,7 @@ impl Backend {
         let ctx = self.file_context(uri);
 
         // ── Primary path: AST-based detection via symbol map ────────
-        let symbol_map = self
-            .symbol_maps
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned());
+        let symbol_map = self.symbol_maps.read().get(uri).cloned();
 
         if let Some(ref sm) = symbol_map
             && let Some(site) = detect_call_site_from_map(sm, content, position)

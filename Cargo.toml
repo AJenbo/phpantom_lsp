@@ -18,6 +18,7 @@ mago-span = "1.8"
 bumpalo = "3"
 ignore = "0.4"
 memchr = "2"
+parking_lot = "0.12"
 toml = "0.8"
 
 [dev-dependencies]

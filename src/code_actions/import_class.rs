@@ -31,32 +31,17 @@ impl Backend {
         out: &mut Vec<CodeActionOrCommand>,
     ) {
         // ── Gather file context ─────────────────────────────────────────
-        let file_use_map: HashMap<String, String> = match self.use_map.lock() {
-            Ok(m) => m.get(uri).cloned().unwrap_or_default(),
-            Err(_) => return,
+        let file_use_map: HashMap<String, String> =
+            self.use_map.read().get(uri).cloned().unwrap_or_default();
+
+        let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
+
+        let symbol_map = match self.symbol_maps.read().get(uri) {
+            Some(sm) => sm.clone(),
+            None => return,
         };
 
-        let file_namespace: Option<String> = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
-
-        let symbol_map = match self.symbol_maps.lock() {
-            Ok(m) => match m.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            },
-            Err(_) => return,
-        };
-
-        let local_classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let local_classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         // Convert LSP range to byte offsets for comparison with symbol spans.
         let request_start = position_to_offset(content, params.range.start);
@@ -329,7 +314,8 @@ impl Backend {
         let name_lower = name.to_lowercase();
 
         // ── 1. class_index ──────────────────────────────────────────────
-        if let Ok(idx) = self.class_index.lock() {
+        {
+            let idx = self.class_index.read();
             for fqn in idx.keys() {
                 if short_name(fqn).to_lowercase() == name_lower {
                     candidates.push(fqn.clone());
@@ -338,7 +324,8 @@ impl Backend {
         }
 
         // ── 2. Composer classmap ────────────────────────────────────────
-        if let Ok(cmap) = self.classmap.lock() {
+        {
+            let cmap = self.classmap.read();
             for fqn in cmap.keys() {
                 if short_name(fqn).to_lowercase() == name_lower
                     && !candidates
@@ -351,9 +338,9 @@ impl Backend {
         }
 
         // ── 3. ast_map (already-parsed files) ───────────────────────────
-        if let Ok(amap) = self.ast_map.lock()
-            && let Ok(nmap) = self.namespace_map.lock()
         {
+            let amap = self.ast_map.read();
+            let nmap = self.namespace_map.read();
             for (file_uri, classes) in amap.iter() {
                 let ns = nmap.get(file_uri).and_then(|o| o.as_deref());
                 for cls in classes {
@@ -461,7 +448,8 @@ mod tests {
     fn find_candidates_from_classmap() {
         let backend = crate::Backend::new_test();
         // Populate classmap with a known class.
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "App\\Models\\User".to_string(),
                 "/fake/path/User.php".into(),
@@ -480,7 +468,8 @@ mod tests {
     #[test]
     fn find_candidates_case_insensitive() {
         let backend = crate::Backend::new_test();
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "Vendor\\Obscure\\ZYGOMORPHIC".to_string(),
                 "/fake/path.php".into(),
@@ -496,10 +485,12 @@ mod tests {
     fn find_candidates_deduplicates() {
         let backend = crate::Backend::new_test();
         // Add the same FQN to both class_index and classmap.
-        if let Ok(mut idx) = backend.class_index.lock() {
+        {
+            let mut idx = backend.class_index.write();
             idx.insert("App\\Foo".to_string(), "file:///foo.php".to_string());
         }
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert("App\\Foo".to_string(), "/foo.php".into());
         }
 
@@ -520,7 +511,8 @@ mod tests {
         backend.update_ast(uri, content);
 
         // Add a candidate to the classmap.
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "Illuminate\\Http\\Request".to_string(),
                 "/vendor/laravel/framework/src/Illuminate/Http/Request.php".into(),
@@ -572,7 +564,8 @@ mod tests {
 
         backend.update_ast(uri, content);
 
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "Illuminate\\Http\\Request".to_string(),
                 "/vendor/laravel/framework/src/Illuminate/Http/Request.php".into(),
@@ -619,7 +612,8 @@ mod tests {
 
         backend.update_ast(uri, content);
 
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "Illuminate\\Http\\Request".to_string(),
                 "/vendor/laravel/framework/src/Illuminate/Http/Request.php".into(),
@@ -664,7 +658,8 @@ mod tests {
 
         backend.update_ast(uri, content);
 
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "Illuminate\\Http\\Request".to_string(),
                 "/vendor/laravel/framework/src/Illuminate/Http/Request.php".into(),
@@ -719,7 +714,8 @@ mod tests {
 
         backend.update_ast(uri, content);
 
-        if let Ok(mut cmap) = backend.classmap.lock() {
+        {
+            let mut cmap = backend.classmap.write();
             cmap.insert(
                 "Illuminate\\Http\\Request".to_string(),
                 "/vendor/laravel/framework/src/Illuminate/Http/Request.php".into(),

@@ -406,7 +406,8 @@ async fn self_scan_classmap_populates_backend_classmap() {
         phpantom_lsp::Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
     // Inject the self-scanned classmap into the backend
-    if let Ok(mut cm) = backend.classmap().lock() {
+    {
+        let mut cm = backend.classmap().write();
         *cm = classmap;
     }
 

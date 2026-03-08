@@ -102,7 +102,7 @@ impl Backend {
         uri: &str,
         offset: u32,
     ) -> Option<crate::symbol_map::SymbolSpan> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         map.lookup(offset).cloned()
     }
@@ -118,7 +118,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<crate::symbol_map::VarDefSite> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         let scope_start = map.find_enclosing_scope(cursor_offset);
         map.find_var_definition(var_name, cursor_offset, scope_start)
@@ -134,7 +134,7 @@ impl Backend {
         var_name: &str,
         cursor_offset: u32,
     ) -> Option<VarDefKind> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         map.var_def_kind_at(var_name, cursor_offset).cloned()
     }
@@ -319,11 +319,7 @@ impl Backend {
         // files, previously navigated-to vendor files) live in
         // class_index (FQN → URI) and ast_map (URI → [ClassInfo]).
         for fqn in &candidates {
-            let target_uri = self
-                .class_index
-                .lock()
-                .ok()
-                .and_then(|idx| idx.get(fqn.as_str()).cloned());
+            let target_uri = self.class_index.read().get(fqn.as_str()).cloned();
             if let Some(ref target_uri) = target_uri
                 && let Some(location) = self.find_definition_in_ast_map_cross_file(fqn, target_uri)
             {
@@ -335,28 +331,20 @@ impl Backend {
         // This covers vendor classes that haven't been loaded into ast_map
         // yet (cold Ctrl+Click on a class never used in completion/hover).
         for fqn in &candidates {
-            if let Ok(cmap) = self.classmap.lock()
-                && let Some(file_path) = cmap.get(fqn.as_str()).cloned()
+            if let Some(file_path) = self.classmap.read().get(fqn.as_str()).cloned()
+                && let Some(location) = self.resolve_class_in_file(&file_path, fqn)
             {
-                drop(cmap);
-                if let Some(location) = self.resolve_class_in_file(&file_path, fqn) {
-                    return Some(location);
-                }
+                return Some(location);
             }
         }
 
         // Cross-file via PSR-4: parse on demand and cache.
         // PSR-4 mappings only cover user code (from composer.json).
         // Vendor classes are resolved by the classmap above.
-        let workspace_root = self
-            .workspace_root
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let workspace_root = self.workspace_root.read().clone();
 
-        if let Some(workspace_root) = workspace_root
-            && let Ok(mappings) = self.psr4_mappings.lock()
-        {
+        if let Some(workspace_root) = workspace_root {
+            let mappings = self.psr4_mappings.read();
             for fqn in &candidates {
                 if let Some(file_path) =
                     composer::resolve_class_path(&mappings, &workspace_root, fqn)
@@ -398,7 +386,7 @@ impl Backend {
         name: &str,
         cursor_offset: u32,
     ) -> Option<crate::symbol_map::TemplateParamDef> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         map.find_template_def(name, cursor_offset).cloned()
     }
@@ -414,7 +402,7 @@ impl Backend {
     fn resolve_constant_definition(&self, candidates: &[String]) -> Option<Location> {
         // Look up the constant in global_defines.
         let found = {
-            let dmap = self.global_defines.lock().ok()?;
+            let dmap = self.global_defines.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some(info) = dmap.get(candidate.as_str()) {
@@ -460,7 +448,7 @@ impl Backend {
     fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Step 1: Check global_functions (user code + cached stubs) ──
         let found = {
-            let fmap = self.global_functions.lock().ok()?;
+            let fmap = self.global_functions.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some((uri, info)) = fmap.get(candidate.as_str()) {
@@ -481,7 +469,7 @@ impl Backend {
 
             // After find_or_load_function, the function is cached in
             // global_functions.  Look it up to get the URI.
-            let fmap = self.global_functions.lock().ok()?;
+            let fmap = self.global_functions.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some((uri, info)) = fmap.get(candidate.as_str()) {
@@ -586,11 +574,7 @@ impl Backend {
         // will re-parse it — but the cost is negligible compared to the
         // disk I/O we'd do anyway.  A future optimisation can skip the
         // re-parse when an `ast_map` entry already exists.
-        let already_cached = self
-            .ast_map
-            .lock()
-            .ok()
-            .is_some_and(|map| map.contains_key(&target_uri_string));
+        let already_cached = self.ast_map.read().contains_key(&target_uri_string);
 
         if !already_cached {
             self.parse_and_cache_file(file_path);
@@ -613,11 +597,7 @@ impl Backend {
     ) -> Option<Location> {
         let sn = short_name(fqn);
 
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|map| map.get(target_uri).cloned())?;
+        let classes = self.ast_map.read().get(target_uri).cloned()?;
 
         // Match by short name + namespace, same logic as
         // `find_definition_in_ast_map`.
@@ -654,11 +634,7 @@ impl Backend {
     ) -> Option<Location> {
         let short_name = short_name(fqn);
 
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|map| map.get(uri).cloned())?;
+        let classes = self.ast_map.read().get(uri).cloned()?;
 
         let class_info = classes.iter().find(|c| {
             if c.name != short_name {
@@ -667,12 +643,7 @@ impl Backend {
             // Build the FQN of this class in the current file and compare
             // against the requested FQN to avoid false matches when two
             // namespaces contain classes with the same short name.
-            let file_namespace = self
-                .namespace_map
-                .lock()
-                .ok()
-                .and_then(|map| map.get(uri).cloned())
-                .flatten();
+            let file_namespace = self.namespace_map.read().get(uri).cloned().flatten();
             let class_fqn = match &file_namespace {
                 Some(ns) => format!("{}\\{}", ns, c.name),
                 None => c.name.clone(),
@@ -718,12 +689,7 @@ impl Backend {
     ) -> Option<Location> {
         let cursor_offset = position_to_offset(content, position);
 
-        let classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let current_class = find_class_at_offset(&classes, cursor_offset)?;
 
@@ -776,13 +742,10 @@ impl Backend {
         {
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
-                if let Ok(cmap) = self.classmap.lock()
-                    && let Some(file_path) = cmap.get(*candidate).cloned()
+                if let Some(file_path) = self.classmap.read().get(*candidate).cloned()
+                    && let Some(location) = self.resolve_class_in_file(&file_path, candidate)
                 {
-                    drop(cmap);
-                    if let Some(location) = self.resolve_class_in_file(&file_path, candidate) {
-                        return Some(location);
-                    }
+                    return Some(location);
                 }
             }
         }
@@ -790,15 +753,10 @@ impl Backend {
         // Try PSR-4 resolution as a last resort.
         // PSR-4 mappings only cover user code (from composer.json).
         // Vendor classes are resolved by the classmap above.
-        let workspace_root = self
-            .workspace_root
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let workspace_root = self.workspace_root.read().clone();
 
-        if let Some(workspace_root) = workspace_root
-            && let Ok(mappings) = self.psr4_mappings.lock()
-        {
+        if let Some(workspace_root) = workspace_root {
+            let mappings = self.psr4_mappings.read();
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
                 if let Some(file_path) =

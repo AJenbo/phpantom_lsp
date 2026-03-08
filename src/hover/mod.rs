@@ -264,7 +264,7 @@ impl Backend {
 
     /// Look up the symbol at the given byte offset for hover purposes.
     fn lookup_symbol_map_for_hover(&self, uri: &str, offset: u32) -> Option<SymbolSpan> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         map.lookup(offset).cloned()
     }
@@ -487,10 +487,11 @@ impl Backend {
 
             SymbolKind::ConstantReference { name } => {
                 // Look up the constant value from global_defines or stubs.
-                let value_text =
-                    self.global_defines.lock().ok().and_then(|dmap| {
-                        dmap.get(name.as_str()).and_then(|info| info.value.clone())
-                    });
+                let value_text = self
+                    .global_defines
+                    .read()
+                    .get(name.as_str())
+                    .and_then(|info| info.value.clone());
 
                 let code = if let Some(ref val) = value_text {
                     format!("```php\n<?php\nconst {} = {};\n```", name, val)
@@ -639,7 +640,7 @@ impl Backend {
             return None;
         }
 
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         let def = map.find_template_def(name, cursor_offset)?;
 
@@ -666,7 +667,7 @@ impl Backend {
         name: &str,
         cursor_offset: u32,
     ) -> Option<Hover> {
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         let def = map.find_template_def(name, cursor_offset)?;
 

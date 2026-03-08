@@ -34,10 +34,8 @@ impl LanguageServer for Backend {
             .as_ref()
             .and_then(|uri| uri.to_file_path().ok());
 
-        if let Some(root) = workspace_root
-            && let Ok(mut wr) = self.workspace_root.lock()
-        {
-            *wr = Some(root);
+        if let Some(root) = workspace_root {
+            *self.workspace_root.write() = Some(root);
         }
 
         Ok(InitializeResult {
@@ -106,11 +104,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         // Parse composer.json for PSR-4 mappings if we have a workspace root
-        let workspace_root = self
-            .workspace_root
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let workspace_root = self.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
             // ── Load project configuration ──────────────────────────────
@@ -119,9 +113,7 @@ impl LanguageServer for Backend {
             // from the very first file load.
             match crate::config::load_config(&root) {
                 Ok(cfg) => {
-                    if let Ok(mut guard) = self.config.lock() {
-                        *guard = cfg;
-                    }
+                    *self.config.lock() = cfg;
                 }
                 Err(e) => {
                     self.log(
@@ -148,29 +140,21 @@ impl LanguageServer for Backend {
 
             // Cache the vendor dir name so cross-file scans can skip it
             // without re-reading composer.json on every request.
-            if let Ok(mut vdn) = self.vendor_dir_name.lock() {
-                *vdn = vendor_dir.clone();
-            }
+            *self.vendor_dir_name.lock() = vendor_dir.clone();
 
             // Store the vendor URI prefix so diagnostics can skip vendor files.
             let vendor_path = root.join(&vendor_dir);
             if let Ok(canonical) = vendor_path.canonicalize() {
                 let prefix = format!("file://{}/", canonical.display());
-                if let Ok(mut vp) = self.vendor_uri_prefix.lock() {
-                    *vp = prefix;
-                }
+                *self.vendor_uri_prefix.lock() = prefix;
             } else {
                 // Vendor dir doesn't exist yet — store the non-canonical path
                 // so files opened from that location are still skipped.
                 let prefix = format!("file://{}/", vendor_path.display());
-                if let Ok(mut vp) = self.vendor_uri_prefix.lock() {
-                    *vp = prefix;
-                }
+                *self.vendor_uri_prefix.lock() = prefix;
             }
 
-            if let Ok(mut m) = self.psr4_mappings.lock() {
-                *m = mappings;
-            }
+            *self.psr4_mappings.write() = mappings;
 
             // ── Build the classmap ──────────────────────────────────────
             //
@@ -242,9 +226,7 @@ impl LanguageServer for Backend {
             };
 
             let classmap_count = classmap.len();
-            if let Ok(mut cm) = self.classmap.lock() {
-                *cm = classmap;
-            }
+            *self.classmap.write() = classmap;
 
             // Parse autoload_files.php to discover global symbols.
             // These files can contain any kind of PHP symbol (classes,
@@ -328,9 +310,7 @@ impl LanguageServer for Backend {
         let text = doc.text;
 
         // Store file content
-        if let Ok(mut files) = self.open_files.lock() {
-            files.insert(uri.clone(), text.clone());
-        }
+        self.open_files.write().insert(uri.clone(), text.clone());
 
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
@@ -352,9 +332,7 @@ impl LanguageServer for Backend {
             let text = &change.text;
 
             // Update stored content
-            if let Ok(mut files) = self.open_files.lock() {
-                files.insert(uri.clone(), text.clone());
-            }
+            self.open_files.write().insert(uri.clone(), text.clone());
 
             // Re-parse and update AST map, use map, and namespace map
             self.update_ast(&uri, text);
@@ -369,9 +347,7 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
-        if let Ok(mut files) = self.open_files.lock() {
-            files.remove(&uri);
-        }
+        self.open_files.write().remove(&uri);
 
         self.clear_file_maps(&uri);
 

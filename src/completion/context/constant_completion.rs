@@ -33,7 +33,8 @@ impl Backend {
         let mut items: Vec<CompletionItem> = Vec::new();
 
         // ── 1. User-defined constants (from parsed files) ───────────
-        if let Ok(dmap) = self.global_defines.lock() {
+        {
+            let dmap = self.global_defines.read();
             for (name, _) in dmap.iter() {
                 if !name.to_lowercase().contains(&prefix_lower) {
                     continue;

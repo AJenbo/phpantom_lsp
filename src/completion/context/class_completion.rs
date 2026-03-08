@@ -940,9 +940,8 @@ impl Backend {
         }
 
         // ── 2. Same-namespace classes (from ast_map) ────────────────
-        if let Some(ns) = file_namespace
-            && let Ok(nmap) = self.namespace_map.lock()
-        {
+        if let Some(ns) = file_namespace {
+            let nmap = self.namespace_map.read();
             // Find all URIs that share the same namespace
             let same_ns_uris: Vec<String> = nmap
                 .iter()
@@ -956,7 +955,8 @@ impl Backend {
                 .collect();
             drop(nmap);
 
-            if let Ok(amap) = self.ast_map.lock() {
+            {
+                let amap = self.ast_map.read();
                 for uri in &same_ns_uris {
                     if let Some(classes) = amap.get(uri) {
                         for cls in classes {
@@ -1035,7 +1035,8 @@ impl Backend {
         }
 
         // ── 3. class_index (discovered / interacted-with classes) ───
-        if let Ok(idx) = self.class_index.lock() {
+        {
+            let idx = self.class_index.read();
             for fqn in idx.keys() {
                 let sn = short_name(fqn);
                 if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix) {
@@ -1090,7 +1091,8 @@ impl Backend {
         }
 
         // ── 4. Composer classmap (all autoloaded classes) ───────────
-        if let Ok(cmap) = self.classmap.lock() {
+        {
+            let cmap = self.classmap.read();
             for fqn in cmap.keys() {
                 let sn = short_name(fqn);
                 if !matches_class_prefix(sn, fqn, &prefix_lower, is_fqn_prefix) {
@@ -1335,14 +1337,10 @@ impl Backend {
         if self.find_class_in_ast_map(fqn).is_some() {
             return false;
         }
-        if let Ok(idx) = self.class_index.lock()
-            && idx.contains_key(fqn)
-        {
+        if self.class_index.read().contains_key(fqn) {
             return false;
         }
-        if let Ok(cmap) = self.classmap.lock()
-            && cmap.contains_key(fqn)
-        {
+        if self.classmap.read().contains_key(fqn) {
             return false;
         }
         if self.stub_index.contains_key(fqn) {
@@ -1352,7 +1350,8 @@ impl Backend {
         // Not a known class. Check for positive namespace evidence.
 
         // 1. Some open file declares this FQN as its namespace.
-        if let Ok(nmap) = self.namespace_map.lock() {
+        {
+            let nmap = self.namespace_map.read();
             for ns in nmap.values().flatten() {
                 if ns == fqn {
                     return true;
@@ -1362,14 +1361,15 @@ impl Backend {
 
         // 2. Known classes exist under this FQN as a namespace prefix.
         let prefix = format!("{}\\", fqn);
-        if let Ok(idx) = self.class_index.lock()
-            && idx.keys().any(|k| k.starts_with(&prefix))
+        if self
+            .class_index
+            .read()
+            .keys()
+            .any(|k| k.starts_with(&prefix))
         {
             return true;
         }
-        if let Ok(cmap) = self.classmap.lock()
-            && cmap.keys().any(|k| k.starts_with(&prefix))
-        {
+        if self.classmap.read().keys().any(|k| k.starts_with(&prefix)) {
             return true;
         }
         if self.stub_index.keys().any(|k| k.starts_with(&prefix)) {
@@ -1419,14 +1419,10 @@ impl Backend {
         if self.stub_index.contains_key(class_name) {
             return true;
         }
-        if let Ok(idx) = self.class_index.lock()
-            && idx.contains_key(class_name)
-        {
+        if self.class_index.read().contains_key(class_name) {
             return true;
         }
-        if let Ok(cmap) = self.classmap.lock()
-            && cmap.contains_key(class_name)
-        {
+        if self.classmap.read().contains_key(class_name) {
             return true;
         }
         false

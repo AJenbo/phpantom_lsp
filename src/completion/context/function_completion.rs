@@ -95,7 +95,8 @@ impl Backend {
         let use_block = content.map(analyze_use_block);
 
         // ── 1. User-defined functions (from parsed files) ───────────
-        if let Ok(fmap) = self.global_functions.lock() {
+        {
+            let fmap = self.global_functions.read();
             for (key, (_uri, info)) in fmap.iter() {
                 // Match against both the FQN (key) and the short name so
                 // that typing either finds the function.

@@ -62,36 +62,20 @@ impl Backend {
 
         // ── Gather context under locks ──────────────────────────────────
         let symbol_map = {
-            let maps = match self.symbol_maps.lock() {
-                Ok(m) => m,
-                Err(_) => return,
-            };
+            let maps = self.symbol_maps.read();
             match maps.get(uri) {
                 Some(sm) => sm.clone(),
                 None => return,
             }
         };
 
-        let file_use_map: HashMap<String, String> = self
-            .use_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let file_use_map: HashMap<String, String> =
+            self.use_map.read().get(uri).cloned().unwrap_or_default();
 
-        let file_namespace: Option<String> = self
-            .namespace_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .flatten();
+        let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
 
-        let local_classes: Vec<ClassInfo> = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let local_classes: Vec<ClassInfo> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
@@ -202,9 +186,7 @@ mod tests {
     /// diagnostic enabled and collect diagnostics.
     fn collect_enabled(backend: &Backend, uri: &str, content: &str) -> Vec<Diagnostic> {
         // Enable the diagnostic via config.
-        if let Ok(mut cfg) = backend.config.lock() {
-            cfg.diagnostics.unresolved_member_access = Some(true);
-        }
+        backend.config.lock().diagnostics.unresolved_member_access = Some(true);
         backend.update_ast(uri, content);
         let mut out = Vec::new();
         backend.collect_unresolved_member_access_diagnostics(uri, content, &mut out);

@@ -121,62 +121,28 @@ Each step compiles and passes tests independently.
 ---
 
 ## 3. `RwLock` for read-heavy maps
-**Impact: Medium · Effort: Low**
+**Impact: Medium · Effort: Low (fixed)**
 
-Every shared data structure on `Backend` uses `Arc<Mutex<...>>`.
-While the `ast_map` lock is held (during `find_class_in_ast_map`'s
-scan or `update_ast`'s write), **all** concurrent requests are
-blocked. Completion, hover, go-to-definition, and diagnostics all
-contend on the same locks.
+**Status:** Fixed. All read-heavy `Arc<Mutex<…>>` fields on `Backend`
+have been replaced with `Arc<parking_lot::RwLock<…>>`:
 
-The vast majority of operations are reads: looking up classes,
-checking use-maps, reading namespaces, scanning symbol maps. Writes
-only happen on `did_open`, `did_change`, and on-demand file loading.
-With `Mutex`, readers block each other. A completion request reading
-`ast_map` blocks a hover request that also wants to read `ast_map`.
-
-Under parallel file processing (indexing.md Phase 3), multiple
-`spawn_blocking` tasks will need concurrent read access. `Mutex`
-serializes them regardless of priority scheduling.
-
-### Fix
-
-Replace `Arc<Mutex<HashMap<...>>>` with `Arc<RwLock<HashMap<...>>>`
-for the read-heavy maps:
-
-- `ast_map`
-- `symbol_maps`
-- `use_map`
-- `namespace_map`
-- `class_index`
-- `classmap`
-- `global_functions`
-- `global_defines`
+- `ast_map`, `symbol_maps`, `use_map`, `namespace_map`
+- `class_index`, `classmap`
+- `global_functions`, `global_defines`
 - `open_files`
+- `workspace_root`, `psr4_mappings`
 
-Use `parking_lot::RwLock` rather than `std::sync::RwLock` for better
-performance characteristics (no poisoning, smaller footprint, writer
-starvation prevention).
+Fields that are rarely accessed or always written use
+`parking_lot::Mutex` (no poisoning, no `Result` unwrapping):
 
-### What to leave as `Mutex`
-
-Fields that are rarely accessed or always written can stay as `Mutex`:
-
-- `resolved_class_cache` — frequently written (cache stores), and
-  `RwLock` upgrades from read to write are error-prone
+- `resolved_class_cache` — frequently written (cache stores)
 - `php_version`, `vendor_uri_prefix`, `vendor_dir_name`, `config` —
   written once during init, read rarely
 - `diag_pending_uri` — tiny critical section
 
-### Migration
-
-This is a mechanical find-and-replace:
-
-1. Add `parking_lot` to `Cargo.toml`.
-2. Change field types from `Arc<Mutex<T>>` to `Arc<RwLock<T>>`.
-3. Change `.lock()` to `.read()` at read sites and `.write()` at
-   write sites. `parking_lot::RwLock` does not return `Result`, so
-   the `.ok()?` / `.ok().map(...)` patterns simplify to direct access.
+All `.lock().ok()?` / `.lock().map(…)` patterns were simplified to
+direct `.read()` or `.write()` calls. `parking_lot` v0.12 added as a
+dependency.
 
 ---
 

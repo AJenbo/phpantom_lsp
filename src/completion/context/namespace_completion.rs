@@ -37,18 +37,14 @@ impl Backend {
 
         // Collect the project's own PSR-4 prefixes (without trailing
         // `\`) so we can gate which cache entries are eligible.
-        let psr4_prefixes: Vec<String> = self
-            .psr4_mappings
-            .lock()
-            .ok()
-            .map(|mappings| {
-                mappings
-                    .iter()
-                    .map(|m| m.prefix.trim_end_matches('\\').to_string())
-                    .filter(|p| !p.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let psr4_prefixes: Vec<String> = {
+            let mappings = self.psr4_mappings.read();
+            mappings
+                .iter()
+                .map(|m| m.prefix.trim_end_matches('\\').to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        };
 
         // Helper: insert a namespace and all its parent namespaces.
         fn insert_with_parents(ns: &str, set: &mut HashSet<String>) {
@@ -83,20 +79,19 @@ impl Backend {
         }
 
         // ── 2. namespace_map (already-opened files) ─────────────────
-        if let Ok(nmap) = self.namespace_map.lock() {
+        {
+            let nmap = self.namespace_map.read();
             for ns in nmap.values().flatten() {
                 insert_if_under_psr4(ns, &mut namespaces, &psr4_prefixes);
             }
         }
 
         // ── 3. ast_map namespace portions ───────────────────────────
-        if let Ok(amap) = self.ast_map.lock() {
-            let nmap = self.namespace_map.lock().ok();
+        {
+            let amap = self.ast_map.read();
+            let nmap = self.namespace_map.read();
             for (uri, classes) in amap.iter() {
-                let file_ns = nmap
-                    .as_ref()
-                    .and_then(|nm| nm.get(uri))
-                    .and_then(|opt| opt.as_deref());
+                let file_ns = nmap.get(uri).and_then(|opt| opt.as_deref());
                 if let Some(ns) = file_ns {
                     for cls in classes {
                         let fqn = format!("{}\\{}", ns, cls.name);
@@ -109,14 +104,16 @@ impl Backend {
         }
 
         // ── 4. class_index + classmap namespace portions ────────────
-        if let Ok(idx) = self.class_index.lock() {
+        {
+            let idx = self.class_index.read();
             for fqn in idx.keys() {
                 if let Some(ns_end) = fqn.rfind('\\') {
                     insert_if_under_psr4(&fqn[..ns_end], &mut namespaces, &psr4_prefixes);
                 }
             }
         }
-        if let Ok(cmap) = self.classmap.lock() {
+        {
+            let cmap = self.classmap.read();
             for fqn in cmap.keys() {
                 if let Some(ns_end) = fqn.rfind('\\') {
                     insert_if_under_psr4(&fqn[..ns_end], &mut namespaces, &psr4_prefixes);

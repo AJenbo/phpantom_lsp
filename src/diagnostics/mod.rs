@@ -73,11 +73,11 @@ impl Backend {
         // and should not produce warnings in the user's editor.  The
         // vendor URI prefix is built during `initialized` from the
         // workspace root and `composer.json`'s `config.vendor-dir`.
-        if let Ok(prefix) = self.vendor_uri_prefix.lock()
-            && !prefix.is_empty()
-            && uri_str.starts_with(prefix.as_str())
         {
-            return;
+            let prefix = self.vendor_uri_prefix.lock();
+            if !prefix.is_empty() && uri_str.starts_with(prefix.as_str()) {
+                return;
+            }
         }
 
         let uri = match uri_str.parse::<Url>() {
@@ -117,9 +117,7 @@ impl Backend {
     /// are never blocked.
     pub(crate) fn schedule_diagnostics(&self, uri: String) {
         // Store the URI that needs diagnostics.
-        if let Ok(mut pending) = self.diag_pending_uri.lock() {
-            *pending = Some(uri);
-        }
+        *self.diag_pending_uri.lock() = Some(uri);
         // Bump version so the worker knows there is fresh work.
         self.diag_version.fetch_add(1, Ordering::Release);
         // Wake the worker (no-op if it is already awake).
@@ -163,19 +161,12 @@ impl Backend {
             }
 
             // ── Step 3: snapshot ────────────────────────────────────
-            let uri = match self.diag_pending_uri.lock() {
-                Ok(mut pending) => pending.take(),
-                Err(_) => continue,
-            };
-            let uri = match uri {
+            let uri = match self.diag_pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
             let content = {
-                let files = match self.open_files.lock() {
-                    Ok(f) => f,
-                    Err(_) => continue,
-                };
+                let files = self.open_files.read();
                 match files.get(&uri) {
                     Some(c) => c.clone(),
                     None => continue,

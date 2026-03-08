@@ -118,9 +118,9 @@ async fn test_stub_function_cached_after_first_lookup() {
     // Verify it's actually in global_functions now.
     let in_cache = backend
         .global_functions()
-        .lock()
-        .ok()
-        .and_then(|fmap| fmap.get("str_contains").map(|(uri, _)| uri.clone()));
+        .read()
+        .get("str_contains")
+        .map(|(uri, _)| uri.clone());
     assert!(
         in_cache.is_some(),
         "str_contains should be cached in global_functions"
@@ -303,11 +303,7 @@ async fn test_stub_function_sibling_functions_cached() {
     // array_pop is in the same standard file group.
     // Check if it got cached in global_functions (it may be in a different
     // file, but let's verify the caching mechanism works for the same file).
-    let in_cache = backend
-        .global_functions()
-        .lock()
-        .ok()
-        .and_then(|fmap| fmap.get("array_push").cloned());
+    let in_cache = backend.global_functions().read().get("array_push").cloned();
     assert!(
         in_cache.is_some(),
         "array_push should be in global_functions cache after lookup"
@@ -359,7 +355,8 @@ async fn test_user_function_takes_precedence_over_stub() {
         template_bindings: vec![],
     };
 
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             "str_contains".to_string(),
             ("file:///custom.php".to_string(), custom_func),

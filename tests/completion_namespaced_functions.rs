@@ -64,7 +64,8 @@ fn register_namespaced_function(
     namespace: &str,
     uri: &str,
 ) {
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             fqn.to_string(),
             (
@@ -92,7 +93,8 @@ fn register_namespaced_function(
 
 /// Register a global (non-namespaced) function in the global_functions map.
 fn register_global_function(backend: &phpantom_lsp::Backend, name: &str, uri: &str) {
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             name.to_string(),
             (
@@ -589,7 +591,7 @@ async fn test_no_short_name_fallback_in_global_functions() {
         })
         .await;
 
-    let fmap = backend.global_functions().lock().unwrap();
+    let fmap = backend.global_functions().read();
 
     assert!(
         fmap.contains_key("Illuminate\\Support\\enum_value"),
@@ -835,7 +837,8 @@ async fn test_auto_import_alphabetical_placement() {
 async fn test_use_function_namespaced_detail_shows_signature() {
     let backend = create_test_backend();
 
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             "Illuminate\\Support\\enum_value".to_string(),
             (
@@ -934,7 +937,8 @@ async fn test_user_function_shadows_stub_same_fqn() {
 async fn test_deprecated_namespaced_function() {
     let backend = create_test_backend();
 
-    if let Ok(mut fmap) = backend.global_functions().lock() {
+    {
+        let mut fmap = backend.global_functions().write();
         fmap.insert(
             "Legacy\\old_helper".to_string(),
             (

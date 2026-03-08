@@ -66,9 +66,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
 
+use parking_lot::{Mutex, RwLock};
 use tower_lsp::Client;
 
 // ─── Module declarations ────────────────────────────────────────────────────
@@ -139,34 +140,34 @@ pub use virtual_members::resolve_class_fully;
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
-    pub(crate) open_files: Arc<Mutex<HashMap<String, String>>>,
+    pub(crate) open_files: Arc<RwLock<HashMap<String, String>>>,
     /// Maps a file URI to a list of ClassInfo extracted from that file.
-    pub(crate) ast_map: Arc<Mutex<HashMap<String, Vec<ClassInfo>>>>,
+    pub(crate) ast_map: Arc<RwLock<HashMap<String, Vec<ClassInfo>>>>,
     /// Per-file precomputed symbol location maps for O(log n) lookup.
     ///
     /// Built during `update_ast` by walking the AST and recording every
     /// navigable symbol occurrence (class references, member accesses,
     /// variables, function calls, etc.).  Consulted by `resolve_definition`
     /// to replace character-level backward-walking with a binary search.
-    pub(crate) symbol_maps: Arc<Mutex<HashMap<String, symbol_map::SymbolMap>>>,
+    pub(crate) symbol_maps: Arc<RwLock<HashMap<String, symbol_map::SymbolMap>>>,
     pub(crate) client: Option<Client>,
     /// The root directory of the workspace (set during `initialize`).
-    pub(crate) workspace_root: Arc<Mutex<Option<PathBuf>>>,
+    pub(crate) workspace_root: Arc<RwLock<Option<PathBuf>>>,
     /// PSR-4 autoload mappings parsed from `composer.json`.
-    pub(crate) psr4_mappings: Arc<Mutex<Vec<composer::Psr4Mapping>>>,
+    pub(crate) psr4_mappings: Arc<RwLock<Vec<composer::Psr4Mapping>>>,
     /// Maps a file URI to its `use` statement mappings (short name → fully qualified name).
     /// For example, `use Klarna\Rest\Resource;` produces `"Resource" → "Klarna\Rest\Resource"`.
-    pub(crate) use_map: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
+    pub(crate) use_map: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,
     /// Maps a file URI to its declared namespace (e.g. `"Klarna\Rest\Checkout"`).
     /// Files without a namespace declaration map to `None`.
-    pub(crate) namespace_map: Arc<Mutex<HashMap<String, Option<String>>>>,
+    pub(crate) namespace_map: Arc<RwLock<HashMap<String, Option<String>>>>,
     /// Global function definitions indexed by function name (short name).
     ///
     /// The value is `(file_uri, FunctionInfo)` so we can jump to the definition.
     /// Populated from files listed in Composer's `autoload_files.php` at init
     /// time, and also from any opened/changed files that contain standalone
     /// function declarations.
-    pub(crate) global_functions: Arc<Mutex<HashMap<String, (String, FunctionInfo)>>>,
+    pub(crate) global_functions: Arc<RwLock<HashMap<String, (String, FunctionInfo)>>>,
     /// Global constants defined via `define('NAME', value)` calls or
     /// top-level `const NAME = value;` statements.
     ///
@@ -177,7 +178,7 @@ pub struct Backend {
     /// init time, and also from any opened/changed files that contain
     /// `define()` calls or `const` statements.  Used for constant name
     /// completions, hover (showing the value), and go-to-definition.
-    pub(crate) global_defines: Arc<Mutex<HashMap<String, DefineInfo>>>,
+    pub(crate) global_defines: Arc<RwLock<HashMap<String, DefineInfo>>>,
     /// Index of fully-qualified class names to file URIs.
     ///
     /// This allows reliable lookup of classes that don't follow PSR-4
@@ -188,7 +189,7 @@ pub struct Backend {
     ///
     /// Populated during `update_ast` (using the file's namespace + class
     /// short name) and during server initialization for autoload files.
-    pub(crate) class_index: Arc<Mutex<HashMap<String, String>>>,
+    pub(crate) class_index: Arc<RwLock<HashMap<String, String>>>,
     /// Composer classmap: fully-qualified class name → file path on disk.
     ///
     /// Parsed from `<vendor>/composer/autoload_classmap.php` during server
@@ -199,7 +200,7 @@ pub struct Backend {
     ///
     /// Consulted by `find_or_load_class` as a resolution step between
     /// the ast_map scan (Phase 1) and PSR-4 resolution (Phase 2).
-    pub(crate) classmap: Arc<Mutex<HashMap<String, PathBuf>>>,
+    pub(crate) classmap: Arc<RwLock<HashMap<String, PathBuf>>>,
     /// Embedded PHP stubs for built-in classes/interfaces (e.g. `UnitEnum`,
     /// `BackedEnum`, `Iterator`, `Countable`, …).
     /// Maps class short name → raw PHP source code.
@@ -240,6 +241,9 @@ pub struct Backend {
     /// Wrapped in a `Mutex` so that `set_php_version` can be called
     /// during `initialized` (which receives `&self`, not `&mut self`).
     pub(crate) php_version: Mutex<types::PhpVersion>,
+    // NOTE: php_version, vendor_uri_prefix, vendor_dir_name, config, and
+    // diag_pending_uri use parking_lot::Mutex (not RwLock) because they
+    // are rarely accessed or always written.
     /// The `file://` URI prefix for the vendor directory, used to skip
     /// diagnostics for vendor files.
     ///
@@ -277,6 +281,9 @@ pub struct Backend {
     /// Wrapped in `Arc` so the diagnostic worker task (spawned during
     /// `initialized`) shares the same slot as the main `Backend`.
     pub(crate) diag_pending_uri: Arc<Mutex<Option<String>>>,
+    // NOTE: resolved_class_cache uses parking_lot::Mutex because it is
+    // frequently written (cache stores) and RwLock read→write upgrades
+    // are error-prone.
     /// Per-project configuration loaded from `.phpantom.toml`.
     ///
     /// Read once during `initialized` from the workspace root directory.
@@ -297,20 +304,20 @@ impl Backend {
         Self {
             name: "PHPantom".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            open_files: Arc::new(Mutex::new(HashMap::new())),
-            ast_map: Arc::new(Mutex::new(HashMap::new())),
-            symbol_maps: Arc::new(Mutex::new(HashMap::new())),
+            open_files: Arc::new(RwLock::new(HashMap::new())),
+            ast_map: Arc::new(RwLock::new(HashMap::new())),
+            symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             client: None,
-            workspace_root: Arc::new(Mutex::new(None)),
+            workspace_root: Arc::new(RwLock::new(None)),
             vendor_uri_prefix: Mutex::new(String::new()),
             vendor_dir_name: Mutex::new("vendor".to_string()),
-            psr4_mappings: Arc::new(Mutex::new(Vec::new())),
-            use_map: Arc::new(Mutex::new(HashMap::new())),
-            namespace_map: Arc::new(Mutex::new(HashMap::new())),
-            global_functions: Arc::new(Mutex::new(HashMap::new())),
-            global_defines: Arc::new(Mutex::new(HashMap::new())),
-            class_index: Arc::new(Mutex::new(HashMap::new())),
-            classmap: Arc::new(Mutex::new(HashMap::new())),
+            psr4_mappings: Arc::new(RwLock::new(Vec::new())),
+            use_map: Arc::new(RwLock::new(HashMap::new())),
+            namespace_map: Arc::new(RwLock::new(HashMap::new())),
+            global_functions: Arc::new(RwLock::new(HashMap::new())),
+            global_defines: Arc::new(RwLock::new(HashMap::new())),
+            class_index: Arc::new(RwLock::new(HashMap::new())),
+            classmap: Arc::new(RwLock::new(HashMap::new())),
             stub_index: stubs::build_stub_class_index(),
             stub_function_index: stubs::build_stub_function_index(),
             stub_constant_index: stubs::build_stub_constant_index(),
@@ -372,8 +379,8 @@ impl Backend {
         psr4_mappings: Vec<composer::Psr4Mapping>,
     ) -> Self {
         Self {
-            workspace_root: Arc::new(Mutex::new(Some(workspace_root))),
-            psr4_mappings: Arc::new(Mutex::new(psr4_mappings)),
+            workspace_root: Arc::new(RwLock::new(Some(workspace_root))),
+            psr4_mappings: Arc::new(RwLock::new(psr4_mappings)),
             ..Self::defaults()
         }
     }
@@ -382,31 +389,31 @@ impl Backend {
 
     /// Borrow the workspace root mutex (used by integration tests to set a
     /// custom workspace directory).
-    pub fn workspace_root(&self) -> &Arc<Mutex<Option<PathBuf>>> {
+    pub fn workspace_root(&self) -> &Arc<RwLock<Option<PathBuf>>> {
         &self.workspace_root
     }
 
     /// Borrow the global functions mutex (used by integration tests to
     /// inject user-defined functions or inspect the cache).
-    pub fn global_functions(&self) -> &Arc<Mutex<HashMap<String, (String, FunctionInfo)>>> {
+    pub fn global_functions(&self) -> &Arc<RwLock<HashMap<String, (String, FunctionInfo)>>> {
         &self.global_functions
     }
 
     /// Borrow the global defines mutex (used by integration tests to
     /// inject user-defined constants or inspect the cache).
-    pub fn global_defines(&self) -> &Arc<Mutex<HashMap<String, DefineInfo>>> {
+    pub fn global_defines(&self) -> &Arc<RwLock<HashMap<String, DefineInfo>>> {
         &self.global_defines
     }
 
     /// Borrow the class index mutex (used by integration tests to
     /// populate discovered class entries).
-    pub fn class_index(&self) -> &Arc<Mutex<HashMap<String, String>>> {
+    pub fn class_index(&self) -> &Arc<RwLock<HashMap<String, String>>> {
         &self.class_index
     }
 
     /// Borrow the classmap mutex (used by integration tests to populate
     /// Composer classmap entries).
-    pub fn classmap(&self) -> &Arc<Mutex<HashMap<String, PathBuf>>> {
+    pub fn classmap(&self) -> &Arc<RwLock<HashMap<String, PathBuf>>> {
         &self.classmap
     }
 
@@ -418,10 +425,7 @@ impl Backend {
 
     /// Return the configured PHP version.
     pub fn php_version(&self) -> types::PhpVersion {
-        self.php_version
-            .lock()
-            .map(|guard| *guard)
-            .unwrap_or_default()
+        *self.php_version.lock()
     }
 
     /// Create a shallow clone of this `Backend` that shares every
@@ -444,6 +448,8 @@ impl Backend {
             open_files: Arc::clone(&self.open_files),
             ast_map: Arc::clone(&self.ast_map),
             symbol_maps: Arc::clone(&self.symbol_maps),
+            // RwLock fields are shared by Arc::clone — the diagnostic
+            // worker reads them concurrently with the main Backend.
             client: self.client.clone(),
             workspace_root: Arc::clone(&self.workspace_root),
             psr4_mappings: Arc::clone(&self.psr4_mappings),
@@ -458,22 +464,12 @@ impl Backend {
             stub_function_index: self.stub_function_index.clone(),
             stub_constant_index: self.stub_constant_index.clone(),
             php_version: Mutex::new(self.php_version()),
-            vendor_uri_prefix: Mutex::new(
-                self.vendor_uri_prefix
-                    .lock()
-                    .map(|g| g.clone())
-                    .unwrap_or_default(),
-            ),
-            vendor_dir_name: Mutex::new(
-                self.vendor_dir_name
-                    .lock()
-                    .map(|g| g.clone())
-                    .unwrap_or_else(|_| "vendor".to_string()),
-            ),
+            vendor_uri_prefix: Mutex::new(self.vendor_uri_prefix.lock().clone()),
+            vendor_dir_name: Mutex::new(self.vendor_dir_name.lock().clone()),
             diag_version: Arc::clone(&self.diag_version),
             diag_notify: Arc::clone(&self.diag_notify),
             diag_pending_uri: Arc::clone(&self.diag_pending_uri),
-            config: Mutex::new(self.config.lock().map(|g| g.clone()).unwrap_or_default()),
+            config: Mutex::new(self.config.lock().clone()),
         }
     }
 
@@ -482,14 +478,12 @@ impl Backend {
     /// Returns a clone of the [`Config`](config::Config) loaded from
     /// `.phpantom.toml` (or the default config when the file is missing).
     pub fn config(&self) -> config::Config {
-        self.config.lock().map(|g| g.clone()).unwrap_or_default()
+        self.config.lock().clone()
     }
 
     /// Set the PHP version (used by integration tests and during
     /// server initialization after reading `composer.json`).
     pub fn set_php_version(&self, version: types::PhpVersion) {
-        if let Ok(mut v) = self.php_version.lock() {
-            *v = version;
-        }
+        *self.php_version.lock() = version;
     }
 }

@@ -50,12 +50,7 @@ impl Backend {
     ) -> Option<Vec<Location>> {
         // Snapshot ast_map keys before the scan so we can evict
         // transiently-loaded entries afterwards (see §13 in bugs.md).
-        let pre_scan_uris: HashSet<String> = self
-            .ast_map
-            .lock()
-            .ok()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default();
+        let pre_scan_uris: HashSet<String> = self.ast_map.read().keys().cloned().collect();
 
         let result = self.resolve_implementation_inner(uri, content, position);
 
@@ -622,12 +617,11 @@ impl Backend {
         // ── Phase 1: scan ast_map ───────────────────────────────────────
         // Collect all candidate classes first, then drop the lock before
         // calling class_loader (which may re-lock ast_map).
-        let ast_candidates: Vec<ClassInfo> = if let Ok(map) = self.ast_map.lock() {
+        let ast_candidates: Vec<ClassInfo> = {
+            let map = self.ast_map.read();
             map.values()
                 .flat_map(|classes| classes.iter().cloned())
                 .collect()
-        } else {
-            Vec::new()
         };
 
         for cls in &ast_candidates {
@@ -640,16 +634,12 @@ impl Backend {
         }
 
         // ── Phase 2: scan class_index for classes not yet in ast_map ────
-        let index_entries: Vec<(String, String)> = self
-            .class_index
-            .lock()
-            .ok()
-            .map(|idx| {
-                idx.iter()
-                    .map(|(fqn, uri)| (fqn.clone(), uri.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let index_entries: Vec<(String, String)> = {
+            let idx = self.class_index.read();
+            idx.iter()
+                .map(|(fqn, uri)| (fqn.clone(), uri.clone()))
+                .collect()
+        };
 
         for (fqn, _uri) in &index_entries {
             if seen_fqns.contains(fqn) {
@@ -670,19 +660,9 @@ impl Backend {
         // multiple classes, so we de-duplicate by path and scan each file
         // at most once).  Files already present in ast_map were covered by
         // Phase 1 and can be skipped.
-        let classmap_paths: HashSet<PathBuf> = self
-            .classmap
-            .lock()
-            .ok()
-            .map(|cm| cm.values().cloned().collect())
-            .unwrap_or_default();
+        let classmap_paths: HashSet<PathBuf> = self.classmap.read().values().cloned().collect();
 
-        let loaded_uris: HashSet<String> = self
-            .ast_map
-            .lock()
-            .ok()
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default();
+        let loaded_uris: HashSet<String> = self.ast_map.read().keys().cloned().collect();
 
         for path in &classmap_paths {
             let uri = format!("file://{}", path.display());
@@ -745,44 +725,26 @@ impl Backend {
         // classmap.  Walk user PSR-4 roots only — vendor classes are
         // assumed complete in the classmap (Phase 3) and should not
         // require a filesystem walk.
-        if let Some(workspace_root) = self
-            .workspace_root
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
-        {
+        let workspace_root = self.workspace_root.read().clone();
+        if let Some(workspace_root) = workspace_root {
             // The vendor dir name is needed by collect_php_files even
             // though we only walk user PSR-4 roots.  A fallback mapping
             // like `"" => "."` resolves to the workspace root, so the
             // walk must still skip the vendor directory (and hidden
             // directories like .git).
-            let vendor_dir_name = self
-                .vendor_dir_name
-                .lock()
-                .ok()
-                .map(|v| v.clone())
-                .unwrap_or_else(|| "vendor".to_string());
+            let vendor_dir_name = self.vendor_dir_name.lock().clone();
 
-            let psr4_dirs: Vec<PathBuf> = self
-                .psr4_mappings
-                .lock()
-                .ok()
-                .map(|mappings| {
-                    mappings
-                        .iter()
-                        .map(|m| workspace_root.join(&m.base_path))
-                        .filter(|p| p.is_dir())
-                        .collect()
-                })
-                .unwrap_or_default();
+            let psr4_dirs: Vec<PathBuf> = {
+                let mappings = self.psr4_mappings.read();
+                mappings
+                    .iter()
+                    .map(|m| workspace_root.join(&m.base_path))
+                    .filter(|p| p.is_dir())
+                    .collect()
+            };
 
             // Refresh loaded URIs — Phase 3 may have added entries.
-            let loaded_uris_p5: HashSet<String> = self
-                .ast_map
-                .lock()
-                .ok()
-                .map(|m| m.keys().cloned().collect())
-                .unwrap_or_default();
+            let loaded_uris_p5: HashSet<String> = self.ast_map.read().keys().cloned().collect();
 
             for dir in &psr4_dirs {
                 for php_file in collect_php_files(dir, &vendor_dir_name) {
@@ -1045,7 +1007,7 @@ impl Backend {
     }
 
     fn class_fqn_for_short(&self, target_short: &str) -> Option<String> {
-        let idx = self.class_index.lock().ok()?;
+        let idx = self.class_index.read();
         // Look for an entry whose short name matches.
         for fqn in idx.keys() {
             let short = short_name(fqn);

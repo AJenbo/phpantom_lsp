@@ -67,8 +67,8 @@ impl Backend {
 
         // Search the ast_map for the file containing this class.
         let uri = {
-            let map = self.ast_map.lock().ok()?;
-            let nmap = self.namespace_map.lock().ok();
+            let map = self.ast_map.read();
+            let nmap = self.namespace_map.read();
 
             // Check whether a class with the right short name and
             // namespace lives in this file.  Uses the per-class
@@ -90,10 +90,7 @@ impl Backend {
                         // Fall back to file-level namespace_map for
                         // classes that don't have file_namespace set
                         // (e.g. single-namespace files, stubs).
-                        let file_ns = nmap
-                            .as_ref()
-                            .and_then(|nm| nm.get(file_uri))
-                            .and_then(|opt| opt.as_deref());
+                        let file_ns = nmap.get(file_uri).and_then(|opt| opt.as_deref());
                         file_ns == Some(exp) && classes.iter().any(|c| c.name == last_segment)
                     }
                 }

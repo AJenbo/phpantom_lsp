@@ -621,7 +621,8 @@ async fn test_goto_definition_vendor_cross_file() {
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
     // Populate classmap with the vendor class.
-    if let Ok(mut cm) = backend.classmap().lock() {
+    {
+        let mut cm = backend.classmap().write();
         cm.insert("Monolog\\Logger".to_string(), vendor_file.clone());
     }
 

@@ -45,7 +45,7 @@ impl Backend {
             }
         })?;
 
-        let maps = self.symbol_maps.lock().ok()?;
+        let maps = self.symbol_maps.read();
         let symbol_map = maps.get(uri)?;
 
         let highlights = match &span.kind {
@@ -168,12 +168,7 @@ impl Backend {
         cursor_offset: u32,
         uri: &str,
     ) -> Vec<DocumentHighlight> {
-        let ctx_classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let ctx_classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
         let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
@@ -353,12 +348,7 @@ impl Backend {
         cursor_offset: u32,
         uri: &str,
     ) -> Vec<DocumentHighlight> {
-        let ctx_classes = self
-            .ast_map
-            .lock()
-            .ok()
-            .and_then(|m| m.get(uri).cloned())
-            .unwrap_or_default();
+        let ctx_classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
         let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),

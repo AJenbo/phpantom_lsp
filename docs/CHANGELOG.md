@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Concurrent read access to shared state.** All read-heavy maps on the backend (`ast_map`, `symbol_maps`, `use_map`, `namespace_map`, `class_index`, `classmap`, `global_functions`, `global_defines`, `open_files`, `workspace_root`, `psr4_mappings`) now use `parking_lot::RwLock` instead of `std::sync::Mutex`. Multiple requests (completion, hover, go-to-definition) can read shared state in parallel instead of serializing on a single lock. Write-heavy fields (`resolved_class_cache`, `diag_pending_uri`, `config`, etc.) use `parking_lot::Mutex` for simpler non-poisoning semantics.
 - **Async diagnostics.** Diagnostics now run in a background task with 500 ms debounce instead of blocking every `did_change` response. Completion, hover, and signature help remain responsive while diagnostics compute in the background.
 - **Smarter cache invalidation.** Editing inside a method body no longer evicts any resolved-class cache entries. PHPantom compares the old and new class signatures (method names, types, visibility, inheritance, docblock tags) and only evicts when something resolution-relevant actually changed. Combined with per-FQN targeted invalidation and generic-aware cache keys, this means typing inside a method body keeps the entire cache warm, while changing a type hint or adding a method evicts only the affected class.
 

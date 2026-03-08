@@ -922,7 +922,8 @@ async fn test_implementation_classmap_file_scan() {
 
     let (mappings, _vendor_dir) = phpantom_lsp::composer::parse_composer_json(dir.path());
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
-    if let Ok(mut cm) = backend.classmap().lock() {
+    {
+        let mut cm = backend.classmap().write();
         *cm = classmap;
     }
 
@@ -1071,7 +1072,8 @@ async fn test_implementation_psr4_scan_skips_classmap_files() {
     let classmap = parse_autoload_classmap(dir.path(), "vendor");
     let (mappings, _vendor_dir) = phpantom_lsp::composer::parse_composer_json(dir.path());
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
-    if let Ok(mut cm) = backend.classmap().lock() {
+    {
+        let mut cm = backend.classmap().write();
         *cm = classmap;
     }
 
