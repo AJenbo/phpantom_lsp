@@ -194,55 +194,7 @@ to subsequent code:
 This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than `if` + early return.
 
-#### 5. `collect()` and other helper functions lose generic type info
-
-| | |
-|---|---|
-| **Impact** | ★★★★★ — `collect()` alone is used in virtually every Laravel codebase. Loss of element types breaks completion chains on resulting collections. Also affects `value()`, `retry()`, `tap()`, `with()`, `transform()`, `data_get()`, and non-Laravel functions. |
-| **Effort** | ★★★★ — Requires adding `template_params` / `template_bindings` to `FunctionInfo`, populating from `@template`/`@param` in `parser/functions.rs`, and building substitution maps in `resolve_rhs_function_call`. New infrastructure. |
-
-Laravel's `collect()` helper is annotated with function-level
-`@template` parameters:
-
-```php
-/**
- * @template TKey of array-key
- * @template TValue
- * @param array<TKey, TValue> $value
- * @return \Illuminate\Support\Collection<TKey, TValue>
- */
-function collect($value = []) { ... }
-```
-
-We correctly resolve the return type as `Collection`, but the
-generic arguments `TKey` and `TValue` are lost — the result is an
-unparameterised `Collection`, so `$users = collect($array)` followed
-by `$users->first()->` produces no completions for the element type.
-
-**Root cause:** `FunctionInfo` has no `template_params` or
-`template_bindings` fields (unlike `MethodInfo`, which has both).
-The `synthesize_template_conditional` function only handles the
-narrow pattern `@return T` where `T` is a bare template param bound
-via `@param class-string<T>`.  It does **not** handle `@return
-Collection<TKey, TValue>` where multiple template params appear
-inside a generic return type.
-
-This affects every Laravel helper that uses function-level generics:
-`collect()`, `value()`, `retry()`, `tap()`, `with()`, `transform()`,
-`data_get()`, plus non-Laravel functions with the same pattern.
-
-**Where to change:** Add `template_params: Vec<String>` and
-`template_bindings: Vec<(String, String)>` to `FunctionInfo` (mirror
-the existing fields on `MethodInfo`).  Populate them in
-`parser/functions.rs` from `@template` and `@param` annotations.
-In `resolve_rhs_function_call` (in `variable_resolution.rs`), after
-loading the `FunctionInfo`, build a substitution map from template
-bindings → call-site argument types and apply it to the return type
-before passing it to `type_hint_to_classes`.  See the general TODO
-item (§ PHP Language Feature Gaps, "Function-level `@template`
-generic resolution") for the full implementation plan.
-
-#### 6. Factory `has*`/`for*` relationship methods
+#### 5. Factory `has*`/`for*` relationship methods
 
 | | |
 |---|---|
@@ -280,7 +232,7 @@ The `has*` variant should accept optional `int $count` and
 `array|callable $state` parameters; `for*` should accept
 `array|callable $state`.
 
-#### 7. `$pivot` property on BelongsToMany related models
+#### 6. `$pivot` property on BelongsToMany related models
 
 | | |
 |---|---|
@@ -326,7 +278,7 @@ the `BelongsToMany` relationship stubs. If the user's stub set
 includes these annotations, it already works through our PHPDoc
 provider.
 
-#### 8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
+#### 7. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
 | | |
 |---|---|
@@ -342,7 +294,7 @@ aggregate function (`withSum`/`withAvg` → `float`,
 
 The `@property` workaround applies here too.
 
-#### 9. Higher-order collection proxies
+#### 8. Higher-order collection proxies
 
 | | |
 |---|---|
@@ -365,7 +317,7 @@ and `HigherOrderCollectionProxyExtension`, which resolve the proxy's
 template types and delegate property/method lookups to the collection's
 value type.
 
-#### 11. `View::withX()` and `RedirectResponse::withX()` dynamic methods
+#### 9. `View::withX()` and `RedirectResponse::withX()` dynamic methods
 
 | | |
 |---|---|
@@ -397,7 +349,7 @@ hard-coding the two known classes.  A simpler approach: add
 `@method` tags to bundled stubs for the most common dynamic `with*`
 methods, or document this as a known limitation.
 
-#### 12. `$appends` array
+#### 10. `$appends` array
 
 | | |
 |---|---|

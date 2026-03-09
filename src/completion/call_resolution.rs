@@ -465,6 +465,38 @@ impl Backend {
                             }
                         }
                     }
+                    // ── Function-level @template substitution ────────
+                    // When the function has template params and bindings,
+                    // infer concrete types from the arguments and apply
+                    // substitution to the return type before resolving.
+                    // Delegates to `build_function_template_subs` which
+                    // handles Direct, ArrayElement, and GenericWrapper
+                    // binding modes (e.g. `@param array<TKey, TValue>`).
+                    if !func_info.template_params.is_empty()
+                        && !func_info.template_bindings.is_empty()
+                        && func_info.return_type.is_some()
+                        && !text_args.is_empty()
+                    {
+                        let subs = super::variable::rhs_resolution::build_function_template_subs(
+                            &func_info, text_args, ctx,
+                        );
+
+                        if !subs.is_empty()
+                            && let Some(ref ret) = func_info.return_type
+                        {
+                            let substituted = apply_substitution(ret, &subs);
+                            let classes = super::type_resolution::type_hint_to_classes(
+                                &substituted,
+                                "",
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                            if !classes.is_empty() {
+                                return classes;
+                            }
+                        }
+                    }
+
                     if let Some(ref ret) = func_info.return_type {
                         return super::type_resolution::type_hint_to_classes(
                             ret,

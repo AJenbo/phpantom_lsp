@@ -169,38 +169,35 @@ pub fn extract_template_param_bindings(
             // Strip nullable prefix and `|null` suffix to get the core type.
             let core = type_token.strip_prefix('?').unwrap_or(type_token);
             // Handle `T|null` — split on `|` and check non-null parts.
-            let matched_template = core
-                .split('|')
-                .map(str::trim)
-                .filter(|part| *part != "null")
-                .find_map(|part| {
-                    // Direct match: `T`
-                    if let Some(t) = template_params.iter().find(|t| t.as_str() == part) {
-                        return Some(t.as_str());
-                    }
-                    // Array suffix: `T[]`
-                    if let Some(base) = part.strip_suffix("[]")
-                        && let Some(t) = template_params.iter().find(|t| t.as_str() == base)
-                    {
-                        return Some(t.as_str());
-                    }
-                    // Generic wrapper: `Wrapper<T>`, `Wrapper<T, U>`
-                    if let Some(open) = part.find('<')
-                        && let Some(close) = part.rfind('>')
-                    {
-                        let inner = &part[open + 1..close];
-                        for arg in inner.split(',') {
-                            let arg = arg.trim();
-                            if let Some(t) = template_params.iter().find(|t| t.as_str() == arg) {
-                                return Some(t.as_str());
-                            }
+            // Collect ALL matching template params (not just the first) so
+            // that `@param array<TKey, TValue> $value` binds both TKey and
+            // TValue to `$value`.
+            for part in core.split('|').map(str::trim).filter(|p| *p != "null") {
+                // Direct match: `T`
+                if let Some(t) = template_params.iter().find(|t| t.as_str() == part) {
+                    results.push((t.to_string(), param_name.to_string()));
+                    continue;
+                }
+                // Array suffix: `T[]`
+                if let Some(base) = part.strip_suffix("[]")
+                    && let Some(t) = template_params.iter().find(|t| t.as_str() == base)
+                {
+                    results.push((t.to_string(), param_name.to_string()));
+                    continue;
+                }
+                // Generic wrapper: `Wrapper<T>`, `Wrapper<T, U>`,
+                // `array<TKey, TValue>` — bind every template param found.
+                if let Some(open) = part.find('<')
+                    && let Some(close) = part.rfind('>')
+                {
+                    let inner_str = &part[open + 1..close];
+                    for arg in inner_str.split(',') {
+                        let arg = arg.trim();
+                        if let Some(t) = template_params.iter().find(|t| t.as_str() == arg) {
+                            results.push((t.to_string(), param_name.to_string()));
                         }
                     }
-                    None
-                });
-
-            if let Some(tpl_name) = matched_template {
-                results.push((tpl_name.to_string(), param_name.to_string()));
+                }
             }
         }
     }

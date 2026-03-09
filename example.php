@@ -2223,6 +2223,26 @@ class InterfaceTemplateDemo
 }
 
 
+// ── Function-level @template (collect) ──────────────────────────────────────
+
+class CollectGenericDemo
+{
+    public function demo(): void
+    {
+        /** @var Pen[] $pens */
+        $pens = [];
+
+        // collect() uses function-level @template to carry element types
+        // through to the returned FluentCollection.
+        $collection = collect($pens);
+        $collection->first()->write();    // TValue resolves to Pen
+
+        // Inline chaining works too
+        collect($pens)->first()->write(); // same resolution, no intermediate variable
+    }
+}
+
+
 // ── Generic @phpstan-assert Narrowing ───────────────────────────────────────
 
 class GenericAssertNarrowingDemo
@@ -3541,6 +3561,12 @@ class FluentCollection
         return $this;
     }
 
+    /** @return TValue|null */
+    public function first(): mixed
+    {
+        return $this->items[array_key_first($this->items)] ?? null;
+    }
+
     /**
      * @return array<
      *   string,
@@ -3559,10 +3585,15 @@ class FluentCollection
     }
 }
 
-/** @return FluentCollection */
-function collect(mixed $value = []): FluentCollection
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @param array<TKey, TValue> $value
+ * @return FluentCollection<TKey, TValue>
+ */
+function collect(array $value = []): FluentCollection
 {
-    return new FluentCollection(is_array($value) ? $value : []);
+    return new FluentCollection($value);
 }
 
 class BrokenDocRecovery
@@ -4427,6 +4458,13 @@ function runDemoAssertions(): void
     $locator = new ScaffoldingEntityLocator();
     $locatorResult = $locator->find(Pen::class);
     assert($locatorResult instanceof Pen, 'ScaffoldingEntityLocator::find(Pen::class) must return Pen');
+
+    // ── Function-level @template (collect) ──────────────────────────────
+    $collectPens = [new Pen()];
+    $collected = collect($collectPens);
+    assert($collected instanceof FluentCollection, 'collect() must return FluentCollection');
+    $firstPen = $collected->first();
+    assert($firstPen instanceof Pen, 'collect(Pen[])->first() must return Pen');
 
     // ── Generic @phpstan-assert narrowing ────────────────────────────────
     $assertObj = new Pen();

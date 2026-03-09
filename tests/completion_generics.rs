@@ -3965,6 +3965,414 @@ fn test_extract_template_param_bindings_empty_templates() {
     assert!(result.is_empty());
 }
 
+/// Multiple template params in a single `@param` generic wrapper:
+/// `@param array<TKey, TValue> $value` → `[("TKey", "$value"), ("TValue", "$value")]`.
+#[test]
+fn test_extract_template_param_bindings_multi_param_generic() {
+    use phpantom_lsp::docblock::extract_template_param_bindings;
+
+    let docblock = concat!(
+        "/**\n",
+        " * @template TKey of array-key\n",
+        " * @template TValue\n",
+        " * @param array<TKey, TValue> $value\n",
+        " * @return Collection<TKey, TValue>\n",
+        " */",
+    );
+    let tpl_params = vec!["TKey".to_string(), "TValue".to_string()];
+    let result = extract_template_param_bindings(docblock, &tpl_params);
+    assert_eq!(
+        result,
+        vec![
+            ("TKey".to_string(), "$value".to_string()),
+            ("TValue".to_string(), "$value".to_string()),
+        ]
+    );
+}
+
+// ── Integration tests: function-level @template with generic return type ─────
+//
+// These test the `collect()` pattern where function-level `@template` params
+// appear inside a generic return type (`@return Collection<TKey, TValue>`),
+// not as the bare return type (`@return T`).  Two variants:
+//   1. Inline chain: `collect($users)->` resolves to `Collection<User>`.
+//   2. Assignment: `$collection = collect($users); $collection->` preserves
+//      the generic substitution through variable assignment.
+
+/// Inline chain: `collect($users)->` shows Collection's members.
+#[tokio::test]
+async fn test_function_template_collect_inline_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///function_template_collect.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class User {\n",                                       // 1
+        "    public function getName(): string {}\n",           // 2
+        "}\n",                                                  // 3
+        "\n",                                                   // 4
+        "/**\n",                                                // 5
+        " * @template TKey of array-key\n",                     // 6
+        " * @template TValue\n",                                // 7
+        " */\n",                                                // 8
+        "class Collection {\n",                                 // 9
+        "    /** @return TValue */\n",                          // 10
+        "    public function first(): mixed {}\n",              // 11
+        "    public function count(): int {}\n",                // 12
+        "}\n",                                                  // 13
+        "\n",                                                   // 14
+        "/**\n",                                                // 15
+        " * @template TKey of array-key\n",                     // 16
+        " * @template TValue\n",                                // 17
+        " * @param array<TKey, TValue> $value\n",               // 18
+        " * @return Collection<TKey, TValue>\n",                // 19
+        " */\n",                                                // 20
+        "function collect(array $value = []): Collection {}\n", // 21
+        "\n",                                                   // 22
+        "function test() {\n",                                  // 23
+        "    /** @var User[] $users */\n",                      // 24
+        "    $users = [];\n",                                   // 25
+        "    collect($users)->\n",                              // 26
+        "}\n",                                                  // 27
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // cursor right after `->` on line 26
+    // "    collect($users)->" = 4+7+1+6+1+2 = 21 characters
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 26,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for collect($users)->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"first"),
+                "Should show Collection's 'first' method on collect($users)->, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"count"),
+                "Should show Collection's 'count' method on collect($users)->, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Assignment preserves generics: `$collection = collect($users); $collection->`
+/// should show Collection's members, proving the variable type preserves
+/// generic args from function-level @template through assignment.
+#[tokio::test]
+async fn test_function_template_collect_assignment() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///function_template_collect_assign.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class User {\n",                                       // 1
+        "    public function getName(): string {}\n",           // 2
+        "}\n",                                                  // 3
+        "\n",                                                   // 4
+        "/**\n",                                                // 5
+        " * @template TKey of array-key\n",                     // 6
+        " * @template TValue\n",                                // 7
+        " */\n",                                                // 8
+        "class Collection {\n",                                 // 9
+        "    /** @return TValue */\n",                          // 10
+        "    public function first(): mixed {}\n",              // 11
+        "    public function count(): int {}\n",                // 12
+        "}\n",                                                  // 13
+        "\n",                                                   // 14
+        "/**\n",                                                // 15
+        " * @template TKey of array-key\n",                     // 16
+        " * @template TValue\n",                                // 17
+        " * @param array<TKey, TValue> $value\n",               // 18
+        " * @return Collection<TKey, TValue>\n",                // 19
+        " */\n",                                                // 20
+        "function collect(array $value = []): Collection {}\n", // 21
+        "\n",                                                   // 22
+        "function test() {\n",                                  // 23
+        "    /** @var User[] $users */\n",                      // 24
+        "    $users = [];\n",                                   // 25
+        "    $collection = collect($users);\n",                 // 26
+        "    $collection->\n",                                  // 27
+        "}\n",                                                  // 28
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // cursor right after `->` on line 27
+    // "    $collection->" = 4+11+2 = 17 characters
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 27,
+                character: 17,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $collection-> after collect($users)"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"first"),
+                "Should show Collection's 'first' method on $collection->, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"count"),
+                "Should show Collection's 'count' method on $collection->, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Deep chain: `collect($users)->first()->` should resolve TValue→User
+/// through function-level @template substitution and show User's methods.
+#[tokio::test]
+async fn test_function_template_collect_deep_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///function_template_collect_deep.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                              // 0
+        "class User {\n",                                       // 1
+        "    public function getName(): string {}\n",           // 2
+        "    public function getEmail(): string {}\n",          // 3
+        "}\n",                                                  // 4
+        "\n",                                                   // 5
+        "/**\n",                                                // 6
+        " * @template TKey of array-key\n",                     // 7
+        " * @template TValue\n",                                // 8
+        " */\n",                                                // 9
+        "class Collection {\n",                                 // 10
+        "    /** @return TValue */\n",                          // 11
+        "    public function first(): mixed {}\n",              // 12
+        "    public function count(): int {}\n",                // 13
+        "}\n",                                                  // 14
+        "\n",                                                   // 12
+        "/**\n",                                                // 16
+        " * @template TKey of array-key\n",                     // 17
+        " * @template TValue\n",                                // 18
+        " * @param array<TKey, TValue> $value\n",               // 19
+        " * @return Collection<TKey, TValue>\n",                // 20
+        " */\n",                                                // 21
+        "function collect(array $value = []): Collection {}\n", // 22
+        "\n",                                                   // 23
+        "function test() {\n",                                  // 24
+        "    /** @var User[] $users */\n",                      // 25
+        "    $users = [];\n",                                   // 26
+        "    collect($users)->first()->\n",                     // 27
+        "}\n",                                                  // 28
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // cursor right after `->` on line 27
+    // "    collect($users)->first()->" = 4+7+1+6+1+2+5+2+2 = 30 characters
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 27,
+                character: 30,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for collect($users)->first()->"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve TValue→User through collect() + first() chain, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should resolve TValue→User through collect() + first() chain, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Real Laravel `collect()` signature: the `@param` is a union type
+/// `Arrayable<TKey, TValue>|iterable<TKey, TValue>|null`.
+/// `classify_template_binding` must split the union at depth 0 before
+/// matching generic wrappers, and `iterable` must be recognised as an
+/// array-like wrapper so positional extraction works.
+#[tokio::test]
+async fn test_function_template_collect_laravel_union_param() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///function_template_collect_laravel.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                                  // 0
+        "class User {\n",                                                           // 1
+        "    public function getName(): string {}\n",                               // 2
+        "    public function getEmail(): string {}\n",                              // 3
+        "}\n",                                                                      // 4
+        "\n",                                                                       // 5
+        "/**\n",                                                                    // 6
+        " * @template TKey of array-key\n",                                         // 7
+        " * @template TValue\n",                                                    // 8
+        " */\n",                                                                    // 9
+        "class Collection {\n",                                                     // 10
+        "    /** @return TValue */\n",                                              // 11
+        "    public function first(): mixed {}\n",                                  // 12
+        "    public function count(): int {}\n",                                    // 13
+        "}\n",                                                                      // 14
+        "\n",                                                                       // 15
+        "/**\n",                                                                    // 16
+        " * @template TKey of array-key\n",                                         // 17
+        " * @template TValue\n",                                                    // 18
+        " * @param  Arrayable<TKey, TValue>|iterable<TKey, TValue>|null  $value\n", // 19
+        " * @return Collection<TKey, TValue>\n",                                    // 20
+        " */\n",                                                                    // 21
+        "function collect($value = []): Collection {}\n",                           // 22
+        "\n",                                                                       // 23
+        "function test() {\n",                                                      // 24
+        "    /** @var User[] $users */\n",                                          // 25
+        "    $users = [];\n",                                                       // 26
+        "    collect($users)->first()->\n",                                         // 27
+        "}\n",                                                                      // 28
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // cursor right after `->` on line 27
+    // "    collect($users)->first()->" = 30 characters
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 27,
+                character: 30,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for collect($users)->first()-> with Laravel union @param"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should resolve TValue→User through collect() with union @param + first(), got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getEmail"),
+                "Should resolve TValue→User through collect() with union @param + first(), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ── Integration tests: inline chain with general @template ──────────────────
 
 /// `@template T` + `@param T $model` + `@return Collection<T>`:

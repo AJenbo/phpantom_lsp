@@ -115,7 +115,6 @@ projects that care about types.
 
 | # | Item | Effort | Domain | Doc Link |
 |---|---|---|---|---|
-| 43 | `collect()` and helper functions lose generic type info | High | Laravel | [laravel.md §5](todo/laravel.md#5-collect-and-other-helper-functions-lose-generic-type-info) |
 | 44 | Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`) | Medium | Laravel | [laravel.md §3](todo/laravel.md#3-custom-eloquent-builders-hasbuilder--useeloquentbuilder) |
 | 45 | `abort_if`/`abort_unless` type narrowing | Medium | Laravel | [laravel.md §4](todo/laravel.md#4-abort_ifabort_unless-type-narrowing) |
 | 46 | Narrow types of `&$var` parameters after function calls | Medium | Type Inference | [type-inference.md §7](todo/type-inference.md#7-narrow-types-of-var-parameters-after-function-calls) |
@@ -130,14 +129,11 @@ projects that care about types.
 | 55 | Diagnostic suppression intelligence | Medium | Diagnostics | [diagnostics.md §3](todo/diagnostics.md#3-diagnostic-suppression-intelligence) |
 | 56 | Partial result streaming via `$/progress` | Medium-High | LSP Features | [lsp-features.md §6](todo/lsp-features.md#6-partial-result-streaming-via-progress) |
 
-**Note:** Item 43 (`collect()` generics) is a direct payoff of Sprint 4
-item 25 (function-level `@template`). Once the infrastructure exists,
-the Laravel-specific manifestation is a small incremental step. Item 51
-(Type Hierarchy) depends on the go-to-implementation infrastructure and
-should be scheduled after that work is stable. Item 56 (partial result
-streaming) addresses outbound latency for large result sets. See also
-item 89 (incremental text sync) in the backlog, which addresses the
-complementary inbound direction.
+**Note:** Item 51 (Type Hierarchy) depends on the go-to-implementation
+infrastructure and should be scheduled after that work is stable. Item 56
+(partial result streaming) addresses outbound latency for large result
+sets. See also item 89 (incremental text sync) in the backlog, which
+addresses the complementary inbound direction.
 
 ---
 

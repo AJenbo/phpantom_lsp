@@ -330,7 +330,8 @@ fn build_constructor_template_subs(
 }
 
 /// How a template parameter is referenced in a `@param` type annotation.
-enum TemplateBindingMode {
+#[derive(Debug)]
+pub(crate) enum TemplateBindingMode {
     /// `@param T $bar` — the whole type is the template param.
     Direct,
     /// `@param T[] $items` — the template param is the array element type.
@@ -341,7 +342,13 @@ enum TemplateBindingMode {
 }
 
 /// Classify how a template parameter name appears in a `@param` type hint.
-fn classify_template_binding(tpl_name: &str, param_hint: Option<&str>) -> TemplateBindingMode {
+///
+/// Handles union types like `Arrayable<TKey, TValue>|iterable<TKey, TValue>|null`
+/// by splitting at depth 0 first, then checking each union part individually.
+pub(crate) fn classify_template_binding(
+    tpl_name: &str,
+    param_hint: Option<&str>,
+) -> TemplateBindingMode {
     let hint = match param_hint {
         Some(h) => h,
         // No type hint — assume direct binding.
@@ -351,39 +358,70 @@ fn classify_template_binding(tpl_name: &str, param_hint: Option<&str>) -> Templa
     // Strip nullable prefix.
     let hint = hint.strip_prefix('?').unwrap_or(hint);
 
-    // Check for `T[]` pattern.
-    if let Some(base) = hint.strip_suffix("[]")
-        && base == tpl_name
-    {
-        return TemplateBindingMode::ArrayElement;
-    }
+    // Split the union at depth 0 (respecting `<…>` nesting) so that
+    // `Arrayable<TKey, TValue>|iterable<TKey, TValue>|null` is split
+    // into individual parts rather than treating the whole thing as one
+    // type with a broken `<…>` span.
+    let union_parts = split_union_at_depth0(hint);
 
-    // Check for direct `T` or `T|null`.
-    let core_parts: Vec<&str> = hint
-        .split('|')
-        .map(str::trim)
-        .filter(|p| *p != "null")
-        .collect();
-    if core_parts.len() == 1 && core_parts[0] == tpl_name {
-        return TemplateBindingMode::Direct;
-    }
+    for part in &union_parts {
+        let part = part.trim();
+        if part == "null" || part.is_empty() {
+            continue;
+        }
 
-    // Check for `Wrapper<..., T, ...>` pattern.
-    if let Some(open) = hint.find('<')
-        && let Some(close) = hint.rfind('>')
-    {
-        let wrapper_name = crate::docblock::types::clean_type(&hint[..open]);
-        let generic_part = &hint[open + 1..close];
-        let hint_args: Vec<&str> = generic_part.split(',').map(|s| s.trim()).collect();
-        for (i, arg) in hint_args.iter().enumerate() {
-            if *arg == tpl_name {
-                return TemplateBindingMode::GenericWrapper(wrapper_name, i);
+        // Check for `T[]` pattern.
+        if let Some(base) = part.strip_suffix("[]")
+            && base == tpl_name
+        {
+            return TemplateBindingMode::ArrayElement;
+        }
+
+        // Check for direct `T`.
+        if part == tpl_name {
+            return TemplateBindingMode::Direct;
+        }
+
+        // Check for `Wrapper<..., T, ...>` pattern.
+        if let Some(open) = part.find('<')
+            && let Some(close) = part.rfind('>')
+        {
+            let wrapper_name = crate::docblock::types::clean_type(&part[..open]);
+            let generic_part = &part[open + 1..close];
+            let hint_args: Vec<&str> = generic_part.split(',').map(|s| s.trim()).collect();
+            for (i, arg) in hint_args.iter().enumerate() {
+                if *arg == tpl_name {
+                    return TemplateBindingMode::GenericWrapper(wrapper_name, i);
+                }
             }
         }
     }
 
     // Fallback to direct.
     TemplateBindingMode::Direct
+}
+
+/// Split a type string on `|` at depth 0, respecting `<…>` nesting.
+///
+/// `"Arrayable<TKey, TValue>|iterable<TKey, TValue>|null"` →
+/// `["Arrayable<TKey, TValue>", "iterable<TKey, TValue>", "null"]`
+fn split_union_at_depth0(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '<' | '(' | '{' => depth += 1,
+            '>' | ')' | '}' => depth -= 1,
+            '|' if depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
 }
 
 /// Resolve a template param that appears inside a generic wrapper type.
@@ -484,8 +522,12 @@ fn resolve_rhs_array_access<'b>(
 /// Build a template substitution map for a function-level `@template` call.
 ///
 /// Uses the function's `template_bindings` to match template parameters to
-/// their concrete types inferred from the call-site arguments.
-fn build_function_template_subs(
+/// their concrete types inferred from the call-site arguments.  Handles:
+///   - Direct type: `@param T $bar` + `func(new Baz())` → `T = Baz`
+///   - Array type: `@param T[] $items` + `func([new X()])` → `T = X`
+///   - Generic wrapper: `@param array<TKey, TValue> $v` + `func($users)` →
+///     positional resolution through the wrapper's generic arguments.
+pub(crate) fn build_function_template_subs(
     func_info: &crate::types::FunctionInfo,
     text_args: &str,
     rctx: &crate::completion::resolver::ResolutionCtx<'_>,
@@ -508,12 +550,183 @@ fn build_function_template_subs(
             None => continue,
         };
 
-        if let Some(type_name) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-            subs.insert(tpl_name.clone(), type_name);
+        // Determine the binding mode by inspecting the parameter's
+        // docblock type hint.  The type hint tells us how the template
+        // param is embedded in the `@param` annotation.
+        let param_hint = func_info
+            .parameters
+            .get(param_idx)
+            .and_then(|p| p.type_hint.as_deref());
+        let binding_mode = classify_template_binding(tpl_name, param_hint);
+
+        match binding_mode {
+            TemplateBindingMode::Direct => {
+                if let Some(type_name) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+                    subs.insert(tpl_name.clone(), type_name);
+                }
+            }
+            TemplateBindingMode::ArrayElement => {
+                // `@param T[] $items` — resolve individual array elements.
+                if arg_text.starts_with('[') && arg_text.ends_with(']') {
+                    let inner = arg_text[1..arg_text.len() - 1].trim();
+                    if !inner.is_empty() {
+                        let first_elem =
+                            crate::completion::conditional_resolution::split_text_args(inner);
+                        if let Some(elem) = first_elem.first()
+                            && let Some(type_name) =
+                                Backend::resolve_arg_text_to_type(elem.trim(), rctx)
+                        {
+                            subs.insert(tpl_name.clone(), type_name);
+                        }
+                    }
+                } else if let Some(type_name) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+                    // Fallback: treat as direct if not an array literal.
+                    subs.insert(tpl_name.clone(), type_name);
+                }
+            }
+            TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
+                // For `@param array<TKey, TValue> $value` with a variable
+                // argument like `$users`, resolve the variable's raw type
+                // string (e.g. `User[]`, `array<int, User>`) and extract
+                // the positional generic argument.
+                if is_array_like_wrapper(wrapper_name)
+                    && arg_text.starts_with('$')
+                    && let Some(resolved) = resolve_arg_variable_raw_type(arg_text, rctx)
+                    && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
+                {
+                    subs.insert(tpl_name.clone(), concrete);
+                    continue;
+                }
+                // Fall back to direct resolution for non-array wrappers
+                // or when raw type extraction fails.
+                if let Some(type_name) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+                    subs.insert(tpl_name.clone(), type_name);
+                }
+            }
         }
     }
 
     subs
+}
+
+/// Resolve a variable argument to its raw type string.
+///
+/// For `$pens` with `/** @var Pen[] $pens */`, returns `Some("Pen[]")`.
+/// For `$users` with `/** @var array<int, User> $users */`, returns
+/// `Some("array<int, User>")`.
+///
+/// Tries docblock annotations first, then falls back to AST-based
+/// raw type inference.
+fn resolve_arg_variable_raw_type(
+    arg_text: &str,
+    rctx: &crate::completion::resolver::ResolutionCtx<'_>,
+) -> Option<String> {
+    let var_name = arg_text.trim();
+    if !var_name.starts_with('$') {
+        return None;
+    }
+
+    // 1. Try docblock annotation (@var).
+    if let Some(raw) = crate::docblock::find_iterable_raw_type_in_source(
+        rctx.content,
+        rctx.cursor_offset as usize,
+        var_name,
+    ) {
+        return Some(raw);
+    }
+
+    // 2. Fall back to AST-based raw type inference.
+    let default_class = crate::types::ClassInfo::default();
+    let current_class = rctx.current_class.unwrap_or(&default_class);
+    super::raw_type_inference::resolve_variable_assignment_raw_type(
+        var_name,
+        rctx.content,
+        rctx.cursor_offset,
+        Some(current_class),
+        rctx.all_classes,
+        rctx.class_loader,
+        rctx.function_loader,
+    )
+}
+
+/// Extract the concrete type at `position` from an array type string.
+///
+/// For array types with two generic parameters (key + value):
+/// - `array<int, User>` at position 0 → `"int"`, position 1 → `"User"`
+/// - `User[]` at position 0 → `"int"` (implicit key), position 1 → `"User"`
+/// - `list<User>` at position 0 → `"int"`, position 1 → `"User"`
+///
+/// For single-param forms:
+/// - `array<User>` at position 0 → `"User"`
+fn extract_array_type_at_position(raw_type: &str, position: usize) -> Option<String> {
+    let trimmed = raw_type.trim();
+
+    // `T[]` shorthand → key is int (position 0), value is T (position 1).
+    if let Some(base) = trimmed.strip_suffix("[]") {
+        let element = crate::docblock::types::clean_type(base);
+        return match position {
+            0 => Some("int".to_string()),
+            1 => Some(element),
+            _ => None,
+        };
+    }
+
+    // `list<T>` → key is int, value is T.
+    if trimmed.starts_with("list<") || trimmed.starts_with("non-empty-list<") {
+        let (_base, args) = crate::docblock::generics::parse_generic_args(trimmed);
+        return match position {
+            0 => Some("int".to_string()),
+            1 => args
+                .first()
+                .map(|a| crate::docblock::types::clean_type(a.trim())),
+            _ => None,
+        };
+    }
+
+    // `array<K, V>` or `array<V>`.
+    if trimmed.starts_with("array<")
+        || trimmed.starts_with("non-empty-array<")
+        || trimmed.starts_with("iterable<")
+    {
+        let (_base, args) = crate::docblock::generics::parse_generic_args(trimmed);
+        if args.len() == 2 {
+            // `array<K, V>` — position maps directly.
+            return args
+                .get(position)
+                .map(|a| crate::docblock::types::clean_type(a.trim()));
+        } else if args.len() == 1 {
+            // `array<V>` — position 0 = int (key), position 1 = V.
+            return match position {
+                0 => Some("int".to_string()),
+                1 => args
+                    .first()
+                    .map(|a| crate::docblock::types::clean_type(a.trim())),
+                _ => None,
+            };
+        }
+    }
+
+    None
+}
+
+/// Whether a wrapper type name should be treated as array-like for
+/// positional generic argument extraction.
+///
+/// When `@param Wrapper<TKey, TValue> $value` binds a template param
+/// via `GenericWrapper`, and the wrapper is an array-like type, we can
+/// resolve the argument variable's raw type (e.g. `User[]`) and extract
+/// the positional generic component (key at 0, value at 1).
+///
+/// This covers `array`, `iterable`, `list`, and common Laravel/PHPStan
+/// collection interfaces whose generic args follow `<TKey, TValue>`.
+fn is_array_like_wrapper(name: &str) -> bool {
+    // Strip leading backslash and compare the short name
+    // (last segment after `\`) case-insensitively.
+    let short = crate::util::short_name(name.strip_prefix('\\').unwrap_or(name));
+    matches!(
+        short.to_ascii_lowercase().as_str(),
+        "array" | "iterable" | "list" | "non-empty-array" | "non-empty-list" | "arrayable"
+    )
 }
 
 /// Resolve function, method, and static method calls to their return
