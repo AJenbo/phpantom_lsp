@@ -224,7 +224,6 @@ separately by their own impact÷effort scoring.
 | L7 | `$pivot` property on BelongsToMany | ★★★ | ★★★★ | [§7](todo/laravel.md#7-pivot-property-on-belongstomany-related-models) |
 | L8 | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties | ★★ | ★★★★ | [§8](todo/laravel.md#8-withsum--withavg--withmin--withmax-aggregate-properties) |
 | L9 | Higher-order collection proxies | ★★ | ★★★★ | [§9](todo/laravel.md#9-higher-order-collection-proxies) |
-| L10 | `SoftDeletes` trait methods on Builder | ★ | ★ | [§10](todo/laravel.md#10-softdeletes-trait-methods-on-builder) |
 | L11 | `View::withX()` / `RedirectResponse::withX()` dynamic methods | ★ | ★★ | [§11](todo/laravel.md#11-viewwithx-and-redirectresponsewithx-dynamic-methods) |
 | L12 | `$appends` array | ★ | ★ | [§12](todo/laravel.md#12-appends-array) |
 

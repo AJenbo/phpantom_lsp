@@ -161,18 +161,25 @@ pub(crate) fn try_swap_custom_collection(
     }
 }
 
-/// Inject scope methods from a concrete model onto a resolved Builder.
+/// Inject scope methods and model virtual methods onto a resolved Builder.
 ///
 /// When the resolved class is the Eloquent Builder and the first generic
-/// argument is a concrete model name, injects the model's scope methods
-/// as instance methods so that `Brand::where(...)->isActive()` and
-/// `$query->active()` both resolve.
+/// argument is a concrete model name, injects:
+///
+/// 1. **Scope methods** — `scopeX` and `#[Scope]` methods from the model,
+///    with the `scope` prefix stripped and the first `$query` parameter
+///    removed.
+///
+/// 2. **Model `@method` tags** — virtual methods declared via `@method`
+///    on the model or its traits (e.g. `SoftDeletes`'s `withTrashed`).
+///    Laravel's `Builder::__call` forwards unknown calls to the model,
+///    so these methods are effectively available on the Builder instance.
+///    Return types containing `static` are remapped to
+///    `Builder<ConcreteModel>` to keep the chain on the builder.
 ///
 /// The `cls` parameter is the Builder **after** generic substitution has
 /// been applied.  `raw_cls` is the pre-substitution class (needed to
 /// check the FQN via `file_namespace`).
-///
-/// Returns `true` if scope methods were injected, `false` otherwise.
 pub(crate) fn try_inject_builder_scopes(
     result: &mut ClassInfo,
     raw_cls: &ClassInfo,
@@ -187,6 +194,8 @@ pub(crate) fn try_inject_builder_scopes(
     // The first (or only) generic arg is the model type.
     let model_arg = generic_args.first().unwrap();
     let model_clean = model_arg.strip_prefix('\\').unwrap_or(model_arg);
+
+    // 1. Inject scope methods.
     let scope_methods = build_scope_methods_for_builder(model_clean, class_loader);
     for method in scope_methods {
         if !result
@@ -196,6 +205,92 @@ pub(crate) fn try_inject_builder_scopes(
         {
             result.methods.push(method);
         }
+    }
+
+    // 2. Inject @method virtual methods from the model.
+    inject_model_virtual_methods(result, model_clean, class_loader);
+}
+
+/// Inject `@method`-declared virtual methods from a model onto a Builder.
+///
+/// Laravel's `Builder::__call()` forwards unknown method calls to the
+/// model instance.  This means `@method` tags on the model (including
+/// those inherited from traits like `SoftDeletes`) are callable on the
+/// Builder.  For example:
+///
+/// ```php
+/// // SoftDeletes declares: @method static Builder<static> withTrashed()
+/// // Customer uses SoftDeletes
+/// Customer::groupBy('email')->withTrashed()->first()
+/// //                          ^^^^^^^^^^^^^ needs to resolve on Builder<Customer>
+/// ```
+///
+/// This function loads the fully-resolved model, finds virtual methods
+/// (those with `is_virtual = true`, which come from `@method` tags),
+/// and injects them as **instance** methods on the Builder.  Return
+/// types containing `static`, `self`, or `$this` are substituted with
+/// `Builder<ConcreteModel>` so the chain continues on the builder.
+fn inject_model_virtual_methods(
+    builder: &mut ClassInfo,
+    model_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+) {
+    use std::collections::HashMap;
+
+    use crate::inheritance::apply_substitution;
+
+    let model_class = match class_loader(model_name) {
+        Some(c) => c,
+        None => return,
+    };
+
+    if !extends_eloquent_model(&model_class, class_loader) {
+        return;
+    }
+
+    // Resolve the model fully so that @method tags from traits and
+    // parent classes are included.
+    let resolved_model = crate::virtual_members::resolve_class_fully(&model_class, class_loader);
+
+    // Build a substitution map: `static`/`self`/`$this` in return
+    // types should become the concrete model name.  The `@method`
+    // tags already declare the full return type (e.g.
+    // `Builder<static>`), so substituting `static` → model name
+    // produces `Builder<Customer>`.  Using `Builder<Model>` here
+    // would double-wrap to `Builder<Builder<Customer>>`.
+    let model_fqn = format!("\\{model_name}");
+    let mut subs = HashMap::new();
+    subs.insert("static".to_string(), model_fqn.clone());
+    subs.insert("$this".to_string(), model_fqn.clone());
+    subs.insert("self".to_string(), model_fqn);
+
+    for method in &resolved_model.methods {
+        // Only inject virtual methods (from @method tags).  Real
+        // methods on the model are not forwarded through Builder.
+        if !method.is_virtual {
+            continue;
+        }
+
+        // Skip methods already present on the builder (real methods,
+        // scope methods, or previously injected methods).
+        if builder
+            .methods
+            .iter()
+            .any(|m| m.name.eq_ignore_ascii_case(&method.name))
+        {
+            continue;
+        }
+
+        // Clone and convert to an instance method on the builder.
+        let mut forwarded = method.clone();
+        forwarded.is_static = false;
+
+        // Substitute self-referencing return types.
+        if let Some(ref mut ret) = forwarded.return_type {
+            *ret = apply_substitution(ret, &subs);
+        }
+
+        builder.methods.push(forwarded);
     }
 }
 

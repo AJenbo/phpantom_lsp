@@ -1409,3 +1409,160 @@ async fn test_completion_promoted_property_param_override_cross_file() {
         CompletionResponse::List(_) => panic!("Expected Array response"),
     }
 }
+
+/// Inline `@var` docblock on a promoted constructor property should
+/// override the native type hint, just like `@param` on the constructor.
+///
+/// Reproduces the pattern used by Spatie's laravel-data:
+/// ```php
+/// public function __construct(
+///     /** @var array<EventModel> */
+///     public array|Optional $decodedEvents,
+/// ) {}
+/// ```
+#[tokio::test]
+async fn test_completion_promoted_property_inline_var_docblock() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inline_var.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class EventModel {\n",
+        "    public string $timestamp;\n",
+        "    public function getLabel(): string { return ''; }\n",
+        "}\n",
+        "class DataModel {\n",
+        "    public function __construct(\n",
+        "        /** @var array<EventModel> */\n",
+        "        public array $events,\n",
+        "    ) {}\n",
+        "    public function test(): void {\n",
+        "        foreach ($this->events as $event) {\n",
+        "            $event->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // "$event->" at line 12, character 20
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 12,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve inline @var type on promoted property"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("getLabel")),
+                "Should include 'getLabel' from EventModel via inline @var. Got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l == &"timestamp"),
+                "Should include 'timestamp' property from EventModel via inline @var. Got: {:?}",
+                labels
+            );
+        }
+        CompletionResponse::List(_) => panic!("Expected Array response"),
+    }
+}
+
+/// Inline `@var` on a promoted property with a union type (e.g.
+/// `array|Optional`) should still be overridden by the `@var` tag.
+#[tokio::test]
+async fn test_completion_promoted_property_inline_var_union_native_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///inline_var_union.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Optional {}\n",
+        "class UserModel {\n",
+        "    public string $name;\n",
+        "    public function greet(): string { return ''; }\n",
+        "}\n",
+        "class Container {\n",
+        "    public function __construct(\n",
+        "        /** @var array<UserModel> */\n",
+        "        public array|Optional $users,\n",
+        "    ) {}\n",
+        "    public function demo(): void {\n",
+        "        foreach ($this->users as $user) {\n",
+        "            $user->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // "$user->" at line 13, character 20
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve inline @var on union-typed promoted property"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("greet")),
+                "Should include 'greet' from UserModel via inline @var on union type. Got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l == &"name"),
+                "Should include 'name' property from UserModel via inline @var on union type. Got: {:?}",
+                labels
+            );
+        }
+        CompletionResponse::List(_) => panic!("Expected Array response"),
+    }
+}

@@ -9416,3 +9416,281 @@ class Demo {
         method_names
     );
 }
+
+/// When a model uses a trait that declares `@method` tags (e.g.
+/// `SoftDeletes` with `@method static Builder<static> withTrashed()`),
+/// those methods should be available on `Builder<Model>` instances
+/// returned by query builder methods in the chain.
+///
+/// Reproduces: `Customer::groupBy('email')->withTrashed()->first()->email`
+/// where `groupBy` comes from Query\Builder (via @mixin) and returns
+/// `Builder<Customer>`, and `withTrashed` comes from `SoftDeletes`
+/// `@method` tag on the model.
+#[tokio::test]
+async fn test_model_method_tags_on_builder_instance() {
+    let soft_deletes_php = "\
+<?php
+namespace App\\Concerns;
+/**
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder<static> withTrashed(bool $withTrashed = true)
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder<static> onlyTrashed()
+ */
+trait SoftDeletes
+{
+}
+";
+
+    // Place the completion trigger inside the model file itself (same
+    // pattern as the working test_scope_on_builder_from_trait).
+    let customer_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use App\\Concerns\\SoftDeletes;
+class Customer extends Model {
+    use SoftDeletes;
+    public string $email = '';
+    public function getDisplayName(): string { return ''; }
+    public function scopeActive(\\Illuminate\\Database\\Eloquent\\Builder $query): void {}
+    public function test(): void {
+        $q = Customer::where('active', true);
+        $q->
+    }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/SoftDeletes.php", soft_deletes_php),
+        ("src/Models/Customer.php", customer_php),
+    ]);
+
+    // "$q->" at line 11, character 12
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/Customer.php",
+        customer_php,
+        11,
+        12,
+    )
+    .await;
+    let methods = method_names(&items);
+
+    // Model @method tags from SoftDeletes should be available on Builder<Customer>.
+    assert!(
+        methods.contains(&"withTrashed"),
+        "Model @method 'withTrashed' from SoftDeletes should be available on Builder<Customer>, got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"onlyTrashed"),
+        "Model @method 'onlyTrashed' from SoftDeletes should be available on Builder<Customer>, got: {:?}",
+        methods
+    );
+
+    // Regular Builder methods should still be present.
+    assert!(
+        methods.contains(&"where"),
+        "Builder::where should still be available, got: {:?}",
+        methods
+    );
+
+    // Model scope methods should also be present.
+    assert!(
+        methods.contains(&"active"),
+        "Model scope 'active' should be available on Builder<Customer>, got: {:?}",
+        methods
+    );
+}
+
+/// After resolving `withTrashed()` on Builder<Customer>, the chain
+/// should continue to resolve Builder methods like `first()`.
+#[tokio::test]
+async fn test_model_method_tags_chain_continues_after_virtual_method() {
+    let soft_deletes_php = "\
+<?php
+namespace App\\Concerns;
+/**
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder<static> withTrashed(bool $withTrashed = true)
+ */
+trait SoftDeletes
+{
+}
+";
+
+    let customer_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use App\\Concerns\\SoftDeletes;
+class Customer extends Model {
+    use SoftDeletes;
+    public string $email = '';
+    public function getDisplayName(): string { return ''; }
+    public function scopeActive(\\Illuminate\\Database\\Eloquent\\Builder $query): void {}
+    public function test(): void {
+        $q = Customer::where('active', true)->withTrashed();
+        $q->
+    }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/SoftDeletes.php", soft_deletes_php),
+        ("src/Models/Customer.php", customer_php),
+    ]);
+
+    // "$q->" at line 11, character 12
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/Customer.php",
+        customer_php,
+        11,
+        12,
+    )
+    .await;
+    let methods = method_names(&items);
+
+    // withTrashed() returns Builder<static> → Builder<Customer>,
+    // so Builder methods like first() and where() should be available.
+    assert!(
+        methods.contains(&"first"),
+        "Builder methods should be available after withTrashed(), got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"where"),
+        "Builder::where should be available after withTrashed(), got: {:?}",
+        methods
+    );
+}
+
+/// `withTrashed()->get()` should return `Collection<int, Customer>`,
+/// not `Collection<int, Builder<Customer>>`.  The `@method` tag on
+/// `SoftDeletes` declares `Builder<static>` as the return type, and
+/// `static` must resolve to the model name so that Builder's own
+/// `get()` method sees the correct TModel generic argument.
+#[tokio::test]
+async fn test_model_method_tags_get_returns_collection_of_model() {
+    let soft_deletes_php = "\
+<?php
+namespace App\\Concerns;
+/**
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder<static> withTrashed(bool $withTrashed = true)
+ */
+trait SoftDeletes
+{
+}
+";
+
+    let customer_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use App\\Concerns\\SoftDeletes;
+class Customer extends Model {
+    use SoftDeletes;
+    public string $email = '';
+    public function getDisplayName(): string { return ''; }
+    public function test(): void {
+        $users = Customer::groupBy('email')->withTrashed()->get();
+        $users->
+    }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/SoftDeletes.php", soft_deletes_php),
+        ("src/Models/Customer.php", customer_php),
+    ]);
+
+    // "$users->" at line 10, character 16
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/Customer.php",
+        customer_php,
+        10,
+        16,
+    )
+    .await;
+    let methods = method_names(&items);
+
+    // get() on Builder<Customer> should return Collection<int, Customer>,
+    // so Collection methods should be available (not Builder methods).
+    assert!(
+        methods.contains(&"count"),
+        "Collection from get() after withTrashed() should have count(), got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"first"),
+        "Collection from get() after withTrashed() should have first(), got: {:?}",
+        methods
+    );
+    // The collection should NOT expose Builder-only methods, which
+    // would indicate a double-wrapped Builder<Builder<Customer>> type.
+    assert!(
+        !methods.contains(&"withTrashed"),
+        "Collection should not have withTrashed() — that would indicate double-wrapping, got: {:?}",
+        methods
+    );
+}
+
+/// `withTrashed()->first()` should return a `Customer` model instance,
+/// not a `Builder<Customer>`.
+#[tokio::test]
+async fn test_model_method_tags_first_returns_model_instance() {
+    let soft_deletes_php = "\
+<?php
+namespace App\\Concerns;
+/**
+ * @method static \\Illuminate\\Database\\Eloquent\\Builder<static> withTrashed(bool $withTrashed = true)
+ */
+trait SoftDeletes
+{
+}
+";
+
+    let customer_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use App\\Concerns\\SoftDeletes;
+class Customer extends Model {
+    use SoftDeletes;
+    public string $email = '';
+    public function getDisplayName(): string { return ''; }
+    public function test(): void {
+        $user = Customer::where('active', true)->withTrashed()->first();
+        $user->
+    }
+}
+";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/SoftDeletes.php", soft_deletes_php),
+        ("src/Models/Customer.php", customer_php),
+    ]);
+
+    // "$user->" at line 10, character 15
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/Customer.php",
+        customer_php,
+        10,
+        15,
+    )
+    .await;
+    let methods = method_names(&items);
+
+    // first() on Builder<Customer> should return Customer, so model
+    // methods and properties should be available.
+    assert!(
+        methods.contains(&"getDisplayName"),
+        "first() after withTrashed() should return Customer with getDisplayName(), got: {:?}",
+        methods
+    );
+}

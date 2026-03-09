@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AST-based array type inference.** Array shape key completion and array element member access resolve through an AST walker that handles literal arrays, `new` expressions, call expressions, spread elements, incremental key assignments, and push-style assignments.
 - **Docblock navigation.** Go-to-definition and hover now work on class names inside callable type annotations, array and object shape value types, and object shape properties.
 - **GTD from parameter and property variables.** Clicking a parameter or property variable at its definition site now jumps to the type hint class. Catch variables with single or union type hints are also supported.
+- **Inline `@var` on promoted constructor properties.** A `/** @var array<EventModel> */` docblock placed directly above a promoted parameter now overrides the native type hint, matching the existing `@param` support on the constructor. Common with Spatie's laravel-data and similar packages that use `array|Optional` union types.
 
 ### Changed
 
@@ -58,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`instanceof` narrowing no longer widens specific types.** `assert($zoo instanceof ZooBase)` after `$zoo = new Zoo()` (where `Zoo extends ZooBase`) no longer replaces the type with the less-specific parent.
 - **Closure parameter with bare type hint now inherits inferred generics.** When a closure parameter has an explicit bare type hint (e.g. `Collection $customers`) and the callable signature infers a more specific generic form (e.g. `Collection<int, Customer>`), the inferred type is used so that foreach resolves the element type.
 - **Cross-file inheritance from global-scope classes imported via `use`.** When a class extends a global class through a `use` import (e.g. `use Exception; class AppException extends Exception {}`), inherited members now resolve correctly across namespaces.
+- **Model `@method` tags available on Builder instances.** Virtual methods declared via `@method` on a model or its traits (e.g. `withTrashed` from `SoftDeletes`) now resolve on `Builder<Model>` instances in method chains. Previously these methods were only available when called statically on the model, so `Customer::where(...)->withTrashed()` lost resolution after the first chain link.
 - **Arrow function parameter completion with incomplete expressions.** Typing `$foo->` inside an arrow function body now resolves the parameter type even when the expression is incomplete.
 - **Inherited `@method` and `@property` tags.** Virtual members declared on a parent class now appear on child classes.
 - **Signature help on function definitions.** Signature help no longer fires when the cursor is inside a function or method definition's parameter list.

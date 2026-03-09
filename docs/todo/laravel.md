@@ -365,34 +365,6 @@ and `HigherOrderCollectionProxyExtension`, which resolve the proxy's
 template types and delegate property/method lookups to the collection's
 value type.
 
-#### 10. `SoftDeletes` trait methods on Builder
-
-| | |
-|---|---|
-| **Impact** | ★ — Already works through `@method` annotations on the `SoftDeletes` trait. Only the generic return type (`Builder<static>` vs `Builder<User>`) is imprecise. |
-| **Effort** | ★ — Not worth a dedicated fix until custom builder support (gap §7) is implemented; would piggyback on that work. |
-
-When a model uses the `SoftDeletes` trait, methods like
-`withTrashed`, `onlyTrashed`, `withoutTrashed`, `restore`,
-`createOrRestore`, and `restoreOrCreate` should be available on
-the Eloquent Builder.
-
-The `SoftDeletes` trait in the framework now ships `@method`
-annotations for these methods, so they are already visible through
-our `@method` PHPDoc provider when the trait is used on a model.
-
-Larastan additionally handles this in
-`EloquentBuilderForwardsCallsExtension` by explicitly checking for
-the `SoftDeletes` trait on the model and forwarding these methods
-through the builder with correct generic return types (e.g.
-`Builder<User>` instead of `Builder<static>`).
-
-**Status:** Mostly covered via `@method` tags on the `SoftDeletes`
-trait.  The generic return types may not carry the concrete model
-type — e.g. `Builder<static>` instead of `Builder<User>`.  This is
-a minor gap but not worth a dedicated fix until custom builder
-support (gap §7) is implemented.
-
 #### 11. `View::withX()` and `RedirectResponse::withX()` dynamic methods
 
 | | |

@@ -1666,9 +1666,27 @@ impl Backend {
                                 let saved_native_hint = native_hint.clone();
                                 let prop_visibility = extract_visibility(param.modifiers.iter());
 
-                                // Check for a `@param` docblock annotation
-                                // that overrides the native type hint.
-                                let type_hint = if let Some(doc) = constructor_docblock {
+                                // Check for a docblock type override.
+                                //
+                                // 1. Inline `@var` on the parameter itself
+                                //    (e.g. `/** @var array<User> */ public array $users`).
+                                // 2. `@param` on the constructor docblock
+                                //    (e.g. `@param list<User> $users`).
+                                let inline_var_type = doc_ctx.and_then(|ctx| {
+                                    let doc = docblock::get_docblock_text_for_node(
+                                        ctx.trivias,
+                                        ctx.content,
+                                        param,
+                                    )?;
+                                    docblock::extract_var_type(doc)
+                                });
+
+                                let type_hint = if let Some(var_type) = inline_var_type {
+                                    docblock::resolve_effective_type(
+                                        native_hint.as_deref(),
+                                        Some(&var_type),
+                                    )
+                                } else if let Some(doc) = constructor_docblock {
                                     let param_doc_type =
                                         docblock::extract_param_raw_type(doc, &raw_name);
                                     docblock::resolve_effective_type(

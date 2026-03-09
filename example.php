@@ -1147,6 +1147,26 @@ class ParamOverrideDemo
 }
 
 
+// ── Inline @var on Promoted Constructor Properties ──────────────────────────
+
+class InlineVarPromotedDemo
+{
+    public function __construct(
+        /** @var array<Ingredient> */
+        public array $ingredients,
+    ) {}
+
+    public function demo(): void
+    {
+        // Inline @var on promoted property overrides the native type hint
+        foreach ($this->ingredients as $ingredient) {
+            $ingredient->name;              // Ingredient::$name via inline @var
+            $ingredient->format();          // Ingredient::format() via inline @var
+        }
+    }
+}
+
+
 // ── Generator / Iterable Yield Type Resolution ─────────────────────────────
 
 class GeneratorDemo
@@ -1398,6 +1418,10 @@ class EloquentQueryDemo
         BlogAuthor::orderBy('name')->limit(10)->get();
         BlogAuthor::whereIn('id', [1, 2])->groupBy('genre')->get();
         BlogAuthor::where('active', 1)->first()->profile->getBio();
+
+        // Model @method tags available on Builder (e.g. SoftDeletes withTrashed)
+        BlogAuthor::where('active', 1)->withTrashed()->first();
+        BlogAuthor::groupBy('genre')->onlyTrashed()->get();
 
         // Scope methods — instance and static
         $author = new BlogAuthor();
@@ -2644,6 +2668,15 @@ trait HasFactory
 }
 
 /**
+ * @method static \Illuminate\Database\Eloquent\Builder<static> withTrashed(bool $withTrashed = true)
+ * @method static \Illuminate\Database\Eloquent\Builder<static> onlyTrashed()
+ */
+trait ScaffoldingSoftDeletes
+{
+    public function trashed(): bool { return false; }
+}
+
+/**
  * @template TKey
  * @template TValue
  */
@@ -3668,6 +3701,8 @@ enum JamFlavor: string
 
 class BlogAuthor extends \Illuminate\Database\Eloquent\Model
 {
+    use ScaffoldingSoftDeletes;
+
     protected $fillable = ['name', 'email', 'genre'];
 
     protected $guarded = ['id'];
@@ -3972,6 +4007,11 @@ function runDemoAssertions(): void
 
     $recipe = new Recipe([new Ingredient()]);
     assert($recipe instanceof Recipe, 'new Recipe() must be Recipe');
+
+    // ── Inline @var on promoted property (InlineVarPromotedDemo) ────────
+    $inlineDemo = new InlineVarPromotedDemo([new Ingredient()]);
+    assert(is_array($inlineDemo->ingredients), 'InlineVarPromotedDemo->ingredients must be array');
+    assert($inlineDemo->ingredients[0] instanceof Ingredient, 'InlineVarPromotedDemo->ingredients[0] must be Ingredient');
 
     // ── Container / app() conditional return types ──────────────────────
     $container = new Container();
