@@ -1,8 +1,0 @@
-{
-    "require": {
-        "jetbrains/phpstorm-stubs": "^2025.3"
-    },
-    "config": {
-      "vendor-dir": "stubs/"
-    }
-}

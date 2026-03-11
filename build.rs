@@ -13,7 +13,7 @@
 //!
 //! If the stubs directory doesn't exist, the build script will automatically
 //! fetch the latest release of phpstorm-stubs from GitHub. This allows
-//! `cargo install` to work without requiring `composer install` first.
+//! `cargo install` to work without any additional setup.
 //!
 //! ## Re-run strategy
 //!
@@ -24,7 +24,7 @@
 //!
 //! Instead we watch the project root directory (`.`).  Its mtime changes
 //! whenever a direct child like `stubs/` is created or removed.  We also
-//! watch `build.rs` and `composer.lock` for targeted rebuilds.
+//! watch `build.rs` for targeted rebuilds.
 //!
 //! To avoid unnecessary recompilation of the main crate we compare the
 //! newly generated content against the existing output file and only write
@@ -66,7 +66,6 @@ fn main() {
     // reliably trigger when they first appear.
     println!("cargo:rerun-if-changed=.");
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=composer.lock");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let stubs_path = Path::new(&manifest_dir).join(STUBS_DIR);
@@ -76,9 +75,7 @@ fn main() {
         eprintln!("cargo:warning=Stubs not found, fetching from GitHub...");
         if let Err(e) = fetch_stubs(&manifest_dir) {
             eprintln!("cargo:warning=Failed to fetch stubs from GitHub: {}", e);
-            eprintln!(
-                "cargo:warning=Building without stubs. Run `composer install` for full stub support."
-            );
+            eprintln!("cargo:warning=Building without stubs (network may be unavailable).");
             write_empty_stubs();
             return;
         }

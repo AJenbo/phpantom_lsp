@@ -28,9 +28,9 @@
 ///
 /// ## Updating stubs
 ///
-/// Run `composer update jetbrains/phpstorm-stubs` in the project root
-/// (with `stubs/` as the vendor directory) and rebuild.  The `build.rs`
-/// script re-reads the map file and re-embeds everything automatically.
+/// Delete the `stubs/` directory and rebuild. The `build.rs` script will
+/// automatically fetch the latest release from GitHub, re-read the map
+/// file and re-embed everything.
 use std::collections::HashMap;
 
 // Pull in the generated static arrays.

@@ -3,23 +3,18 @@
 ## Quick Start
 
 ```bash
-composer install        # fetch PHP stubs (requires Composer)
 cargo build --release   # build the binary
 ```
 
 ## Prerequisites
 
 - [Rust](https://rustup.rs/) (stable toolchain)
-- [Composer](https://getcomposer.org/) (for PHP standard library stubs)
 
 ## Build
 
-The PHP stubs are managed as a Composer dependency in `stubs/`. The `build.rs` script embeds the [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) directly into the binary, giving the LSP full knowledge of built-in PHP classes, functions, and constants with no runtime dependencies.
+The `build.rs` script automatically fetches the latest [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) from GitHub and embeds them directly into the binary. This gives the LSP full knowledge of built-in PHP classes, functions, and constants with no runtime dependencies.
 
-> [!NOTE]
-> The build will succeed without `composer install`, but the resulting binary won't know about built-in PHP symbols like `Iterator`, `Countable`, `UnitEnum`, etc. Always run `composer install` first for a fully functional build.
-
-After updating stubs (`composer update`), just rebuild. `build.rs` watches `composer.lock` and re-embeds everything automatically.
+The stubs are downloaded on first build and cached in `stubs/`. To update to the latest stubs, delete the `stubs/` directory and rebuild.
 
 For details on how symbol resolution and stub loading work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
