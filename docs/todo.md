@@ -18,7 +18,7 @@ with each step.
 | [Type Inference](todo/type-inference.md) | Generic resolution, conditional return types, type narrowing, stub attribute handling |
 | [Completion](todo/completion.md) | Completion-specific improvements (enum return types, array shapes, expected values) |
 | [Diagnostics](todo/diagnostics.md) | Scalar member access errors, chain/return member diagnostics, unknown function errors, duplicate suppression, chain error propagation, deprecated rendering, unresolved PHPDoc types, suppression intelligence, composer warnings, argument count, unreachable code, implementation errors |
-| [Code Actions](todo/actions.md) | Import class, remove unused imports, implement missing methods, null coalescing simplification, extract function, inline variable, extract variable, inline function/method, switch→match |
+| [Code Actions](todo/actions.md) | Import class, remove unused imports, implement missing methods, null coalescing simplification, extract function, extract constant, inline variable, extract variable, inline function/method, switch→match, update docblock, change visibility, generate interface |
 | [LSP Features](todo/lsp-features.md) | Find references, document highlighting, document/workspace symbols, rename, code lens, inlay hints, PHPDoc generation, partial result streaming, formatting proxy, file rename on class rename |
 | [Signature Help](todo/signature-help.md) | Parameter descriptions, signature-level docs, default values, attribute/closure support |
 | [Laravel](todo/laravel.md) | Model property gaps, relationship methods, type narrowing, custom builders |
@@ -109,6 +109,7 @@ gate check before Sprint 5 widens the feature surface further.
 | 76 | Inline Variable | Medium | Code Actions | [actions.md §7](todo/actions.md#7-inline-variable) |
 | 77 | Extract Variable | Medium | Code Actions | [actions.md §8](todo/actions.md#8-extract-variable) |
 | 78 | Inline Function/Method | High | Code Actions | [actions.md §9](todo/actions.md#9-inline-functionmethod) |
+| 109 | Extract Constant | Medium | Code Actions | [actions.md §10](todo/actions.md#10-extract-constant) |
 | 95 | Canonicalize FQN representation | High | Refactoring | [refactor.md §1](todo/refactor.md#1-canonicalize-fqn-representation) |
 
 **After Sprint 4:** The core refactoring toolkit is complete. The
@@ -181,6 +182,8 @@ code action polish.
 | 32 | Code Lens: jump to prototype method | Low | LSP Features | [lsp-features.md §8](todo/lsp-features.md#8-code-lens-jump-to-prototype-method) |
 | 34 | Document Links (`textDocument/documentLink`) | Low | LSP Features | [lsp-features.md §15](todo/lsp-features.md#15-document-links-textdocumentdocumentlink) |
 | 39 | Simplify with null coalescing / null-safe operator (code action) | Medium | Code Actions | [actions.md §2](todo/actions.md#2-simplify-with-null-coalescing--null-safe-operator) |
+| 110 | Update docblock to match signature | Medium | Code Actions | [actions.md §11](todo/actions.md#11-update-docblock-to-match-signature) |
+| 111 | Change visibility | Low | Code Actions | [actions.md §12](todo/actions.md#12-change-visibility) |
 
 ---
 
@@ -265,6 +268,7 @@ eventually but don't move the needle.
 | 72 | Switch → match conversion | Medium | Code Actions | [actions.md §4](todo/actions.md#4-switch--match-conversion) |
 | 89 | Incremental text sync | Medium | Performance | [performance.md §8](todo/performance.md#8-incremental-text-sync) |
 | 104 | Unreachable code diagnostic | Low | Diagnostics | [diagnostics.md §8](todo/diagnostics.md#8-unreachable-code-diagnostic) |
+| 112 | Generate interface from class | Medium | Code Actions | [actions.md §13](todo/actions.md#13-generate-interface-from-class) |
 
 ### Performance long-tail
 

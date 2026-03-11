@@ -540,3 +540,269 @@ When the callee has multiple statements:
 |---|---|
 | Go-to-Definition | Resolves call site to the callee's definition location and source |
 | Extract Function (§3) scope analysis | Variable collision detection at the call site |
+
+---
+
+## 10. Extract Constant
+**Impact: Medium · Effort: Medium**
+
+Select a literal value (string, integer, float, boolean) inside a class
+and extract it into a class constant. This pairs naturally with Extract
+Variable (§8) and shares the same "select, name, replace" workflow.
+
+### Behaviour
+
+- **Trigger:** The user selects a literal expression inside a class
+  method or property default. The code action introduces a new class
+  constant with a generated name, assigns the literal value, and
+  replaces the selection (and optionally all identical occurrences in
+  the class) with `self::CONSTANT_NAME`.
+- **Code action kind:** `refactor.extract`.
+
+### What can be extracted
+
+- String literals: `'pending'`, `"active"`.
+- Integer literals: `200`, `0xFF`.
+- Float literals: `3.14`.
+- Boolean literals: `true`, `false` (less common but valid).
+- Concatenated string expressions: `'prefix_' . 'suffix'` — extract the
+  whole expression as a single constant.
+
+Array literals and class instantiations are out of scope (PHP const
+expressions are limited).
+
+### Name generation
+
+Generate a default name from the value:
+
+- String: `'pending'` → `PENDING`. `'order_status'` → `ORDER_STATUS`.
+- Number: `200` → `STATUS_200` or `VALUE_200`.
+- Boolean: `true` → `IS_ENABLED` (weak heuristic, user will rename).
+- Fallback: `CONSTANT` with a numeric suffix if needed.
+
+Use `SCREAMING_SNAKE_CASE` per PHP convention. If the generated name
+collides with an existing constant in the class, append a numeric suffix.
+
+### Insertion point
+
+Insert the new constant declaration at the top of the class body, after
+any existing constant declarations (to keep constants grouped). Use the
+visibility of the surrounding context as a hint: if the literal appears
+in a public method, default to `public const`; otherwise `private const`.
+
+### Duplicate replacement
+
+Same approach as Extract Variable (§8): offer "this occurrence only"
+and "all N occurrences in this class". Textual equality is sufficient
+for literals.
+
+### Implementation
+
+- Verify the selection is a literal expression node inside a class body.
+- Find the class declaration node and scan for existing constants.
+- Generate the constant name and check for collisions.
+- Determine the insertion point (after last existing constant, or at
+  the top of the class body if none exist).
+- Build a `WorkspaceEdit` that:
+  1. Inserts `{visibility} const NAME = {value};\n` at the insertion
+     point with correct indentation.
+  2. Replaces the selected literal with `self::NAME`.
+  3. Optionally replaces other identical literals in the class.
+
+### Prerequisites
+
+| Feature | What it contributes |
+|---|---|
+| Extract Function (§3) scope analysis | Class body traversal and constant name collision detection |
+
+---
+
+## 11. Update Docblock to Match Signature
+**Impact: Medium · Effort: Medium**
+
+When a function or method signature changes (parameters added, removed,
+reordered, or type hints updated), the docblock often falls out of sync.
+This code action regenerates or patches the `@param`, `@return`, and
+`@throws` tags to match the current signature.
+
+### Behaviour
+
+- **Trigger:** Cursor is on a function/method declaration that has an
+  existing docblock. The code action appears when the docblock's `@param`
+  tags don't match the signature's parameters (by name, count, or order),
+  or when the `@return` tag contradicts the return type hint.
+- **Code action kind:** `quickfix` (when tags are clearly wrong) or
+  `source.fixAll.docblock` for a broader sweep.
+
+### What gets updated
+
+1. **`@param` tags:**
+   - Add missing `@param` for parameters present in the signature but
+     absent from the docblock.
+   - Remove `@param` for parameters no longer in the signature.
+   - Reorder `@param` tags to match signature order.
+   - Update the type if the signature has a type hint and the docblock
+     type contradicts it (e.g. docblock says `string`, signature says
+     `int`). If the docblock type is _more specific_ than the signature
+     (e.g. docblock says `non-empty-string`, signature says `string`),
+     keep the docblock type (it's a refinement, not a contradiction).
+   - Preserve existing descriptions after the type and variable name.
+
+2. **`@return` tag:**
+   - If the signature has a return type hint and the docblock `@return`
+     contradicts it, update the type. Same refinement rule: keep the
+     docblock type if it's more specific.
+   - If the signature has a return type but no `@return` tag exists,
+     do not add one (the type hint is sufficient). Only update or
+     remove existing tags.
+   - Remove `@return void` if redundant with a `: void` return type.
+
+3. **Preserve other tags:** `@throws`, `@template`, `@deprecated`,
+   `@see`, and any other tags are left untouched.
+
+### Edge cases
+
+- **Promoted constructor parameters:** Treat the same as regular
+  parameters for `@param` purposes.
+- **Variadic parameters:** `...$args` matches `@param type ...$args`.
+- **No existing docblock:** This action only patches existing docblocks.
+  PHPDoc generation on `/**` (Sprint 5, item 24) handles creating new
+  ones.
+
+### Implementation
+
+- Parse the function signature to extract parameter names, types, and
+  order, plus the return type.
+- Parse the existing docblock to extract `@param` and `@return` tags
+  with their positions, types, variable names, and descriptions.
+- Diff the two lists to determine additions, removals, reorderings,
+  and type updates.
+- Build a `WorkspaceEdit` with targeted `TextEdit`s that modify only
+  the changed lines within the docblock, preserving formatting,
+  indentation, and unchanged tags.
+
+### Prerequisites
+
+| Feature | What it contributes |
+|---|---|
+| Docblock tag parsing (`docblock/tags.rs`) | Extracts existing `@param`/`@return` tags with positions |
+| Parser (`parser/functions.rs`) | Extracts parameter names, types, and return type from the signature |
+
+---
+
+## 12. Change Visibility
+**Impact: Low-Medium · Effort: Low**
+
+Change the visibility of a method, property, constant, or class from the
+cursor position. Offers all applicable alternatives as separate code
+actions.
+
+### Behaviour
+
+- **Trigger:** Cursor is on (or inside) a method, property, constant, or
+  promoted constructor parameter that has an explicit visibility modifier.
+- **Code action kind:** `refactor.rewrite`.
+- **Offered actions:** One action per alternative visibility. For a
+  `public` method, offer "Make protected" and "Make private". For a
+  `private` property, offer "Make protected" and "Make public".
+
+### What can be changed
+
+- Methods: `public` ↔ `protected` ↔ `private`.
+- Properties (including promoted constructor parameters): same.
+- Constants: `public` ↔ `protected` ↔ `private` (PHP 8.1+).
+- Constructor visibility promotion: `public function __construct(private string $name)` —
+  change `private` to `protected` or `public`.
+
+### Scope
+
+This is a single-file edit. It does **not** update call sites or
+subclass overrides in other files. If a user makes a public method
+private and there are external callers, they'll see errors from
+diagnostics or their static analyser. Cross-file visibility propagation
+is a possible follow-up but not required for the initial implementation.
+
+### Implementation
+
+- Find the visibility keyword token for the member under the cursor.
+- Determine the current visibility.
+- For each alternative visibility, create a code action whose
+  `WorkspaceEdit` replaces the visibility keyword token with the new one.
+- Handle the edge case of implicit public visibility (no keyword present)
+  by inserting the keyword before the `function`/property token.
+
+### Prerequisites
+
+None beyond basic AST navigation. This is one of the simplest possible
+code actions.
+
+---
+
+## 13. Generate Interface from Class
+**Impact: Low-Medium · Effort: Medium**
+
+Extract an interface from an existing class. The new interface contains
+method signatures for all public methods in the class, and the class is
+updated to implement it.
+
+### Behaviour
+
+- **Trigger:** Cursor is on a class declaration. The code action
+  "Extract interface" appears.
+- **Code action kind:** `refactor.extract`.
+- **Result:** A new file is created containing the interface, and the
+  original class is updated to add `implements InterfaceName`.
+
+### What gets extracted
+
+- All `public` methods (excluding the constructor) become interface
+  method signatures: visibility, name, parameters with types and
+  defaults, and return type.
+- PHPDoc blocks from the extracted methods are copied to the interface
+  (they often contain `@param`, `@return`, and `@template` tags that
+  are essential for type information).
+- Class-level `@template` tags are copied if any extracted method
+  references those template parameters.
+- Public constants are **not** extracted (interface constants have
+  different semantics and this is rarely what users want).
+
+### Naming
+
+Default interface name: `{ClassName}Interface`. Place it in the same
+namespace and directory as the class. If the file uses PSR-4, the
+interface file path is derived from the namespace.
+
+### Implementation
+
+- Parse the class to collect public method signatures and their
+  docblocks.
+- Collect class-level `@template` tags if referenced by extracted
+  methods.
+- Generate the interface source: namespace declaration, use imports
+  needed by the method signatures, interface declaration with method
+  stubs.
+- Build a `WorkspaceEdit` with two operations:
+  1. `CreateFile` + `TextEdit` for the new interface file.
+  2. `TextEdit` on the original class to add `implements InterfaceName`
+     (and a `use` import if the interface is in a different file, though
+     by default it's the same namespace).
+- Format the generated interface to match the project's indentation
+  style (detect from the source class).
+
+### Edge cases
+
+- **Class already implements interfaces:** Append to the existing
+  `implements` list rather than replacing it.
+- **Abstract methods:** Include them in the interface (they're already
+  stubs).
+- **Static methods:** Include them. Interfaces can declare static method
+  signatures.
+- **Generic classes:** If the class has `@template T` and a method
+  returns `T`, the interface needs the same `@template` tag.
+
+### Prerequisites
+
+| Feature | What it contributes |
+|---|---|
+| Parser (`parser/classes.rs`) | Extracts public method signatures with full type information |
+| Implement missing methods (§1) | Shared infrastructure for generating method stubs and `implements` clause editing |
