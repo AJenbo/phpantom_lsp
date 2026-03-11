@@ -179,6 +179,23 @@ supports glob patterns like `**/vendor/composer/autoload_*.php`.
 - Debounce rapid changes (Composer writes multiple files in sequence)
   with a short delay (e.g. 500ms) to avoid redundant reloads.
 
+### `textDocument/didSave` handler
+
+PHPantom does not currently implement `textDocument/didSave`. This
+means changes to files that are not open in the editor (e.g. files
+saved by a script, a git checkout, or another tool) are invisible
+until the file is opened. This is standard behaviour for most LSPs,
+but it matters for the file-watching story: even after
+`workspace/didChangeWatchedFiles` is wired up for Composer artifacts,
+changes to user PHP files made outside the editor (e.g. code
+generation, `artisan make:model`) will not be picked up until the
+file is opened.
+
+When file system watching is implemented, consider also registering
+a `didSave` handler (or a broad `*.php` watcher) to trigger a
+targeted single-file rescan for files in PSR-4 directories, matching
+the plan described in [indexing.md Phase 2](indexing.md#phase-2-staleness-detection-and-auto-refresh).
+
 ---
 
 ## 6. Property hooks (PHP 8.4)

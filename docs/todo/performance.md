@@ -219,6 +219,80 @@ parallelisation, this item can be dropped.
 
 ---
 
+## 12. O(n²) transitive eviction in `evict_fqn`
+**Impact: Low-Medium · Effort: Low**
+
+The `evict_fqn` function in `virtual_members/mod.rs` runs a
+fixed-point loop that scans the entire resolved-class cache on each
+iteration to find transitive dependents. In a large project with a
+deep class hierarchy (common in Laravel codebases with hundreds of
+Eloquent models), editing a base class can trigger a cascade of
+evictions where each round does a full cache scan.
+
+The `depends_on_any` helper also matches against both the FQN and
+the short name of the evicted class, which increases the chance of
+false-positive transitive evictions (e.g. two unrelated classes that
+share a short name like `Builder`).
+
+### Fix
+
+Build a reverse-dependency index (`HashMap<String, Vec<String>>`)
+that maps each FQN to the set of cached FQNs that directly depend
+on it. Maintain this index alongside cache insertions and removals.
+On eviction, walk the reverse index instead of scanning the entire
+cache, turning the O(n²) loop into O(dependents).
+
+If the reverse index is too much bookkeeping, a simpler first step
+is to collect all dependents in a single pass (instead of the
+current iterative fixed-point loop) by doing a breadth-first walk
+of the dependency graph within the cache.
+
+---
+
+## 13. `diag_pending_uris` uses `Vec::contains` for deduplication
+**Impact: Low · Effort: Low**
+
+`schedule_diagnostics` and `schedule_diagnostics_for_open_files`
+deduplicate pending URIs with `Vec::contains`, which is O(n) per
+insertion. When a class signature changes, every open file is
+queued, and each insertion scans the entire pending list.
+
+For typical usage (< 50 open files) this is imperceptible. It
+becomes measurable only with hundreds of open tabs and rapid
+cross-file edits.
+
+### Fix
+
+Replace `Vec<String>` with `IndexSet<String>` (from `indexmap`) or
+`HashSet<String>` + a separate `Vec<String>` for ordering. The
+worker drains the collection on each wake, so insertion order is
+not important and a plain `HashSet` suffices.
+
+---
+
+## 14. `find_class_in_ast_map` linear fallback scan
+**Impact: Low · Effort: Low**
+
+The fast O(1) `fqn_index` lookup in `find_class_in_ast_map` covers
+the common case. The slow fallback iterates every file in `ast_map`
+linearly. The comment says this covers "race conditions during
+initial indexing" and anonymous classes.
+
+During initial indexing with many files open, the fallback could
+cause micro-stutters if the `fqn_index` has not been populated yet
+for a requested class. In steady state the fallback is rarely hit.
+
+### Fix
+
+Audit the code paths that can reach the fallback to determine
+whether they are still reachable after the `fqn_index` was added.
+If they are not, replace the fallback with a `None` return and a
+debug log. If they are, consider populating `fqn_index` earlier in
+the pipeline (e.g. during the byte-level scan phase) to close the
+window.
+
+---
+
 ## 8. Incremental text sync
 **Impact: Low-Medium · Effort: Medium**
 

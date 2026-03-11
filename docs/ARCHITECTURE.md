@@ -869,6 +869,12 @@ The `symbol_maps` store is keyed by file URI, matching `ast_map`. A typical PHP 
 
 Files that are not open (vendor files loaded via PSR-4 on demand) do not get a symbol map — they use the stored byte offsets from Tier 2 (which live on `ClassInfo` / `MethodInfo` / etc. in `ast_map`).
 
+## Diagnostic Worker Architecture
+
+Diagnostics run in a background `tokio::spawn` task so they never block completion, hover, or signature help. The worker is created during `initialized` via `clone_for_diagnostic_worker`, which builds a shallow clone of the `Backend`. All `Arc`-wrapped fields (maps, caches, the notify/pending slot) are shared by `Arc::clone`, so the worker sees every mutation the main `Backend` makes.
+
+Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, `vendor_dir_paths`, and `config`. These fields are only written during `initialized` (before the worker is spawned) and never change afterwards. If a future feature adds hot-reloading of `.phpantom.toml` or runtime PHP version changes, the worker would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
+
 ## Name Resolution
 
 PHP class names go through resolution at parse time (`resolve_parent_class_names`):

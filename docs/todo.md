@@ -34,26 +34,12 @@ with each step.
 
 ## Sprint 2 — Stabilise for 0.5.0 release
 
-All Sprint 2+ feature work is done. Before tagging 0.5.0, fix the
-remaining bugs that would embarrass us in front of new users. No new
-features, no refactors, no "while I'm here" detours. Ship what we
-have, ship it correct.
-
-The common thread: our own diagnostics contradict our own demos in
-`example.php`. If PHPantom flags working code in its own showcase
-file, users will not trust any diagnostic it produces.
-
 | # | Item | Effort | Domain | Doc Link |
 |---|---|---|---|---|
-| 106 | Diagnostics fire on type alias array shape object values | Low | Bug Fixes | [bugs.md §1](todo/bugs.md#1-diagnostics-fire-on-type-alias-array-shape-object-values) |
-| 107 | Inline array-element function calls resolve to native return type in diagnostics | Low | Bug Fixes | [bugs.md §2](todo/bugs.md#2-inline-array-element-function-calls-resolve-to-native-return-type-in-diagnostics) |
-| 108 | Flaky `unknown_member` diagnostic on Eloquent Builder scope chains | Medium | Bug Fixes | [bugs.md §3](todo/bugs.md#3-flaky-unknown_member-diagnostic-on-eloquent-builder-scope-chains) |
+| 106 | Thread panic in parallel file scanners crashes server | Low | Bug Fixes | [bugs.md §0](todo/bugs.md#0-thread-panic-in-parallel-file-scanners-crashes-the-server) |
+| 107 | Analyse sequential write-lock acquisition in `parse_and_cache_content_versioned` | Low | Bug Fixes | [bugs.md §1](todo/bugs.md#1-sequential-write-lock-acquisition-in-parse_and_cache_content_versioned) |
 
-**Release gate:** `cargo test`, `cargo clippy -- -D warnings`,
-`cargo clippy --tests -- -D warnings`, `cargo fmt --check`,
-`php -l example.php`, and `php -d zend.assertions=1 example.php`
-all pass. Zero diagnostics on `example.php` from PHPantom itself.
-Tag 0.5.0, write release notes, publish.
+**After Sprint 2:** Tag 0.5.0, write release notes, publish.
 
 ---
 
@@ -278,6 +264,9 @@ eventually but don't move the needle.
 | 96 | Parallel pre-filter in `find_implementors` | Medium | Performance | [performance.md §9](todo/performance.md#9-parallel-pre-filter-in-find_implementors) |
 | 97 | `memmem` for block comment terminator search | Low | Performance | [performance.md §10](todo/performance.md#10-memmem-for-block-comment-terminator-search) |
 | 98 | `memmap2` for file reads during scanning | Low | Performance | [performance.md §11](todo/performance.md#11-memmap2-for-file-reads-during-scanning) |
+| 108 | O(n²) transitive eviction in `evict_fqn` | Low | Performance | [performance.md §12](todo/performance.md#12-on²-transitive-eviction-in-evict_fqn) |
+| 109 | `diag_pending_uris` uses `Vec::contains` for dedup | Low | Performance | [performance.md §13](todo/performance.md#13-diag_pending_uris-uses-veccontains-for-deduplication) |
+| 110 | `find_class_in_ast_map` linear fallback scan | Low | Performance | [performance.md §14](todo/performance.md#14-find_class_in_ast_map-linear-fallback-scan) |
 
 ### External stubs
 
