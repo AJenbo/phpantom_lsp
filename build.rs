@@ -9,12 +9,18 @@
 //!
 //! The generated file is consumed by `src/stubs.rs` at compile time.
 //!
+//! ## Automatic stub fetching
+//!
+//! If the stubs directory doesn't exist, the build script will automatically
+//! fetch the latest release of phpstorm-stubs from GitHub. This allows
+//! `cargo install` to work without requiring `composer install` first.
+//!
 //! ## Re-run strategy
 //!
 //! The `stubs/` directory is gitignored, so Cargo's default "re-run when
-//! any package file changes" behaviour does not notice when
-//! `composer install` creates it.  Explicit `rerun-if-changed` on paths
-//! inside `stubs/` also fails when the directory doesn't exist yet.
+//! any package file changes" behaviour does not notice when stubs are
+//! downloaded.  Explicit `rerun-if-changed` on paths inside `stubs/` also
+//! fails when the directory doesn't exist yet.
 //!
 //! Instead we watch the project root directory (`.`).  Its mtime changes
 //! whenever a direct child like `stubs/` is created or removed.  We also
@@ -29,7 +35,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
+
+use flate2::read::GzDecoder;
+use serde::Deserialize;
+use tar::Archive;
+
+const GITHUB_REPO: &str = "JetBrains/phpstorm-stubs";
 
 /// Relative path from the crate root to the stubs map file.
 const MAP_FILE: &str = "stubs/jetbrains/phpstorm-stubs/PhpStormStubsMap.php";
@@ -37,6 +50,13 @@ const MAP_FILE: &str = "stubs/jetbrains/phpstorm-stubs/PhpStormStubsMap.php";
 /// Relative path from the crate root to the stubs directory (the base for
 /// relative paths found in the map file).
 const STUBS_DIR: &str = "stubs/jetbrains/phpstorm-stubs";
+
+/// GitHub API response for latest release.
+#[derive(Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    tarball_url: String,
+}
 
 fn main() {
     // Watch the project root directory so that creating/removing `stubs/`
@@ -49,7 +69,20 @@ fn main() {
     println!("cargo:rerun-if-changed=composer.lock");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let stubs_path = Path::new(&manifest_dir).join(STUBS_DIR);
     let map_path = Path::new(&manifest_dir).join(MAP_FILE);
+
+    if !map_path.exists() {
+        eprintln!("cargo:warning=Stubs not found, fetching from GitHub...");
+        if let Err(e) = fetch_stubs(&manifest_dir) {
+            eprintln!("cargo:warning=Failed to fetch stubs from GitHub: {}", e);
+            eprintln!(
+                "cargo:warning=Building without stubs. Run `composer install` for full stub support."
+            );
+            write_empty_stubs();
+            return;
+        }
+    }
 
     let map_content = match fs::read_to_string(&map_path) {
         Ok(c) => c,
@@ -60,13 +93,7 @@ fn main() {
                 "cargo:warning=Could not read PhpStormStubsMap.php ({}); generating empty stub index",
                 e
             );
-            let content = concat!(
-                "pub(crate) static STUB_FILES: [&str; 0] = [];\n",
-                "pub(crate) static STUB_CLASS_MAP: [(&str, usize); 0] = [];\n",
-                "pub(crate) static STUB_FUNCTION_MAP: [(&str, usize); 0] = [];\n",
-                "pub(crate) static STUB_CONSTANT_MAP: [(&str, usize); 0] = [];\n",
-            );
-            write_if_changed(content);
+            write_empty_stubs();
             return;
         }
     };
@@ -91,11 +118,10 @@ fn main() {
     }
 
     // Only keep files that actually exist on disk.
-    let stubs_base = Path::new(&manifest_dir).join(STUBS_DIR);
     let existing_files: Vec<&str> = unique_files
         .iter()
         .copied()
-        .filter(|rel| stubs_base.join(rel).is_file())
+        .filter(|rel| stubs_path.join(rel).is_file())
         .collect();
 
     // Build a path → index mapping.
@@ -122,7 +148,7 @@ fn main() {
         // Build the include_str! path relative to the generated file's
         // location ($OUT_DIR).  We use an absolute path rooted at CARGO_MANIFEST_DIR
         // to avoid fragile relative path arithmetic.
-        let abs = stubs_base.join(rel_path);
+        let abs = stubs_path.join(rel_path);
         let abs_str = abs.to_string_lossy().replace('\\', "/");
         out.push_str(&format!("    include_str!(\"{}\")", abs_str));
         out.push_str(",\n");
@@ -193,6 +219,82 @@ fn main() {
     out.push_str("];\n");
 
     write_if_changed(&out);
+}
+
+fn fetch_stubs(manifest_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let api_url = format!(
+        "https://api.github.com/repos/{}/releases/latest",
+        GITHUB_REPO
+    );
+
+    let response = ureq::get(&api_url)
+        .set("User-Agent", "phpantom-lsp-build")
+        .set("Accept", "application/vnd.github.v3+json")
+        .call()?;
+
+    let release: GitHubRelease = response.into_json()?;
+    eprintln!(
+        "cargo:warning=Downloading phpstorm-stubs {}",
+        release.tag_name
+    );
+
+    let tarball_response = ureq::get(&release.tarball_url)
+        .set("User-Agent", "phpantom-lsp-build")
+        .call()?;
+
+    let mut tarball_bytes = Vec::new();
+    tarball_response
+        .into_reader()
+        .read_to_end(&mut tarball_bytes)?;
+
+    let decoder = GzDecoder::new(&tarball_bytes[..]);
+    let mut archive = Archive::new(decoder);
+
+    let target_dir = Path::new(manifest_dir).join("stubs/jetbrains/phpstorm-stubs");
+    fs::create_dir_all(&target_dir)?;
+
+    // GitHub tarballs have a top-level directory like "JetBrains-phpstorm-stubs-abc1234/"
+    // We need to strip that prefix when extracting.
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?;
+
+        let components: Vec<_> = path.components().collect();
+        if components.len() <= 1 {
+            continue;
+        }
+
+        let relative_path: std::path::PathBuf = components[1..].iter().collect();
+        let dest_path = target_dir.join(&relative_path);
+
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        if entry.header().entry_type().is_dir() {
+            fs::create_dir_all(&dest_path)?;
+        } else if entry.header().entry_type().is_file() {
+            let mut file = fs::File::create(&dest_path)?;
+            std::io::copy(&mut entry, &mut file)?;
+        }
+    }
+
+    eprintln!(
+        "cargo:warning=Successfully downloaded phpstorm-stubs {}",
+        release.tag_name
+    );
+    Ok(())
+}
+
+/// Write an empty stub map when stubs aren't available.
+fn write_empty_stubs() {
+    let content = concat!(
+        "pub(crate) static STUB_FILES: [&str; 0] = [];\n",
+        "pub(crate) static STUB_CLASS_MAP: [(&str, usize); 0] = [];\n",
+        "pub(crate) static STUB_FUNCTION_MAP: [(&str, usize); 0] = [];\n",
+        "pub(crate) static STUB_CONSTANT_MAP: [(&str, usize); 0] = [];\n",
+    );
+    write_if_changed(content);
 }
 
 /// Parse one of the `const CLASSES = array(...)`, `const FUNCTIONS = array(...)`,
