@@ -583,6 +583,7 @@ pub(crate) fn extract_parameters(
                 default_value,
                 is_variadic,
                 is_reference,
+                closure_this_type: None,
             }
         })
         .collect()

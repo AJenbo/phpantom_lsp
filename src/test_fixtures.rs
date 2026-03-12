@@ -114,6 +114,7 @@ pub fn make_param(name: &str, type_hint: Option<&str>, is_required: bool) -> Par
         default_value: None,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }
 }
 

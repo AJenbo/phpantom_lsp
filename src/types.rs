@@ -246,6 +246,14 @@ pub struct ParameterInfo {
     pub is_variadic: bool,
     /// Whether this parameter is passed by reference (has `&`).
     pub is_reference: bool,
+    /// The type that `$this` resolves to inside a closure passed for this
+    /// parameter, declared via the `@param-closure-this` PHPDoc tag.
+    ///
+    /// For example, `@param-closure-this \Illuminate\Routing\Route $callback`
+    /// means that inside the closure passed as `$callback`, `$this` refers to
+    /// `\Illuminate\Routing\Route` rather than the lexically enclosing class.
+    /// Common in Laravel where closures are rebound via `Closure::bindTo()`.
+    pub closure_this_type: Option<String>,
 }
 
 impl ParameterInfo {
@@ -261,6 +269,7 @@ impl ParameterInfo {
             && self.default_value == other.default_value
             && self.is_variadic == other.is_variadic
             && self.is_reference == other.is_reference
+            && self.closure_this_type == other.closure_this_type
     }
 }
 
@@ -1429,6 +1438,7 @@ mod tests {
             default_value: None,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         }
     }
 

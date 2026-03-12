@@ -31,6 +31,8 @@ use mago_span::HasSpan;
 use mago_syntax::ast::sequence::TokenSeparatedSequence;
 use mago_syntax::ast::*;
 
+use crate::completion::resolver::ResolutionCtx;
+
 /// Maximum recursion depth for callable parameter inference.
 ///
 /// When a closure parameter is untyped, the resolver infers its type
@@ -44,13 +46,572 @@ thread_local! {
     /// Tracks the current recursion depth of callable parameter
     /// inference to prevent stack overflow from nested closures.
     static CLOSURE_INFER_DEPTH: Cell<u32> = const { Cell::new(0) };
+
+    /// Re-entrancy guard for [`find_closure_this_override`].
+    ///
+    /// The override check re-parses the program and resolves the
+    /// receiver of the enclosing call expression.  If the receiver
+    /// is `$this`, that triggers `resolve_target_classes_expr` →
+    /// `SubjectExpr::This` → `find_closure_this_override` again,
+    /// creating an infinite cycle.  This flag breaks the cycle by
+    /// returning `None` on re-entry.
+    static IN_CLOSURE_THIS_OVERRIDE: Cell<bool> = const { Cell::new(false) };
 }
 
 use crate::docblock::replace_self_in_type;
 use crate::parser::extract_hint_string;
-use crate::types::{AccessKind, ClassInfo};
+use crate::parser::with_parsed_program;
+use crate::types::{AccessKind, ClassInfo, FunctionInfo, MethodInfo};
 
 use crate::completion::resolver::VarResolutionCtx;
+
+// ─── @param-closure-this resolution ─────────────────────────────────────────
+
+/// Check whether the cursor is inside a closure that is passed as an
+/// argument to a function/method whose parameter carries a
+/// `@param-closure-this` annotation.  If so, resolve the declared type
+/// and return it as a `ClassInfo`.
+///
+/// This is the static-analysis equivalent of `Closure::bindTo()`:
+/// frameworks like Laravel rebind closures so that `$this` inside the
+/// closure body refers to a different object.  The
+/// `@param-closure-this` PHPDoc tag declares what `$this` should
+/// resolve to.
+pub(crate) fn find_closure_this_override(ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+    // Re-entrancy guard: when resolving the receiver of the enclosing
+    // call (e.g. `$this->group(…)`), `resolve_target_classes` will hit
+    // `SubjectExpr::This` and call us again.  Return `None` on the
+    // second entry so the normal `current_class` fallback is used for
+    // the receiver, avoiding infinite recursion.
+    let already_inside = IN_CLOSURE_THIS_OVERRIDE.with(|f| f.get());
+    if already_inside {
+        return None;
+    }
+    IN_CLOSURE_THIS_OVERRIDE.with(|f| f.set(true));
+
+    let result = with_parsed_program(ctx.content, "find_closure_this_override", |program, _| {
+        for stmt in program.statements.iter() {
+            if let Some(result) = walk_stmt_for_closure_this(stmt, ctx) {
+                return Some(result);
+            }
+        }
+        None
+    });
+
+    IN_CLOSURE_THIS_OVERRIDE.with(|f| f.set(false));
+    result
+}
+
+/// Recursively walk a statement looking for a closure argument that
+/// contains the cursor and whose receiving parameter has
+/// `closure_this_type`.
+fn walk_stmt_for_closure_this(stmt: &Statement<'_>, ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+    let sp = stmt.span();
+    if ctx.cursor_offset < sp.start.offset || ctx.cursor_offset > sp.end.offset {
+        return None;
+    }
+
+    match stmt {
+        Statement::Class(class) => {
+            let start = class.left_brace.start.offset;
+            let end = class.right_brace.end.offset;
+            if ctx.cursor_offset < start || ctx.cursor_offset > end {
+                return None;
+            }
+            for member in class.members.iter() {
+                if let ClassLikeMember::Method(method) = member
+                    && let MethodBody::Concrete(body) = &method.body
+                {
+                    let bsp = body.span();
+                    if ctx.cursor_offset >= bsp.start.offset && ctx.cursor_offset <= bsp.end.offset
+                    {
+                        for inner in body.statements.iter() {
+                            if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                                return Some(r);
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Statement::Expression(expr_stmt) => walk_expr_for_closure_this(expr_stmt.expression, ctx),
+        Statement::Return(ret) => ret
+            .value
+            .as_ref()
+            .and_then(|v| walk_expr_for_closure_this(v, ctx)),
+        Statement::Block(block) => {
+            for inner in block.statements.iter() {
+                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => walk_stmt_for_closure_this(body.statement, ctx),
+            IfBody::ColonDelimited(body) => {
+                for inner in body.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+                None
+            }
+        },
+        Statement::Foreach(foreach) => match &foreach.body {
+            ForeachBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
+            ForeachBody::ColonDelimited(body) => {
+                for inner in body.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+                None
+            }
+        },
+        Statement::While(while_stmt) => match &while_stmt.body {
+            WhileBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
+            WhileBody::ColonDelimited(body) => {
+                for inner in body.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+                None
+            }
+        },
+        Statement::For(for_stmt) => match &for_stmt.body {
+            ForBody::Statement(inner) => walk_stmt_for_closure_this(inner, ctx),
+            ForBody::ColonDelimited(body) => {
+                for inner in body.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+                None
+            }
+        },
+        Statement::DoWhile(dw) => walk_stmt_for_closure_this(dw.statement, ctx),
+        Statement::Namespace(ns) => {
+            for inner in ns.statements().iter() {
+                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Statement::Try(try_stmt) => {
+            for inner in try_stmt.block.statements.iter() {
+                if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                    return Some(r);
+                }
+            }
+            for catch in try_stmt.catch_clauses.iter() {
+                for inner in catch.block.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+            }
+            if let Some(finally) = &try_stmt.finally_clause {
+                for inner in finally.block.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+            }
+            None
+        }
+        Statement::Function(func) => {
+            let bsp = func.body.span();
+            if ctx.cursor_offset >= bsp.start.offset && ctx.cursor_offset <= bsp.end.offset {
+                for inner in func.body.statements.iter() {
+                    if let Some(r) = walk_stmt_for_closure_this(inner, ctx) {
+                        return Some(r);
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Walk an expression looking for a call whose closure argument
+/// contains the cursor and whose parameter has `closure_this_type`.
+fn walk_expr_for_closure_this(expr: &Expression<'_>, ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+    let sp = expr.span();
+    if ctx.cursor_offset < sp.start.offset || ctx.cursor_offset > sp.end.offset {
+        return None;
+    }
+
+    match expr {
+        Expression::Call(call) => walk_call_for_closure_this(call, ctx),
+        Expression::Parenthesized(p) => walk_expr_for_closure_this(p.expression, ctx),
+        Expression::Assignment(a) => walk_expr_for_closure_this(a.lhs, ctx)
+            .or_else(|| walk_expr_for_closure_this(a.rhs, ctx)),
+        Expression::Binary(bin) => walk_expr_for_closure_this(bin.lhs, ctx)
+            .or_else(|| walk_expr_for_closure_this(bin.rhs, ctx)),
+        Expression::Conditional(cond) => walk_expr_for_closure_this(cond.condition, ctx)
+            .or_else(|| cond.then.and_then(|e| walk_expr_for_closure_this(e, ctx)))
+            .or_else(|| walk_expr_for_closure_this(cond.r#else, ctx)),
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                let found = match elem {
+                    ArrayElement::KeyValue(kv) => walk_expr_for_closure_this(kv.key, ctx)
+                        .or_else(|| walk_expr_for_closure_this(kv.value, ctx)),
+                    ArrayElement::Value(v) => walk_expr_for_closure_this(v.value, ctx),
+                    ArrayElement::Variadic(v) => walk_expr_for_closure_this(v.value, ctx),
+                    _ => None,
+                };
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        Expression::LegacyArray(arr) => {
+            for elem in arr.elements.iter() {
+                let found = match elem {
+                    ArrayElement::KeyValue(kv) => walk_expr_for_closure_this(kv.key, ctx)
+                        .or_else(|| walk_expr_for_closure_this(kv.value, ctx)),
+                    ArrayElement::Value(v) => walk_expr_for_closure_this(v.value, ctx),
+                    ArrayElement::Variadic(v) => walk_expr_for_closure_this(v.value, ctx),
+                    _ => None,
+                };
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        Expression::Match(m) => {
+            if let Some(r) = walk_expr_for_closure_this(m.expression, ctx) {
+                return Some(r);
+            }
+            for arm in m.arms.iter() {
+                if let Some(r) = walk_expr_for_closure_this(arm.expression(), ctx) {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Expression::Access(access) => match access {
+            Access::Property(pa) => walk_expr_for_closure_this(pa.object, ctx),
+            Access::NullSafeProperty(pa) => walk_expr_for_closure_this(pa.object, ctx),
+            Access::StaticProperty(pa) => walk_expr_for_closure_this(pa.class, ctx),
+            Access::ClassConstant(pa) => walk_expr_for_closure_this(pa.class, ctx),
+        },
+        Expression::Instantiation(inst) => {
+            if let Some(ref args) = inst.argument_list {
+                walk_args_for_closure_this(&args.arguments, ctx, &|_| None)
+            } else {
+                None
+            }
+        }
+        Expression::UnaryPrefix(u) => walk_expr_for_closure_this(u.operand, ctx),
+        Expression::UnaryPostfix(u) => walk_expr_for_closure_this(u.operand, ctx),
+        Expression::Yield(y) => match y {
+            Yield::Value(yv) => yv
+                .value
+                .as_ref()
+                .and_then(|v| walk_expr_for_closure_this(v, ctx)),
+            Yield::Pair(yp) => walk_expr_for_closure_this(yp.key, ctx)
+                .or_else(|| walk_expr_for_closure_this(yp.value, ctx)),
+            Yield::From(yf) => walk_expr_for_closure_this(yf.iterator, ctx),
+        },
+        Expression::Throw(t) => walk_expr_for_closure_this(t.exception, ctx),
+        Expression::Clone(c) => walk_expr_for_closure_this(c.object, ctx),
+        Expression::Pipe(p) => walk_expr_for_closure_this(p.input, ctx)
+            .or_else(|| walk_expr_for_closure_this(p.callable, ctx)),
+        // Closures/arrow-functions that are NOT inside a call argument
+        // are handled by the caller; we don't descend into their bodies
+        // here because there is no call context to check.
+        _ => None,
+    }
+}
+
+/// Walk a call expression, checking each closure/arrow-function argument
+/// to see if the cursor is inside it and the target parameter has
+/// `closure_this_type`.
+fn walk_call_for_closure_this(call: &Call<'_>, ctx: &ResolutionCtx<'_>) -> Option<ClassInfo> {
+    match call {
+        Call::Function(fc) => {
+            let func_name = match fc.function {
+                Expression::Identifier(ident) => Some(ident.value().to_string()),
+                _ => None,
+            };
+            let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
+                let name = func_name.as_deref()?;
+                let fi = ctx.function_loader.and_then(|fl| fl(name))?;
+                closure_this_from_function_params(&fi, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
+            }
+            // Recurse into arguments that are not closures (e.g. nested calls).
+            for arg in fc.argument_list.arguments.iter() {
+                let arg_expr = arg.value();
+                if !is_closure_like(arg_expr)
+                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
+                {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Call::Method(mc) => {
+            if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
+                return Some(r);
+            }
+            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
+                let method_name = ident.value.to_string();
+                let obj_span = mc.object.span();
+                let result =
+                    walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
+                        closure_this_from_receiver(
+                            obj_span.start.offset,
+                            obj_span.end.offset,
+                            &method_name,
+                            arg_idx,
+                            ctx,
+                        )
+                    });
+                if result.is_some() {
+                    return result;
+                }
+            }
+            for arg in mc.argument_list.arguments.iter() {
+                let arg_expr = arg.value();
+                if !is_closure_like(arg_expr)
+                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
+                {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Call::NullSafeMethod(mc) => {
+            if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
+                return Some(r);
+            }
+            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
+                let method_name = ident.value.to_string();
+                let obj_span = mc.object.span();
+                let result =
+                    walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
+                        closure_this_from_receiver(
+                            obj_span.start.offset,
+                            obj_span.end.offset,
+                            &method_name,
+                            arg_idx,
+                            ctx,
+                        )
+                    });
+                if result.is_some() {
+                    return result;
+                }
+            }
+            for arg in mc.argument_list.arguments.iter() {
+                let arg_expr = arg.value();
+                if !is_closure_like(arg_expr)
+                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
+                {
+                    return Some(r);
+                }
+            }
+            None
+        }
+        Call::StaticMethod(sc) => {
+            if let Some(r) = walk_expr_for_closure_this(sc.class, ctx) {
+                return Some(r);
+            }
+            if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
+                let method_name = ident.value.to_string();
+                let result =
+                    walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
+                        closure_this_from_static_receiver(sc.class, &method_name, arg_idx, ctx)
+                    });
+                if result.is_some() {
+                    return result;
+                }
+            }
+            for arg in sc.argument_list.arguments.iter() {
+                let arg_expr = arg.value();
+                if !is_closure_like(arg_expr)
+                    && let Some(r) = walk_expr_for_closure_this(arg_expr, ctx)
+                {
+                    return Some(r);
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Check whether an expression is a closure or arrow function.
+fn is_closure_like(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::Closure(_) | Expression::ArrowFunction(_))
+}
+
+/// Walk call arguments.  For each closure/arrow-function argument whose
+/// body contains the cursor, call `lookup_fn(arg_idx)` to check whether
+/// the target parameter has `closure_this_type`.
+fn walk_args_for_closure_this<F>(
+    arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
+    ctx: &ResolutionCtx<'_>,
+    lookup_fn: &F,
+) -> Option<ClassInfo>
+where
+    F: Fn(usize) -> Option<ClassInfo>,
+{
+    for (arg_idx, arg) in arguments.iter().enumerate() {
+        let arg_expr = arg.value();
+        let arg_span = arg_expr.span();
+        if ctx.cursor_offset < arg_span.start.offset || ctx.cursor_offset > arg_span.end.offset {
+            continue;
+        }
+
+        let cursor_inside_body = match arg_expr {
+            Expression::Closure(closure) => {
+                let body_start = closure.body.left_brace.start.offset;
+                let body_end = closure.body.right_brace.end.offset;
+                ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end
+            }
+            Expression::ArrowFunction(arrow) => {
+                let arrow_body_span = arrow.expression.span();
+                ctx.cursor_offset >= arrow.arrow.start.offset
+                    && ctx.cursor_offset <= arrow_body_span.end.offset
+            }
+            _ => false,
+        };
+
+        if cursor_inside_body {
+            return lookup_fn(arg_idx);
+        }
+    }
+    None
+}
+
+/// Look up `closure_this_type` on a standalone function's parameter at
+/// `arg_idx`.
+fn closure_this_from_function_params(
+    fi: &FunctionInfo,
+    arg_idx: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<ClassInfo> {
+    let param = fi.parameters.get(arg_idx)?;
+    let raw_type = param.closure_this_type.as_deref()?;
+    resolve_closure_this_type(raw_type, None, ctx)
+}
+
+/// Look up `closure_this_type` on an instance method's parameter at
+/// `arg_idx`, resolving the receiver from the source span.
+fn closure_this_from_receiver(
+    obj_start: u32,
+    obj_end: u32,
+    method_name: &str,
+    arg_idx: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<ClassInfo> {
+    let start = obj_start as usize;
+    let end = obj_end as usize;
+    if end > ctx.content.len() {
+        return None;
+    }
+    let obj_text = ctx.content[start..end].trim();
+    let receiver_classes =
+        crate::completion::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, ctx);
+    for cls in &receiver_classes {
+        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        if let Some(method) = resolved.methods.iter().find(|m| m.name == method_name)
+            && let Some(result) =
+                closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+        {
+            return Some(result);
+        }
+    }
+    None
+}
+
+/// Look up `closure_this_type` on a static method's parameter at
+/// `arg_idx`.
+fn closure_this_from_static_receiver(
+    class_expr: &Expression<'_>,
+    method_name: &str,
+    arg_idx: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<ClassInfo> {
+    let class_name = match class_expr {
+        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.map(|cc| cc.name.clone()),
+        Expression::Identifier(ident) => Some(ident.value().to_string()),
+        Expression::Parent(_) => ctx.current_class.and_then(|cc| cc.parent_class.clone()),
+        _ => None,
+    }?;
+
+    let owner = ctx
+        .all_classes
+        .iter()
+        .find(|c| c.name == class_name)
+        .cloned()
+        .or_else(|| (ctx.class_loader)(&class_name))?;
+
+    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &owner,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let method = resolved.methods.iter().find(|m| m.name == method_name)?;
+    closure_this_from_method_params(method, arg_idx, Some(&resolved), ctx)
+}
+
+/// Extract `closure_this_type` from a method's parameter at `arg_idx`
+/// and resolve it to a `ClassInfo`.
+fn closure_this_from_method_params(
+    method: &MethodInfo,
+    arg_idx: usize,
+    owner: Option<&ClassInfo>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<ClassInfo> {
+    let param = method.parameters.get(arg_idx)?;
+    let raw_type = param.closure_this_type.as_deref()?;
+    resolve_closure_this_type(raw_type, owner, ctx)
+}
+
+/// Resolve a raw `@param-closure-this` type string to a `ClassInfo`.
+///
+/// Handles `$this`, `static`, and `self` by mapping them to the
+/// declaring class (owner), and resolves fully-qualified class names
+/// through the class loader.
+fn resolve_closure_this_type(
+    raw_type: &str,
+    owner: Option<&ClassInfo>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<ClassInfo> {
+    let type_str = raw_type.trim_start_matches('\\');
+
+    // `$this`, `static`, and `self` all refer to the declaring class.
+    if type_str == "$this" || type_str == "static" || type_str == "self" {
+        return owner.cloned().or_else(|| ctx.current_class.cloned());
+    }
+
+    // Try local classes first, then the cross-file loader.
+    if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == type_str) {
+        return Some(cls.clone());
+    }
+
+    let resolved = (ctx.class_loader)(type_str)?;
+    Some(crate::virtual_members::resolve_class_fully_maybe_cached(
+        &resolved,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    ))
+}
 
 /// Check whether `stmt` contains a closure or arrow function whose
 /// body encloses the cursor.  If so, resolve the variable from the

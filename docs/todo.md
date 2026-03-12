@@ -131,7 +131,6 @@ and Laravel developer alike. File system watching eliminates the
 | 27 | `BackedEnum::from()` / `::tryFrom()` return type refinement | Low | Completion | [completion.md §1](todo/completion.md#1-backedenumfrom--tryfrom-return-type-refinement) |
 | 28 | Pipe operator (PHP 8.5) type resolution | Low | Type Inference | [type-inference.md §1](todo/type-inference.md#1-pipe-operator-php-85) |
 | 29 | Conditional return types `($param is T ? A : B)` | Medium | Type Inference | [type-inference.md §3](todo/type-inference.md#3-parse-and-resolve-param-is-t--a--b-return-types) |
-| 30 | `@param-closure-this` | Medium | Type Inference | [type-inference.md §15](todo/type-inference.md#15-param-closure-this) |
 | 31 | `key-of<T>` and `value-of<T>` resolution | Medium | Type Inference | [type-inference.md §16](todo/type-inference.md#16-key-oft-and-value-oft-resolution) |
 | 37 | File system watching for vendor and project changes | Medium | Type Inference | [type-inference.md §5](todo/type-inference.md#5-file-system-watching-for-vendor-and-project-changes) |
 | 38 | Property hooks (PHP 8.4) | Medium | Type Inference | [type-inference.md §6](todo/type-inference.md#6-property-hooks-php-84) |

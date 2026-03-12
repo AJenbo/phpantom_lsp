@@ -857,6 +857,7 @@ async fn test_use_function_namespaced_detail_shows_signature() {
                         default_value: None,
                         is_variadic: false,
                         is_reference: false,
+                        closure_this_type: None,
                     }],
                     return_type: Some("mixed".to_string()),
                     native_return_type: None,

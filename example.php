@@ -2291,6 +2291,35 @@ class GenericAssertNarrowingDemo
 }
 
 
+// ── @param-closure-this ─────────────────────────────────────────────────────
+
+class ParamClosureThisDemo
+{
+    public function demo(): void
+    {
+        $router = new ScaffoldingClosureThisRouter();
+
+        // @param-closure-this overrides $this inside the closure to
+        // ScaffoldingClosureThisRoute instead of ParamClosureThisDemo.
+        $router->group(function () {
+            $this->middleware('auth');     // resolves Route::middleware()
+            $this->prefix('/api');        // resolves Route::prefix()
+        });
+
+        // Chaining through the overridden $this
+        $router->group(function () {
+            $this->middleware('auth')->prefix('/v2');
+        });
+
+        // @param-closure-this with $this as the type (declares the
+        // closure's $this is the method's declaring class).
+        $router->extend('redis', function () {
+            $this->getDefaultDriver();    // resolves Router::getDefaultDriver()
+        });
+    }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
@@ -2598,6 +2627,31 @@ class ScaffoldingPipeline
 
     public function send(mixed $data): static { return $this; }
     public function through(array $pipes): static { return $this; }
+}
+
+// ScaffoldingClosureThisRoute / ScaffoldingClosureThisRouter — used by ParamClosureThisDemo
+class ScaffoldingClosureThisRoute
+{
+    public function middleware(string $m): self { return $this; }
+    public function prefix(string $p): self { return $this; }
+}
+
+class ScaffoldingClosureThisRouter
+{
+    public function getDefaultDriver(): string { return ''; }
+
+    /**
+     * @param-closure-this ScaffoldingClosureThisRoute $callback
+     */
+    public function group(\Closure $callback): void {}
+
+    /**
+     * @param string $driver
+     * @param \Closure $callback
+     * @param-closure-this $this $callback
+     * @return $this
+     */
+    public function extend(string $driver, \Closure $callback): self { return $this; }
 }
 
 class ScaffoldingFirstClassCallable
@@ -4504,6 +4558,18 @@ function runDemoAssertions(): void
     $assertObj = new Pen();
     ScaffoldingAssert::assertInstanceOf(Pen::class, $assertObj);
     assert($assertObj instanceof Pen, 'ScaffoldingAssert::assertInstanceOf(Pen::class, $obj) must narrow to Pen');
+
+    // ── @param-closure-this scaffolding ──────────────────────────────────
+    $ctRoute = new ScaffoldingClosureThisRoute();
+    $ctMw = $ctRoute->middleware('auth');
+    assert($ctMw instanceof ScaffoldingClosureThisRoute, 'Route::middleware() must return self');
+    $ctPfx = $ctRoute->prefix('/api');
+    assert($ctPfx instanceof ScaffoldingClosureThisRoute, 'Route::prefix() must return self');
+
+    $ctRouter = new ScaffoldingClosureThisRouter();
+    assert(is_string($ctRouter->getDefaultDriver()), 'Router::getDefaultDriver() must return string');
+    $ctExt = $ctRouter->extend('redis', function () {});
+    assert($ctExt instanceof ScaffoldingClosureThisRouter, 'Router::extend() must return self');
 
     echo "All assertions passed.\n";
 }

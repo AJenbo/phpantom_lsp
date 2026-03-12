@@ -59,6 +59,7 @@ fn format_params_with_types() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
         ParameterInfo {
             name: "$age".to_string(),
@@ -69,6 +70,7 @@ fn format_params_with_types() {
             is_required: false,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
     ];
     assert_eq!(format_params(&params), "string $name, int $age = ...");
@@ -85,6 +87,7 @@ fn format_params_variadic() {
         is_required: false,
         is_variadic: true,
         is_reference: false,
+        closure_this_type: None,
     }];
     assert_eq!(format_params(&params), "string ...$items");
 }
@@ -100,6 +103,7 @@ fn format_params_reference() {
         is_required: true,
         is_variadic: false,
         is_reference: true,
+        closure_this_type: None,
     }];
     assert_eq!(format_params(&params), "array &$arr");
 }

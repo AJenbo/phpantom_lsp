@@ -160,6 +160,7 @@ fn format_param_with_default_value() {
         is_required: false,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "int $limit = 10");
 }
@@ -175,6 +176,7 @@ fn format_param_with_null_default() {
         is_required: false,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "?string $name = null");
 }
@@ -191,6 +193,7 @@ fn format_param_optional_no_known_default() {
         is_required: false,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "int $x");
 }
@@ -207,6 +210,7 @@ fn format_param_variadic_no_default_even_if_set() {
         is_required: false,
         is_variadic: true,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "string ...$items");
 }
@@ -222,6 +226,7 @@ fn format_param_simple() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "int $x");
 }
@@ -237,6 +242,7 @@ fn format_param_variadic() {
         is_required: false,
         is_variadic: true,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "string ...$items");
 }
@@ -252,6 +258,7 @@ fn format_param_reference() {
         is_required: true,
         is_variadic: false,
         is_reference: true,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "array &$arr");
 }
@@ -267,6 +274,7 @@ fn format_param_no_type() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     };
     assert_eq!(format_param_label(&p), "$x");
 }
@@ -285,6 +293,7 @@ fn build_signature_label() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
         ParameterInfo {
             name: "$age".to_string(),
@@ -295,6 +304,7 @@ fn build_signature_label() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
     ];
     let sig = build_signature(&params, Some("void"));
@@ -313,6 +323,7 @@ fn build_signature_parameter_offsets() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
         ParameterInfo {
             name: "$b".to_string(),
@@ -323,6 +334,7 @@ fn build_signature_parameter_offsets() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
     ];
     let sig = build_signature(&params, None);
@@ -358,6 +370,7 @@ fn build_signature_with_default_values() {
             is_required: false,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
         ParameterInfo {
             name: "$count".to_string(),
@@ -368,6 +381,7 @@ fn build_signature_with_default_values() {
             is_required: false,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
     ];
     let sig = build_signature(&params, Some("void"));
@@ -393,6 +407,7 @@ fn build_signature_param_documentation_same_types() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
         ParameterInfo {
             name: "$array".to_string(),
@@ -403,6 +418,7 @@ fn build_signature_param_documentation_same_types() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
     ];
     let sig = build_signature(&params, Some("array"));
@@ -432,6 +448,7 @@ fn build_signature_param_documentation_effective_differs() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }];
     let sig = build_signature(&params, Some("void"));
     let pi = sig.parameters.unwrap();
@@ -458,6 +475,7 @@ fn build_signature_param_effective_only_no_native() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }];
     let sig = build_signature(&params, None);
     let pi = sig.parameters.unwrap();
@@ -485,6 +503,7 @@ fn build_signature_param_effective_differs_no_description() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }];
     let sig = build_signature(&params, Some("object"));
     let pi = sig.parameters.unwrap();
@@ -519,6 +538,7 @@ fn build_signature_param_effective_fqn_shortened_in_doc() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }];
     let sig = build_signature(&params, Some("void"));
     let pi = sig.parameters.unwrap();
@@ -543,6 +563,7 @@ fn build_signature_param_effective_fqn_no_desc() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }];
     let sig = build_signature(&params, None);
     let pi = sig.parameters.unwrap();
@@ -643,6 +664,7 @@ fn clamp_within_range() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
         ParameterInfo {
             name: "$b".to_string(),
@@ -653,6 +675,7 @@ fn clamp_within_range() {
             is_required: true,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         },
     ];
     assert_eq!(clamp_active_param(0, &params), 0);
@@ -670,6 +693,7 @@ fn clamp_exceeds_range() {
         is_required: true,
         is_variadic: false,
         is_reference: false,
+        closure_this_type: None,
     }];
     assert_eq!(clamp_active_param(5, &params), 0);
 }

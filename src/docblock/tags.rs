@@ -444,6 +444,54 @@ pub fn extract_param_raw_type(docblock: &str, var_name: &str) -> Option<String> 
     None
 }
 
+/// Extract all `@param-closure-this` declarations from a docblock.
+///
+/// The tag format is `@param-closure-this TypeName $paramName`, declaring
+/// that `$this` inside a closure passed as `$paramName` resolves to
+/// `TypeName`.  This is the static-analysis equivalent of runtime
+/// `Closure::bindTo()` and is used heavily in Laravel (routing, macros,
+/// testing).
+///
+/// Returns a list of `(type_name, param_name)` pairs.  The `param_name`
+/// includes the `$` prefix.  The `type_name` is the raw type string
+/// (e.g. `\Illuminate\Routing\Route`, `$this`, `static`).
+pub fn extract_param_closure_this(docblock: &str) -> Vec<(String, String)> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = trimmed.strip_prefix("@param-closure-this") {
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+            if type_token.is_empty() {
+                continue;
+            }
+
+            // The next token should be the parameter name (`$paramName`).
+            if let Some(name) = remainder.split_whitespace().next()
+                && name.starts_with('$')
+            {
+                results.push((type_token.to_string(), name.to_string()));
+            }
+        }
+    }
+
+    results
+}
+
 /// Extract the human-readable description from a `@param` tag for a
 /// specific parameter.
 ///

@@ -176,9 +176,19 @@ pub(crate) fn resolve_target_classes_expr(
 
     match expr {
         // ── Keywords that always mean "current class" ────────────
-        SubjectExpr::This | SubjectExpr::SelfKw | SubjectExpr::StaticKw => {
+        SubjectExpr::This => {
+            // Check for `@param-closure-this` override: when the cursor
+            // is inside a closure passed as an argument to a function
+            // whose parameter carries `@param-closure-this`, resolve
+            // `$this` to the declared type instead of the lexical class.
+            if let Some(override_cls) =
+                super::variable::closure_resolution::find_closure_this_override(ctx)
+            {
+                return vec![override_cls];
+            }
             current_class.cloned().into_iter().collect()
         }
+        SubjectExpr::SelfKw | SubjectExpr::StaticKw => current_class.cloned().into_iter().collect(),
 
         // ── `parent::` — resolve to the current class's parent ──
         SubjectExpr::Parent => {

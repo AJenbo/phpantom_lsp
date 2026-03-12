@@ -186,6 +186,20 @@ impl Backend {
                             param.description =
                                 docblock::extract_param_description(doc_text, &param.name);
                         }
+
+                        // Populate `closure_this_type` from
+                        // `@param-closure-this` tags so that `$this`
+                        // inside a closure argument resolves to the
+                        // declared type instead of the lexical class.
+                        for (this_type, param_name) in
+                            docblock::extract_param_closure_this(doc_text)
+                        {
+                            if let Some(param) =
+                                parameters.iter_mut().find(|p| p.name == param_name)
+                            {
+                                param.closure_this_type = Some(this_type);
+                            }
+                        }
                     }
 
                     functions.push(FunctionInfo {

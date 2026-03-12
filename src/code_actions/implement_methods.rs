@@ -591,6 +591,7 @@ mod tests {
                     default_value: None,
                     is_variadic: false,
                     is_reference: false,
+                    closure_this_type: None,
                 },
                 ParameterInfo {
                     name: "$age".to_string(),
@@ -601,6 +602,7 @@ mod tests {
                     default_value: Some("0".to_string()),
                     is_variadic: false,
                     is_reference: false,
+                    closure_this_type: None,
                 },
             ],
             ..MethodInfo::virtual_method("test", None)
@@ -623,6 +625,7 @@ mod tests {
                     default_value: None,
                     is_variadic: true,
                     is_reference: false,
+                    closure_this_type: None,
                 },
                 ParameterInfo {
                     name: "$out".to_string(),
@@ -633,6 +636,7 @@ mod tests {
                     default_value: None,
                     is_variadic: false,
                     is_reference: true,
+                    closure_this_type: None,
                 },
             ],
             ..MethodInfo::virtual_method("test", None)
@@ -976,6 +980,7 @@ mod tests {
                     default_value: None,
                     is_variadic: false,
                     is_reference: false,
+                    closure_this_type: None,
                 },
                 ParameterInfo {
                     name: "$options".to_string(),
@@ -986,6 +991,7 @@ mod tests {
                     default_value: Some("[]".to_string()),
                     is_variadic: false,
                     is_reference: false,
+                    closure_this_type: None,
                 },
             ],
             native_return_type: Some("void".to_string()),

@@ -362,51 +362,6 @@ See `ClosureBindDynamicReturnTypeExtension` and
 
 ---
 
-## 15. `@param-closure-this`
-**Impact: Medium-High · Effort: Medium**
-
-The `@param-closure-this` PHPDoc tag declares what `$this` refers to
-inside a closure parameter. This is critical for frameworks like Laravel
-where closures are commonly rebound via `Closure::bindTo()`:
-
-```php
-/**
- * @param-closure-this \Illuminate\Routing\Route $callback
- */
-function group(Closure $callback): void;
-```
-
-Without this, `$this->` inside the closure body produces no completions.
-Laravel's routing (`Route::group`), testing (`$this->get(...)` inside
-test closures), and macro APIs all rely on closure rebinding.
-
-**Implementation:**
-
-1. **Docblock parsing** — recognise `@param-closure-this` in
-   `docblock/tags.rs`. The tag format is
-   `@param-closure-this TypeName $paramName`. Extract the type string
-   and the parameter name it applies to.
-
-2. **Store on `ParameterInfo`** — add an optional `closure_this_type:
-   Option<String>` field to `ParameterInfo`. During function/method
-   extraction, if the docblock contains `@param-closure-this` for a
-   parameter, populate this field.
-
-3. **Closure `$this` resolution** — when resolving `$this` inside a
-   closure body, check whether the closure is passed as an argument to
-   a function/method call. If so, resolve the receiving function,
-   find the target parameter, and check for `closure_this_type`. If
-   present, use that type instead of the lexical `$this` class.
-
-4. **Interaction with `Closure::bind()`** — this tag is the static
-   analysis equivalent of runtime `Closure::bindTo()`. The two
-   features are complementary: `@param-closure-this` handles the
-   common case where the rebinding happens inside the called function,
-   while `Closure::bind()` support (§14) handles explicit user-side
-   rebinding.
-
----
-
 ## 16. `key-of<T>` and `value-of<T>` resolution
 **Impact: Medium · Effort: Medium**
 

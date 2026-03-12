@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@param-closure-this`.** When a function or method parameter carries a `@param-closure-this TypeName $param` PHPDoc tag, `$this` inside a closure passed for that parameter resolves to the declared type instead of the lexically enclosing class. Supports fully-qualified class names, `$this`, `static`, and `self` as the type. Works with instance methods, static methods, and standalone functions, including cross-file resolution via PSR-4.
 - **Function-level `@template` with generic return types.** Functions like `collect()` that use `@template` parameters inside a generic return type (e.g. `@return Collection<TKey, TValue>`) now resolve the concrete types from call-site arguments. Previously only the narrow `@return T` pattern worked. This covers `collect()`, `value()`, `retry()`, `tap()`, `with()`, `transform()`, `data_get()`, and any non-Laravel function with the same annotation style.
 
 - **Find References.** "Find All References" locates every usage of a symbol across the project. Supports classes, interfaces, traits, enums, methods, properties, constants, functions, and variables. Variable references are scoped to the enclosing function or closure. Member references are scoped to the class hierarchy of the target symbol, so unrelated classes that happen to share a method name are excluded. Cross-file scanning lazily indexes user files on demand (vendor and stub files are excluded, matching PhpStorm's behaviour).

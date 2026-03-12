@@ -273,6 +273,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             default_value: None,
             is_variadic: false,
             is_reference: false,
+            closure_this_type: None,
         }],
         return_type: Some("TValue".to_string()),
         native_return_type: None,

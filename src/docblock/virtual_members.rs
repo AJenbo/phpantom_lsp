@@ -296,6 +296,7 @@ fn parse_method_tag_params(params_str: &str) -> Vec<ParameterInfo> {
             default_value: None,
             is_variadic,
             is_reference: false,
+            closure_this_type: None,
         });
     }
 
