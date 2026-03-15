@@ -1,15 +1,14 @@
-# PHPantom — Blade Template Support
-
+# PHPantom — Blade
 
 This document is the implementation plan for Laravel Blade template
-support in PHPantom. For Eloquent model support see `todo-laravel.md`.
+support in PHPantom. For Eloquent model support see `laravel.md`.
 For general architecture see `ARCHITECTURE.md`.
 
 ---
 
 ## Philosophy
 
-- **No application booting.** Consistent with `todo-laravel.md`. We
+- **No application booting.** Consistent with `laravel.md`. We
   never run PHP or boot a Laravel application.
 - **No call-site scanning.** We do not scan controllers, mailers, or
   other PHP files for `view()` calls to infer template variable types.

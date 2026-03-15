@@ -1,6 +1,6 @@
-# PHPantom — Signature Help: Improvement Plan
+# PHPantom — Signature Help
 
-Signature help is architecturally solid — dual-path detection (AST-based
+Signature help is architecturally solid. Dual-path detection (AST-based
 `CallSite` lookup + text-based fallback), precomputed comma offsets for
 active parameter tracking, content patching for unclosed parens, and
 chain/constructor/first-class-callable resolution all work well. The
@@ -10,11 +10,61 @@ parameter labels.
 
 The remaining work requires new extraction or deeper protocol support.
 
-Items are ordered by impact (descending), then effort (ascending).
+Items are ordered by **impact** (descending), then **effort** (ascending)
+within the same impact tier.
+
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
+| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
-## 5. Closure / arrow function parameter signature help
+## S1. Attribute constructor signature help
+**Impact: Medium · Effort: Medium**
+
+Signature help should fire inside attribute argument lists:
+
+```php
+#[Route('/users', methods: ['GET'])]
+//      ^ signature help here showing Route::__construct params
+```
+
+#### Current state
+
+Attributes are parsed by Mago as `Attribute` AST nodes with an
+`ArgumentList`, but no `CallSite` is emitted for them because they
+are not function calls. The signature help detection path only looks
+for function/method call expressions.
+
+#### Implementation
+
+1. **Emit synthetic `CallSite` for attributes** — in
+   `symbol_map/extraction.rs`, when walking an `Attribute` node that
+   has an argument list, emit a `CallSite` whose target is the
+   attribute class's `__construct` method. The attribute name resolves
+   through the use-map like any class reference.
+
+2. **Resolve the constructor** — in `resolve_callable`, when the
+   target is an attribute class, look up its `__construct` method.
+   Most attributes have a simple constructor with named parameters
+   (PHP 8.0+), so named argument awareness (S4) would pair well.
+
+3. **Label prefix** — use the attribute short name (e.g. `Route`)
+   as the signature label, not `__construct`.
+
+#### Tests
+
+- Integration test: `#[Route('/path', ` → assert signature help
+  shows `Route::__construct` parameters.
+- Integration test: `#[Deprecated(reason: ` → assert
+  `active_parameter` points to the `$reason` parameter.
+- Stub attributes like `#[Override]` (no constructor args) should
+  return an empty signature or no signature.
+
+---
+
+## S2. Closure / arrow function parameter signature help
 **Impact: Medium · Effort: Medium**
 
 Signature help should work when invoking a variable that holds a closure
@@ -66,7 +116,7 @@ don't end with `(...)`.
 
 ---
 
-## 7. Multiple overloaded signatures
+## S3. Multiple overloaded signatures
 **Impact: Low · Effort: Medium-High**
 
 Some PHP functions have multiple signatures depending on argument count
@@ -104,7 +154,7 @@ This is a deeper change:
 
 ---
 
-## 8. Named argument awareness in active parameter
+## S4. Named argument awareness in active parameter
 **Impact: Low · Effort: Medium**
 
 When the user types a named argument (`callback: ` in `array_map(callback: `),
@@ -133,7 +183,7 @@ the parameter list.
 
 ---
 
-## 9. Language construct signature help and hover
+## S5. Language construct signature help and hover
 **Impact: Low · Effort: Low**
 
 PHP language constructs that use parentheses (`unset()`, `isset()`, `empty()`,

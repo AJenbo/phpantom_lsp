@@ -337,12 +337,8 @@ impl Backend {
         };
 
         // Determine the class body the cursor is in.
-        let ctx_classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let ctx_classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
         let current_class = crate::util::find_class_at_offset(&ctx_classes, cursor_offset);
         let (class_start, class_end) = match current_class {
             Some(cc) => (cc.start_offset, cc.end_offset),
@@ -816,12 +812,8 @@ impl Backend {
         namespace: &Option<String>,
         offset: u32,
     ) -> Option<String> {
-        let classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let current_class = crate::util::find_class_at_offset(&classes, offset)?;
 
@@ -869,12 +861,8 @@ impl Backend {
         uri: &str,
         offset: u32,
     ) -> Option<HashSet<String>> {
-        let classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
         let current_class = find_class_at_offset(&classes, offset)?;
         let fqn = current_class.fqn();
         Some(self.collect_hierarchy_for_fqns(&[fqn]))
@@ -962,7 +950,7 @@ impl Backend {
     /// Find the FQN of the class enclosing a given byte offset.
     fn find_enclosing_class_fqn(
         &self,
-        classes: &[ClassInfo],
+        classes: &[Arc<ClassInfo>],
         namespace: &Option<String>,
         offset: u32,
     ) -> Option<String> {
@@ -984,7 +972,7 @@ impl Backend {
     ///   the hierarchy)
     fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
         let mut hierarchy = HashSet::new();
-        let class_loader = |name: &str| -> Option<ClassInfo> { self.find_or_load_class(name) };
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
         // Insert the seeds.
         for fqn in seed_fqns {
@@ -1056,7 +1044,7 @@ impl Backend {
     fn collect_ancestors(
         &self,
         fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         hierarchy: &mut HashSet<String>,
     ) {
         let cls = match class_loader(fqn) {
@@ -1103,7 +1091,7 @@ impl Backend {
         &self,
         cls: &ClassInfo,
         targets: &[String],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
         // Direct parent.
         if let Some(ref parent) = cls.parent_class {
@@ -1152,7 +1140,7 @@ impl Backend {
         &self,
         fqn: &str,
         targets: &[String],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         depth: u32,
     ) -> bool {
         if depth >= MAX_INHERITANCE_DEPTH {

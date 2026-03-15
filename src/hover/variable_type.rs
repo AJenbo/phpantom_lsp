@@ -10,6 +10,8 @@
 //! the AST to find the variable's definition context and returns the
 //! effective type string (docblock overriding native where applicable).
 
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -30,8 +32,8 @@ use crate::completion::variable::raw_type_inference::resolve_variable_assignment
 /// the inferred subclass (e.g. `BrandTranslation`).
 struct HoverClosureCtx<'a> {
     current_class: Option<&'a ClassInfo>,
-    all_classes: &'a [ClassInfo],
-    class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &'a [Arc<ClassInfo>],
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     content: &'a str,
 }
 
@@ -50,8 +52,8 @@ pub(crate) fn resolve_variable_type_string(
     content: &str,
     cursor_offset: u32,
     current_class: Option<&ClassInfo>,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Option<String> {
     // 1. Inline @var override: `/** @var Type $var */`
@@ -654,8 +656,8 @@ fn resolve_foreach_type_via_class(
     content: &str,
     cursor_offset: u32,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     for stmt in stmts {
         match stmt {
@@ -719,8 +721,8 @@ fn resolve_foreach_in_members<'a>(
     content: &str,
     cursor_offset: u32,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     for member in members {
         if let ClassLikeMember::Method(method) = member
@@ -753,8 +755,8 @@ fn resolve_foreach_in_body(
     content: &str,
     cursor_offset: u32,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     for stmt in stmts {
         if let Statement::Foreach(foreach) = stmt {
@@ -814,8 +816,8 @@ fn resolve_foreach_binding_via_class(
     content: &str,
     cursor_offset: u32,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     let foreach_start = foreach.foreach.span().start.offset;
     let body_end = foreach.body.span().end.offset;
@@ -909,8 +911,8 @@ fn resolve_expression_to_classes(
     content: &str,
     cursor_offset: u32,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<ClassInfo> {
     // Simple variable: try to resolve its type.
     if expr_text.starts_with('$') && !expr_text.contains("->") && !expr_text.contains("::") {
@@ -948,7 +950,7 @@ fn resolve_expression_to_classes(
 /// transitively through interfaces.
 fn extract_iterable_type_from_merged(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     is_key: bool,
 ) -> Option<String> {
     // 1. Direct check on implements_generics.
@@ -1007,7 +1009,7 @@ fn extract_iterable_type_from_merged(
 /// interface (e.g. `TypedCollection extends IteratorAggregate`).
 fn is_transitive_iterable(
     iface: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     // Check direct interfaces.
     for parent in &iface.interfaces {
@@ -1459,8 +1461,8 @@ fn infer_callable_param_types_for_call(
                         .all_classes
                         .iter()
                         .find(|c| c.name == name)
-                        .cloned()
-                        .or_else(|| (closure_ctx.class_loader)(&name))
+                        .map(|c| ClassInfo::clone(c))
+                        .or_else(|| (closure_ctx.class_loader)(&name).map(Arc::unwrap_or_clone))
                 });
                 if let Some(ref c) = cls {
                     let resolved =

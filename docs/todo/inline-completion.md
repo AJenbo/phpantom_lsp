@@ -96,7 +96,7 @@ artifact, not bundled in the main LSP binary.
 
 ---
 
-## Phase 1: Template Engine
+## N1. Template Engine
 
 **Effort:** Medium (2-5 days per pattern group)
 **Dependencies:** None beyond existing type resolution
@@ -424,7 +424,7 @@ wrong.
 
 ---
 
-## Phase 2: N-gram Engine
+## N2. N-gram Engine
 
 **Effort:** Medium-High (1-2 weeks including training)
 **Dependencies:** Training corpus, PHP tokenizer
@@ -526,7 +526,7 @@ and `$id`.
 
 ---
 
-## Phase 3: Fine-Tuned GGUF Model
+## N3. Fine-Tuned GGUF Model
 
 **Effort:** High (2-4 weeks including training and integration)
 **Dependencies:** Phase 1 and 2 complete, training infrastructure
@@ -783,7 +783,7 @@ temperature = 0.2
 
 ## Phasing and Sprint Placement
 
-### Phase 1: Template Engine (Sprint 7-8 timeframe)
+### N1. Template Engine (Sprint 7 timeframe)
 
 Implement the `InlineContext` builder and 3-4 high-value template
 patterns:
@@ -795,7 +795,7 @@ patterns:
 This is enough to demo the "how did it know" effect. No external
 dependencies, no model files, ships in the main binary.
 
-### Phase 2: N-gram Engine (post-Sprint 8)
+### N2. N-gram Engine (post-Sprint 7)
 
 - Build the PHP tokenizer
 - Scrape and process the Packagist corpus
@@ -804,7 +804,7 @@ dependencies, no model files, ships in the main binary.
 - Ship the model file as a separate downloadable asset or embed it
   if it stays under 5MB
 
-### Phase 3: GGUF Sidecar (when competing with PHPStorm)
+### N3. GGUF Sidecar (when competing with PHPStorm)
 
 - Select and fine-tune the base model
 - Build the sidecar binary (Rust + llama.cpp bindings, or a small

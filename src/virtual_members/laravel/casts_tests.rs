@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_fixtures::{make_class, make_method, no_loader};
+use std::sync::Arc;
 
 // ── cast_type_to_php_type: built-in types ───────────────────────────
 
@@ -201,13 +202,13 @@ fn cast_unknown_type_falls_back_to_mixed() {
 
 #[test]
 fn cast_custom_class_with_get_method() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\MoneyCast" {
             let mut cast_class = make_class("MoneyCast");
             cast_class
                 .methods
                 .push(make_method("get", Some("\\App\\Money")));
-            Some(cast_class)
+            Some(Arc::new(cast_class))
         } else {
             None
         }
@@ -220,13 +221,13 @@ fn cast_custom_class_with_get_method() {
 
 #[test]
 fn cast_custom_class_canonical_fqn() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\MoneyCast" {
             let mut cast_class = make_class("MoneyCast");
             cast_class
                 .methods
                 .push(make_method("get", Some("App\\Money")));
-            Some(cast_class)
+            Some(Arc::new(cast_class))
         } else {
             None
         }
@@ -241,9 +242,9 @@ fn cast_custom_class_canonical_fqn() {
 
 #[test]
 fn cast_custom_class_without_get_returns_mixed() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\WeirdCast" {
-            Some(make_class("WeirdCast"))
+            Some(Arc::new(make_class("WeirdCast")))
         } else {
             None
         }
@@ -258,11 +259,11 @@ fn cast_custom_class_without_get_returns_mixed() {
 
 #[test]
 fn cast_enum_resolves_to_enum_class() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Enums\\Status" {
             let mut e = make_class("Status");
             e.kind = ClassLikeKind::Enum;
-            Some(e)
+            Some(Arc::new(e))
         } else {
             None
         }
@@ -275,11 +276,11 @@ fn cast_enum_resolves_to_enum_class() {
 
 #[test]
 fn cast_enum_canonical_fqn() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Enums\\Status" {
             let mut e = make_class("Status");
             e.kind = ClassLikeKind::Enum;
-            Some(e)
+            Some(Arc::new(e))
         } else {
             None
         }
@@ -296,11 +297,11 @@ fn cast_enum_canonical_fqn() {
 
 #[test]
 fn cast_castable_resolves_to_class_itself() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![CASTABLE_FQN.to_string()];
-            Some(c)
+            Some(Arc::new(c))
         } else {
             None
         }
@@ -313,11 +314,11 @@ fn cast_castable_resolves_to_class_itself() {
 
 #[test]
 fn cast_castable_with_fqn_interface() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![CASTABLE_FQN.to_string()];
-            Some(c)
+            Some(Arc::new(c))
         } else {
             None
         }
@@ -330,11 +331,11 @@ fn cast_castable_with_fqn_interface() {
 
 #[test]
 fn cast_castable_short_interface_name() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec!["Castable".to_string()];
-            Some(c)
+            Some(Arc::new(c))
         } else {
             None
         }
@@ -349,11 +350,11 @@ fn cast_castable_short_interface_name() {
 
 #[test]
 fn cast_class_with_colon_argument_suffix() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![CASTABLE_FQN.to_string()];
-            Some(c)
+            Some(Arc::new(c))
         } else {
             None
         }
@@ -366,11 +367,11 @@ fn cast_class_with_colon_argument_suffix() {
 
 #[test]
 fn cast_enum_with_colon_argument_suffix() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Enums\\Status" {
             let mut e = make_class("Status");
             e.kind = ClassLikeKind::Enum;
-            Some(e)
+            Some(Arc::new(e))
         } else {
             None
         }
@@ -383,13 +384,13 @@ fn cast_enum_with_colon_argument_suffix() {
 
 #[test]
 fn cast_custom_class_with_colon_argument_and_get() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\MoneyCast" {
             let mut cast_class = make_class("MoneyCast");
             cast_class
                 .methods
                 .push(make_method("get", Some("\\App\\Money")));
-            Some(cast_class)
+            Some(Arc::new(cast_class))
         } else {
             None
         }
@@ -510,7 +511,7 @@ fn tget_skips_empty_string_arg() {
 
 #[test]
 fn cast_custom_class_falls_back_to_implements_generics() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\HtmlCast" {
             let mut cast_class = make_class("HtmlCast");
             // get() has no return type — mimics the real scenario.
@@ -519,7 +520,7 @@ fn cast_custom_class_falls_back_to_implements_generics() {
                 "CastsAttributes".to_string(),
                 vec!["HtmlString".to_string(), "HtmlString".to_string()],
             )];
-            Some(cast_class)
+            Some(Arc::new(cast_class))
         } else {
             None
         }
@@ -532,7 +533,7 @@ fn cast_custom_class_falls_back_to_implements_generics() {
 
 #[test]
 fn cast_implements_generics_take_priority_over_get_return_type() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\HtmlCast" {
             let mut cast_class = make_class("HtmlCast");
             cast_class
@@ -542,7 +543,7 @@ fn cast_implements_generics_take_priority_over_get_return_type() {
                 "CastsAttributes".to_string(),
                 vec!["DifferentType".to_string(), "DifferentType".to_string()],
             )];
-            Some(cast_class)
+            Some(Arc::new(cast_class))
         } else {
             None
         }
@@ -557,14 +558,14 @@ fn cast_implements_generics_take_priority_over_get_return_type() {
 
 #[test]
 fn cast_get_return_type_used_when_no_implements_generics() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Casts\\HtmlCast" {
             let mut cast_class = make_class("HtmlCast");
             cast_class
                 .methods
                 .push(make_method("get", Some("?HtmlString")));
             // No @implements generics — get() is the only signal.
-            Some(cast_class)
+            Some(Arc::new(cast_class))
         } else {
             None
         }

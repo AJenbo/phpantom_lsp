@@ -29,6 +29,7 @@ mod declaring;
 mod file_lookup;
 mod shape_keys;
 
+use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use super::point_location;
@@ -670,7 +671,7 @@ impl Backend {
     fn find_builder_forwarded_method(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<(ClassInfo, String)> {
         if !extends_eloquent_model(class, class_loader) {
             return None;
@@ -708,7 +709,7 @@ impl Backend {
         resolved_candidate: &ClassInfo,
         raw_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<(ClassInfo, String, String)> {
         // Only applies to the Eloquent Builder class.
         let raw_fqn = match &raw_class.file_namespace {

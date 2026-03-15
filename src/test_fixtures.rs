@@ -7,6 +7,7 @@
 //! `make_method()` / etc. should import from here instead.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::types::{
@@ -130,6 +131,6 @@ pub fn make_param(name: &str, type_hint: Option<&str>, is_required: bool) -> Par
 /// A class loader that always returns `None`.
 ///
 /// Useful for tests that don't need cross-class resolution.
-pub fn no_loader(_name: &str) -> Option<ClassInfo> {
+pub fn no_loader(_name: &str) -> Option<Arc<ClassInfo>> {
     None
 }

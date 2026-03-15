@@ -1,22 +1,21 @@
-# PHPantom — Completion Improvements
+# PHPantom — Completion
 
-This document covers completion-specific improvements: dynamic return
-type handling for built-in functions, stub attribute extraction, and
-argument-level intelligence. Items that are about *type resolution
-infrastructure* (generics, narrowing, conditional types) live in
-[todo-type-inference.md](todo-type-inference.md).
+Dynamic return type handling for built-in functions, stub attribute
+extraction, and argument-level intelligence. Items that are about
+*type resolution infrastructure* (generics, narrowing, conditional
+types) live in [type-inference.md](type-inference.md).
 
 Items are ordered by **impact** (descending), then **effort** (ascending)
 within the same impact tier.
 
-| Label | Scale |
-|---|---|
-| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low** |
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
-## 1. Array functions needing new code paths
+## C1. Array functions needing new code paths
 **Impact: Medium · Effort: High**
 
 These functions have return type semantics that don't fit into either
@@ -48,7 +47,7 @@ These functions have return type semantics that don't fit into either
 
 ---
 
-## 2. `LanguageLevelTypeAware` version-aware type hints
+## C2. `LanguageLevelTypeAware` version-aware type hints
 **Impact: Medium · Effort: Medium**
 
 phpstorm-stubs use a second version attribute, `#[LanguageLevelTypeAware]`,
@@ -95,7 +94,7 @@ FQN, so all three names work automatically.
 
 ---
 
-## 3. `#[ArrayShape]` return shapes on stub functions
+## C3. `#[ArrayShape]` return shapes on stub functions
 **Impact: Medium · Effort: Medium**
 
 phpstorm-stubs annotate ~84 functions and methods with
@@ -132,7 +131,7 @@ parsing and should feed into the same `return_type` field on
 
 ---
 
-## 4. Go-to-definition for array shape keys via bracket access
+## C4. Go-to-definition for array shape keys via bracket access
 **Impact: Low-Medium · Effort: Medium**
 
 Array shape keys accessed via bracket notation (`$status['code']`)
@@ -151,7 +150,7 @@ key inside the matching `array{…}` annotation.
 
 ---
 
-## 5. Non-array functions with dynamic return types
+## C5. Non-array functions with dynamic return types
 **Impact: Low · Effort: High**
 
 PHPStan also provides dynamic return type extensions for many non-array
@@ -182,7 +181,7 @@ return types (less impactful for class-based completion).
 
 ---
 
-## 6. `#[ReturnTypeContract]` parameter-dependent return types
+## C6. `#[ReturnTypeContract]` parameter-dependent return types
 **Impact: Low · Effort: Low**
 
 phpstorm-stubs use `#[ReturnTypeContract]` on 4 functions to express
@@ -225,7 +224,7 @@ type. This integrates into the call return type resolution path.
 
 ---
 
-## 7. `#[ExpectedValues]` parameter value suggestions
+## C7. `#[ExpectedValues]` parameter value suggestions
 **Impact: Low · Effort: Medium**
 
 phpstorm-stubs annotate ~62 parameters and return values with
@@ -270,7 +269,7 @@ combinations.
 
 ---
 
-## 8. `class_alias()` support
+## C8. `class_alias()` support
 **Impact: Low-Medium · Effort: Medium**
 
 Resolve `class_alias('OriginalClass', 'AliasName')` so that the alias
@@ -308,3 +307,4 @@ and no go-to-definition because PHPantom has no record of the alias.
    `if (!class_exists(...))` guards) are common and should still be
    processed since the alias is expected to be available at analysis
    time.
+

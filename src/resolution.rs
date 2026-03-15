@@ -51,8 +51,8 @@ impl Backend {
     ///   - A namespace-qualified name like `"Klarna\\Customer"`
     ///   - A fully-qualified name like `"\\Klarna\\Customer"` (leading `\` is stripped)
     ///
-    /// Returns a cloned `ClassInfo` if found, or `None`.
-    pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<ClassInfo> {
+    /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
+    pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
         // The class name stored in ClassInfo is just the short name (e.g. "Customer"),
         // so we match against the last segment of the namespace-qualified name.
         let last_segment = short_name(class_name);
@@ -83,7 +83,7 @@ impl Backend {
             && let Some(classes) = self.parse_and_cache_file(&file_path)
             && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
         {
-            return Some(ClassInfo::clone(cls));
+            return Some(Arc::clone(cls));
         }
 
         // ── Phase 2: Try PSR-4 resolution ──
@@ -101,7 +101,7 @@ impl Backend {
                 && let Some(classes) = self.parse_and_cache_file(&file_path)
                 && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
             {
-                return Some(ClassInfo::clone(cls));
+                return Some(Arc::clone(cls));
             }
         }
 
@@ -123,7 +123,7 @@ impl Backend {
                 self.parse_and_cache_content_versioned(stub_content, &stub_uri, ver)
                 && let Some(cls) = classes.iter().find(|c| c.name == last_segment)
             {
-                return Some(ClassInfo::clone(cls));
+                return Some(Arc::clone(cls));
             }
         }
 
@@ -423,10 +423,10 @@ impl Backend {
     pub(crate) fn resolve_class_name(
         &self,
         name: &str,
-        local_classes: &[ClassInfo],
+        local_classes: &[Arc<ClassInfo>],
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
-    ) -> Option<ClassInfo> {
+    ) -> Option<Arc<ClassInfo>> {
         // ── Fully qualified name (leading `\`) ──────────────
         if let Some(stripped) = name.strip_prefix('\\') {
             return self.find_or_load_class(stripped);
@@ -441,7 +441,7 @@ impl Backend {
             // Check local classes (same-file shortcut).
             let lookup = short_name(name);
             if let Some(cls) = local_classes.iter().find(|c| c.name == lookup) {
-                return Some(cls.clone());
+                return Some(Arc::clone(cls));
             }
             // In a namespace, try the namespace-qualified form first.
             // Per PHP semantics, class names do NOT fall back to global
@@ -537,7 +537,7 @@ impl Backend {
     pub(crate) fn class_loader<'a>(
         &'a self,
         ctx: &'a FileContext,
-    ) -> impl Fn(&str) -> Option<ClassInfo> + 'a {
+    ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
         self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace)
     }
 
@@ -549,10 +549,10 @@ impl Backend {
     /// recovery).
     pub(crate) fn class_loader_with<'a>(
         &'a self,
-        classes: &'a [ClassInfo],
+        classes: &'a [Arc<ClassInfo>],
         use_map: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
-    ) -> impl Fn(&str) -> Option<ClassInfo> + 'a {
+    ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
         move |name: &str| self.resolve_class_name(name, classes, use_map, namespace)
     }
 

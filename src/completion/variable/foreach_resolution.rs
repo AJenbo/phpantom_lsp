@@ -1,3 +1,5 @@
+use mago_span::HasSpan;
+use mago_syntax::ast::*;
 /// Foreach and destructuring variable type resolution.
 ///
 /// This submodule handles resolving types for variables that appear as:
@@ -11,8 +13,7 @@
 /// These functions are self-contained: they receive a [`VarResolutionCtx`]
 /// and push resolved [`ClassInfo`] values into a results vector.  They were
 /// extracted from `variable_resolution.rs` to improve navigability.
-use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use std::sync::Arc;
 
 use crate::docblock;
 use crate::types::ClassInfo;
@@ -410,7 +411,7 @@ const ITERABLE_IFACE_NAMES: &[&str] = &[
 /// members).
 fn extract_iterable_element_type_from_class(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     // 1. Check implements_generics for known iterable interfaces.
     for (name, args) in &class.implements_generics {
@@ -464,7 +465,7 @@ fn extract_iterable_element_type_from_class(
 /// implicit `int` key which is scalar).
 fn extract_iterable_key_type_from_class(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     // 1. Check implements_generics for known iterable interfaces.
     for (name, args) in &class.implements_generics {
@@ -510,7 +511,7 @@ fn extract_iterable_key_type_from_class(
 /// interface (e.g. `TypedCollection extends IteratorAggregate`).
 fn is_transitive_iterable(
     iface: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     // Check direct interfaces.
     for parent in &iface.interfaces {
@@ -846,7 +847,7 @@ pub(in crate::completion) fn extract_rhs_iterable_raw_type<'b>(
             all_classes
                 .iter()
                 .find(|c| c.name == current_class_name)
-                .cloned()
+                .map(|c| ClassInfo::clone(c))
                 .into_iter()
                 .collect()
         } else if let Expression::Variable(Variable::Direct(dv)) = method_call.object {
@@ -903,8 +904,8 @@ pub(in crate::completion) fn extract_rhs_iterable_raw_type<'b>(
             let owner = all_classes
                 .iter()
                 .find(|c| c.name == cls_name)
-                .cloned()
-                .or_else(|| class_loader(&cls_name));
+                .map(|c| ClassInfo::clone(c))
+                .or_else(|| class_loader(&cls_name).map(Arc::unwrap_or_clone));
             if let Some(ref owner) = owner
                 && let Some(rt) = crate::inheritance::resolve_method_return_type(
                     owner,
@@ -943,7 +944,7 @@ pub(in crate::completion) fn extract_rhs_iterable_raw_type<'b>(
                         all_classes
                             .iter()
                             .find(|c| c.name == current_class_name)
-                            .cloned()
+                            .map(|c| ClassInfo::clone(c))
                             .into_iter()
                             .collect()
                     } else if let Expression::Variable(Variable::Direct(dv)) = obj {

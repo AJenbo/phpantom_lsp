@@ -27,6 +27,8 @@
 /// Chained array accesses like `$response['meta']['` are supported.
 /// The detector collects prefix keys (`["meta"]`) and the resolver walks
 /// through each level of the shape to offer keys from the inner type.
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -290,7 +292,11 @@ impl Backend {
                 if patched == content {
                     return vec![];
                 }
-                patched_classes_storage = self.parse_php(&patched);
+                patched_classes_storage = self
+                    .parse_php(&patched)
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect::<Vec<_>>();
                 let patched_offset = position_to_offset(&patched, position);
                 let patched_ctx = FileContext {
                     classes: patched_classes_storage.clone(),

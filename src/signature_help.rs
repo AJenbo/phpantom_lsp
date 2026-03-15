@@ -11,6 +11,8 @@
 //! recover an unclosed paren), we fall back to text-based backward
 //! scanning so that signature help still works on incomplete code.
 
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -399,7 +401,8 @@ impl Backend {
             // a re-parsed AST so resolution can find class context.
             let patched = Self::patch_content_for_signature(content, position);
             if patched != content {
-                let patched_classes = self.parse_php(&patched);
+                let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
+                    self.parse_php(&patched).into_iter().map(Arc::new).collect();
                 if !patched_classes.is_empty() {
                     let patched_ctx = FileContext {
                         classes: patched_classes,

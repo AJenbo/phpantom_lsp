@@ -18,6 +18,8 @@
 ///
 /// All functions in this module are free functions (not methods on
 /// `Backend`).  Cross-module dependencies use their canonical module paths.
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -213,8 +215,8 @@ pub(crate) fn resolve_variable_assignment_raw_type(
     content: &str,
     cursor_offset: u32,
     current_class: Option<&ClassInfo>,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Option<String> {
     let dummy_class;

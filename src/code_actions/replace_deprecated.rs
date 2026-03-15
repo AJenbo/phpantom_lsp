@@ -12,6 +12,7 @@
 //! - `%class%` — the object/class expression for method call replacements.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -28,7 +29,7 @@ use crate::virtual_members::resolve_class_fully_cached;
 struct FileCtx<'a> {
     use_map: &'a HashMap<String, String>,
     namespace: &'a Option<String>,
-    local_classes: &'a [ClassInfo],
+    local_classes: &'a [Arc<ClassInfo>],
 }
 
 impl Backend {
@@ -58,12 +59,8 @@ impl Backend {
         let file_use_map: HashMap<String, String> =
             self.use_map.read().get(uri).cloned().unwrap_or_default();
         let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
-        let local_classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let local_classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let cache = &self.resolved_class_cache;
@@ -546,7 +543,9 @@ fn resolve_subject_to_class(
             } else {
                 cls.name.clone()
             };
-            backend.find_or_load_class(&fqn)
+            backend
+                .find_or_load_class(&fqn)
+                .map(|arc| ClassInfo::clone(&arc))
         }
         "parent" => {
             let cls = ctx
@@ -555,11 +554,15 @@ fn resolve_subject_to_class(
                 .find(|c| !c.name.starts_with("__anonymous@") && c.parent_class.is_some())?;
             let parent = cls.parent_class.as_ref()?;
             let fqn = resolve_name_to_fqn(parent, ctx.use_map, ctx.namespace);
-            backend.find_or_load_class(&fqn)
+            backend
+                .find_or_load_class(&fqn)
+                .map(|arc| ClassInfo::clone(&arc))
         }
         _ if is_static && !trimmed.starts_with('$') => {
             let fqn = resolve_name_to_fqn(trimmed, ctx.use_map, ctx.namespace);
-            backend.find_or_load_class(&fqn)
+            backend
+                .find_or_load_class(&fqn)
+                .map(|arc| ClassInfo::clone(&arc))
         }
         _ if trimmed.starts_with('$') => {
             // Variable — use variable resolution.
@@ -571,7 +574,7 @@ fn resolve_subject_to_class(
                         && access_offset >= c.start_offset
                         && access_offset <= c.end_offset
                 })
-                .cloned()
+                .map(|c| ClassInfo::clone(c))
                 .unwrap_or_default();
 
             let function_loader = backend.function_loader_with(ctx.use_map, ctx.namespace);

@@ -7,6 +7,7 @@
 //! (`legacy_accessor_method_name`, `accessor_method_candidates`).
 
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
+use std::sync::Arc;
 
 use super::ELOQUENT_MODEL_FQN;
 
@@ -19,7 +20,7 @@ use super::ELOQUENT_MODEL_FQN;
 /// themselves) and returns `true` when the target base class is found.
 pub(in crate::virtual_members::laravel) fn walks_parent_chain(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     predicate: fn(&str) -> bool,
 ) -> bool {
     if predicate(&class.name) {
@@ -41,7 +42,7 @@ pub(in crate::virtual_members::laravel) fn walks_parent_chain(
                 if predicate(&parent.name) {
                     return true;
                 }
-                current = parent;
+                current = Arc::unwrap_or_clone(parent);
             }
             None => break,
         }
@@ -63,7 +64,7 @@ pub(in crate::virtual_members::laravel) fn is_eloquent_model(class_name: &str) -
 /// Returns `true` if the class itself is `Model` or any ancestor is.
 pub fn extends_eloquent_model(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     walks_parent_chain(class, class_loader, is_eloquent_model)
 }

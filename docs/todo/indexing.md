@@ -1,9 +1,17 @@
-# PHPantom — Indexing & File Discovery
+# PHPantom — Indexing
 
 This document covers how PHPantom discovers, parses, and caches class
 definitions across the workspace. The goal is to remain fast and
 lightweight by default while offering progressively richer modes for
 users who want exhaustive workspace intelligence.
+
+Items are ordered by **impact** (descending), then **effort** (ascending)
+within the same impact tier.
+
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
+| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
@@ -99,27 +107,7 @@ is that it never self-scans to fill gaps.
 
 ---
 
-## Phase 1: Self-generated classmap
-
-No outstanding items. Implemented: byte-level classmap scanner,
-PSR-4 compliance filtering, vendor package scanning via
-`installed.json`, non-Composer workspace fallback, strategy
-configuration, and user feedback messages.
-
----
-
-## Phase 1.5: Merged classmap + self-scan
-
-No outstanding items. Implemented: the Composer classmap and the
-self-scanner run as a single merged pipeline. The classmap file paths
-serve as a skip set for the self-scanner, so whatever Composer already
-covers is a free performance win and whatever it missed is discovered
-automatically. The completeness heuristic has been removed. Monorepo
-subprojects use the same merged pipeline.
-
----
-
-## Phase 2: Staleness detection and auto-refresh
+## X1. Staleness detection and auto-refresh
 
 **Goal:** Keep the classmap fresh without user intervention.
 
@@ -143,48 +131,14 @@ happens rarely (a few times per day at most).
 
 ---
 
-## Phase 2.5: Lazy autoload file indexing
-
-No outstanding items. Implemented: the autoload file loop in
-`server.rs` (`initialized`) now uses `find_symbols` (the byte-level
-full-scan) instead of `update_ast` to process files from Composer's
-`autoload_files.php` and their `require_once` chains. This populates
-`autoload_function_index`, `autoload_constant_index`, and
-`class_index` without building full AST data. Full parsing is deferred
-to the moment a symbol is first accessed via `find_or_load_function`
-(Phase 1.5), `resolve_constant_definition` (Phase 1.5), or
-`find_or_load_class` (through `class_index`).
-
-Functions inside `if (! function_exists(...))` guards are not
-discovered by the byte-level scanner (they are at brace depth > 0).
-As a safety net, `autoload_file_paths` stores all visited autoload
-file paths. When a function or constant is not found in any index or
-stubs, `find_or_load_function` and `resolve_constant_definition`
-lazily parse each known autoload file via `update_ast` as a last
-resort (Phase 1.75). Each file is parsed at most once.
-
----
-
-## Phase 2.6: Non-Composer function and constant discovery
-
-No outstanding items. Implemented: `find_symbols` byte-level scanner
-extracts classes, functions, `define()` constants, and top-level
-`const` in a single pass. `scan_workspace_fallback_full` populates
-`autoload_function_index` and `autoload_constant_index` for
-non-Composer projects. Lazy resolution in `find_or_load_function`
-and `resolve_constant_definition` parses files on demand. Completion
-shows autoload index entries before they are lazily parsed.
-
----
-
-## Phase 3: Parallel file processing
+## X2. Parallel file processing
 
 **Goal:** Speed up workspace-wide operations (find references,
 go-to-implementation, self-scan, diagnostics) by processing files in
 parallel with priority awareness.
 
-All prerequisites (§3 `RwLock`, §5 `Arc<String>`, §6 `Arc<SymbolMap>`)
-are complete.
+All prerequisites (`RwLock`, `Arc<String>`, `Arc<SymbolMap>`) are
+complete.
 
 ### Current state (partial)
 
@@ -264,7 +218,7 @@ builds in the background.
 
 ---
 
-## Phase 4: Completion item detail on demand
+## X3. Completion item detail on demand
 
 **Goal:** Show type signatures, docblock descriptions, and
 deprecation info in completion item hover without parsing every
@@ -300,7 +254,7 @@ is a nice-to-have, not a requirement.
 
 ---
 
-## Phase 5: Full background indexing
+## X4. Full background indexing
 
 **Goal:** Parse every PHP file in the project in the background,
 enabling workspace symbols, fast find-references without on-demand
@@ -308,20 +262,21 @@ scanning, and complete completion item detail.
 
 **Prerequisites (from [performance.md](performance.md)):**
 
-- **§1 FQN secondary index.** Done. `fqn_index` provides O(1)
-  lookups by fully-qualified name, so the second pass populating
-  `ast_map` with thousands of entries no longer causes linear scans.
-- **§2 `Arc<ClassInfo>`.** Full indexing stores a `ClassInfo` for every
-  class in the project. Without `Arc`, every resolution clones the
-  entire struct out of the map. With `Arc`, retrieval is a
+- **FQN secondary index.** Done. `fqn_index` provides O(1) lookups
+  by fully-qualified name, so the second pass populating `ast_map`
+  with thousands of entries no longer causes linear scans.
+- **`Arc<ClassInfo>` (P1).** Full indexing stores a `ClassInfo` for
+  every class in the project. Without `Arc`, every resolution clones
+  the entire struct out of the map. With `Arc`, retrieval is a
   reference-count increment. This is the difference between full
   indexing using ~200 MB vs. ~500 MB for a large project.
-- **§3 `RwLock`.** Done. The second pass writes to `ast_map` at Low priority
-  while High-priority LSP requests read from it. `Mutex` would force
-  every completion/hover request to wait for the current background
-  parse to finish its map insertion. `RwLock` lets reads proceed
-  concurrently with other reads; only the brief write window blocks.
-- **§4 `HashSet` dedup.** Done. All member deduplication during
+- **`RwLock`.** Done. The second pass writes to `ast_map` at Low
+  priority while High-priority LSP requests read from it. `Mutex`
+  would force every completion/hover request to wait for the current
+  background parse to finish its map insertion. `RwLock` lets reads
+  proceed concurrently with other reads; only the brief write window
+  blocks.
+- **`HashSet` dedup.** Done. All member deduplication during
   inheritance merging now uses `HashSet` lookups, bringing the
   per-resolution cost from O(N²) to O(N).
 
@@ -332,7 +287,7 @@ When `strategy = "full"` is set in `.phpantom.toml`.
 ### Design: self + second pass
 
 Full mode is not a separate discovery system. It works exactly like
-`"self"` mode (Phase 1) and then schedules a second pass:
+`"self"` mode (self-scan) and then schedules a second pass:
 
 1. **First pass (same as self):** Build the classmap via byte-level
    scanning. This completes in about a second and gives us class
@@ -367,7 +322,7 @@ Each stage improves on the last without blocking the previous one.
 
 ### Behaviour
 
-1. Respect the priority system from Phase 3: pause the second pass
+1. Respect the priority system from X2: pause the second pass
    when higher-priority work arrives.
 2. Process user code first, then vendor.
 3. Report progress via `$/progress` tokens so the editor can show
@@ -384,8 +339,8 @@ codebase, full indexing will use meaningful RAM. This is acceptable
 because it's an opt-in mode, but we should profile and trim struct
 sizes over time. The aim is to stay under 512 MB for a full project.
 
-The performance prerequisites above (§2 `Arc<ClassInfo>`, §5
-`Arc<String>`, §6 `Arc<SymbolMap>`) directly reduce memory usage by
+The performance prerequisites above (P1 `Arc<ClassInfo>`,
+`Arc<String>`, `Arc<SymbolMap>`) directly reduce memory usage by
 sharing data across the ast_map, caches, and snapshot copies instead
 of deep-cloning each. These should be measured before and after to
 validate the 512 MB target.
@@ -404,7 +359,7 @@ one-time hint suggesting they enable `strategy = "full"` in
 
 ---
 
-## Phase 5.5: Granular progress reporting
+## X5. Granular progress reporting
 **Impact: Medium · Effort: Medium**
 
 All progress indicators in PHPantom currently report coarse
@@ -495,14 +450,14 @@ This avoids threading async senders into sync code.
 
 ---
 
-## Phase 6: Disk cache (evaluate later)
+## X6. Disk cache (evaluate later)
 
 **Goal:** Persist the full index to disk so that restarts don't
 require a full rescan.
 
 ### When to consider
 
-Only if Phase 5 background indexing is slow enough on cold start that
+Only if X4 background indexing is slow enough on cold start that
 users complain. Given that:
 - Mago can lint 45K files in 2 seconds.
 - A regex classmap scan over 21K files should be sub-second.

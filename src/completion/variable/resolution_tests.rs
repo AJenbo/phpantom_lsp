@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::enrich_builder_type_in_scope;
 use crate::test_fixtures::make_class;
 
@@ -9,11 +11,13 @@ fn make_model(name: &str) -> ClassInfo {
     class
 }
 
-fn model_loader(name: &str) -> Option<ClassInfo> {
+fn model_loader(name: &str) -> Option<Arc<ClassInfo>> {
     if name == "Illuminate\\Database\\Eloquent\\Model" {
-        Some(make_class("Illuminate\\Database\\Eloquent\\Model"))
+        Some(Arc::new(make_class(
+            "Illuminate\\Database\\Eloquent\\Model",
+        )))
     } else if name == "App\\Models\\User" {
-        Some(make_model("App\\Models\\User"))
+        Some(Arc::new(make_model("App\\Models\\User")))
     } else {
         None
     }
@@ -205,12 +209,16 @@ function test() {
         c
     };
 
-    let all_classes = vec![processor.clone(), builder.clone(), factory.clone()];
-    let class_loader = |name: &str| -> Option<ClassInfo> {
+    let all_classes: Vec<Arc<ClassInfo>> = vec![
+        Arc::new(processor.clone()),
+        Arc::new(builder.clone()),
+        Arc::new(factory.clone()),
+    ];
+    let class_loader = |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "Processor" => Some(processor.clone()),
-            "Builder" => Some(builder.clone()),
-            "Factory" => Some(factory.clone()),
+            "Processor" => Some(Arc::new(processor.clone())),
+            "Builder" => Some(Arc::new(builder.clone())),
+            "Factory" => Some(Arc::new(factory.clone())),
             _ => None,
         }
     };
@@ -326,23 +334,27 @@ function test() {
         c
     };
 
-    let all_classes: Vec<ClassInfo> = vec![];
+    let all_classes: Vec<Arc<ClassInfo>> = vec![];
 
     let user_c = user.clone();
     let user_factory_c = user_factory.clone();
     let factory_base_c = factory_base.clone();
     let model_base_c = model_base.clone();
     let has_factory_c = has_factory_trait.clone();
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "User" | "App\\Models\\User" => Some(user_c.clone()),
-            "UserFactory" | "Database\\Factories\\UserFactory" => Some(user_factory_c.clone()),
-            "Factory" | "Illuminate\\Database\\Eloquent\\Factories\\Factory" => {
-                Some(factory_base_c.clone())
+            "User" | "App\\Models\\User" => Some(Arc::new(user_c.clone())),
+            "UserFactory" | "Database\\Factories\\UserFactory" => {
+                Some(Arc::new(user_factory_c.clone()))
             }
-            "Model" | "Illuminate\\Database\\Eloquent\\Model" => Some(model_base_c.clone()),
+            "Factory" | "Illuminate\\Database\\Eloquent\\Factories\\Factory" => {
+                Some(Arc::new(factory_base_c.clone()))
+            }
+            "Model" | "Illuminate\\Database\\Eloquent\\Model" => {
+                Some(Arc::new(model_base_c.clone()))
+            }
             "HasFactory" | "Illuminate\\Database\\Eloquent\\Factories\\HasFactory" => {
-                Some(has_factory_c.clone())
+                Some(Arc::new(has_factory_c.clone()))
             }
             _ => None,
         }

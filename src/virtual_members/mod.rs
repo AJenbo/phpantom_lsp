@@ -228,7 +228,7 @@ pub trait VirtualMemberProvider {
     fn applies_to(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool;
 
     /// Produce virtual members for this class.
@@ -245,7 +245,7 @@ pub trait VirtualMemberProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers;
 }
@@ -369,7 +369,7 @@ fn type_specificity(hint: &Option<String>) -> u8 {
 /// higher-priority providers' contributions shadow lower-priority ones.
 pub fn apply_virtual_members(
     class: &mut ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     providers: &[Box<dyn VirtualMemberProvider>],
     cache: Option<&ResolvedClassCache>,
 ) {
@@ -429,7 +429,7 @@ pub fn default_providers() -> Vec<Box<dyn VirtualMemberProvider>> {
 /// [`resolve_class_with_inheritance`] directly.
 pub fn resolve_class_fully(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> ClassInfo {
     resolve_class_fully_inner(class, class_loader, None, &[])
 }
@@ -448,7 +448,7 @@ pub fn resolve_class_fully(
 /// transform to the returned value.
 pub fn resolve_class_fully_cached(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: &ResolvedClassCache,
 ) -> ClassInfo {
     resolve_class_fully_inner(class, class_loader, Some(cache), &[])
@@ -463,7 +463,7 @@ pub fn resolve_class_fully_cached(
 /// when `None`, behaves like [`resolve_class_fully`].
 pub fn resolve_class_fully_maybe_cached(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> ClassInfo {
     resolve_class_fully_inner(class, class_loader, cache, &[])
@@ -485,7 +485,7 @@ fn class_fqn(class: &ClassInfo) -> String {
 /// [`resolve_class_fully_cached`].
 fn resolve_class_fully_inner(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
     generic_args: &[String],
 ) -> ClassInfo {
@@ -605,7 +605,7 @@ fn resolve_class_fully_inner(
                 }
 
                 active_subs = level_subs;
-                current = parent;
+                current = Arc::unwrap_or_clone(parent);
             } else {
                 break;
             }

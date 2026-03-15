@@ -27,6 +27,7 @@
 /// are also housed here because they are exclusively used by the
 /// completion handler.
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use super::resolver::ResolutionCtx;
 
@@ -549,7 +550,8 @@ impl Backend {
         if params.is_empty() {
             let patched = Self::patch_content_at_cursor(content, position);
             if patched != content {
-                let patched_classes = self.parse_php(&patched);
+                let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
+                    self.parse_php(&patched).into_iter().map(Arc::new).collect();
                 if !patched_classes.is_empty() {
                     let patched_ctx = FileContext {
                         classes: patched_classes,
@@ -736,7 +738,8 @@ impl Backend {
                     if resolved.is_empty() && target.subject.starts_with('$') {
                         let patched = Self::patch_incomplete_member_access(content, position);
                         if patched != content {
-                            let patched_classes = self.parse_php(&patched);
+                            let patched_classes: Vec<Arc<crate::types::ClassInfo>> =
+                                self.parse_php(&patched).into_iter().map(Arc::new).collect();
                             let patched_offset = position_to_offset(&patched, position);
                             let patched_current =
                                 find_class_at_offset(&patched_classes, patched_offset);

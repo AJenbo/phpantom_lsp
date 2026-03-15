@@ -778,8 +778,7 @@ completion is about types the developer has *not yet* separated.
 Members that are only available on a subset of the union already show the
 originating class in the `detail` field (e.g. "Class: AdminUser"), which
 gives the developer a visual hint. A future enhancement could sort
-intersection members above branch-only members or add an explicit marker
-(see todo item 35).
+intersection members above branch-only members or add an explicit marker.
 
 ## Context-Aware Class Name Completion
 

@@ -26,6 +26,7 @@
 /// through generic resolution), and infers `$u` as the concrete element
 /// type.
 use std::cell::Cell;
+use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::ast::sequence::TokenSeparatedSequence;
@@ -558,8 +559,8 @@ fn closure_this_from_static_receiver(
         .all_classes
         .iter()
         .find(|c| c.name == class_name)
-        .cloned()
-        .or_else(|| (ctx.class_loader)(&class_name))?;
+        .map(|c| ClassInfo::clone(c))
+        .or_else(|| (ctx.class_loader)(&class_name).map(Arc::unwrap_or_clone))?;
 
     let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
         &owner,
@@ -602,7 +603,7 @@ fn resolve_closure_this_type(
 
     // Try local classes first, then the cross-file loader.
     if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == type_str) {
-        return Some(cls.clone());
+        return Some(ClassInfo::clone(cls));
     }
 
     let resolved = (ctx.class_loader)(type_str)?;
@@ -1374,8 +1375,8 @@ fn infer_callable_params_from_static_receiver(
         ctx.all_classes
             .iter()
             .find(|c| c.name == name)
-            .cloned()
-            .or_else(|| (ctx.class_loader)(&name))
+            .map(|c| ClassInfo::clone(c))
+            .or_else(|| (ctx.class_loader)(&name).map(Arc::unwrap_or_clone))
     });
     if let Some(ref cls) = owner {
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(

@@ -22,6 +22,8 @@
 /// All functions in this module are free functions (not methods on
 /// `Backend`).  Cross-module dependencies that previously used `Self::`
 /// are called via their canonical module paths.
+use std::sync::Arc;
+
 use crate::docblock::{self, replace_self_in_type};
 use crate::types::{BracketSegment, ClassInfo};
 use crate::util::{find_semicolon_balanced, short_name};
@@ -200,7 +202,7 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
     let cursor_offset = rctx.cursor_offset;
     let current_class = rctx.current_class;
     let all_classes = rctx.all_classes;
-    let class_loader: &dyn Fn(&str) -> Option<ClassInfo> = rctx.class_loader;
+    let class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = rctx.class_loader;
     let function_loader = rctx.function_loader;
     let search_area = content.get(..cursor_offset as usize)?;
 
@@ -245,8 +247,8 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
                 all_classes
                     .iter()
                     .find(|c| c.name == lookup)
-                    .cloned()
-                    .or_else(|| class_loader(&clean))
+                    .map(|c| ClassInfo::clone(c))
+                    .or_else(|| class_loader(&clean).map(Arc::unwrap_or_clone))
             })
         } else {
             // Non-variable LHS (e.g. chained call) — delegate to
@@ -271,14 +273,14 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
         } else if class_part == "parent" {
             current_class
                 .and_then(|cc| cc.parent_class.as_ref())
-                .and_then(|p| class_loader(p))
+                .and_then(|p| class_loader(p).map(Arc::unwrap_or_clone))
         } else {
             let lookup = short_name(class_part);
             all_classes
                 .iter()
                 .find(|c| c.name == lookup)
-                .cloned()
-                .or_else(|| class_loader(class_part))
+                .map(|c| ClassInfo::clone(c))
+                .or_else(|| class_loader(class_part).map(Arc::unwrap_or_clone))
         };
 
         if let Some(cls) = owner {
@@ -313,8 +315,8 @@ pub(in crate::completion) fn try_chained_array_access_with_candidates<'a>(
     candidates: impl Iterator<Item = String> + 'a,
     segments: &[BracketSegment],
     current_class: Option<&ClassInfo>,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<ClassInfo>> {
     let current_class_name = current_class.map(|c| c.name.as_str()).unwrap_or("");
 
@@ -343,8 +345,8 @@ fn walk_array_segments_and_resolve(
     raw_type: &str,
     segments: &[BracketSegment],
     current_class_name: &str,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<ClassInfo>> {
     let mut current_type = raw_type.to_string();
 
@@ -415,8 +417,8 @@ fn resolve_raw_type_from_call_chain(
     callee: &str,
     _args_text: &str,
     current_class: Option<&ClassInfo>,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     // Split at the rightmost `->` to get the final method name and
     // the LHS expression that produces the owning object.
@@ -441,8 +443,8 @@ fn resolve_raw_type_from_call_chain(
 fn resolve_lhs_to_class(
     lhs: &str,
     current_class: Option<&ClassInfo>,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<ClassInfo> {
     // Trim whitespace so that multi-line call chains (where
     // `rfind("->")` leaves trailing newlines/spaces on the LHS)
@@ -460,8 +462,8 @@ fn resolve_lhs_to_class(
         return all_classes
             .iter()
             .find(|c| c.name == lookup)
-            .cloned()
-            .or_else(|| class_loader(&class_name));
+            .map(|c| ClassInfo::clone(c))
+            .or_else(|| class_loader(&class_name).map(Arc::unwrap_or_clone));
     }
 
     // LHS ends with `)` — it's a call expression.  Recurse.
@@ -513,8 +515,8 @@ fn resolve_lhs_to_class(
                     all_classes
                         .iter()
                         .find(|c| c.name == lookup)
-                        .cloned()
-                        .or_else(|| class_loader(cls_part))
+                        .map(|c| ClassInfo::clone(c))
+                        .or_else(|| class_loader(cls_part).map(Arc::unwrap_or_clone))
                 };
                 if let Some(cls) = resolved {
                     return crate::inheritance::resolve_method_return_type(
@@ -533,8 +535,8 @@ fn resolve_lhs_to_class(
         return all_classes
             .iter()
             .find(|c| c.name == lookup)
-            .cloned()
-            .or_else(|| class_loader(&clean));
+            .map(|c| ClassInfo::clone(c))
+            .or_else(|| class_loader(&clean).map(Arc::unwrap_or_clone));
     }
 
     // `$this->prop` — property access
@@ -550,8 +552,8 @@ fn resolve_lhs_to_class(
         return all_classes
             .iter()
             .find(|c| c.name == lookup)
-            .cloned()
-            .or_else(|| class_loader(&clean));
+            .map(|c| ClassInfo::clone(c))
+            .or_else(|| class_loader(&clean).map(Arc::unwrap_or_clone));
     }
 
     None

@@ -4,6 +4,7 @@
 //! here to avoid duplication.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -124,13 +125,14 @@ pub(crate) fn resolve_to_fqn(
 /// encloses `offset`, including anonymous classes.  Used for
 /// `$this`/`self`/`static` resolution inside diagnostic collectors.
 pub(crate) fn find_innermost_enclosing_class(
-    local_classes: &[ClassInfo],
+    local_classes: &[Arc<ClassInfo>],
     offset: u32,
 ) -> Option<&ClassInfo> {
     local_classes
         .iter()
         .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
         .min_by_key(|c| c.end_offset.saturating_sub(c.start_offset))
+        .map(|c| c.as_ref())
 }
 
 /// Build a standard diagnostic with the common fields pre-filled.

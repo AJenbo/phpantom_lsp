@@ -1,9 +1,16 @@
-# PHPantom — Laravel Support: Remaining Work
+# PHPantom — Laravel
 
+Known gaps and missing features in PHPantom's Laravel Eloquent support.
+For the general architecture and virtual member provider design, see
+`ARCHITECTURE.md`.
 
-This document tracks bugs, known gaps, and missing features in
-PHPantom's Laravel Eloquent support. For the general architecture and
-virtual member provider design, see `ARCHITECTURE.md`.
+Items are ordered by **impact** (descending), then **effort** (ascending)
+within the same impact tier.
+
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
+| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
@@ -13,7 +20,7 @@ virtual member provider design, see `ARCHITECTURE.md`.
 |------|--------|
 | Container string aliases | Requires booting the application. Use `::class` references instead. |
 | Facade `getFacadeAccessor()` with string aliases | Requires booting the application. `@method static` tags provide a workable fallback. |
-| Blade templates | Separate project. See `todo-blade.md` for the implementation plan. |
+| Blade templates | Separate project. See `blade.md` for the implementation plan. |
 | Model column types from DB/migrations | Unreasonable complexity. Require `@property` annotations (via ide-helper or hand-written). |
 | Legacy Laravel versions | We target current Larastan-style annotations. Older code may degrade gracefully. |
 | Application provider scanning | Low-value, high-complexity. |
@@ -43,7 +50,7 @@ virtual member provider design, see `ARCHITECTURE.md`.
 
 ---
 
-## Facade completion
+## L1. Facade completion
 
 Facades are the primary way Laravel developers interact with framework
 services (`Cache::get(...)`, `DB::table(...)`, `Route::get(...)`, etc.).
@@ -95,7 +102,7 @@ facades expose them as **static** calls. The provider must flip
 
 ### Implementation notes
 
-**Impact: High. Effort: Medium.**
+**Impact: High · Effort: Medium**
 
 This would be a new virtual member provider (or an extension of the
 Laravel provider) that:
@@ -143,25 +150,15 @@ today and what is still missing.
 
 ### Gaps (ranked by impact ÷ effort)
 
-Each gap now carries an **Impact** rating (how many users / codebases
-benefit) and an **Effort** estimate (implementation complexity):
-
-| Rating | Impact meaning | Effort meaning |
-|--------|---------------|----------------|
-| ★ | Rare / niche | Trivial — a few lines |
-| ★★ | Occasionally useful | Small — one function / field |
-| ★★★ | Common pattern | Moderate — touches 2-3 modules |
-| ★★★★ | Very common | Significant — new subsystem or cross-cutting |
-| ★★★★★ | Nearly every codebase | Large — new infrastructure + plumbing |
-
 ---
 
-#### 1. `morphedByMany` missing from relationship method map
+#### L2. `morphedByMany` missing from relationship method map
 
-| | |
-|---|---|
-| **Impact** | ★★ — Any model using `morphedByMany` (the inverse of a polymorphic many-to-many) gets no virtual property or `_count` property for that relationship. |
-| **Effort** | ★ — One-line addition to `RELATIONSHIP_METHOD_MAP` in `virtual_members/laravel.rs`. |
+**Impact: Low-Medium · Effort: Low**
+
+Any model using `morphedByMany` (the inverse of a polymorphic
+many-to-many) gets no virtual property or `_count` property for that
+relationship. One-line addition to `RELATIONSHIP_METHOD_MAP`.
 
 `morphedByMany` is the inverse side of a polymorphic many-to-many
 relationship. It returns a `MorphToMany` instance (the same class as
@@ -176,12 +173,14 @@ relationship. It returns a `MorphToMany` instance (the same class as
 No other changes needed since `MorphToMany` is already in
 `COLLECTION_RELATIONSHIPS`.
 
-#### 2. `$dates` array (deprecated)
+#### L3. `$dates` array (deprecated)
 
-| | |
-|---|---|
-| **Impact** | ★★ — Only affects legacy codebases that haven't migrated to `$casts`. Decreasing relevance over time. |
-| **Effort** | ★★ — New `extract_dates_definitions` function in `parser/classes.rs` + merge logic in the provider at lower priority than `$casts`. |
+**Impact: Low-Medium · Effort: Low**
+
+Only affects legacy codebases that haven't migrated to `$casts`.
+Decreasing relevance over time. New `extract_dates_definitions`
+function in `parser/classes.rs` + merge logic in the provider at
+lower priority than `$casts`.
 
 Before `$casts`, Laravel used `protected $dates = [...]` to mark
 columns as Carbon instances. This was deprecated in favour of
@@ -195,12 +194,13 @@ Merge these into `casts_definitions` at a lower priority than explicit
 `$casts` entries, or add a separate field on `ClassInfo` and handle
 priority in the provider.
 
-#### 3. Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`)
+#### L4. Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`)
 
-| | |
-|---|---|
-| **Impact** | ★★★★ — Custom builders are the recommended pattern for complex query scoping in modern Laravel. Without this, users get zero completions for builder-specific methods via static model calls. |
-| **Effort** | ★★★ — In `build_builder_forwarded_methods`, detect `@use HasBuilder<X>` / `newEloquentBuilder()` return type, load the custom builder class, and resolve it instead of the standard `Eloquent\Builder`. |
+**Impact: High · Effort: Medium**
+
+Custom builders are the recommended pattern for complex query scoping
+in modern Laravel. Without this, users get zero completions for
+builder-specific methods via static model calls.
 
 Laravel 11+ introduced the `HasBuilder` trait and
 `#[UseEloquentBuilder(UserBuilder::class)]` attribute to let models
@@ -233,12 +233,13 @@ declares a custom builder via `@use HasBuilder<X>` in `use_generics`
 or a `newEloquentBuilder()` method with a non-default return type.
 If found, load and resolve that builder class instead.
 
-#### 4. `abort_if`/`abort_unless` type narrowing
+#### L5. `abort_if`/`abort_unless` type narrowing
 
-| | |
-|---|---|
-| **Impact** | ★★★★ — These are the standard guard patterns in Laravel controllers and middleware. Without narrowing, variables keep their wider type, causing false "unknown member" warnings and missing completions. |
-| **Effort** | ★★★ — Special-case handling in `type_narrowing.rs` for specific function names; reuses existing guard-clause narrowing logic but triggered differently. |
+**Impact: High · Effort: Medium**
+
+These are the standard guard patterns in Laravel controllers and
+middleware. Without narrowing, variables keep their wider type,
+causing false "unknown member" warnings and missing completions.
 
 After `abort_if($user === null, 404)`, the type of `$user` should
 be narrowed to exclude `null` in subsequent code.  Similarly,
@@ -277,12 +278,12 @@ to subsequent code:
 This is similar to the existing guard clause narrowing but triggered
 by specific function names rather than `if` + early return.
 
-#### 5. Factory `has*`/`for*` relationship methods
+#### L6. Factory `has*`/`for*` relationship methods
 
-| | |
-|---|---|
-| **Impact** | ★★ — Convenience for factory-heavy test suites. Without this, no completion after `->has` or `->for` on factory instances. |
-| **Effort** | ★★★ — Load associated model in `LaravelFactoryProvider::provide`, iterate relationship methods, synthesize `has{Rel}` / `for{Rel}` virtual methods with correct signatures. |
+**Impact: Low-Medium · Effort: Medium**
+
+Convenience for factory-heavy test suites. Without this, no completion
+after `->has` or `->for` on factory instances.
 
 Laravel's `Factory` class supports dynamic `has{Relationship}()` and
 `for{Relationship}()` calls via `__call()`.  For example,
@@ -315,12 +316,13 @@ The `has*` variant should accept optional `int $count` and
 `array|callable $state` parameters; `for*` should accept
 `array|callable $state`.
 
-#### 6. `$pivot` property on BelongsToMany related models
+#### L7. `$pivot` property on BelongsToMany related models
 
-| | |
-|---|---|
-| **Impact** | ★★★ — Pivot access is common in apps with many-to-many relationships. However, Larastan doesn't handle this either, and `@property` on custom Pivot classes covers most needs. |
-| **Effort** | ★★★★ — Multi-layered: basic `$pivot` typed as `Pivot` is easy, but `withPivot()` columns and `using()` custom pivot classes require relationship body parsing we don't currently do. |
+**Impact: Medium · Effort: Medium-High**
+
+Pivot access is common in apps with many-to-many relationships.
+However, Larastan doesn't handle this either, and `@property` on
+custom Pivot classes covers most needs.
 
 When a model is accessed through a `BelongsToMany` (or `MorphToMany`)
 relationship, each related model instance gains a `$pivot` property at
@@ -361,12 +363,13 @@ the `BelongsToMany` relationship stubs. If the user's stub set
 includes these annotations, it already works through our PHPDoc
 provider.
 
-#### 7. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
+#### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
-| | |
-|---|---|
-| **Impact** | ★★ — Less common than `withCount`; only affects codebases using aggregate eager-loading. |
-| **Effort** | ★★★★ — Cannot be inferred declaratively from the model alone; requires tracking call-site string arguments to `withSum()`/etc. |
+**Impact: Low-Medium · Effort: Medium-High**
+
+Less common than `withCount`; only affects codebases using aggregate
+eager-loading. Cannot be inferred declaratively from the model alone;
+requires tracking call-site string arguments.
 
 Similar to `withCount`, these aggregate methods produce virtual
 properties named `{relation}_{function}` (e.g.
@@ -377,12 +380,13 @@ aggregate function (`withSum`/`withAvg` → `float`,
 
 The `@property` workaround applies here too.
 
-#### 8. Higher-order collection proxies
+#### L9. Higher-order collection proxies
 
-| | |
-|---|---|
-| **Impact** | ★★ — Convenience syntax; most users prefer closures. Niche usage. |
-| **Effort** | ★★★★ — Requires synthesizing virtual properties on collection classes that return a proxy type parameterised with the collection's value type. Complex proxy delegation. |
+**Impact: Low-Medium · Effort: Medium-High**
+
+Convenience syntax; most users prefer closures. Niche usage. Requires
+synthesizing virtual properties on collection classes that return a
+proxy type parameterised with the collection's value type.
 
 Laravel collections support higher-order proxies via magic properties
 like `$users->map->name` or `$users->filter->isActive()`. These
@@ -400,12 +404,13 @@ and `HigherOrderCollectionProxyExtension`, which resolve the proxy's
 template types and delegate property/method lookups to the collection's
 value type.
 
-#### 9. `View::withX()` and `RedirectResponse::withX()` dynamic methods
+#### L10. `View::withX()` and `RedirectResponse::withX()` dynamic methods
 
-| | |
-|---|---|
-| **Impact** | ★ — Most code uses `->with('key', $value)` instead of the dynamic `->withKey($value)` form. Explicitly declared methods (`withErrors`, `withInput`, etc.) already work. |
-| **Effort** | ★★ — Could hard-code the two known classes or add `@method` tags to bundled stubs. |
+**Impact: Low · Effort: Low**
+
+Most code uses `->with('key', $value)` instead of the dynamic
+`->withKey($value)` form. Explicitly declared methods (`withErrors`,
+`withInput`, etc.) already work.
 
 Both `Illuminate\View\View` and `Illuminate\Http\RedirectResponse`
 support dynamic `with*()` calls via `__call()`.  For example,
@@ -432,12 +437,13 @@ hard-coding the two known classes.  A simpler approach: add
 `@method` tags to bundled stubs for the most common dynamic `with*`
 methods, or document this as a known limitation.
 
-#### 10. `$appends` array
+#### L11. `$appends` array
 
-| | |
-|---|---|
-| **Impact** | ★ — The accessor method is the real source of truth; `$appends` only helps when the accessor is defined in an unloaded parent class. |
-| **Effort** | ★ — Similar to `$fillable`/`$hidden` extraction. |
+**Impact: Low · Effort: Low**
+
+The accessor method is the real source of truth; `$appends` only
+helps when the accessor is defined in an unloaded parent class.
+Similar to `$fillable`/`$hidden` extraction.
 
 The `$appends` property lists accessor names that should always be
 included in `toArray()` / `toJson()`. These reference existing

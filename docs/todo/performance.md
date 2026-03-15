@@ -8,19 +8,19 @@ underlying costs (parallel file processing, full background indexing).
 Items are ordered by **impact** (descending), then **effort** (ascending)
 within the same impact tier.
 
-| Label | Scale |
-|---|---|
-| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low** |
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
-## 2. Reference-counted `ClassInfo` (`Arc<ClassInfo>`)
+## P1. Reference-counted `ClassInfo` (`Arc<ClassInfo>`)
 **Impact: High · Effort: Medium**
 
 ### Completed
 
-The three main data stores now hold `Arc<ClassInfo>`:
+The three main data stores hold `Arc<ClassInfo>`:
 
 - `ast_map`: `HashMap<String, Vec<Arc<ClassInfo>>>`
 - `fqn_index`: `HashMap<String, Arc<ClassInfo>>`
@@ -29,49 +29,52 @@ The three main data stores now hold `Arc<ClassInfo>`:
 Insertion sites (`parse_and_cache_content_versioned`, `update_ast_inner`)
 wrap `ClassInfo` in `Arc` before storing.
 
+The retrieval and resolution pipeline now returns `Arc<ClassInfo>`
+from the storage layer through to the class-loader boundary:
+
+- `find_class_in_ast_map` returns `Option<Arc<ClassInfo>>`.
+- `find_or_load_class` returns `Option<Arc<ClassInfo>>`.
+- `FileContext::classes` is `Vec<Arc<ClassInfo>>`.
+- `file_context()` clones `Arc`s instead of deep-cloning.
+- `ResolutionCtx::all_classes` and `VarResolutionCtx::all_classes`
+  are `&[Arc<ClassInfo>]`.
+- All downstream functions that accept `all_classes` or
+  `local_classes` parameters (`resolve_variable_types`,
+  `type_hint_to_classes`, `resolve_type_alias`, helpers in
+  `source/helpers.rs`, `hover/variable_type.rs`, diagnostics,
+  definition, references, etc.) accept `&[Arc<ClassInfo>]`.
+- `find_class_at_offset` and `find_class_by_name` accept
+  `&[Arc<ClassInfo>]` and return `&ClassInfo` via `Arc::Deref`.
+
+The `class_loader` closures and `resolve_class_name` now return
+`Option<Arc<ClassInfo>>`, eliminating the deep clone at the
+class-loader boundary. All ~32 files that accept a `class_loader`
+parameter use the updated signature
+`&dyn Fn(&str) -> Option<Arc<ClassInfo>>`.
+
+Consumers that only read the `ClassInfo` (checking methods,
+properties, parent chains, etc.) access it through `Arc`'s `Deref`
+at zero cost. Mutation sites (inheritance merging in
+`resolve_class_with_inheritance`, parent chain walks, virtual member
+providers) call `Arc::unwrap_or_clone()` to obtain an owned
+`ClassInfo` only when they actually need to mutate.
+
 ### Remaining work
 
-Every retrieval site currently unwraps the `Arc` with a full deep
-clone (`ClassInfo::clone(c)`), negating the benefit of reference
-counting. The following API changes are needed to actually eliminate
-deep copies on the hot paths:
-
-1. **`find_class_in_ast_map`** — return `Option<Arc<ClassInfo>>`
-   instead of `Option<ClassInfo>`.
-2. **`find_or_load_class`** — return `Option<Arc<ClassInfo>>`.
-3. **`class_loader` closures** — change the signature from
-   `Fn(&str) -> Option<ClassInfo>` to
-   `Fn(&str) -> Option<Arc<ClassInfo>>` throughout the codebase.
-   This is the most pervasive change: `class_loader` is threaded
-   through completion, hover, diagnostics, inheritance, virtual
-   members, and definition resolution.
-4. **`resolve_class_fully_cached`** and related functions — return
+1. **`resolve_class_fully_cached`** and related functions — return
    `Arc<ClassInfo>`. Cache hits become a cheap `Arc::clone` instead
-   of a deep copy.
-5. **Downstream consumers** — the majority only read from `ClassInfo`
-   (checking methods, properties, etc.) and can work through
-   `&ClassInfo` via `Arc`'s `Deref`. Only mutation sites (inheritance
-   merging in `resolve_class_with_inheritance`,
-   `apply_virtual_members`) need to call `Arc::unwrap_or_clone()` or
-   `Arc::make_mut()`.
-
-### Migration strategy
-
-Propagate `Arc<ClassInfo>` outward from the storage layer one
-function at a time. Each step compiles and passes tests independently:
-
-1. Change `find_class_in_ast_map` → update its ~5 call sites.
-2. Change `find_or_load_class` → update `class_loader` closure
-   construction in `file_context`, `class_loader()` helper, and
-   all inline closures across the codebase (~20 sites).
-3. Change `resolve_class_fully*` return types → update callers in
-   completion, hover, diagnostics (~15 sites).
-4. Audit remaining `ClassInfo::clone(c)` unwrap sites and convert
-   to `Arc::clone` where the consumer is read-only.
+   of a deep copy. The cache already stores `Arc<ClassInfo>` internally
+   but the public API still clones on the way out.
+2. **Propagate `Arc<ClassInfo>` through downstream return types** —
+   many intermediate functions (e.g. `resolve_static_owner_class`,
+   `resolve_lhs_to_class`, `resolve_variable_subject`) currently
+   unwrap the `Arc` from the class_loader and return an owned
+   `ClassInfo`. Changing these to return `Arc<ClassInfo>` would
+   eliminate additional deep clones along the hot path.
 
 ---
 
-## 7. Recursive string substitution in `apply_substitution`
+## P2. Recursive string substitution in `apply_substitution`
 **Impact: Medium · Effort: High**
 
 Generic type substitution (`apply_substitution`) does recursive
@@ -87,7 +90,7 @@ is active. In a deeply-generic framework like Laravel (where
 levels), this function is called hundreds of times per resolution,
 each time allocating new strings.
 
-The resolved-class cache (type-inference.md §31) mitigates this by
+The resolved-class cache mitigates this by
 caching the result, so substitution only runs on cache misses. But
 cache misses still happen: first access, after edits that trigger
 invalidation, and for generic classes with different type arguments.
@@ -111,7 +114,7 @@ confirms that substitution remains a measurable cost.
 
 ---
 
-## 9. Parallel pre-filter in `find_implementors`
+## P3. Parallel pre-filter in `find_implementors`
 **Impact: Medium · Effort: Medium**
 
 `find_implementors` Phase 3 reads every unloaded classmap file
@@ -146,7 +149,7 @@ threshold (e.g. 8 files).
 
 ---
 
-## 10. `memmem` for block comment terminator search
+## P4. `memmem` for block comment terminator search
 **Impact: Low-Medium · Effort: Low**
 
 The current block comment skip in `find_classes` and `find_symbols`
@@ -170,7 +173,7 @@ the comment body.
 
 ---
 
-## 11. `memmap2` for file reads during scanning
+## P5. `memmap2` for file reads during scanning
 **Impact: Low-Medium · Effort: Low**
 
 All file-scanning paths (`scan_files_parallel_classes`,
@@ -206,7 +209,7 @@ parallelisation, this item can be dropped.
 
 ---
 
-## 12. O(n²) transitive eviction in `evict_fqn`
+## P6. O(n²) transitive eviction in `evict_fqn`
 **Impact: Low-Medium · Effort: Low**
 
 The `evict_fqn` function in `virtual_members/mod.rs` runs a
@@ -236,7 +239,7 @@ of the dependency graph within the cache.
 
 ---
 
-## 13. `diag_pending_uris` uses `Vec::contains` for deduplication
+## P7. `diag_pending_uris` uses `Vec::contains` for deduplication
 **Impact: Low · Effort: Low**
 
 `schedule_diagnostics` and `schedule_diagnostics_for_open_files`
@@ -257,7 +260,7 @@ not important and a plain `HashSet` suffices.
 
 ---
 
-## 14. `find_class_in_ast_map` linear fallback scan
+## P8. `find_class_in_ast_map` linear fallback scan
 **Impact: Low · Effort: Low**
 
 The fast O(1) `fqn_index` lookup in `find_class_in_ast_map` covers
@@ -280,52 +283,7 @@ window.
 
 ---
 
-## 8. Incremental text sync
-**Impact: Low-Medium · Effort: Medium**
-
-PHPantom uses `TextDocumentSyncKind::FULL`, meaning every
-`textDocument/didChange` notification sends the entire file content.
-For large files (5000+ lines, common in legacy PHP), sending 200 KB
-on every keystroke adds measurable IPC overhead.
-
-The practical benefit is bounded: Mago requires a full re-parse
-regardless of how the change was received. The saving is purely in
-the data transferred over the IPC channel. For files under ~1000
-lines this is negligible.
-
-### User-visible impact
-
-Most editors (VS Code, Zed, Neovim) handle full sync gracefully and
-users will not notice a difference on typical files. The impact
-becomes noticeable in two scenarios:
-
-1. **Very large files (5000+ lines).** Legacy PHP files, generated
-   code, and test fixtures can exceed 200 KB. On every keystroke the
-   editor serializes the entire buffer and sends it over the IPC
-   channel. With incremental sync, only the changed range (typically
-   a few bytes) is sent.
-
-2. **Remote / high-latency connections.** When the editor and
-   language server communicate over a network (e.g. VS Code Remote,
-   SSH tunnels), the per-keystroke payload matters more. Full sync
-   sends orders of magnitude more data than incremental.
-
-For the common case (local editing, files under 2000 lines), full
-sync adds roughly 0.1–0.5 ms per keystroke of serialization overhead.
-This is well within the editor's debounce window and imperceptible.
-
-Intelephense uses incremental sync by default. Users switching from
-Intelephense are unlikely to notice the difference unless they
-regularly edit very large PHP files.
-
-This item is already tracked in [lsp-features.md §17](lsp-features.md#17-incremental-text-sync)
-and is included here for completeness. The effort and implementation
-plan are unchanged. It is the lowest-priority performance item
-because full-file sync is rarely the bottleneck in practice.
-
----
-
-## 15. Pull diagnostics (`textDocument/diagnostic`)
+## P9. Pull diagnostics (`textDocument/diagnostic`)
 **Impact: Medium-High · Effort: Medium**
 
 Replace the current push-based diagnostic model

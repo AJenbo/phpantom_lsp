@@ -19,6 +19,7 @@
 /// [`check_expression_for_assignment`](super::resolution::check_expression_for_assignment)
 /// in `variable_resolution.rs`.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
@@ -437,12 +438,14 @@ fn resolve_generic_wrapper_template(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<String> {
     // Load the wrapper class.
-    let wrapper_cls = (ctx.class_loader)(wrapper_name).or_else(|| {
-        ctx.all_classes
-            .iter()
-            .find(|c| crate::util::short_name(&c.name) == crate::util::short_name(wrapper_name))
-            .cloned()
-    })?;
+    let wrapper_cls = (ctx.class_loader)(wrapper_name)
+        .map(Arc::unwrap_or_clone)
+        .or_else(|| {
+            ctx.all_classes
+                .iter()
+                .find(|c| crate::util::short_name(&c.name) == crate::util::short_name(wrapper_name))
+                .map(|c| ClassInfo::clone(c))
+        })?;
 
     // Find the wrapper's constructor and its template bindings.
     let wrapper_ctor = wrapper_cls
@@ -1009,7 +1012,7 @@ fn resolve_rhs_method_call<'b>(
         ctx.all_classes
             .iter()
             .find(|c| c.name == ctx.current_class.name)
-            .cloned()
+            .map(|c| ClassInfo::clone(c))
             .into_iter()
             .collect()
     } else if let Expression::Variable(Variable::Direct(dv)) = method_call.object {
@@ -1093,8 +1096,8 @@ fn resolve_rhs_static_call(
             .all_classes
             .iter()
             .find(|c| c.name == cls_name)
-            .cloned()
-            .or_else(|| (ctx.class_loader)(&cls_name));
+            .map(|c| ClassInfo::clone(c))
+            .or_else(|| (ctx.class_loader)(&cls_name).map(Arc::unwrap_or_clone));
         if let Some(ref owner) = owner {
             let text_args = super::raw_type_inference::extract_argument_text(
                 &static_call.argument_list,
@@ -1203,7 +1206,7 @@ fn resolve_rhs_property_access(access: &Access<'_>, ctx: &VarResolutionCtx<'_>) 
                 all_classes
                     .iter()
                     .find(|c| c.name == current_class_name)
-                    .cloned()
+                    .map(|c| ClassInfo::clone(c))
                     .into_iter()
                     .collect()
             } else if let Expression::Variable(Variable::Direct(dv)) = obj {

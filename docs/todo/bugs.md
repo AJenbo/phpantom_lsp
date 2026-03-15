@@ -5,18 +5,19 @@ requests — they represent cases where existing functionality produces
 wrong results. Bugs should generally be fixed before new features at
 the same impact tier.
 
-Items are ordered by **impact** (descending), then **effort** (ascending).
+Items are ordered by **impact** (descending), then **effort** (ascending)
+within the same impact tier.
 
-| Label | Scale |
-|---|---|
-| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low** |
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
-## 0. Native type hints not considered in virtual property specificity ranking
+## B1. Native type hints not considered in virtual property specificity ranking
 
-**Impact: Low-Medium — Effort: Medium**
+**Impact: Low-Medium · Effort: Medium**
 
 The `type_specificity` function used during virtual member merging only
 scores the `type_hint` field (the effective/docblock type). It does not

@@ -454,9 +454,10 @@ pub(crate) fn position_to_offset(content: &str, position: Position) -> u32 {
 /// nested inside a named class's method), the smallest (most specific)
 /// class is returned.  This ensures that `$this` inside an anonymous
 /// class body resolves to the anonymous class, not the outer class.
-pub(crate) fn find_class_at_offset(classes: &[ClassInfo], offset: u32) -> Option<&ClassInfo> {
+pub(crate) fn find_class_at_offset(classes: &[Arc<ClassInfo>], offset: u32) -> Option<&ClassInfo> {
     classes
         .iter()
+        .map(|c| c.as_ref())
         .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
         .min_by_key(|c| c.end_offset - c.start_offset)
 }
@@ -473,7 +474,7 @@ pub(crate) fn find_class_at_offset(classes: &[ClassInfo], offset: u32) -> Option
 /// When `name` is a bare short name (no backslashes), the first class with
 /// a matching `name` field is returned (preserving existing behavior).
 pub(crate) fn find_class_by_name<'a>(
-    all_classes: &'a [ClassInfo],
+    all_classes: &'a [Arc<ClassInfo>],
     name: &str,
 ) -> Option<&'a ClassInfo> {
     let short = short_name(name);
@@ -482,9 +483,13 @@ pub(crate) fn find_class_by_name<'a>(
         let expected_ns = name.rsplit_once('\\').map(|(ns, _)| ns);
         all_classes
             .iter()
+            .map(|c| c.as_ref())
             .find(|c| c.name == short && c.file_namespace.as_deref() == expected_ns)
     } else {
-        all_classes.iter().find(|c| c.name == short)
+        all_classes
+            .iter()
+            .map(|c| c.as_ref())
+            .find(|c| c.name == short)
     }
 }
 
@@ -642,14 +647,14 @@ impl Backend {
     /// `namespace_map`) must match for the class to be returned.  This
     /// prevents `"Demo\\PDO"` from matching the global `PDO` stub.
     ///
-    /// Returns a cloned `ClassInfo` if found, or `None`.
-    pub(crate) fn find_class_in_ast_map(&self, class_name: &str) -> Option<ClassInfo> {
+    /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
+    pub(crate) fn find_class_in_ast_map(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
         // ── Fast path: O(1) lookup via fqn_index ──
         // For namespace-qualified names the FQN is the normalized name
         // itself.  For bare names (no backslash) the FQN equals the
         // short name, which is also stored in the index.
         if let Some(cls) = self.fqn_index.read().get(class_name) {
-            return Some(ClassInfo::clone(cls));
+            return Some(Arc::clone(cls));
         }
 
         // ── Slow fallback: linear scan of ast_map ──
@@ -683,7 +688,7 @@ impl Backend {
                         continue;
                     }
                 }
-                return Some(ClassInfo::clone(cls));
+                return Some(Arc::clone(cls));
             }
         }
         None
@@ -771,12 +776,7 @@ impl Backend {
     /// blocks acquiring `ast_map`, `use_map`, and `namespace_map` locks
     /// and extracting the entry for a given URI.
     pub(crate) fn file_context(&self, uri: &str) -> FileContext {
-        let classes = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|arcs| arcs.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let classes = self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let use_map = self.use_map.read().get(uri).cloned().unwrap_or_default();
 

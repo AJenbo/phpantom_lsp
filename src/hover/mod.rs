@@ -11,6 +11,7 @@
 mod formatting;
 pub(crate) mod variable_type;
 
+use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -51,7 +52,7 @@ fn raw_class_has_member(
     owner: &ClassInfo,
     member_name: &str,
     member_kind: &MemberKindForOrigin,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     // Build the FQN the same way the class loader expects.
     let fqn = match &owner.file_namespace {
@@ -93,7 +94,7 @@ fn build_origin_lines(
     owner: &ClassInfo,
     is_virtual: bool,
     member_kind: MemberKindForOrigin,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     let mut origins: Vec<MemberOrigin> = Vec::new();
 
@@ -436,7 +437,9 @@ impl Backend {
                     "self" | "static" => current_class.cloned(),
                     "parent" => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
-                        .and_then(|parent_name| class_loader(parent_name)),
+                        .and_then(|parent_name| {
+                            class_loader(parent_name).map(Arc::unwrap_or_clone)
+                        }),
                     _ => None,
                 };
                 if let Some(cls) = resolved {
@@ -632,7 +635,7 @@ impl Backend {
         _is_fqn: bool,
         uri: &str,
         _ctx: &FileContext,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cursor_offset: u32,
     ) -> Option<Hover> {
         let class_info = class_loader(name);
@@ -739,7 +742,7 @@ impl Backend {
         &self,
         method: &MethodInfo,
         owner: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Hover {
         let visibility = format_visibility(method.visibility);
         let static_kw = if method.is_static { "static " } else { "" };
@@ -832,7 +835,7 @@ impl Backend {
         &self,
         property: &PropertyInfo,
         owner: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Hover {
         let visibility = format_visibility(property.visibility);
         let static_kw = if property.is_static { "static " } else { "" };
@@ -906,7 +909,7 @@ impl Backend {
         &self,
         constant: &ConstantInfo,
         owner: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Hover {
         let member_line = if constant.is_enum_case {
             if let Some(ref val) = constant.enum_value {
@@ -1082,7 +1085,7 @@ impl Backend {
 fn build_variable_hover_body(
     var_name: &str,
     type_str: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     template_line: Option<&str>,
 ) -> String {
     // Split the type string on `|` at the top level (respecting
@@ -1162,7 +1165,7 @@ fn split_top_level_union(type_str: &str) -> Vec<&str> {
 
 fn resolve_type_namespace(
     type_str: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     // Find the base type name: take everything before `<`, `|`, `&`,
     // `?`, or `[`.

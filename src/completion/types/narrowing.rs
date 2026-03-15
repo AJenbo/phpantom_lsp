@@ -1,3 +1,5 @@
+use mago_span::HasSpan;
+use mago_syntax::ast::*;
 /// Type narrowing for variable resolution.
 ///
 /// This module contains the logic for narrowing a variable's type based on
@@ -20,8 +22,7 @@
 ///     `return`, `throw`, `continue`, or `break`.
 ///   - `in_array($var, $haystack, true)` — narrows `$var` to the
 ///     haystack's element type when the third argument is `true`.
-use mago_span::HasSpan;
-use mago_syntax::ast::*;
+use std::sync::Arc;
 
 use crate::docblock;
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, TypeAssertion};
@@ -265,7 +266,7 @@ pub(in crate::completion) fn apply_instanceof_inclusion(
 pub(crate) fn is_subtype_of(
     class: &ClassInfo,
     ancestor_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     let ancestor_short = ancestor_name.rsplit('\\').next().unwrap_or(ancestor_name);
 
@@ -664,8 +665,9 @@ fn extract_call_assertions<'a>(
             let class_info = (ctx.class_loader)(&class_name)?;
             let method = class_info
                 .methods
-                .into_iter()
-                .find(|m| m.name == method_name && m.is_static)?;
+                .iter()
+                .find(|m| m.name == method_name && m.is_static)?
+                .clone();
             if method.type_assertions.is_empty() {
                 return None;
             }

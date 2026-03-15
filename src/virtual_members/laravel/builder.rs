@@ -14,6 +14,7 @@
 //! Methods whose name starts with `__` (magic methods) are skipped.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::inheritance::{apply_substitution, apply_substitution_to_conditional};
 use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN, MethodInfo, Visibility};
@@ -44,7 +45,7 @@ pub(super) fn replace_eloquent_collection(type_str: &str, custom_collection: &st
 /// Methods whose name starts with `__` (magic methods) are skipped.
 pub(super) fn build_builder_forwarded_methods(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     _cache: Option<&ResolvedClassCache>,
 ) -> Vec<MethodInfo> {
     // Load the Eloquent Builder class.

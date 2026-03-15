@@ -1,60 +1,21 @@
-# PHPantom — Type Inference & Resolution
+# PHPantom — Type Inference
 
-This document covers type resolution gaps: generic resolution, conditional
-return types, type narrowing, PHP version features, and stub attribute
-handling. Items that are purely about *completion UX* or *stub metadata
-extraction* live in [todo-completion.md](todo-completion.md).
+Type resolution gaps: generic resolution, conditional return types,
+type narrowing, PHP version features, and stub attribute handling.
+Items that are purely about *completion UX* or *stub metadata
+extraction* live in [completion.md](completion.md).
 
 Items are ordered by **impact** (descending), then **effort** (ascending)
 within the same impact tier.
 
-| Label | Scale |
-|---|---|
-| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low** |
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
-## 3. Parse and resolve `($param is T ? A : B)` return types
-**Impact: High · Effort: Medium**
-
-PHPStan's stubs use conditional return type syntax in docblocks:
-
-```php
-/**
- * @return ($value is string ? true : false)
- */
-function is_string(mixed $value): bool {}
-```
-
-This is the mechanism behind all `is_*` function type narrowing in
-PHPStan — the stubs declare the conditional, and the type specifier
-reads it.  If we parse this syntax from stubs and `@return` tags, we
-get type narrowing for `is_string`, `is_int`, `is_array`,
-`is_object`, `is_null`, `is_bool`, `is_float`, `is_numeric`,
-`is_scalar`, `is_callable`, `is_iterable`, `is_countable`, and
-`is_resource` from annotations alone, without any hard-coded function
-list.
-
-The syntax also appears in userland code (PHPStan and Psalm both
-support it), and in array function stubs:
-
-```php
-/**
- * @return ($array is non-empty-array ? non-empty-list<T> : list<T>)
- */
-function array_values(array $array): array {}
-```
-
-**Implementation:** Extend the return type parser in
-`docblock/types.rs` to recognise the `($paramName is Type ? A : B)`
-pattern.  At call sites, check the argument's type against the
-condition and select the appropriate branch.  This could reuse or
-extend the existing `ConditionalReturnType` infrastructure.
-
----
-
-## 4. Inherited docblock type propagation
+## T1. Inherited docblock type propagation
 **Impact: High · Effort: Medium**
 
 When a child class overrides a method from a parent class or interface,
@@ -129,7 +90,7 @@ only has a native `array` type hint.
 
 ---
 
-## 5. File system watching for vendor and project changes
+## T2. File system watching for vendor and project changes
 **Impact: Medium-High · Effort: Medium**
 
 PHPantom loads Composer artifacts (classmap, PSR-4 mappings, autoload
@@ -198,7 +159,7 @@ the plan described in [indexing.md Phase 2](indexing.md#phase-2-staleness-detect
 
 ---
 
-## 6. Property hooks (PHP 8.4)
+## T3. Property hooks (PHP 8.4)
 **Impact: Medium · Effort: Medium**
 
 PHP 8.4 introduced property hooks (`get` / `set`):
@@ -231,35 +192,10 @@ explicitly, walk hook bodies for anonymous classes and variable
 scopes, and parse the set-visibility modifier into a new
 `set_visibility` field on `PropertyInfo`.
 
----
+### Asymmetric visibility (also PHP 8.4 / 8.5)
 
-## 8. SPL iterator generic stubs
-**Impact: Medium · Effort: Medium**
-
-PHPStan's `iterable.stub` provides full `@template TKey` /
-`@template TValue` annotations for the entire SPL iterator hierarchy:
-`ArrayIterator`, `FilterIterator`, `LimitIterator`,
-`CachingIterator`, `RegexIterator`, `NoRewindIterator`,
-`InfiniteIterator`, `AppendIterator`, `IteratorIterator`,
-`RecursiveIteratorIterator`, `CallbackFilterIterator`, and more.
-
-This means `foreach` over any SPL iterator properly resolves element
-types.  If we rely on php-stubs for these classes, we are almost
-certainly missing these generic annotations.  We should either:
-
-- Ship our own stub overlays for the SPL iterator classes with
-  `@template` annotations (like PHPStan does), or
-- Detect and use PHPStan's stubs when present in the project's
-  vendor directory.
-
----
-
-## 9. Asymmetric visibility (PHP 8.4)
-**Impact: Low-Medium · Effort: Low**
-
-Separate from property hooks, PHP 8.4 allows asymmetric visibility on
-plain and promoted properties. PHP 8.5 extended this to static
-properties as well.
+Separate from hooks, PHP 8.4 allows asymmetric visibility on plain
+and promoted properties. PHP 8.5 extended this to static properties.
 
 ```php
 class Settings {
@@ -276,44 +212,50 @@ Completion filtering uses this to decide whether a property should
 appear. A `public private(set)` property should appear for reading
 from outside the class but not for assignment contexts.
 
-**Fix:** Add an optional `set_visibility: Option<Visibility>` to
+Add an optional `set_visibility: Option<Visibility>` to
 `PropertyInfo`. Populate it from the AST modifier list (the parser
 exposes the set-visibility keyword). Completion filtering does not
 currently distinguish read vs write contexts, so the immediate fix
 is just to store the value; context-aware filtering can follow later.
 
+This shares the same `set_visibility` field as the hooked-property
+fix above, so both should be implemented together.
+
 ---
 
-## 10. `str_contains` / `str_starts_with` / `str_ends_with` → non-empty-string narrowing
+## T4. Non-empty-* type narrowing and propagation
 **Impact: Low-Medium · Effort: Low**
 
-When `str_contains($haystack, $needle)` appears in a condition and
-`$needle` is known to be a non-empty string, PHPStan narrows
-`$haystack` to `non-empty-string`.  The same applies to
-`str_starts_with`, `str_ends_with`, `strpos`, `strrpos`, `stripos`,
-`strripos`, `strstr`, and the `mb_*` equivalents.
+PHPStan tracks `non-empty-string` and `non-empty-array` through
+built-in functions. These narrowings don't directly enable
+class-based completion, but they improve hover type display and
+would catch bugs if we add diagnostics. All three sub-items share
+the same implementation pattern (function-name-triggered type
+narrowing in conditions or return types) and should be implemented
+together.
 
-This is lower priority for an LSP because `non-empty-string` does
-not directly enable class-based completion, but it would improve
-hover type display and catch bugs if we ever add diagnostics.
-
+**String containment narrowing.** When `str_contains($haystack,
+$needle)` appears in a condition and `$needle` is known to be a
+non-empty string, narrow `$haystack` to `non-empty-string`. Same
+for `str_starts_with`, `str_ends_with`, `strpos`, `strrpos`,
+`stripos`, `strripos`, `strstr`, and the `mb_*` equivalents.
 See `StrContainingTypeSpecifyingExtension` in PHPStan.
 
+**Count narrowing.** `if (count($arr) > 0)` or
+`if (count($arr) >= 1)` narrows `$arr` to `non-empty-array`.
+PHPStan handles a full matrix of comparison operators and integer
+range types against `count()` / `sizeof()` calls. See
+`CountFunctionTypeSpecifyingExtension`.
+
+**String function propagation.** Passing a `non-empty-string` to
+`addslashes()`, `urlencode()`, `htmlspecialchars()`,
+`escapeshellarg()`, `escapeshellcmd()`, `preg_quote()`,
+`rawurlencode()`, or `rawurldecode()` should return
+`non-empty-string`. See `NonEmptyStringFunctionsReturnTypeExtension`.
+
 ---
 
-## 11. `count` / `sizeof` comparison → non-empty-array narrowing
-**Impact: Low-Medium · Effort: Low**
-
-`if (count($arr) > 0)` or `if (count($arr) >= 1)` narrows `$arr` to
-a non-empty-array.  PHPStan handles a full matrix of comparison
-operators and integer range types against `count()` / `sizeof()` calls.
-
-See `CountFunctionTypeSpecifyingExtension` and the count-related
-branches in `TypeSpecifier::specifyTypesInCondition`.
-
----
-
-## 12. Fiber type resolution
+## T5. Fiber type resolution
 **Impact: Low · Effort: Low**
 
 `Generator<TKey, TValue, TSend, TReturn>` has dedicated support for
@@ -328,25 +270,7 @@ Generator extraction in `docblock/types.rs`.
 
 ---
 
-## 13. Non-empty-string propagation through string functions
-**Impact: Low · Effort: Low**
-
-PHPStan tracks `non-empty-string` through string-manipulating
-functions.  If you pass a `non-empty-string` to `addslashes()`,
-`urlencode()`, `htmlspecialchars()`, `escapeshellarg()`,
-`escapeshellcmd()`, `preg_quote()`, `rawurlencode()`, or
-`rawurldecode()`, the return type is also `non-empty-string`.
-
-This is low priority for an LSP because the narrower string type
-does not directly enable class-based completion.  However, if we
-ever add hover type display or diagnostics, this information
-would improve accuracy.
-
-See `NonEmptyStringFunctionsReturnTypeExtension` in PHPStan.
-
----
-
-## 14. `Closure::bind()` / `Closure::fromCallable()` return type preservation
+## T6. `Closure::bind()` / `Closure::fromCallable()` return type preservation
 **Impact: Low · Effort: Low-Medium**
 
 Variables holding closure literals, arrow functions, and first-class
@@ -362,7 +286,7 @@ See `ClosureBindDynamicReturnTypeExtension` and
 
 ---
 
-## 16. `key-of<T>` and `value-of<T>` resolution
+## T7. `key-of<T>` and `value-of<T>` resolution
 **Impact: Medium · Effort: Medium**
 
 PHPantom already parses `key-of<T>` and `value-of<T>` as type keywords
@@ -397,18 +321,6 @@ type:
 - If the inner type is `array<K, V>`, extract `K` or `V` directly.
 - If the inner type is still an unresolved template parameter, leave
   it as-is (it may resolve later in the chain).
-
----
-
-## 28. `__invoke()` return type resolution
-**Impact: Low-Medium · Effort: Low**
-
-Calling an object as a function (`$obj()`) does not resolve the return
-type from the object's `__invoke()` method. The call expression path
-does not check for `__invoke` when the callee is a variable holding
-an object type.
-
-**Discovered via:** fixture conversion (call_expression/invoke_return_type).
 
 ---
 

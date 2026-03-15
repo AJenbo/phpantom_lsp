@@ -14,6 +14,7 @@ pub use crate::subject_expr::{BracketSegment, SubjectExpr};
 
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 // ─── PHP Version ────────────────────────────────────────────────────────────
 
@@ -1351,7 +1352,7 @@ impl ClassInfo {
 /// definition, and implementation handlers.
 pub(crate) struct FileContext {
     /// Classes extracted from the file's AST (from `ast_map`).
-    pub classes: Vec<ClassInfo>,
+    pub classes: Vec<Arc<ClassInfo>>,
     /// Import table mapping short names to fully-qualified names
     /// (from `use_map`).
     pub use_map: HashMap<String, String>,

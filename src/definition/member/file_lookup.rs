@@ -30,8 +30,8 @@ impl Backend {
     /// class cannot be reloaded (e.g. synthetic/anonymous classes).
     pub(in crate::definition) fn reload_raw_class(
         candidate: &ClassInfo,
-        all_classes: &[ClassInfo],
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        all_classes: &[Arc<ClassInfo>],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<ClassInfo> {
         let fqn = match &candidate.file_namespace {
             Some(ns) if !ns.is_empty() => format!("{}\\{}", ns, candidate.name),
@@ -39,7 +39,7 @@ impl Backend {
         };
         crate::util::find_class_by_name(all_classes, &fqn)
             .cloned()
-            .or_else(|| class_loader(&fqn))
+            .or_else(|| class_loader(&fqn).map(Arc::unwrap_or_clone))
     }
 
     /// Find the file URI and content for the file that contains a given class.

@@ -767,12 +767,8 @@ impl Backend {
     ) -> Option<Location> {
         let cursor_offset = position_to_offset(content, position);
 
-        let classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let classes: Vec<std::sync::Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let current_class = find_class_at_offset(&classes, cursor_offset)?;
 

@@ -133,7 +133,7 @@ impl Backend {
                 None => break,
             };
             let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => p,
+                Some(p) => ClassInfo::clone(&p),
                 None => break,
             };
             // Check methods declared directly on this parent (not
@@ -245,7 +245,7 @@ impl Backend {
                 None => break,
             };
             let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => p,
+                Some(p) => ClassInfo::clone(&p),
                 None => break,
             };
             for iface in &parent.interfaces {

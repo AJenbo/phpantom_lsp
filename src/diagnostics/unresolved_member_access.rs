@@ -29,6 +29,7 @@
 //! handled identically to completion and go-to-definition.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -75,12 +76,8 @@ impl Backend {
 
         let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
 
-        let local_classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let local_classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(&file_use_map, &file_namespace);

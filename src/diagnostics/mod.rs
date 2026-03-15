@@ -600,9 +600,7 @@ fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
         // a line-wide PHPStan underline next to a pinpointed native
         // error.  The suppressed diagnostic will reappear once the user
         // resolves the precise one.
-        if is_full_line_range(&d.range)
-            && lines_with_precise_diag.contains(&d.range.start.line)
-        {
+        if is_full_line_range(&d.range) && lines_with_precise_diag.contains(&d.range.start.line) {
             return false;
         }
 
@@ -617,9 +615,7 @@ fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
 /// very large end character).  PHPStan and other line-only tools
 /// produce these ranges because they don't report column information.
 fn is_full_line_range(range: &Range) -> bool {
-    range.start.line == range.end.line
-        && range.start.character == 0
-        && range.end.character >= 1000
+    range.start.line == range.end.line && range.start.character == 0 && range.end.character >= 1000
 }
 
 /// Check whether two LSP ranges overlap.

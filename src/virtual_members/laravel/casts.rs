@@ -10,6 +10,7 @@
 
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
+use std::sync::Arc;
 
 /// The short name of the `CastsAttributes` interface, used to look up
 /// `@implements` generic arguments on custom cast classes.
@@ -69,7 +70,7 @@ const CASTABLE_FQN: &str = "Illuminate\\Contracts\\Database\\Eloquent\\Castable"
 /// resolving the class.
 pub(super) fn cast_type_to_php_type(
     cast_type: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     // 1. Check the built-in mapping table.
     let lower = cast_type.to_lowercase();

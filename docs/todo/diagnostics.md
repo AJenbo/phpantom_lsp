@@ -23,7 +23,7 @@ PHPantom assigns diagnostic severity based on runtime consequences:
 
 ---
 
-## 1. Scalar member access diagnostic — remaining gaps
+## D1. Scalar member access diagnostic — remaining gaps
 
 **Impact: High · Effort: Low**
 
@@ -48,45 +48,7 @@ not yet covered.
 
 ---
 
-## 2. Chain and function-return member diagnostics
-
-**Impact: High · Effort: Medium**
-
-When a method return chain or function call return resolves to a known
-class, unknown member diagnostics should fire on the final member. This
-is the same "known type, missing member" logic that already works for
-direct variables and parameters, but the symbol map's `subject_text`
-for chain and call expressions isn't being resolved through to the end.
-
-### Current state
-
-- Direct variable and parameter member access: working.
-- Static access on known class: working.
-- Property chains (`$user->getProfile()->nonexistent`): NOT flagged.
-- Function return member access (`getUser()->nonexistent`): NOT flagged.
-
-### Gaps to fix
-
-| Scenario                           | Current | Expected                                                         |
-| ---------------------------------- | ------- | ---------------------------------------------------------------- |
-| `$user->getProfile()->nonexistent` | Silent  | **Warning**: Property 'nonexistent' not found on class 'Profile' |
-| `$user->getProfile()->fakeFn()`    | Silent  | **Warning**: Method 'fakeFn' not found on class 'Profile'        |
-| `getUser()->nonexistent`           | Silent  | **Warning**: Property 'nonexistent' not found on class 'User'    |
-| `getUser()->fakeMethod()`          | Silent  | **Warning**: Method 'fakeMethod' not found on class 'User'       |
-
-### Implementation notes
-
-The completion resolver pipeline (`resolve_target_classes`) handles all
-these subject forms correctly for completion. The issue is that the
-symbol map's `subject_text` for these expressions may not carry enough
-context, or the diagnostic walker doesn't pass it through the full
-resolver pipeline. Verify that the `subject_text` captured for
-`$user->getProfile()->nonexistent` is `$user->getProfile()` and that
-`resolve_target_classes` returns `Profile` for it.
-
----
-
-## 3. Chain error propagation (flag only the first broken link)
+## D2. Chain error propagation (flag only the first broken link)
 
 **Impact: Medium · Effort: Medium**
 
@@ -105,7 +67,7 @@ noise without actionable information.
   by accident.
 - Scalar chains (`$user->getAge()->value->deep`): the scalar member
   access at `->value` should be flagged but `->deep` should be silent.
-  Currently `->value` is not flagged at all (see item 1).
+  Currently `->value` is not flagged at all (see D1).
 
 ### Desired behavior
 
@@ -127,7 +89,7 @@ the first pass.
 
 ---
 
-## 4. Deprecated rendering
+## D3. Deprecated rendering
 
 **Impact: Low-Medium · Effort: Low**
 
@@ -149,7 +111,7 @@ deprecated symbol types. Verify that:
 
 ---
 
-## 5. Unresolved type in PHPDoc
+## D4. Unresolved type in PHPDoc
 
 **Impact: Medium · Effort: Medium**
 
@@ -174,7 +136,7 @@ positions produce `ClassReference` spans and which don't.
 
 ---
 
-## 6. Diagnostic suppression intelligence
+## D5. Diagnostic suppression intelligence
 
 **Impact: Medium · Effort: Medium**
 
@@ -205,7 +167,7 @@ suppression actions can be wired up.
 
 ---
 
-## 8. Unreachable code diagnostic
+## D6. Unreachable code diagnostic
 
 **Impact: Low-Medium · Effort: Low**
 
@@ -248,7 +210,7 @@ the call becomes visible, signalling the bug.
 
 ---
 
-## 9. Implementation error diagnostic
+## D7. Implementation error diagnostic
 
 **Impact: Medium · Effort: Medium**
 
@@ -299,7 +261,7 @@ This makes inheritance resolution bugs immediately visible.
 
 ---
 
-## 10. Undefined variable diagnostic
+## D8. Undefined variable diagnostic
 
 **Impact: High · Effort: Medium**
 
@@ -411,7 +373,7 @@ shared or adapted.
 
 ---
 
-## 11. Syntax error diagnostic
+## D9. Syntax error diagnostic
 
 **Impact: High · Effort: Low**
 
@@ -477,3 +439,34 @@ type resolution) can optionally be skipped entirely since the AST is
 likely incomplete, though this is not required for correctness since
 the downstream diagnostics will simply produce fewer results on a
 partial AST.
+
+---
+
+## D10. PHPMD diagnostic proxy
+
+**Impact: Low · Effort: Medium**
+
+Proxy PHPMD (PHP Mess Detector) diagnostics into the editor, following
+the same pattern as the existing PHPStan proxy. PHPMD 3.0 (once
+released) is the target version. It will get a `[phpmd]` TOML section
+with `command`, `timeout`, and tool-specific options mirroring the
+`[phpstan]` schema.
+
+### Prerequisites
+
+- PHPMD 3.0 must be released. Current 2.x output formats and rule
+  naming may change.
+- The diagnostic suppression code action (D5) should support PHPMD's
+  `@SuppressWarnings(PHPMD.[RuleName])` syntax once the proxy exists.
+
+### Implementation
+
+1. Add a `[phpmd]` section to the config schema in `src/config.rs`
+   with `command` (default `"vendor/bin/phpmd"`), `timeout`, and
+   an `enabled` flag.
+2. Run PHPMD with XML or JSON output on the current file (or changed
+   files) and parse the results into LSP diagnostics.
+3. Map PHPMD rule names to diagnostic codes so that suppression
+   actions (D5) can insert the correct `@SuppressWarnings` annotation.
+4. Respect the same debounce and queueing logic used by the PHPStan
+   proxy to avoid overwhelming the tool on rapid edits.

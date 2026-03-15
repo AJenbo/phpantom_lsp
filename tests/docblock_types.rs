@@ -1381,7 +1381,7 @@ async fn test_parse_php_class_property_tags() {
     );
 
     // After resolve_class_fully, virtual properties appear.
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
     assert_eq!(merged.properties.len(), 2);
 
@@ -1495,7 +1495,7 @@ async fn test_real_property_overrides_property_tag() {
 
     // After resolve_class_fully, still only one — the virtual @property
     // is suppressed because a real property with the same name exists.
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
 
     let name_props: Vec<_> = merged
@@ -1535,7 +1535,7 @@ async fn test_parse_php_property_read_tag() {
     assert_eq!(classes[0].properties.len(), 0);
 
     // Available after resolve_class_fully.
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
 
     let prop = merged
@@ -1776,7 +1776,7 @@ async fn test_parse_php_class_method_tags() {
     );
 
     // After resolve_class_fully, virtual methods appear.
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
     assert_eq!(merged.methods.len(), 3);
 
@@ -2015,7 +2015,7 @@ async fn test_real_method_overrides_method_tag() {
 
     // After resolve_class_fully, still only one — the virtual @method
     // is suppressed because a real method with the same name exists.
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
 
     let name_methods: Vec<_> = merged
@@ -2185,7 +2185,7 @@ async fn test_parse_php_trait_method_tags() {
         "@method not eagerly parsed on traits"
     );
 
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
     assert_eq!(merged.methods.len(), 1);
     assert_eq!(merged.methods[0].name, "greet");
@@ -2213,7 +2213,7 @@ async fn test_parse_php_interface_method_tags() {
         "@method not eagerly parsed on interfaces"
     );
 
-    let no_loader = |_: &str| -> Option<phpantom_lsp::ClassInfo> { None };
+    let no_loader = |_: &str| -> Option<std::sync::Arc<phpantom_lsp::ClassInfo>> { None };
     let merged = phpantom_lsp::resolve_class_fully(&classes[0], &no_loader);
     assert_eq!(merged.methods.len(), 1);
     assert_eq!(merged.methods[0].name, "create");

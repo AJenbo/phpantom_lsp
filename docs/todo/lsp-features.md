@@ -1,4 +1,4 @@
-# PHPantom — New LSP Features
+# PHPantom — LSP Features
 
 Items are ordered by **impact** (descending), then **effort** (ascending)
 within the same impact tier.
@@ -10,77 +10,7 @@ within the same impact tier.
 
 ---
 
-## 2. Document Highlighting (`textDocument/documentHighlight`)
-
-**Impact: Medium-High · Effort: Low**
-
-When the cursor lands on a symbol, highlight all other occurrences of that
-symbol in the current file. This is a cheap, high-visibility UX
-improvement — users expect it from any modern language server and notice
-its absence immediately.
-
-### Existing infrastructure
-
-The `SymbolMap` already records every navigable symbol occurrence in
-a file during `update_ast`. Each `SymbolSpan` carries a `SymbolKind`
-discriminant (`ClassReference`, `ClassDeclaration`, `MemberAccess`,
-`Variable`, `FunctionCall`, `SelfStaticParent`, `ConstantReference`).
-The highlight handler can reuse these spans directly — no additional
-parsing or AST walking is needed.
-
-### Implementation plan
-
-1. **Register the capability** — set `document_highlight_provider: Some(OneOf::Left(true))`
-   in `ServerCapabilities` inside `server.rs`.
-
-2. **Add a handler method** on `Backend`:
-   - Look up the `SymbolMap` for the file URI from `self.symbol_maps`.
-   - Call `symbol_map.lookup(offset)` to find the `SymbolSpan` under the
-     cursor.
-   - Based on the `SymbolKind`, determine matching criteria:
-     - `Variable { name }` → match all `Variable` spans with the same
-       `name` that share the same enclosing scope (use
-       `symbol_map.find_enclosing_scope(offset)`).
-     - `ClassReference { name, .. }` / `ClassDeclaration { name }` →
-       match all `ClassReference` and `ClassDeclaration` spans whose
-       resolved name is the same FQN.
-     - `MemberAccess { member_name, is_static, .. }` → match all
-       `MemberAccess` spans with the same `member_name` and `is_static`
-       flag. Optionally resolve the subject type to avoid false positives
-       across unrelated classes, but a name-only match is acceptable for v1.
-     - `FunctionCall { name }` → match all `FunctionCall` spans with the
-       same name.
-     - `ConstantReference { name }` → match all `ConstantReference` spans
-       with the same name.
-     - `SelfStaticParent { keyword }` → match all `SelfStaticParent`
-       spans with the same keyword within the same class body.
-   - Iterate `symbol_map.spans` and collect every span that matches.
-   - Convert each matching `SymbolSpan` to a `DocumentHighlight` with
-     `range` computed from the byte offsets and `kind` set to
-     `DocumentHighlightKind::Read` (or `Write` for assignment LHS
-     variables, detectable via `symbol_map.var_def_kind_at`).
-
-3. **Wire the LSP method** — implement `async fn document_highlight` in the
-   `LanguageServer` impl in `server.rs`, delegating to the handler above.
-
-### Highlight kind assignment
-
-- Variable on an assignment LHS, parameter definition, foreach binding,
-  or catch binding → `DocumentHighlightKind::Write` (check
-  `var_def_kind_at` for the offset).
-- Everything else → `DocumentHighlightKind::Read`.
-
-### Scope rules
-
-- **Variables** should be scoped to their enclosing function/method/closure
-  body via `find_enclosing_scope`. A `$user` in method A must not
-  highlight `$user` in method B.
-- **Class names, member names, function names, constants** are file-global —
-  highlight all occurrences in the file regardless of scope.
-
----
-
-## 3. PHPDoc block generation on `/**`
+## F1. PHPDoc block generation on `/**`
 
 **Impact: Medium-High · Effort: Medium**
 
@@ -122,7 +52,7 @@ block. This generates the entire block from scratch.
 
 ---
 
-## 6. Partial result streaming via `$/progress`
+## F2. Partial result streaming via `$/progress`
 
 **Impact: Medium · Effort: Medium-High**
 
@@ -186,8 +116,8 @@ developer arrive before vendor matches, even within a single phase.
 | Request                        | Benefit                                                                         |
 | ------------------------------ | ------------------------------------------------------------------------------- |
 | `textDocument/implementation`  | Already scans five phases; each phase's matches can be streamed                 |
-| `textDocument/references` (§1) | Will need full-project scanning; streaming is essential                         |
-| `workspace/symbol` (§5)        | Searches every known class/function; early batches feel instant                 |
+| `textDocument/references`      | Will need full-project scanning; streaming is essential                         |
+| `workspace/symbol`             | Searches every known class/function; early batches feel instant                 |
 | `textDocument/completion`      | Less critical (usually fast), but long chains through vendor code could benefit |
 
 ### Implementation sketch
@@ -203,74 +133,9 @@ developer arrive before vendor matches, even within a single phase.
 
 ---
 
-## 7. Rename (`textDocument/rename`)
-
-**Impact: Medium · Effort: Medium-High**
-
-No rename refactoring support. Rename builds on find-references (§1) —
-once all occurrences of a symbol are known, the rename handler produces
-a `WorkspaceEdit` replacing each occurrence. The `SymbolMap`'s byte
-ranges translate directly to LSP `Range`s via `offset_to_position`,
-which makes generating the text edits straightforward.
-
-For member renames, the stored `name_offset` on `MethodInfo`,
-`PropertyInfo`, and `ConstantInfo` provides the declaration-site edit
-position without text scanning.
-
-**Vendor rejection:** The rename handler must reject renames for symbols
-whose definition lives under the vendor directory. Users cannot
-meaningfully rename third-party code. Use `vendor_uri_prefix` to detect
-this and return an error via `prepareRename` (the LSP spec's
-`textDocument/prepareRename` request exists specifically so the server
-can reject a rename before the user types a new name).
-
----
-
----
-
-## 11. No go-to-definition for built-in (stub) functions and constants
-
-**Impact: Medium · Effort: Medium**
-
-Clicking on a built-in function name like `array_map`, `strlen`, or
-`json_decode` does not navigate anywhere. `resolve_function_definition`
-finds the function in `stub_function_index` and caches it under a
-synthetic `phpantom-stub-fn://` URI, but then explicitly skips navigation
-because the URI is not a real file path. The same applies to built-in
-constants like `PHP_EOL`, `SORT_ASC`, `PHP_INT_MAX` — they exist in
-`stub_constant_index` for completion but `resolve_constant_definition`
-only checks `global_defines`.
-
-User-defined functions and `define()` constants work correctly. Only
-built-in PHP symbols from stubs are affected.
-
-**Fix:** either embed the stub source files as navigable resources (e.g.
-write them to a temporary directory and use real file URIs), or accept
-that stub go-to-definition is out of scope and document it as a known
-limitation.
-
----
-
-## 15. Document Links (`textDocument/documentLink`)
-
-No outstanding items. Shipped in the current release cycle.
-
----
-
-## 16. Type Hierarchy (`textDocument/prepareTypeHierarchy`)
-
-No outstanding items. Shipped in the current release cycle.
-
----
-
-## 17. Incremental text sync
+## F3. Incremental text sync
 
 **Impact: Low-Medium · Effort: Medium**
-
-> **Cross-reference:** This item is also tracked as
-> [performance.md §8](performance.md#8-incremental-text-sync) and
-> roadmap item 89. The canonical spec lives here; the performance
-> document includes it for completeness.
 
 PHPantom uses `TextDocumentSyncKind::FULL`, meaning every
 `textDocument/didChange` notification sends the entire file content.
@@ -297,10 +162,10 @@ legacy PHP), sending 200KB on every keystroke can become noticeable.
 3. **Re-parse** — after applying all change events, re-parse the full
    file with Mago as today. No incremental parsing needed initially.
 
-**Relationship with partial result streaming (§6):** These two features
+**Relationship with partial result streaming (F2):** These two features
 address different performance axes. Incremental text sync reduces the
 cost of _inbound_ data (client to server per keystroke). Partial result
-streaming (§6) reduces the _perceived latency_ of _outbound_ results
+streaming (F2) reduces the _perceived latency_ of _outbound_ results
 (server to client for large result sets). They are independent and can
 be implemented in either order, but if both are planned, incremental
 text sync is lower priority because full-file sync is rarely the
@@ -310,17 +175,7 @@ workspace symbols on large codebases.
 
 ---
 
-## 19. Formatting (`textDocument/formatting`)
-
-No outstanding items. Built-in formatting via mago-formatter (PER-CS
-2.0 style) works out of the box. Projects with php-cs-fixer or
-PHP_CodeSniffer in `require-dev` automatically use those external tools
-instead. Explicit tool paths and disable switches are supported via
-`.phpantom.toml`.
-
----
-
-## 20. File rename on class rename
+## F4. File rename on class rename
 
 **Impact: Medium · Effort: Medium**
 
@@ -360,3 +215,4 @@ now, only single-class file renames are in scope.
   from the `changes` map to `documentChanges` array when file
   operations are included, since `changes` does not support renames.
   Check the client capability first.
+

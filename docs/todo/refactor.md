@@ -42,7 +42,3 @@ pass. Small fixes that can be done inline during feature work should
 just be done inline. Items do not need to be scoped to the sprint's
 feature area, but they should be completable in reasonable time (not
 multi-week rewrites that would stall the sprint indefinitely).
-
----
-
-No outstanding items.

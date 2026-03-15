@@ -7,6 +7,7 @@
 //! `Database\Factories\UserFactory` → `App\Models\User`).
 
 use crate::types::{ClassInfo, MethodInfo};
+use std::sync::Arc;
 
 use super::helpers::walks_parent_chain;
 
@@ -91,7 +92,7 @@ fn is_eloquent_factory(class_name: &str) -> bool {
 /// Returns `true` if the class itself is `Factory` or any ancestor is.
 fn extends_eloquent_factory(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     walks_parent_chain(class, class_loader, is_eloquent_factory)
 }
@@ -112,7 +113,7 @@ fn has_factory_extends_generic(class: &ClassInfo) -> bool {
 /// `Database\Factories\UserFactory` → `App\Models\User`).
 fn build_factory_model_methods(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<MethodInfo> {
     let model_fqn = match factory_to_model_fqn(&class.name) {
         Some(fqn) => fqn,
@@ -148,7 +149,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
     fn applies_to(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
         !is_eloquent_factory(&class.name)
             && !has_factory_extends_generic(class)
@@ -160,7 +161,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         _cache: Option<&crate::virtual_members::ResolvedClassCache>,
     ) -> VirtualMembers {
         let methods = build_factory_model_methods(class, class_loader);

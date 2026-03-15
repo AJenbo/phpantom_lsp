@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 /// Base class inheritance resolution.
 ///
 /// This module handles merging members from parent classes and traits
@@ -16,7 +17,7 @@
 /// parent has `@template T1` / `@template T2`, the inherited methods and
 /// properties have their template parameter references replaced with the
 /// concrete types.
-use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Bundles the trait-level configuration passed through
 /// [`merge_traits_into`] so the function stays within clippy's
@@ -85,7 +86,7 @@ use crate::virtual_members::laravel::{
 /// A depth limit of 20 prevents infinite loops from circular inheritance.
 pub(crate) fn resolve_class_with_inheritance(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> ClassInfo {
     let mut merged = class.clone();
 
@@ -231,7 +232,7 @@ pub(crate) fn resolve_class_with_inheritance(
         // we need to apply the current substitutions to those type
         // arguments so that `TKey` → `int` flows through.
         active_subs = level_subs;
-        current = parent;
+        current = Arc::unwrap_or_clone(parent);
     }
 
     merged
@@ -251,7 +252,7 @@ pub(crate) fn resolve_class_with_inheritance(
 pub(crate) fn resolve_method_return_type(
     class: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     let merged = crate::virtual_members::resolve_class_fully(class, class_loader);
     merged
@@ -275,7 +276,7 @@ pub(crate) fn resolve_method_return_type(
 pub(crate) fn resolve_property_type_hint(
     class: &ClassInfo,
     prop_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     let merged = crate::virtual_members::resolve_class_fully(class, class_loader);
     merged
@@ -306,7 +307,7 @@ fn merge_traits_into(
     merged: &mut ClassInfo,
     trait_names: &[String],
     ctx: &TraitContext<'_>,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u32,
     dedup: &mut MergeDedup,
 ) {

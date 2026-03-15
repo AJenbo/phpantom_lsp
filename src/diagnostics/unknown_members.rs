@@ -23,6 +23,7 @@
 //!   are accessed via `::` but stored as constants).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -76,12 +77,8 @@ impl Backend {
 
         let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
 
-        let local_classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let local_classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
@@ -480,7 +477,7 @@ fn resolve_scalar_subject_type(
     expr: &SubjectExpr,
     access_kind: AccessKind,
     rctx: &ResolutionCtx<'_>,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
     cache: &crate::virtual_members::ResolvedClassCache,
 ) -> Option<String> {
@@ -607,7 +604,7 @@ fn resolve_scalar_subject_type(
 fn resolve_unresolvable_class_subject(
     expr: &SubjectExpr,
     rctx: &ResolutionCtx<'_>,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
 ) -> Option<String> {
     let raw_type = match expr {

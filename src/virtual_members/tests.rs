@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_fixtures::{make_class, make_method, make_property};
 use crate::types::Visibility;
+use std::sync::Arc;
 
 // ── VirtualMembers tests ────────────────────────────────────────────
 
@@ -533,7 +534,7 @@ impl VirtualMemberProvider for TestProvider {
     fn applies_to(
         &self,
         _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
         true
     }
@@ -541,7 +542,7 @@ impl VirtualMemberProvider for TestProvider {
     fn provide(
         &self,
         _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         _cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         VirtualMembers {
@@ -559,7 +560,7 @@ impl VirtualMemberProvider for NeverProvider {
     fn applies_to(
         &self,
         _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
         false
     }
@@ -567,7 +568,7 @@ impl VirtualMemberProvider for NeverProvider {
     fn provide(
         &self,
         _class: &ClassInfo,
-        _class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        _class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         _cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         panic!("provide should not be called when applies_to returns false")
@@ -595,7 +596,7 @@ fn apply_providers_in_priority_order() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -617,7 +618,7 @@ fn apply_providers_skips_non_applicable() {
     let mut class = make_class("Foo");
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![Box::new(NeverProvider)];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -638,7 +639,7 @@ fn apply_providers_real_members_beat_virtual() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![provider];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -668,7 +669,7 @@ fn apply_providers_property_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -706,7 +707,7 @@ fn apply_providers_low_priority_overrides_mixed_from_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -738,7 +739,7 @@ fn apply_providers_low_priority_cannot_override_specific_from_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -778,7 +779,7 @@ fn apply_providers_generic_from_low_priority_beats_bare_from_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -810,7 +811,7 @@ fn apply_providers_same_specificity_preserves_high_priority() {
     }) as Box<dyn VirtualMemberProvider>;
 
     let providers: Vec<Box<dyn VirtualMemberProvider>> = vec![high_priority, low_priority];
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
 
     apply_virtual_members(&mut class, &class_loader, &providers, None);
 
@@ -849,9 +850,9 @@ fn resolve_class_fully_returns_same_as_base_when_no_providers() {
         .methods
         .push(make_method("parentMethod", Some("string")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Parent" {
-            Some(parent.clone())
+            Some(Arc::new(parent.clone()))
         } else {
             None
         }

@@ -6,6 +6,7 @@
 //! for all missing methods.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -129,7 +130,7 @@ impl Backend {
 /// class itself or inherited as concrete from parent classes.
 fn collect_missing_methods(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<MethodInfo> {
     // Build the full set of concrete method names already available on
     // this class: own methods + concrete methods inherited from the
@@ -176,7 +177,7 @@ fn collect_missing_methods(
 /// abstract methods are already satisfied by a parent class.
 fn collect_concrete_parent_methods(
     parent_name: &Option<String>,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     implemented: &mut Vec<String>,
     depth: usize,
 ) {
@@ -210,7 +211,7 @@ fn collect_concrete_parent_methods(
 /// parent interfaces.
 fn collect_from_interface(
     iface_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     own_methods: &[String],
     missing: &mut Vec<MethodInfo>,
     seen: &mut Vec<String>,
@@ -257,7 +258,7 @@ fn collect_from_interface(
 /// implementation.
 fn collect_from_parent_chain(
     parent_name: &Option<String>,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     own_methods: &[String],
     missing: &mut Vec<MethodInfo>,
     seen: &mut Vec<String>,
@@ -728,9 +729,9 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<ClassInfo> {
+        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
             if name == "Renderable" {
-                Some(interface.clone())
+                Some(Arc::new(interface.clone()))
             } else {
                 None
             }
@@ -758,9 +759,9 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<ClassInfo> {
+        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
             if name == "Renderable" {
-                Some(interface.clone())
+                Some(Arc::new(interface.clone()))
             } else {
                 None
             }
@@ -795,9 +796,9 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<ClassInfo> {
+        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
             if name == "AbstractBase" {
-                Some(parent.clone())
+                Some(Arc::new(parent.clone()))
             } else {
                 None
             }
@@ -825,9 +826,9 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<ClassInfo> {
+        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
             if name == "Renderable" {
-                Some(interface.clone())
+                Some(Arc::new(interface.clone()))
             } else {
                 None
             }
@@ -866,10 +867,10 @@ mod tests {
             ..Default::default()
         };
 
-        let loader = |name: &str| -> Option<ClassInfo> {
+        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
             match name {
-                "AbstractBase" => Some(parent.clone()),
-                "Serializable" => Some(serializable.clone()),
+                "AbstractBase" => Some(Arc::new(parent.clone())),
+                "Serializable" => Some(Arc::new(serializable.clone())),
                 _ => None,
             }
         };

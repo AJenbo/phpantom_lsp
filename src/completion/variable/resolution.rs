@@ -29,6 +29,8 @@
 /// Type narrowing (instanceof, assert, custom type guards) is delegated
 /// to the [`crate::completion::type_narrowing`] module.  Closure/arrow-function scope
 /// handling is delegated to [`super::closure_resolution`].
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -79,7 +81,7 @@ fn enrich_builder_type_in_scope(
     method_name: &str,
     has_scope_attr: bool,
     current_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     use crate::virtual_members::laravel::{ELOQUENT_BUILDER_FQN, extends_eloquent_model};
 
@@ -125,10 +127,10 @@ fn enrich_builder_type_in_scope(
 pub(crate) fn resolve_variable_types(
     var_name: &str,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
+    all_classes: &[Arc<ClassInfo>],
     content: &str,
     cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoaderFn<'_>,
 ) -> Vec<ClassInfo> {
     with_parsed_program(content, "resolve_variable_types", |program, _content| {
@@ -1342,8 +1344,8 @@ fn extract_native_type_from_rhs<'b>(
                         .all_classes
                         .iter()
                         .find(|c| c.name == cls_name)
-                        .cloned()
-                        .or_else(|| (ctx.class_loader)(&cls_name));
+                        .map(|c| ClassInfo::clone(c))
+                        .or_else(|| (ctx.class_loader)(&cls_name).map(Arc::unwrap_or_clone));
                     owner.and_then(|o| {
                         o.methods
                             .iter()
@@ -1496,7 +1498,8 @@ pub(in crate::completion) fn resolve_arg_raw_type<'b>(
         let current_class = ctx
             .all_classes
             .iter()
-            .find(|c| c.name == ctx.current_class.name);
+            .find(|c| c.name == ctx.current_class.name)
+            .map(|c| c.as_ref());
         if let Some(raw) = super::raw_type_inference::resolve_variable_assignment_raw_type(
             &var_text,
             ctx.content,

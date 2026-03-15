@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_fixtures::{make_class, make_constant, make_method, make_property, no_loader};
+use std::sync::Arc;
 
 // ── applies_to ──────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ fn applies_when_class_has_mixins() {
     let mut class = make_class("Foo");
     class.mixins = vec!["Bar".to_string()];
 
-    let class_loader = |_: &str| -> Option<ClassInfo> { None };
+    let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
     assert!(provider.applies_to(&class, &class_loader));
 }
 
@@ -45,9 +46,9 @@ fn applies_when_ancestor_has_mixins() {
     let mut parent = make_class("Parent");
     parent.mixins = vec!["Mixin".to_string()];
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Parent" {
-            Some(parent.clone())
+            Some(Arc::new(parent.clone()))
         } else {
             None
         }
@@ -290,9 +291,9 @@ fn provides_public_methods_from_mixin() {
     private_method.visibility = Visibility::Private;
     bar.methods.push(private_method);
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -315,9 +316,9 @@ fn provides_public_properties_from_mixin() {
     protected_prop.visibility = Visibility::Protected;
     bar.properties.push(protected_prop);
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -340,9 +341,9 @@ fn provides_public_constants_from_mixin() {
     private_const.visibility = Visibility::Private;
     bar.constants.push(private_const);
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -364,9 +365,9 @@ fn mixin_does_not_overwrite_existing_class_members() {
     bar.methods.push(make_method("doStuff", Some("string")));
     bar.methods.push(make_method("barOnly", Some("void")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -389,9 +390,9 @@ fn mixin_leaves_this_return_type_as_is_for_consumer_resolution() {
     bar.methods.push(make_method("selfRef", Some("self")));
     bar.methods.push(make_method("staticRef", Some("static")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -429,10 +430,10 @@ fn mixin_collects_from_ancestor_mixins() {
     let mut mixin = make_class("Mixin");
     mixin.methods.push(make_method("mixinMethod", Some("void")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "Parent" => Some(parent.clone()),
-            "Mixin" => Some(mixin.clone()),
+            "Parent" => Some(Arc::new(parent.clone())),
+            "Mixin" => Some(Arc::new(mixin.clone())),
             _ => None,
         }
     };
@@ -455,10 +456,10 @@ fn mixin_recurses_into_mixin_mixins() {
     let mut baz = make_class("Baz");
     baz.methods.push(make_method("bazMethod", Some("void")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "Bar" => Some(bar.clone()),
-            "Baz" => Some(baz.clone()),
+            "Bar" => Some(Arc::new(bar.clone())),
+            "Baz" => Some(Arc::new(baz.clone())),
             _ => None,
         }
     };
@@ -481,10 +482,10 @@ fn multiple_mixins() {
     let mut baz = make_class("Baz");
     baz.methods.push(make_method("bazMethod", Some("void")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "Bar" => Some(bar.clone()),
-            "Baz" => Some(baz.clone()),
+            "Bar" => Some(Arc::new(bar.clone())),
+            "Baz" => Some(Arc::new(baz.clone())),
             _ => None,
         }
     };
@@ -507,10 +508,10 @@ fn first_mixin_wins_on_name_collision() {
     let mut baz = make_class("Baz");
     baz.methods.push(make_method("shared", Some("int")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "Bar" => Some(bar.clone()),
-            "Baz" => Some(baz.clone()),
+            "Bar" => Some(Arc::new(bar.clone())),
+            "Baz" => Some(Arc::new(baz.clone())),
             _ => None,
         }
     };
@@ -537,9 +538,9 @@ fn method_tag_beats_mixin_method() {
     bar.methods.push(make_method("doStuff", Some("int")));
     bar.methods.push(make_method("barOnly", Some("void")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -570,9 +571,9 @@ fn property_tag_beats_mixin_property() {
     bar.properties.push(make_property("name", Some("int")));
     bar.properties.push(make_property("email", Some("string")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }
@@ -602,9 +603,9 @@ fn mixin_only_no_docblock() {
     bar.methods.push(make_method("barMethod", Some("void")));
     bar.properties.push(make_property("barProp", Some("int")));
 
-    let class_loader = move |name: &str| -> Option<ClassInfo> {
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
-            Some(bar.clone())
+            Some(Arc::new(bar.clone()))
         } else {
             None
         }

@@ -15,6 +15,7 @@
 //! resolution pass instead of re-parsing the file for each access.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -60,12 +61,8 @@ impl Backend {
 
         let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
 
-        let local_classes: Vec<ClassInfo> = self
-            .ast_map
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+        let local_classes: Vec<Arc<ClassInfo>> =
+            self.ast_map.read().get(uri).cloned().unwrap_or_default();
 
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
@@ -111,7 +108,8 @@ impl Backend {
                         &file_namespace,
                         &local_classes,
                     )
-                    .and_then(|name| self.find_or_load_class(&name));
+                    .and_then(|name| self.find_or_load_class(&name))
+                    .map(|arc| ClassInfo::clone(&arc));
 
                     // Fall back to variable type resolution for $var->member() calls.
                     // Use the per-variable cache to avoid re-parsing the
@@ -299,7 +297,7 @@ fn resolve_subject_to_class_name(
     is_static: bool,
     file_use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
-    local_classes: &[ClassInfo],
+    local_classes: &[Arc<ClassInfo>],
 ) -> Option<String> {
     let trimmed = subject_text.trim();
 
@@ -356,8 +354,8 @@ fn resolve_variable_subject(
     subject_text: &str,
     access_offset: u32,
     content: &str,
-    local_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
 ) -> Option<ClassInfo> {
     let var_name = subject_text.trim();
@@ -370,7 +368,7 @@ fn resolve_variable_subject(
                 && access_offset >= c.start_offset
                 && access_offset <= c.end_offset
         })
-        .cloned()
+        .map(|c| ClassInfo::clone(c))
         .unwrap_or_default();
 
     let results = resolve_variable_types(
@@ -389,7 +387,7 @@ fn resolve_variable_subject(
 /// Find the FQN of the first non-anonymous class in the file (heuristic
 /// for the "enclosing class" in single-class-per-file projects).
 fn find_enclosing_class_fqn(
-    local_classes: &[ClassInfo],
+    local_classes: &[Arc<ClassInfo>],
     file_namespace: &Option<String>,
 ) -> Option<String> {
     // Skip anonymous classes

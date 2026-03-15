@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_fixtures::{make_class, no_loader};
+use std::sync::Arc;
 
 // ── model_to_factory_fqn tests ──────────────────────────────────────
 
@@ -102,9 +103,9 @@ fn extends_factory_indirect() {
     let mut base = make_class("BaseFactory");
     base.parent_class = Some(FACTORY_FQN.to_string());
 
-    let loader = move |name: &str| -> Option<ClassInfo> {
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "BaseFactory" {
-            Some(base.clone())
+            Some(Arc::new(base.clone()))
         } else {
             None
         }
@@ -155,9 +156,9 @@ fn build_factory_model_methods_synthesizes_create_and_make() {
     factory.parent_class = Some(FACTORY_FQN.to_string());
 
     let model = make_class("App\\Models\\User");
-    let loader = move |name: &str| -> Option<ClassInfo> {
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\User" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -201,9 +202,9 @@ fn factory_provider_applies_to_factory_subclass() {
     let mut factory = make_class("Database\\Factories\\UserFactory");
     factory.parent_class = Some(FACTORY_FQN.to_string());
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == FACTORY_FQN {
-            Some(make_class(FACTORY_FQN))
+            Some(Arc::new(make_class(FACTORY_FQN)))
         } else {
             None
         }
@@ -242,9 +243,9 @@ fn factory_provider_synthesizes_create_and_make() {
     factory.parent_class = Some(FACTORY_FQN.to_string());
 
     let model = make_class("App\\Models\\User");
-    let loader = move |name: &str| -> Option<ClassInfo> {
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\User" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -279,9 +280,9 @@ fn factory_provider_subdirectory_convention() {
     factory.parent_class = Some(FACTORY_FQN.to_string());
 
     let model = make_class("App\\Models\\Admin\\SuperUser");
-    let loader = move |name: &str| -> Option<ClassInfo> {
+    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\Admin\\SuperUser" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }

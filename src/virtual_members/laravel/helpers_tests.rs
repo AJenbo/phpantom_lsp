@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_fixtures::{make_class, no_loader};
 use crate::types::ClassInfo;
+use std::sync::Arc;
 
 // ── is_eloquent_model ───────────────────────────────────────────────
 
@@ -22,9 +23,9 @@ fn direct_child_of_model() {
     user.parent_class = Some("Illuminate\\Database\\Eloquent\\Model".to_string());
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -43,10 +44,10 @@ fn indirect_child_of_model() {
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         match name {
-            "App\\Models\\User" => Some(base.clone()),
-            "Illuminate\\Database\\Eloquent\\Model" => Some(model.clone()),
+            "App\\Models\\User" => Some(Arc::new(base.clone())),
+            "Illuminate\\Database\\Eloquent\\Model" => Some(Arc::new(model.clone())),
             _ => None,
         }
     };

@@ -3,6 +3,7 @@ use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
 };
 use crate::types::{MethodInfo, Visibility};
+use std::sync::Arc;
 
 // ── applies_to ──────────────────────────────────────────────────────
 
@@ -13,9 +14,9 @@ fn applies_to_model_subclass() {
     user.parent_class = Some("Illuminate\\Database\\Eloquent\\Model".to_string());
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -669,11 +670,11 @@ fn provide_includes_builder_forwarded_methods() {
         ),
     ]);
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_BUILDER_FQN {
-            Some(builder.clone())
+            Some(Arc::new(builder.clone()))
         } else {
             None
         }
@@ -725,11 +726,11 @@ fn provide_scope_beats_builder_method_with_same_name() {
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
     let builder = make_builder(vec![make_method("where", Some("static"))]);
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_BUILDER_FQN {
-            Some(builder.clone())
+            Some(Arc::new(builder.clone()))
         } else {
             None
         }
@@ -768,9 +769,9 @@ fn synthesizes_legacy_accessor_property() {
         .push(make_method("getFullNameAttribute", Some("string")));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -802,9 +803,9 @@ fn synthesizes_modern_accessor_property() {
     ));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -835,9 +836,9 @@ fn synthesizes_modern_accessor_property_with_generic_type() {
     ));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -865,9 +866,9 @@ fn synthesizes_modern_accessor_property_short_name_generic() {
         .push(make_method("age", Some("Attribute<int>")));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -892,9 +893,9 @@ fn accessor_and_relationship_coexist() {
     ));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -922,9 +923,9 @@ fn get_attribute_method_not_treated_as_accessor() {
         .push(make_method("getAttribute", Some("mixed")));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -965,9 +966,9 @@ fn accessor_scope_and_relationship_all_coexist() {
     ));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -1000,9 +1001,9 @@ fn legacy_accessor_preserves_deprecated() {
     user.methods.push(accessor);
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -1031,9 +1032,9 @@ fn synthesizes_property_from_body_inferred_has_many() {
         .push(make_method("posts", Some("HasMany<Post>")));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -1059,9 +1060,9 @@ fn synthesizes_property_from_body_inferred_morph_to() {
         .push(make_method("commentable", Some("MorphTo")));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Illuminate\\Database\\Eloquent\\Model" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else {
             None
         }
@@ -1599,9 +1600,9 @@ fn builder_scope_returns_empty_when_model_not_found() {
 
 #[test]
 fn builder_scope_returns_empty_for_non_model() {
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\Plain" {
-            Some(make_class("App\\Models\\Plain"))
+            Some(Arc::new(make_class("App\\Models\\Plain")))
         } else {
             None
         }
@@ -1620,11 +1621,11 @@ fn builder_scope_extracts_scope_methods_as_instance() {
         .push(make_method("scopeVerified", Some("void")));
     model.methods.push(make_method("getName", Some("string")));
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\User" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
-            Some(make_class(ELOQUENT_MODEL_FQN))
+            Some(Arc::new(make_class(ELOQUENT_MODEL_FQN)))
         } else {
             None
         }
@@ -1658,11 +1659,11 @@ fn builder_scope_substitutes_static_in_return_type() {
         .methods
         .push(make_method("scopePopular", Some("void")));
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\Brand" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
-            Some(make_class(ELOQUENT_MODEL_FQN))
+            Some(Arc::new(make_class(ELOQUENT_MODEL_FQN)))
         } else {
             None
         }
@@ -1698,11 +1699,11 @@ fn builder_scope_strips_query_parameter() {
         ],
     ));
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\Task" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
-            Some(make_class(ELOQUENT_MODEL_FQN))
+            Some(Arc::new(make_class(ELOQUENT_MODEL_FQN)))
         } else {
             None
         }
@@ -1726,11 +1727,11 @@ fn builder_scope_with_custom_return_type() {
         Some("\\Illuminate\\Database\\Eloquent\\Builder<static>"),
     ));
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\Post" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
-            Some(make_class(ELOQUENT_MODEL_FQN))
+            Some(Arc::new(make_class(ELOQUENT_MODEL_FQN)))
         } else {
             None
         }
@@ -1755,11 +1756,11 @@ fn builder_scope_preserves_deprecated() {
     scope.deprecation_message = Some("Use scopeNew() instead".into());
     model.methods.push(scope);
 
-    let loader = |name: &str| -> Option<ClassInfo> {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "App\\Models\\Item" {
-            Some(model.clone())
+            Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
-            Some(make_class(ELOQUENT_MODEL_FQN))
+            Some(Arc::new(make_class(ELOQUENT_MODEL_FQN)))
         } else {
             None
         }

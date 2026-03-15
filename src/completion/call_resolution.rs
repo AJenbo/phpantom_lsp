@@ -20,6 +20,7 @@
 ///   substitution map for method-level `@template` parameters from
 ///   call-site argument text.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::completion::variable::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
@@ -45,9 +46,9 @@ use tower_lsp::lsp_types::Position;
 /// limit.
 pub(super) struct MethodReturnCtx<'a> {
     /// All classes known in the current file.
-    pub all_classes: &'a [ClassInfo],
+    pub all_classes: &'a [Arc<ClassInfo>],
     /// Cross-file class resolution callback.
-    pub class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Template substitution map (method-level `@template` bindings).
     pub template_subs: &'a HashMap<String, String>,
     /// Resolves a variable name to class-string values (for conditional
@@ -191,7 +192,7 @@ impl Backend {
     /// Loads and merges the class, then extracts `__construct` parameters.
     fn resolve_constructor_callable(
         class_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: &crate::virtual_members::ResolvedClassCache,
     ) -> Option<ResolvedCallableTarget> {
         let ci = class_loader(class_name)?;
@@ -603,7 +604,7 @@ impl Backend {
             // return type is always the class itself.
             SubjectExpr::NewExpr { class_name } => find_class_by_name(ctx.all_classes, class_name)
                 .cloned()
-                .or_else(|| (ctx.class_loader)(class_name))
+                .or_else(|| (ctx.class_loader)(class_name).map(Arc::unwrap_or_clone))
                 .into_iter()
                 .collect(),
 
@@ -994,7 +995,7 @@ impl Backend {
                 } else {
                     find_class_by_name(all_classes, class_part)
                         .cloned()
-                        .or_else(|| class_loader(class_part))
+                        .or_else(|| class_loader(class_part).map(Arc::unwrap_or_clone))
                 };
                 if let Some(ref cls) = owner
                     && let Some(rt) = crate::inheritance::resolve_method_return_type(

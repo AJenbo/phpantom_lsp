@@ -7,6 +7,7 @@
 //! and the first `$query` parameter removed.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::inheritance::apply_substitution;
 use crate::types::{ClassInfo, MethodInfo};
@@ -127,7 +128,7 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
 /// keeping the chain on the Builder rather than jumping to the model.
 pub fn build_scope_methods_for_builder(
     model_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<MethodInfo> {
     let model_class = match class_loader(model_name) {
         Some(c) => c,

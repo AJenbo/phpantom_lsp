@@ -89,6 +89,8 @@ use relationships::{
 pub use scopes::build_scope_methods_for_builder;
 use scopes::{build_scope_methods, is_scope_method};
 
+use std::sync::Arc;
+
 use builder::build_builder_forwarded_methods;
 use casts::cast_type_to_php_type;
 pub use factory::LaravelFactoryProvider;
@@ -133,8 +135,8 @@ pub(crate) fn try_swap_custom_collection(
     cls: ClassInfo,
     base_fqn: &str,
     generic_args: &[&str],
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> ClassInfo {
     if base_fqn != crate::types::ELOQUENT_COLLECTION_FQN || generic_args.is_empty() {
         return cls;
@@ -144,14 +146,14 @@ pub(crate) fn try_swap_custom_collection(
     let model_arg = generic_args.last().unwrap();
     let model_class = find_class_in(all_classes, model_arg)
         .cloned()
-        .or_else(|| class_loader(model_arg));
+        .or_else(|| class_loader(model_arg).map(Arc::unwrap_or_clone));
 
     if let Some(ref mc) = model_class
         && let Some(coll_name) = mc.laravel().and_then(|l| l.custom_collection.as_ref())
     {
         find_class_in(all_classes, coll_name)
             .cloned()
-            .or_else(|| class_loader(coll_name))
+            .or_else(|| class_loader(coll_name).map(Arc::unwrap_or_clone))
             .unwrap_or(cls)
     } else {
         cls
@@ -182,7 +184,7 @@ pub(crate) fn try_inject_builder_scopes(
     raw_cls: &ClassInfo,
     base_fqn: &str,
     generic_args: &[&str],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
     if !is_eloquent_builder_fqn(base_fqn, raw_cls) || generic_args.is_empty() {
         return;
@@ -229,7 +231,7 @@ pub(crate) fn try_inject_builder_scopes(
 fn inject_model_virtual_methods(
     builder: &mut ClassInfo,
     model_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
     use std::collections::HashMap;
 
@@ -311,7 +313,7 @@ fn is_eloquent_builder_fqn(base_fqn: &str, cls: &ClassInfo) -> bool {
 ///
 /// Minimal local lookup used by the collection-swap helper.  Prefers
 /// namespace-aware matching when the name contains backslashes.
-fn find_class_in<'a>(all_classes: &'a [ClassInfo], name: &str) -> Option<&'a ClassInfo> {
+fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'a ClassInfo> {
     let short = name.rsplit('\\').next().unwrap_or(name);
 
     if name.contains('\\') {
@@ -319,8 +321,12 @@ fn find_class_in<'a>(all_classes: &'a [ClassInfo], name: &str) -> Option<&'a Cla
         all_classes
             .iter()
             .find(|c| c.name == short && c.file_namespace.as_deref() == expected_ns)
+            .map(|c| c.as_ref())
     } else {
-        all_classes.iter().find(|c| c.name == short)
+        all_classes
+            .iter()
+            .find(|c| c.name == short)
+            .map(|c| c.as_ref())
     }
 }
 
@@ -341,7 +347,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
     fn applies_to(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
         extends_eloquent_model(class, class_loader)
     }
@@ -353,7 +359,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         let mut properties = Vec::new();
@@ -448,6 +454,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     .and_then(|related_class| {
                         related_class
                             .laravel
+                            .as_ref()
                             .and_then(|l| l.custom_collection.clone())
                     })
             } else {

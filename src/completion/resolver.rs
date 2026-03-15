@@ -25,6 +25,8 @@
 ///   parent chain).
 /// - [`super::conditional_resolution`]: PHPStan conditional return type
 ///   resolution at call sites.
+use std::sync::Arc;
+
 use crate::Backend;
 use crate::docblock;
 use crate::types::*;
@@ -45,13 +47,13 @@ pub(crate) struct ResolutionCtx<'a> {
     /// The class the cursor is inside, if any.
     pub current_class: Option<&'a ClassInfo>,
     /// All classes known in the current file.
-    pub all_classes: &'a [ClassInfo],
+    pub all_classes: &'a [Arc<ClassInfo>],
     /// The full source text of the current file.
     pub content: &'a str,
     /// Byte offset of the cursor in `content`.
     pub cursor_offset: u32,
     /// Cross-file class resolution callback.
-    pub class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// Shared cache of fully-resolved classes, keyed by FQN.
     ///
     /// When `Some`, [`resolve_class_fully_cached`](crate::virtual_members::resolve_class_fully_cached)
@@ -72,10 +74,10 @@ pub(crate) struct ResolutionCtx<'a> {
 pub(super) struct VarResolutionCtx<'a> {
     pub var_name: &'a str,
     pub current_class: &'a ClassInfo,
-    pub all_classes: &'a [ClassInfo],
+    pub all_classes: &'a [Arc<ClassInfo>],
     pub content: &'a str,
     pub cursor_offset: u32,
-    pub class_loader: &'a dyn Fn(&str) -> Option<ClassInfo>,
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     pub function_loader: FunctionLoaderFn<'a>,
     /// Shared cache of fully-resolved classes, keyed by FQN.
     ///
@@ -198,7 +200,10 @@ pub(crate) fn resolve_target_classes_expr(
                 if let Some(cls) = find_class_by_name(all_classes, parent_name) {
                     return vec![cls.clone()];
                 }
-                return class_loader(parent_name).into_iter().collect();
+                return class_loader(parent_name)
+                    .map(Arc::unwrap_or_clone)
+                    .into_iter()
+                    .collect();
             }
             vec![]
         }
@@ -223,7 +228,10 @@ pub(crate) fn resolve_target_classes_expr(
             if let Some(cls) = find_class_by_name(all_classes, class) {
                 return vec![cls.clone()];
             }
-            class_loader(class).into_iter().collect()
+            class_loader(class)
+                .map(Arc::unwrap_or_clone)
+                .into_iter()
+                .collect()
         }
 
         // ── Bare class name ─────────────────────────────────────
@@ -231,7 +239,10 @@ pub(crate) fn resolve_target_classes_expr(
             if let Some(cls) = find_class_by_name(all_classes, name) {
                 return vec![cls.clone()];
             }
-            class_loader(name).into_iter().collect()
+            class_loader(name)
+                .map(Arc::unwrap_or_clone)
+                .into_iter()
+                .collect()
         }
 
         // ── `new ClassName` (without trailing call parens) ───────
@@ -239,7 +250,10 @@ pub(crate) fn resolve_target_classes_expr(
             if let Some(cls) = find_class_by_name(all_classes, class_name) {
                 return vec![cls.clone()];
             }
-            class_loader(class_name).into_iter().collect()
+            class_loader(class_name)
+                .map(Arc::unwrap_or_clone)
+                .into_iter()
+                .collect()
         }
 
         // ── Call expression ─────────────────────────────────────
@@ -337,7 +351,10 @@ pub(crate) fn resolve_target_classes_expr(
             if let Some(cls) = find_class_by_name(all_classes, &text) {
                 return vec![cls.clone()];
             }
-            class_loader(&text).into_iter().collect()
+            class_loader(&text)
+                .map(Arc::unwrap_or_clone)
+                .into_iter()
+                .collect()
         }
     }
 }
@@ -406,11 +423,11 @@ pub(in crate::completion) fn resolve_static_owner_class(
     } else if class == "parent" {
         rctx.current_class
             .and_then(|cc| cc.parent_class.as_ref())
-            .and_then(|p| (rctx.class_loader)(p))
+            .and_then(|p| (rctx.class_loader)(p).map(Arc::unwrap_or_clone))
     } else {
         find_class_by_name(rctx.all_classes, class)
             .cloned()
-            .or_else(|| (rctx.class_loader)(class))
+            .or_else(|| (rctx.class_loader)(class).map(Arc::unwrap_or_clone))
             .or_else(|| {
                 resolve_target_classes(class, crate::AccessKind::DoubleColon, rctx)
                     .into_iter()

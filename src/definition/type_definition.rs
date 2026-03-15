@@ -12,6 +12,7 @@
 /// subject resolution pipelines, then looks up each resolved class name
 /// via [`resolve_class_reference`](super::resolve) to find its
 /// definition location.
+use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -151,7 +152,7 @@ impl Backend {
         candidates: &[ClassInfo],
         member_name: &str,
         is_method_call: bool,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<String> {
         for target_class in candidates {
             let merged = crate::virtual_members::resolve_class_fully_cached(
@@ -273,7 +274,7 @@ fn resolve_variable_type_names(
     cursor_offset: u32,
     current_class: Option<&ClassInfo>,
     ctx: &FileContext,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
 ) -> Vec<String> {
     let var_name = format!("${}", name);

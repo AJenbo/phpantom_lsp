@@ -1,10 +1,18 @@
-# PHPantom — External Stub Support
+# PHPantom — External Stubs
 
 This document covers how PHPantom can support external PHP stub files
 beyond the built-in phpstorm-stubs embedded in the binary. External
 stubs let users get type information for PHP extensions, framework
 helpers, and IDE-specific annotations that the bundled stubs don't
 cover or that the user wants to override.
+
+Items are ordered by **impact** (descending), then **effort** (ascending)
+within the same impact tier.
+
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
+| **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
 ---
 
@@ -186,7 +194,7 @@ according to their source priority.
 
 ---
 
-## Phase 1: Project-level phpstorm-stubs for GTD
+## E1. Project-level phpstorm-stubs for GTD
 
 **Goal:** When `jetbrains/phpstorm-stubs` is installed in the
 project's vendor directory, use those on-disk files for
@@ -237,7 +245,7 @@ to `resolve_class_definition` / `resolve_function_definition`.
 
 ---
 
-## Phase 2: Project-level stubs as resolution source
+## E2. Project-level stubs as resolution source
 
 **Goal:** Let project-level stub packages override or augment the
 embedded stubs for type resolution, completion, and hover. This is
@@ -367,7 +375,7 @@ runtime.
 
 ---
 
-## Phase 3: IDE-provided and `.phpantom.toml` stub paths
+## E3. IDE-provided and `.phpantom.toml` stub paths
 
 **Goal:** Support stub directories provided by IDE extensions (via
 `initializationOptions`) and by users (via `.phpantom.toml`). Phase 2
@@ -449,7 +457,7 @@ into the existing scanner.
 
 ---
 
-## Phase 4: Embedded stub override with external stubs
+## E4. Embedded stub override with external stubs
 
 **Goal:** When a project-level or global stub defines a symbol with
 richer type annotations than the embedded stub (e.g. `@template` on
@@ -573,16 +581,16 @@ embedded stubs, built-in symbols would be invisible.
 
 ## Summary
 
-| Phase | Goal | Effort | Dependencies |
+| #   | Goal | Effort | Dependencies |
 |---|---|---|---|
-| 1 | GTD for built-in symbols via project-level phpstorm-stubs | Low | None |
-| 2 | Project-level stubs as a type resolution source | Medium | indexing.md Phase 2.5 (byte-level function/constant scanner) |
-| 3 | IDE-provided and `.phpantom.toml` stub paths | Low | Phase 2 |
-| 4 | Ship SPL overlay stubs, let external stubs override | Low | Phase 2 |
+| E1 | GTD for built-in symbols via project-level phpstorm-stubs | Low | None |
+| E2 | Project-level stubs as a type resolution source | Medium | indexing.md (byte-level function/constant scanner) |
+| E3 | IDE-provided and `.phpantom.toml` stub paths | Low | E2 |
+| E4 | Ship SPL overlay stubs, let external stubs override | Low | E2 |
 
-Phase 1 can be done immediately and independently. It provides
+E1 can be done immediately and independently. It provides
 immediate value (GTD on `array_map`, `PDO`, `Iterator`, etc.) with
-minimal code. Phases 2-4 build on the scanner infrastructure from
+minimal code. E2-E4 build on the scanner infrastructure from
 indexing.md and on each other.
 
 The priority order (`.phpantom.toml` > Composer > IDE > embedded)
@@ -595,3 +603,59 @@ overrides, non-Composer projects, and edge cases.
 source: its `PhpStormStubsMap.php` is parsed for fast indexed lookup
 instead of directory scanning, then other stub packages are scanned
 on top.
+
+---
+
+## E5. Extension stub selection (`[stubs] extensions`)
+
+**Impact: Low-Medium · Effort: Low**
+
+Override which PHP extension stubs are loaded. By default PHPantom
+loads core + all commonly bundled extensions, plus any declared in
+the project's `composer.json` via `ext-*` keys.
+
+```toml
+[stubs]
+extensions = [
+  "Core", "standard", "json", "mbstring", "curl",
+  "redis", "imagick", "mongodb",
+]
+```
+
+### Auto-detection from `composer.json`
+
+When `extensions` is unset, PHPantom reads the `require` and
+`require-dev` sections of `composer.json` and collects every `ext-*`
+key. These are added on top of the default set. Only `composer.json`
+is read, not `composer.lock`. Transitive `ext-*` requirements from
+dependencies are intentionally ignored.
+
+### Manual override
+
+When `extensions` is set, only the listed extensions are loaded and
+auto-detection is skipped. Extension names match the directory names
+in phpstorm-stubs (e.g. `"redis"`, `"imagick"`, `"swoole"`). An
+unrecognised name is silently ignored with a log message.
+
+### Implementation
+
+The build script already embeds all stub files. Filtering happens at
+runtime: when building the stub class/function indices, skip entries
+whose source file path does not start with one of the enabled
+extension directories. This is a simple string prefix check on the
+relative path from `STUB_CLASS_MAP`.
+
+---
+
+## E6. Stub install prompt for non-Composer projects
+
+**Impact: Low · Effort: Low**
+
+For non-Composer projects, offer to install phpstorm-stubs into the
+project so that go-to-definition works for built-in symbols. The
+answer (`true` or `false`) is written to `[stubs] install` in
+`.phpantom.toml` so the prompt does not reappear.
+
+This is not implemented yet. The config writing infrastructure
+(using `toml_edit` to preserve comments and formatting) is a
+prerequisite.

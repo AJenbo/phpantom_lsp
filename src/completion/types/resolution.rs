@@ -17,6 +17,8 @@
 ///   on a class to all candidate `ClassInfo` values.
 /// - [`resolve_imported_type_alias`]: resolves a single imported
 ///   type alias reference (`from:ClassName:OriginalName`).
+use std::sync::Arc;
+
 use crate::docblock;
 use crate::docblock::types::{
     parse_generic_args, split_intersection_depth0, split_union_depth0, strip_generics,
@@ -33,8 +35,8 @@ use crate::virtual_members::{self, laravel};
 pub(crate) fn resolve_property_types(
     prop_name: &str,
     class_info: &ClassInfo,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<ClassInfo> {
     // Resolve inheritance so that inherited (and generic-substituted)
     // properties are visible.  For example, if `ConfigWrapper extends
@@ -66,8 +68,8 @@ pub(crate) fn resolve_property_types(
 pub(crate) fn type_hint_to_classes(
     type_hint: &str,
     owning_class_name: &str,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<ClassInfo> {
     type_hint_to_classes_depth(type_hint, owning_class_name, all_classes, class_loader, 0)
 }
@@ -77,8 +79,8 @@ pub(crate) fn type_hint_to_classes(
 fn type_hint_to_classes_depth(
     type_hint: &str,
     owning_class_name: &str,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u8,
 ) -> Vec<ClassInfo> {
     if depth > MAX_ALIAS_DEPTH {
@@ -200,8 +202,8 @@ fn type_hint_to_classes_depth(
         return all_classes
             .iter()
             .find(|c| c.name == owning_class_name)
-            .cloned()
-            .or_else(|| class_loader(owning_class_name))
+            .map(|c| ClassInfo::clone(c))
+            .or_else(|| class_loader(owning_class_name).map(Arc::unwrap_or_clone))
             .into_iter()
             .collect();
     }
@@ -244,7 +246,7 @@ fn type_hint_to_classes_depth(
     // `Illuminate\Database\Eloquent\Builder` in example.php).
     let found = find_class_by_name(all_classes, &base_clean)
         .cloned()
-        .or_else(|| class_loader(base_hint));
+        .or_else(|| class_loader(base_hint).map(Arc::unwrap_or_clone));
 
     match found {
         Some(cls) => {
@@ -293,10 +295,10 @@ fn type_hint_to_classes_depth(
             // type so that completion and go-to-definition still work.
             let loaded;
             let owning = match all_classes.iter().find(|c| c.name == owning_class_name) {
-                Some(c) => Some(c),
+                Some(c) => Some(c.as_ref()),
                 None => {
                     loaded = class_loader(owning_class_name);
-                    loaded.as_ref()
+                    loaded.as_deref()
                 }
             };
 
@@ -348,8 +350,8 @@ fn type_hint_to_classes_depth(
 pub(crate) fn resolve_type_alias(
     hint: &str,
     owning_class_name: &str,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     let mut current = hint.to_string();
     let mut resolved_any = false;
@@ -388,8 +390,8 @@ pub(crate) fn resolve_type_alias(
 fn resolve_type_alias_once(
     hint: &str,
     owning_class_name: &str,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     // Find the owning class to check its type_aliases.
     let owning_class = all_classes.iter().find(|c| c.name == owning_class_name);
@@ -432,8 +434,8 @@ fn resolve_type_alias_once(
 /// Loads the source class and returns the original alias definition.
 pub(crate) fn resolve_imported_type_alias(
     import_ref: &str,
-    all_classes: &[ClassInfo],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     let (source_class_name, original_name) = import_ref.split_once(':')?;
 
@@ -445,8 +447,8 @@ pub(crate) fn resolve_imported_type_alias(
     let source_class = all_classes
         .iter()
         .find(|c| c.name == lookup)
-        .cloned()
-        .or_else(|| class_loader(source_class_name));
+        .map(|c| ClassInfo::clone(c))
+        .or_else(|| class_loader(source_class_name).map(Arc::unwrap_or_clone));
 
     let source_class = source_class?;
     let def = source_class.type_aliases.get(original_name)?;

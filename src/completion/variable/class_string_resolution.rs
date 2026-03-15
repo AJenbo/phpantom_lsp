@@ -7,6 +7,8 @@
 ///
 /// Handles simple assignments, match expressions, ternary / null-coalescing
 /// branches, and `self` / `static` / `parent` keywords.
+use std::sync::Arc;
+
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -30,10 +32,10 @@ use crate::completion::resolver::VarResolutionCtx;
 pub(in crate::completion) fn resolve_class_string_targets(
     var_name: &str,
     current_class: &ClassInfo,
-    all_classes: &[ClassInfo],
+    all_classes: &[Arc<ClassInfo>],
     content: &str,
     cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<ClassInfo> {
     with_parsed_program(
         content,
@@ -194,9 +196,9 @@ fn check_class_string_assignment(
         };
         let lookup = short_name(&resolved_name);
         if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == lookup) {
-            ClassInfo::push_unique(results, cls.clone());
+            ClassInfo::push_unique(results, ClassInfo::clone(cls));
         } else if let Some(cls) = (ctx.class_loader)(&resolved_name) {
-            ClassInfo::push_unique(results, cls);
+            ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
         }
     }
 }

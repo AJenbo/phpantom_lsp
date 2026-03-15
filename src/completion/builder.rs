@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 /// Member completion item building.
 ///
 /// This module contains the logic for constructing LSP `CompletionItem`s from
@@ -13,7 +14,7 @@
 ///
 /// Use-statement insertion helpers live in the sibling [`super::use_edit`]
 /// module and are re-exported here for backward compatibility.
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -367,7 +368,7 @@ pub(crate) fn build_completion_items(
 pub(crate) fn is_ancestor_of(
     current_class: Option<&ClassInfo>,
     target_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     let Some(cc) = current_class else {
         return false;
@@ -413,7 +414,7 @@ pub(crate) fn build_union_completion_items(
     candidates: &[ClassInfo],
     effective_access: AccessKind,
     current_class: Option<&ClassInfo>,
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: &crate::virtual_members::ResolvedClassCache,
 ) -> Vec<CompletionItem> {
     let current_class_name = current_class.map(|cc| cc.name.as_str());
@@ -723,7 +724,7 @@ mod tests {
             name: "Foo".to_string(),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<ClassInfo> { None };
+        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&cls), &cls, &loader));
     }
 
@@ -733,7 +734,7 @@ mod tests {
             name: "Foo".to_string(),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<ClassInfo> { None };
+        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
         assert!(!is_ancestor_of(None, &target, &loader));
     }
 
@@ -748,7 +749,7 @@ mod tests {
             parent_class: Some("Parent".to_string()),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<ClassInfo> { None };
+        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&child), &parent, &loader));
     }
 
@@ -763,13 +764,13 @@ mod tests {
             parent_class: Some("Parent".to_string()),
             ..ClassInfo::default()
         };
-        let loader = |name: &str| -> Option<ClassInfo> {
+        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
             if name == "Parent" {
-                Some(ClassInfo {
+                Some(Arc::new(ClassInfo {
                     name: "Parent".to_string(),
                     parent_class: Some("GrandParent".to_string()),
                     ..ClassInfo::default()
-                })
+                }))
             } else {
                 None
             }
@@ -788,7 +789,7 @@ mod tests {
             name: "Baz".to_string(),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<ClassInfo> { None };
+        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
         assert!(!is_ancestor_of(Some(&current), &target, &loader));
     }
 
@@ -803,7 +804,7 @@ mod tests {
             parent_class: Some("App\\BaseService".to_string()),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<ClassInfo> { None };
+        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&child), &parent_target, &loader));
     }
 }

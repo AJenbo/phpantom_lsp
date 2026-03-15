@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::path::PathBuf;
 /// Go-to-implementation support (`textDocument/implementation`).
 ///
 /// When the cursor is on an interface name, abstract class name, or any
@@ -28,8 +30,7 @@
 /// 5. **Reverse jump** — for `MemberDeclaration` symbols on a concrete class,
 ///    walk the class's interfaces and parent abstract classes to find the
 ///    prototype method declaration and return its location.
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -92,7 +93,7 @@ impl Backend {
                     let target = match keyword.as_str() {
                         "parent" => current_class
                             .and_then(|cc| cc.parent_class.as_ref())
-                            .and_then(|p| class_loader(p)),
+                            .and_then(|p| class_loader(p).map(Arc::unwrap_or_clone)),
                         _ => current_class.cloned(),
                     };
                     if let Some(ref t) = target {
@@ -143,7 +144,9 @@ impl Backend {
         let class_loader = self.class_loader(ctx);
 
         let fqn = Self::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace);
-        let target = class_loader(&fqn).or_else(|| class_loader(name))?;
+        let target = class_loader(&fqn)
+            .or_else(|| class_loader(name))
+            .map(Arc::unwrap_or_clone)?;
 
         // Final classes cannot be extended, so there are no implementations.
         if target.is_final {
@@ -214,7 +217,7 @@ impl Backend {
         content: &str,
         current_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
         // For interfaces and abstract classes, the forward direction
         // applies: find concrete implementors that define the method.
@@ -313,7 +316,7 @@ impl Backend {
     fn collect_all_interfaces(
         &self,
         cls: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<String> {
         let mut result = Vec::new();
         let mut seen = HashSet::new();
@@ -355,7 +358,7 @@ impl Backend {
     fn collect_parent_interfaces(
         &self,
         iface_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         result: &mut Vec<String>,
         seen: &mut HashSet<String>,
     ) {
@@ -387,7 +390,7 @@ impl Backend {
         content: &str,
         interface_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
         let target_short = interface_class.name.clone();
         let target_fqn = self
@@ -614,7 +617,7 @@ impl Backend {
         &self,
         target_short: &str,
         target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         include_abstract: bool,
         direct_only: bool,
     ) -> Vec<ClassInfo> {
@@ -671,7 +674,7 @@ impl Backend {
             {
                 let cls_fqn = Self::build_fqn(&cls.name, &cls.file_namespace);
                 if seen_fqns.insert(cls_fqn) {
-                    result.push(cls);
+                    result.push(Arc::unwrap_or_clone(cls));
                 }
             }
         }
@@ -749,7 +752,7 @@ impl Backend {
             {
                 let cls_fqn = Self::build_fqn(&cls.name, &cls.file_namespace);
                 if seen_fqns.insert(cls_fqn) {
-                    result.push(cls);
+                    result.push(Arc::unwrap_or_clone(cls));
                 }
             }
         }
@@ -840,7 +843,7 @@ impl Backend {
         cls: &ClassInfo,
         target_short: &str,
         target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         include_abstract: bool,
         direct_only: bool,
     ) -> bool {
@@ -956,7 +959,7 @@ impl Backend {
         iface_name: &str,
         target_short: &str,
         target_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         depth: u32,
     ) -> bool {
         if depth >= MAX_INHERITANCE_DEPTH {

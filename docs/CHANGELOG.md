@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Memory efficiency.** Class metadata is now shared via reference counting (`Arc<ClassInfo>`) from storage through the class-loader boundary to all consumers, reducing deep copies during completion, hover, and diagnostics on large codebases.
 - **Generic type substitution.** `apply_substitution` now returns early when no template parameters appear in the type string, avoiding allocation and recursion in the common case.
 - **Cross-file resolution.** Fully-qualified class names are now stored in a single canonical form throughout the system, eliminating a class of bugs where name comparisons failed because one side had a leading backslash and the other did not. This improves reliability of completion, hover, go-to-definition, and cache invalidation across files.
 - **tower-lsp 0.20.** Upgraded the LSP framework from 0.18 to 0.20, bringing native trait support for inlay hints, type hierarchy, and pull diagnostics. Inlay hints are now served through the standard protocol method instead of a custom handler.

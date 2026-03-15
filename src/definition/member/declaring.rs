@@ -7,6 +7,7 @@
 
 use crate::Backend;
 use crate::types::*;
+use std::sync::Arc;
 
 use super::MemberAccessHint;
 
@@ -42,7 +43,7 @@ impl Backend {
     pub(in crate::definition) fn find_declaring_class(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<(ClassInfo, String)> {
         // Check if this class directly declares the member.
         if Self::classify_member(class, member_name, MemberAccessHint::Unknown).is_some() {
@@ -68,7 +69,7 @@ impl Backend {
                 None => break,
             };
             let parent = match class_loader(&parent_name) {
-                Some(p) => p,
+                Some(p) => Arc::unwrap_or_clone(p),
                 None => break,
             };
             if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some() {
@@ -95,7 +96,7 @@ impl Backend {
                     None => break,
                 };
                 let parent = match class_loader(&parent_name) {
-                    Some(p) => p,
+                    Some(p) => Arc::unwrap_or_clone(p),
                     None => break,
                 };
                 for iface in &parent.interfaces {
@@ -106,7 +107,7 @@ impl Backend {
                 iface_current = parent;
             }
             for iface_name in &all_iface_names {
-                if let Some(iface) = class_loader(iface_name) {
+                if let Some(iface) = class_loader(iface_name).map(Arc::unwrap_or_clone) {
                     if Self::classify_member(&iface, member_name, MemberAccessHint::Unknown)
                         .is_some()
                     {
@@ -117,7 +118,7 @@ impl Backend {
                     let mut iface_ancestor = iface.clone();
                     for _ in 0..MAX_INHERITANCE_DEPTH {
                         for parent_iface in &iface_ancestor.interfaces {
-                            if let Some(pi) = class_loader(parent_iface)
+                            if let Some(pi) = class_loader(parent_iface).map(Arc::unwrap_or_clone)
                                 && Self::classify_member(
                                     &pi,
                                     member_name,
@@ -130,7 +131,7 @@ impl Backend {
                         }
                         match iface_ancestor.parent_class.as_ref() {
                             Some(pn) => match class_loader(pn) {
-                                Some(p) => iface_ancestor = p,
+                                Some(p) => iface_ancestor = Arc::unwrap_or_clone(p),
                                 None => break,
                             },
                             None => break,
@@ -156,7 +157,7 @@ impl Backend {
                 None => break,
             };
             let parent = match class_loader(&parent_name) {
-                Some(p) => p,
+                Some(p) => Arc::unwrap_or_clone(p),
                 None => break,
             };
             if !parent.mixins.is_empty()
@@ -181,7 +182,7 @@ impl Backend {
     pub(in crate::definition) fn find_declaring_in_traits(
         trait_names: &[String],
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         depth: usize,
     ) -> Option<(ClassInfo, String)> {
         if depth > MAX_TRAIT_DEPTH as usize {
@@ -190,7 +191,7 @@ impl Backend {
 
         for trait_name in trait_names {
             let trait_info = if let Some(t) = class_loader(trait_name) {
-                t
+                Arc::unwrap_or_clone(t)
             } else {
                 continue;
             };
@@ -219,7 +220,7 @@ impl Backend {
                     break;
                 }
                 let parent = if let Some(p) = class_loader(parent_name) {
-                    p
+                    Arc::unwrap_or_clone(p)
                 } else {
                     break;
                 };
@@ -255,7 +256,7 @@ impl Backend {
     pub(in crate::definition) fn find_declaring_in_mixins(
         mixin_names: &[String],
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         depth: usize,
     ) -> Option<(ClassInfo, String)> {
         if depth > MAX_MIXIN_DEPTH as usize {
@@ -264,7 +265,7 @@ impl Backend {
 
         for mixin_name in mixin_names {
             let mixin_class = if let Some(c) = class_loader(mixin_name) {
-                c
+                Arc::unwrap_or_clone(c)
             } else {
                 continue;
             };

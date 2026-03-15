@@ -3,23 +3,18 @@
 Items are ordered by **impact** (descending), then **effort** (ascending)
 within the same impact tier.
 
-| Label | Scale |
-|---|---|
-| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low** |
+| Label      | Scale                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Effort** | **Low** (≤ 1 day), **Medium** (2-5 days), **Medium-High** (1-2 weeks), **High** (2-4 weeks), **Very High** (> 1 month) |
 
-**Refactoring code actions overview:** §3 (Extract Function), §7 (Inline
-Variable), §8 (Extract Variable), and §9 (Inline Function/Method) form
-the core refactoring toolkit. They share infrastructure for scope
-analysis, variable usage tracking, and `WorkspaceEdit` generation.
+**Refactoring code actions overview:** A11 (ScopeCollector) is the
+shared infrastructure that A2 (Extract Function), A4 (Inline Variable),
+A5 (Extract Variable), A6 (Inline Function/Method), and A7 (Extract
+Constant) all depend on. It provides forward-pass variable usage
+tracking with byte offsets across function scopes.
 
-## 1. Implement missing abstract/interface methods
-
-No outstanding items. Shipped in the current release cycle.
-
----
-
-## 2. Simplify with null coalescing / null-safe operator
+## A1. Simplify with null coalescing / null-safe operator
 **Impact: Medium · Effort: Medium**
 
 Offer code actions to simplify common nullable patterns:
@@ -47,30 +42,26 @@ if-statement patterns are a follow-up.
 
 ---
 
-## 3. Extract Function refactoring
-**Impact: Low-Medium · Effort: Very High**
+## A11. ScopeCollector infrastructure
+**Impact: Medium · Effort: Medium**
 
-Select a range of statements inside a method/function and extract them into a
-new function. The LSP would need to:
+A lightweight forward-pass AST walker that collects every variable
+read and write with byte offsets across a function/method/closure body.
+This is shared infrastructure used by A2 (Extract Function), A4 (Inline
+Variable), A5 (Extract Variable), A6 (Inline Function/Method), A7
+(Extract Constant), and D8 (undefined variable diagnostic). It could
+also serve document highlights (`textDocument/documentHighlight`) since
+it produces "all occurrences of variable X in this scope" as a natural
+byproduct.
 
-1. **Scope analysis** — determine which variables are read in the selection but
-   defined before it (→ parameters) and which are written in the selection but
-   read after it (→ return values).
-2. **Statement boundary validation** — reject selections that split an
-   expression or cross control-flow boundaries in invalid ways.
-3. **Type annotation** — use variable type resolution to generate parameter and
-   return type hints on the new function.
-4. **Code generation** — produce a `WorkspaceEdit` that replaces the selection
-   with a call and inserts the new function definition nearby.
+### Design
 
-### Scope analysis detail
-
-Step 1 is the hard part. Today our variable resolution
-(`completion/variable/resolution.rs`) walks backward from the cursor to
-find assignments, which is sufficient for completion but not for
-extract-function. Extract-function needs a **forward** pass that tracks
-_all_ variable definitions and usages across the enclosing function body,
-not just the ones that lead to the cursor.
+Today our variable resolution (`completion/variable/resolution.rs`)
+walks backward from the cursor to find assignments, which is sufficient
+for completion but not for refactoring. The refactoring toolkit needs a
+**forward** pass that tracks _all_ variable definitions and usages
+across the enclosing function body, not just the ones that lead to the
+cursor.
 
 Phpactor solves this with a "frame" model — a stack of scopes where each
 scope records its own local variable assignments with byte offsets. The
@@ -87,8 +78,7 @@ key ideas worth borrowing:
   source order and recording every `$var = …`, parameter declaration,
   `foreach ($x as $k => $v)`, and `catch (E $e)` populates this.
 
-- **Read set / write set per range.** Given the user's selected range
-  `[start, end)`:
+- **Read set / write set per range.** Given a range `[start, end)`:
   - **Parameters** = variables _read_ inside `[start, end)` whose most
     recent assignment is _before_ `start`.
   - **Return values** = variables _written_ inside `[start, end)` that
@@ -97,39 +87,72 @@ key ideas worth borrowing:
     read) is contained within `[start, end)` — these stay inside the
     extracted function and do not become parameters or return values.
 
-- **`$this` handling.** If the selection reads `$this` (or `self::`/
-  `static::`), the extracted code must be a method on the same class,
-  not a standalone function.
+- **`$this` handling.** Track whether `$this`, `self::`, or `static::`
+  appears in a given range.
 
-- **Reference parameters (`&$var`).** If a variable is passed by
-  reference into the selection _and_ modified, the extracted function
-  needs a `&$param` — or it becomes part of the return tuple.
+- **Reference parameters (`&$var`).** Track by-reference writes so
+  callers can decide whether to generate `&$param` or a return tuple.
 
 We do _not_ need Phpactor's full per-expression-node resolver system for
 this. Our existing variable resolution + type narrowing infrastructure
-can resolve the type of each variable at the extraction boundary. The new
+can resolve the type of each variable at extraction boundaries. The new
 piece is the forward walk that collects the read/write sets.
 
-**Implementation approach:** build a lightweight `ScopeCollector` that
-walks the enclosing function's AST once, recording every variable
-read/write with its byte offset. The extract-function logic then
-partitions those entries by `[start, end)` to derive params, returns,
-and locals. This collector could also serve document highlights
-(`textDocument/documentHighlight`) since it produces "all occurrences of
-variable X in this scope" as a natural byproduct.
+### Implementation
+
+Build a `ScopeCollector` struct that walks the enclosing function's AST
+once and produces a `ScopeMap` containing:
+
+- Every variable read and write with `(name, byte_offset, kind)` where
+  kind is `Read` or `Write`.
+- Frame boundaries (function, closure, arrow function, catch) so
+  consumers can determine variable visibility.
+- A query API: given a byte range `[start, end)`, return the
+  parameter set, return value set, and local set as described above.
+
+### Prerequisites
+
+| Feature | What it contributes |
+|---|---|
+| Find References (see `lsp-features.md`) | Variable usage tracking across a scope — overlapping analysis |
+| Implement missing methods (shipped) | Validates the code action + `WorkspaceEdit` plumbing |
+
+---
+
+## A2. Extract Function refactoring
+**Impact: Low-Medium · Effort: High**
+
+Select a range of statements inside a method/function and extract them into a
+new function. With the `ScopeCollector` (A11) already in place, the remaining
+work is:
+
+1. **Statement boundary validation** — reject selections that split an
+   expression or cross control-flow boundaries in invalid ways.
+2. **Type annotation** — use variable type resolution to generate parameter and
+   return type hints on the new function.
+3. **Code generation** — produce a `WorkspaceEdit` that replaces the selection
+   with a call and inserts the new function definition nearby.
+4. **Range partitioning** — use the `ScopeCollector` to derive parameters,
+   return values, and locals from the selected range.
+
+### `$this` and method extraction
+
+If the `ScopeCollector` reports that the selection reads `$this` (or
+`self::`/`static::`), the extracted code must be a method on the same
+class, not a standalone function.
 
 ### Prerequisites (build these first)
 
 | Feature | What it contributes |
 |---|---|
+| ScopeCollector (A11) | Variable read/write tracking with byte offsets, range partitioning |
 | Hover | "Resolve type at arbitrary position" — needed to type params |
-| Document Symbols (see `todo-lsp-features.md`) | AST range → symbol mapping — needed to find enclosing function and valid insertion points |
-| Find References (see `todo-lsp-features.md`) | Variable usage tracking across a scope — the same "which variables are used where" analysis |
-| Implement missing methods (§1, shipped) | Builds the code action + `WorkspaceEdit` plumbing |
+| Document Symbols (see `lsp-features.md`) | AST range → symbol mapping — needed to find enclosing function and valid insertion points |
+| Implement missing methods (shipped) | Builds the code action + `WorkspaceEdit` plumbing |
 
 ---
 
-## 4. Switch → match conversion
+## A3. Switch → match conversion
 **Impact: Low · Effort: Medium**
 
 Offer a code action to convert a `switch` statement to a `match`
@@ -167,113 +190,7 @@ but bounded in scope.
 
 ---
 
-## 5. Import class
-**Impact: High · Effort: Medium**
-
-When a class name is used without a corresponding `use` statement (or
-full qualification), offer a code action to add the import. This is the
-single most commonly used code action in any PHP language server.
-
-### Behaviour
-
-- **Trigger:** The cursor is on an unqualified or partially qualified
-  class name that does not match any existing `use` import or any class
-  defined in the current namespace.
-- **Resolution:** Search the class index (class_map, PSR-4 loader,
-  stubs) for classes whose short name matches. If multiple candidates
-  exist, offer one code action per candidate so the user can pick.
-- **Edit:** Insert `use Fully\Qualified\ClassName;` in the import block
-  at the top of the file (after the `namespace` declaration, grouped
-  with existing `use` statements). If no `use` block exists yet, create
-  one with a blank line separating it from the namespace declaration and
-  the first code line.
-- **Sorting:** Insert the new `use` statement in alphabetical order
-  among existing imports. Do not reorder or reformat existing imports.
-- **Code action kind:** `quickfix` (so it appears in the lightbulb menu
-  and can be triggered via the quick-fix keybinding).
-
-### Edge cases
-
-- **Group imports:** `use Foo\{Bar, Baz}` — insert a new standalone
-  `use` rather than modifying the group. Merging into groups is a
-  follow-up.
-- **Aliased imports:** If the short name collides with an existing
-  import (e.g. `use Other\Request;` already exists), offer to import
-  with an alias: `use Fully\Qualified\Request as FqRequest;`. Choosing
-  a good alias name automatically is hard — a simple heuristic is to
-  prepend the parent namespace segment (e.g. `HttpRequest`,
-  `FoundationRequest`).
-- **Trait `use` inside class bodies:** These are not namespace imports
-  and should not be touched.
-- **Functions and constants:** `use function` and `use const` imports
-  are a follow-up. Start with class imports only.
-
-### Implementation
-
-- Register as `codeActionProvider` in `ServerCapabilities` (first code
-  action to do so — builds the infrastructure).
-- Add a `textDocument/codeAction` handler that checks whether the
-  symbol under the cursor is an unresolved class reference.
-- Use `find_or_load_class` / class index to find candidates.
-- Generate a `WorkspaceEdit` containing a single `TextEdit` that
-  inserts the `use` line at the correct position.
-
-### Prerequisites
-
-None — the class resolution infrastructure already exists.
-
----
-
-## 6. Remove unused imports
-**Impact: Medium · Effort: Low**
-
-Offer a code action to remove `use` statements that are not referenced
-anywhere in the file. Pairs naturally with the unused `use` dimming
-diagnostic (see `todo-diagnostics.md §4`).
-
-### Behaviour
-
-- **Trigger:** The cursor is on (or the diagnostic is attached to) a
-  `use` statement that is not referenced in the file.
-- **Single removal:** One code action per unused import:
-  `Remove unused import 'Foo\Bar'`.
-- **Bulk removal:** When multiple unused imports exist, also offer
-  `Remove all unused imports` which removes all of them in a single
-  edit.
-- **Code action kind:** `quickfix` for the single removal (attached to
-  the diagnostic), `source.organizeImports` for the bulk removal.
-
-### What counts as "used"
-
-A `use Foo\Bar;` import is considered used if `Bar` (or the alias name)
-appears as:
-- A type hint in a parameter, return type, property type, or catch clause.
-- A class reference in `new Bar()`, `Bar::method()`, `Bar::CONST`,
-  `Bar::$prop`, `instanceof Bar`, or `extends`/`implements` clauses.
-- A reference in a PHPDoc type: `@param Bar $x`, `@return Bar`,
-  `@var Bar`, `@throws Bar`, `@mixin Bar`, `@extends Bar<T>`,
-  `@implements Bar<T>`.
-- A reference in an attribute: `#[Bar]`, `#[Bar(args)]`.
-- A string literal class reference is NOT counted (too unreliable).
-
-### Implementation
-
-- Reuse the unused-use detection logic from the dimming diagnostic
-  (`todo-diagnostics.md §4`). The diagnostic marks which imports are
-  unused; the code action just generates `TextEdit`s to delete them.
-- When deleting a `use` line, also delete the trailing newline so no
-  blank lines accumulate.
-- For group imports (`use Foo\{Bar, Baz}`), if only some members are
-  unused, remove just those members from the group. If all members are
-  unused, remove the entire group statement.
-
-### Prerequisites
-
-- Unused `use` detection (shared with the dimming diagnostic).
-
----
-
-## 7. Inline Variable
+## A4. Inline Variable
 **Impact: Medium · Effort: Medium**
 
 Replace every occurrence of a variable with its right-hand-side
@@ -322,10 +239,9 @@ Before offering the action, verify:
 
 ### Implementation
 
-- Reuse the scope analysis / variable usage tracking from the
-  `ScopeCollector` infrastructure (see §3, Extract Function). The
-  collector already identifies all reads and writes of each variable
-  with byte offsets.
+- Reuse the `ScopeCollector` infrastructure (A11). The collector
+  already identifies all reads and writes of each variable with byte
+  offsets.
 - Collect all read sites for the target variable in the enclosing scope.
 - Build a `WorkspaceEdit` that:
   1. Deletes the assignment statement (including trailing semicolon and
@@ -337,11 +253,11 @@ Before offering the action, verify:
 
 | Feature | What it contributes |
 |---|---|
-| Extract Function (§3) scope analysis | `ScopeCollector` that tracks all variable reads/writes with byte offsets |
+| ScopeCollector (A11) | Variable read/write tracking with byte offsets |
 
 ---
 
-## 8. Extract Variable
+## A5. Extract Variable
 **Impact: Medium · Effort: Medium**
 
 Select an expression and extract it into a new local variable assigned
@@ -407,11 +323,11 @@ insert before the `if` statement, not inside the condition.
 
 | Feature | What it contributes |
 |---|---|
-| Extract Function (§3) scope analysis | Enclosing scope detection and variable name collision avoidance |
+| ScopeCollector (A11) | Enclosing scope detection and variable name collision avoidance |
 
 ---
 
-## 9. Inline Function/Method
+## A6. Inline Function/Method
 **Impact: Medium · Effort: High**
 
 Replace a function or method call with the body of the called function,
@@ -507,16 +423,16 @@ When the callee has multiple statements:
 | Feature | What it contributes |
 |---|---|
 | Go-to-Definition | Resolves call site to the callee's definition location and source |
-| Extract Function (§3) scope analysis | Variable collision detection at the call site |
+| ScopeCollector (A11) | Variable collision detection at the call site |
 
 ---
 
-## 10. Extract Constant
+## A7. Extract Constant
 **Impact: Medium · Effort: Medium**
 
 Select a literal value (string, integer, float, boolean) inside a class
 and extract it into a class constant. This pairs naturally with Extract
-Variable (§8) and shares the same "select, name, replace" workflow.
+Variable (A5) and shares the same "select, name, replace" workflow.
 
 ### Behaviour
 
@@ -560,7 +476,7 @@ in a public method, default to `public const`; otherwise `private const`.
 
 ### Duplicate replacement
 
-Same approach as Extract Variable (§8): offer "this occurrence only"
+Same approach as Extract Variable (A5): offer "this occurrence only"
 and "all N occurrences in this class". Textual equality is sufficient
 for literals.
 
@@ -581,11 +497,11 @@ for literals.
 
 | Feature | What it contributes |
 |---|---|
-| Extract Function (§3) scope analysis | Class body traversal and constant name collision detection |
+| ScopeCollector (A11) | Class body traversal and constant name collision detection |
 
 ---
 
-## 11. Update Docblock to Match Signature
+## A8. Update Docblock to Match Signature
 **Impact: Medium · Effort: Medium**
 
 When a function or method signature changes (parameters added, removed,
@@ -634,8 +550,7 @@ This code action regenerates or patches the `@param`, `@return`, and
   parameters for `@param` purposes.
 - **Variadic parameters:** `...$args` matches `@param type ...$args`.
 - **No existing docblock:** This action only patches existing docblocks.
-  PHPDoc generation on `/**` (Sprint 5, item 24) handles creating new
-  ones.
+  PHPDoc generation on `/**` (F1) handles creating new ones.
 
 ### Implementation
 
@@ -658,7 +573,7 @@ This code action regenerates or patches the `@param`, `@return`, and
 
 ---
 
-## 12. Change Visibility
+## A9. Change Visibility
 **Impact: Low-Medium · Effort: Low**
 
 Change the visibility of a method, property, constant, or class from the
@@ -706,7 +621,7 @@ code actions.
 
 ---
 
-## 13. Generate Interface from Class
+## A10. Generate Interface from Class
 **Impact: Low-Medium · Effort: Medium**
 
 Extract an interface from an existing class. The new interface contains
@@ -773,4 +688,4 @@ interface file path is derived from the namespace.
 | Feature | What it contributes |
 |---|---|
 | Parser (`parser/classes.rs`) | Extracts public method signatures with full type information |
-| Implement missing methods (§1) | Shared infrastructure for generating method stubs and `implements` clause editing |
+| Implement missing methods (shipped) | Shared infrastructure for generating method stubs and `implements` clause editing |

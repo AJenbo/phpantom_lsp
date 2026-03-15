@@ -17,6 +17,7 @@
 //! with internal precedence rules.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::docblock;
 use crate::types::{
@@ -69,7 +70,7 @@ impl VirtualMemberProvider for PHPDocProvider {
     fn applies_to(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> bool {
         // Has a non-empty docblock with potential @method/@property tags.
         if class.class_docblock.as_ref().is_some_and(|d| !d.is_empty()) {
@@ -117,7 +118,7 @@ impl VirtualMemberProvider for PHPDocProvider {
             {
                 return true;
             }
-            current = parent;
+            current = Arc::unwrap_or_clone(parent);
         }
 
         false
@@ -133,7 +134,7 @@ impl VirtualMemberProvider for PHPDocProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         _cache: Option<&super::ResolvedClassCache>,
     ) -> VirtualMembers {
         let mut methods = Vec::new();
@@ -287,7 +288,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                     }
                 }
 
-                current = parent;
+                current = Arc::unwrap_or_clone(parent);
             }
         }
 
@@ -334,7 +335,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                     &mut mixin_dedup,
                 );
             }
-            current = parent;
+            current = Arc::unwrap_or_clone(parent);
         }
 
         VirtualMembers {
@@ -359,7 +360,7 @@ impl VirtualMemberProvider for PHPDocProvider {
 /// [`MAX_MIXIN_DEPTH`] levels.
 fn collect_mixin_members(
     mixin_names: &[String],
-    class_loader: &dyn Fn(&str) -> Option<ClassInfo>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     methods: &mut Vec<MethodInfo>,
     properties: &mut Vec<PropertyInfo>,
     constants: &mut Vec<ConstantInfo>,
