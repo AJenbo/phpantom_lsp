@@ -878,3 +878,432 @@ async fn rename_static_method_does_not_leak_to_unrelated_class() {
         result
     );
 }
+
+// ─── Use-Statement-Aware Class Rename ───────────────────────────────────────
+
+#[tokio::test]
+async fn rename_class_updates_use_import() {
+    // Renaming a class should update the `use` statement FQN (last segment)
+    // as well as all in-code references.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Eagle\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Eagle\\Tasks;\n",
+        "\n",
+        "use Eagle\\Tasks\\Resources\\TaskResource;\n",
+        "\n",
+        "class Task {\n",
+        "    protected static string $service = TaskResource::class;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Rename from the declaration site (line 3, col 6 = "TaskResource").
+    let edit = rename(&backend, &uri_decl, 3, 6, "TaskResourceService").await;
+    assert!(edit.is_some(), "Expected a workspace edit for class rename");
+
+    let ws = edit.unwrap();
+    let edits_usage = edits_for_uri(&ws, &uri_usage);
+    assert!(!edits_usage.is_empty(), "Expected edits in the usage file");
+
+    let result = apply_edits(text_usage, &edits_usage);
+
+    // The use statement should have the FQN last segment updated.
+    assert!(
+        result.contains("use Eagle\\Tasks\\Resources\\TaskResourceService;"),
+        "Use statement should be updated; got:\n{}",
+        result
+    );
+
+    // The in-code reference should be renamed.
+    assert!(
+        result.contains("TaskResourceService::class"),
+        "In-code reference should be renamed; got:\n{}",
+        result
+    );
+
+    // The old name should NOT appear.
+    assert!(
+        !result.contains("TaskResource::class"),
+        "Old name should not remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_preserves_explicit_alias() {
+    // When a file imports the class with an explicit alias, the alias
+    // should be preserved and in-code references should NOT be renamed.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Controller.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Eagle\\Tasks\\Resources;\n",
+        "\n",
+        "class TaskResource {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Eagle\\Tasks\\Http;\n",
+        "\n",
+        "use Eagle\\Tasks\\Resources\\TaskResource as ResourceService;\n",
+        "\n",
+        "class Controller {\n",
+        "    private ResourceService $service;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Rename from the declaration.
+    let edit = rename(&backend, &uri_decl, 3, 6, "TaskResourceService").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for aliased class rename"
+    );
+
+    let ws = edit.unwrap();
+    let edits_usage = edits_for_uri(&ws, &uri_usage);
+
+    let result = apply_edits(text_usage, &edits_usage);
+
+    // The use statement FQN should be updated, but the alias kept.
+    assert!(
+        result.contains("use Eagle\\Tasks\\Resources\\TaskResourceService as ResourceService;"),
+        "Use statement FQN should update, alias preserved; got:\n{}",
+        result
+    );
+
+    // In-code references via the alias should NOT change.
+    assert!(
+        result.contains("private ResourceService $service;"),
+        "Alias-based references should remain unchanged; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_with_collision_adds_alias() {
+    // When renaming would produce a short name that collides with an
+    // existing import, an alias should be introduced.
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///src/OldName.php").unwrap();
+    let uri_b = Url::parse("file:///src/NewName.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace Ns\\A;\n", "\n", "class OldName {}\n",);
+
+    let text_b = concat!("<?php\n", "namespace Ns\\B;\n", "\n", "class NewName {}\n",);
+
+    let text_usage = concat!(
+        "<?php\n",
+        "use Ns\\A\\OldName;\n",
+        "use Ns\\B\\NewName;\n",
+        "\n",
+        "function demo(OldName $a, NewName $b): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Rename OldName → NewName (which collides with an existing import).
+    let edit = rename(&backend, &uri_a, 3, 6, "NewName").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for colliding class rename"
+    );
+
+    let ws = edit.unwrap();
+    let edits_usage = edits_for_uri(&ws, &uri_usage);
+    let result = apply_edits(text_usage, &edits_usage);
+
+    // The existing `use Ns\B\NewName;` should remain unchanged.
+    assert!(
+        result.contains("use Ns\\B\\NewName;"),
+        "Existing import should remain unchanged; got:\n{}",
+        result
+    );
+
+    // The renamed import should get an alias to avoid collision.
+    assert!(
+        result.contains("use Ns\\A\\NewName as NewNameAlias;"),
+        "Renamed import should get an alias; got:\n{}",
+        result
+    );
+
+    // In-code references to the renamed class should use the alias.
+    assert!(
+        result.contains("NewNameAlias $a"),
+        "In-code references should use the alias; got:\n{}",
+        result
+    );
+
+    // The other class's references should be unaffected.
+    assert!(
+        result.contains("NewName $b"),
+        "Other class references should remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_same_file_no_use_statement() {
+    // Renaming a class in the same file (no use statement) should still work.
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Logger {\n",
+        "    public function log(string $msg): void {}\n",
+        "}\n",
+        "function demo(Logger $logger): void {\n",
+        "    $obj = new Logger();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename from the declaration.
+    let edit = rename(&backend, &uri, 1, 7, "AppLogger").await;
+    assert!(edit.is_some(), "Expected a workspace edit");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert!(
+        result.contains("class AppLogger"),
+        "Declaration should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("function demo(AppLogger"),
+        "Type hint should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("new AppLogger()"),
+        "new expression should be renamed; got:\n{}",
+        result
+    );
+    // Verify no standalone "Logger" remains (AppLogger is fine).
+    let has_standalone_old_name = result
+        .lines()
+        .any(|l| l.contains("Logger") && !l.contains("AppLogger"));
+    assert!(
+        !has_standalone_old_name,
+        "Old standalone name should not remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_updates_use_import_from_reference_site() {
+    // Trigger rename from a reference site (not the declaration) and
+    // verify the use statement is still updated.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/Animal.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Zoo.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Zoo\\Models;\n",
+        "\n",
+        "class Animal {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "use Zoo\\Models\\Animal;\n",
+        "\n",
+        "function feed(Animal $a): void {}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Rename from the reference site in the usage file (line 3, col 15).
+    // "function feed(Animal $a): void {}"
+    //                ^ col 14
+    let edit = rename(&backend, &uri_usage, 3, 15, "Creature").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit when renaming from reference"
+    );
+
+    let ws = edit.unwrap();
+    let edits_usage = edits_for_uri(&ws, &uri_usage);
+    let result = apply_edits(text_usage, &edits_usage);
+
+    assert!(
+        result.contains("use Zoo\\Models\\Creature;"),
+        "Use statement should be updated; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("function feed(Creature $a)"),
+        "In-code reference should be renamed; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_cross_file_use_import_multiple_refs() {
+    // A file with multiple references to the renamed class (via use
+    // import) should have all references and the use statement updated.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/Repo.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Service.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Repos;\n",
+        "\n",
+        "class UserRepo {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "use App\\Repos\\UserRepo;\n",
+        "\n",
+        "class Service {\n",
+        "    private UserRepo $repo;\n",
+        "    public function getRepo(): UserRepo {\n",
+        "        return new UserRepo();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "UserRepository").await;
+    assert!(edit.is_some());
+
+    let ws = edit.unwrap();
+    let edits_usage = edits_for_uri(&ws, &uri_usage);
+    let result = apply_edits(text_usage, &edits_usage);
+
+    assert!(
+        result.contains("use App\\Repos\\UserRepository;"),
+        "Use statement should be updated; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("private UserRepository $repo;"),
+        "Property type should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("getRepo(): UserRepository"),
+        "Return type should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("new UserRepository()"),
+        "new expression should be renamed; got:\n{}",
+        result
+    );
+    // Verify no standalone "UserRepo" remains (UserRepository is fine).
+    let has_standalone_old_name = result
+        .lines()
+        .any(|l| l.contains("UserRepo") && !l.contains("UserRepository"));
+    assert!(
+        !has_standalone_old_name,
+        "Old standalone name should not remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_fqn_inline_reference() {
+    // When a file uses the class via an inline FQN (no use statement),
+    // only the last segment should be renamed.
+    let backend = Backend::new_test();
+    let uri_decl = Url::parse("file:///src/Item.php").unwrap();
+    let uri_usage = Url::parse("file:///src/other.php").unwrap();
+
+    let text_decl = concat!("<?php\n", "namespace Shop;\n", "\n", "class Item {}\n",);
+
+    let text_usage = concat!(
+        "<?php\n",
+        "function demo(): void {\n",
+        "    $x = new \\Shop\\Item();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "Product").await;
+    assert!(edit.is_some());
+
+    let ws = edit.unwrap();
+    let edits_usage = edits_for_uri(&ws, &uri_usage);
+    let result = apply_edits(text_usage, &edits_usage);
+
+    // The inline FQN should have only the last segment renamed.
+    assert!(
+        result.contains("\\Shop\\Product()"),
+        "Inline FQN should update last segment only; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_declaration_updates_in_same_namespace() {
+    // Two files in the same namespace — references use the short name
+    // without a use statement.  The rename should just update the short name.
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///src/Foo.php").unwrap();
+    let uri_b = Url::parse("file:///src/Bar.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App;\n", "\n", "class Foo {}\n",);
+
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class Bar extends Foo {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 3, 6, "Baz").await;
+    assert!(edit.is_some());
+
+    let ws = edit.unwrap();
+    let edits_a = edits_for_uri(&ws, &uri_a);
+    let edits_b = edits_for_uri(&ws, &uri_b);
+
+    let result_a = apply_edits(text_a, &edits_a);
+    let result_b = apply_edits(text_b, &edits_b);
+
+    assert!(
+        result_a.contains("class Baz"),
+        "Declaration should be renamed; got:\n{}",
+        result_a
+    );
+    assert!(
+        result_b.contains("extends Baz"),
+        "Cross-file reference should be renamed; got:\n{}",
+        result_b
+    );
+}

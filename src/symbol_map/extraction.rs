@@ -1140,11 +1140,15 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
 fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<SymbolSpan>) {
     fn register_use_item(item: &UseItem<'_>, spans: &mut Vec<SymbolSpan>) {
         let raw = item.name.value().to_string();
-        spans.push(class_ref_span(
-            item.name.span().start.offset,
-            item.name.span().end.offset,
-            &raw,
-        ));
+        // Use statement names are always fully qualified (even without a
+        // leading `\`), so force `is_fqn = true`.  `class_ref_span`
+        // derives the flag from a leading `\` which use statements omit.
+        let name = raw.strip_prefix('\\').unwrap_or(&raw).to_string();
+        spans.push(SymbolSpan {
+            start: item.name.span().start.offset,
+            end: item.name.span().end.offset,
+            kind: SymbolKind::ClassReference { name, is_fqn: true },
+        });
     }
 
     match &use_stmt.items {

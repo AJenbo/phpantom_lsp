@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Diagnostics.** Scalar member access errors now detect method-return chains where an intermediate call returns a scalar type (e.g. `$user->getName()->trim()` correctly reports "Cannot access method 'trim' on type 'string'").
 - **Diagnostics.** By-reference `@param` annotations (e.g. `@param array<int> &$data`) no longer produce a false "unknown class '$data'" diagnostic.
 - **Hover on empty arrays.** `[]` and `array()` literals now show `array` on hover instead of nothing.
+- **Rename updates imports.** Renaming a class now updates `use` statement FQNs (last segment only), preserves explicit aliases, and introduces an alias when the new name collides with an existing import in the same file. Previously, `use` statements were left unchanged, breaking the file.
 
 ## [0.5.0] - 2026-03-12
 
