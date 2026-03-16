@@ -443,9 +443,11 @@ async fn test_completion_superglobals_sort_after_variables() {
     );
 }
 
-/// `insert_text` should include the `$` prefix.
+/// Variable completions use `text_edit` with an explicit replacement range
+/// that covers the `$` prefix, preventing the double-dollar problem in
+/// editors like Helix and Neovim.
 #[tokio::test]
-async fn test_completion_variable_insert_text_includes_dollar() {
+async fn test_completion_variable_uses_text_edit_with_dollar() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///var_insert.php").unwrap();
@@ -455,11 +457,22 @@ async fn test_completion_variable_insert_text_includes_dollar() {
 
     let result_item = items.iter().find(|i| i.label == "$result");
     assert!(result_item.is_some(), "Should find $result in completions");
-    assert_eq!(
-        result_item.unwrap().insert_text.as_deref(),
-        Some("$result"),
-        "insert_text should include the $ prefix"
-    );
+    let item = result_item.unwrap();
+
+    // Should use text_edit (not insert_text) with an explicit range
+    // covering the typed prefix including `$`.
+    match &item.text_edit {
+        Some(CompletionTextEdit::Edit(te)) => {
+            assert_eq!(
+                te.new_text, "$result",
+                "text_edit new_text should be $result"
+            );
+            // Range should start at the `$` (line 2, col 0) and end at cursor (line 2, col 4).
+            assert_eq!(te.range.start, Position::new(2, 0));
+            assert_eq!(te.range.end, Position::new(2, 4));
+        }
+        other => panic!("Expected text_edit with Edit variant, got: {:?}", other),
+    }
 }
 
 /// Variables from function parameters should be suggested.

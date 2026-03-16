@@ -166,6 +166,13 @@ pub use virtual_members::resolve_class_fully;
 pub struct Backend {
     pub(crate) name: String,
     pub(crate) version: String,
+    /// The name of the LSP client (IDE/editor) connected to this server.
+    ///
+    /// Populated from `InitializeParams.client_info.name` during the
+    /// `initialize` handshake.  Used for quirks-mode adjustments when
+    /// certain editors need non-standard behavior (e.g. Helix, Neovim).
+    /// Empty string when the client does not report its identity.
+    pub(crate) client_name: Mutex<String>,
     pub(crate) open_files: Arc<RwLock<HashMap<String, Arc<String>>>>,
     /// Maps a file URI to a list of ClassInfo extracted from that file.
     pub(crate) ast_map: Arc<RwLock<HashMap<String, Vec<Arc<ClassInfo>>>>>,
@@ -446,6 +453,7 @@ impl Backend {
         Self {
             name: "PHPantom".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
+            client_name: Mutex::new(String::new()),
             open_files: Arc::new(RwLock::new(HashMap::new())),
             ast_map: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
@@ -631,6 +639,7 @@ impl Backend {
         Self {
             name: self.name.clone(),
             version: self.version.clone(),
+            client_name: Mutex::new(self.client_name.lock().clone()),
             open_files: Arc::clone(&self.open_files),
             ast_map: Arc::clone(&self.ast_map),
             symbol_maps: Arc::clone(&self.symbol_maps),

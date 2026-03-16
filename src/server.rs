@@ -52,6 +52,11 @@ impl LanguageServer for Backend {
             *self.workspace_root.write() = Some(root);
         }
 
+        // Store the client name for quirks-mode adjustments.
+        if let Some(info) = &params.client_info {
+            *self.client_name.lock() = info.name.clone();
+        }
+
         // Detect whether the client supports pull diagnostics.
         let client_supports_pull = params
             .capabilities

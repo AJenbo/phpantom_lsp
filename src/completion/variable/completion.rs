@@ -127,6 +127,19 @@ impl Backend {
 
         let cursor_offset = position_to_byte_offset(content, position) as u32;
 
+        // Compute the replacement range: from the start of the `$` prefix
+        // to the cursor position.  Using `text_edit` with an explicit range
+        // prevents the double-dollar problem in editors (Helix, Neovim)
+        // that don't consider `$` part of a word boundary.
+        let prefix_char_len = prefix.chars().count() as u32;
+        let replace_range = Range {
+            start: Position {
+                line: position.line,
+                character: position.character.saturating_sub(prefix_char_len),
+            },
+            end: position,
+        };
+
         // ── 1. AST-based scope-aware variable collection ────────────
         let scope_vars = collect_variables_in_scope(content, cursor_offset);
 
@@ -141,7 +154,10 @@ impl Backend {
                 label: var_name.clone(),
                 kind: Some(CompletionItemKind::VARIABLE),
                 detail: Some("variable".to_string()),
-                insert_text: Some(var_name.clone()),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range: replace_range,
+                    new_text: var_name.clone(),
+                })),
                 filter_text: Some(var_name.clone()),
                 sort_text: Some(format!("0_{}", var_name.to_lowercase())),
                 ..CompletionItem::default()
@@ -160,7 +176,10 @@ impl Backend {
                 label: name.to_string(),
                 kind: Some(CompletionItemKind::VARIABLE),
                 detail: Some("PHP superglobal".to_string()),
-                insert_text: Some(name.to_string()),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range: replace_range,
+                    new_text: name.to_string(),
+                })),
                 filter_text: Some(name.to_string()),
                 sort_text: Some(format!("z_{}", name.to_lowercase())),
                 deprecated: Some(true),
