@@ -32,7 +32,7 @@ use crate::completion::resolver::{
     ResolutionCtx, resolve_target_classes, resolve_target_classes_expr,
 };
 use crate::completion::variable::raw_type_inference::resolve_variable_assignment_raw_type;
-use crate::docblock::type_strings::is_scalar;
+use crate::docblock::type_strings::{is_scalar, strip_generics, PHPDOC_TYPE_KEYWORDS};
 use crate::hover::variable_type::resolve_variable_type_string;
 use crate::inheritance::resolve_property_type_hint;
 use crate::subject_expr::SubjectExpr;
@@ -648,19 +648,13 @@ fn resolve_unresolvable_class_subject(
 
     // Skip scalars, mixed, void, never, array, callable, object, null,
     // resource, iterable — these are not class names.
+    // Also skip PHPDoc pseudo-types like `class-string<T>`, `list<T>`,
+    // `non-empty-array<K, V>`, etc.  Strip generic parameters first so
+    // that `class-string<BackedEnum>` is recognised as `class-string`.
+    let base = strip_generics(&cleaned);
+    let base_lower = base.to_ascii_lowercase();
     if is_scalar(&cleaned)
-        || matches!(
-            cleaned.as_str(),
-            "mixed"
-                | "void"
-                | "never"
-                | "array"
-                | "callable"
-                | "object"
-                | "null"
-                | "resource"
-                | "iterable"
-        )
+        || PHPDOC_TYPE_KEYWORDS.contains(&base_lower.as_str())
     {
         return None;
     }
@@ -3122,6 +3116,31 @@ function helper(mixed $value): void {
         assert!(
             diags.is_empty(),
             "No diagnostics expected for mixed parameter member access, got: {:?}",
+            diags,
+        );
+    }
+
+    /// When the parameter type is `class-string<T>`, no unknown-class
+    /// diagnostic should fire — `class-string` is a PHPDoc pseudo-type,
+    /// not a class name.
+    #[test]
+    fn no_unknown_class_diagnostic_for_class_string_parameter() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+class Demo {
+    /**
+     * @param class-string<\BackedEnum> $class
+     */
+    public static function make(string $class): void {
+        $class::cases();
+    }
+}
+"#;
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "No diagnostics expected for class-string<T> parameter static access, got: {:?}",
             diags,
         );
     }
