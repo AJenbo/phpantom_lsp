@@ -209,6 +209,28 @@ impl Backend {
                                 param.closure_this_type = Some(this_type);
                             }
                         }
+
+                        // Append extra `@param` tags that don't match any
+                        // native parameter.  These document parameters
+                        // accessed via `func_get_args()` or similar
+                        // mechanisms and should appear in hover/signature.
+                        for (tag_name, tag_type) in docblock::extract_all_param_tags(doc_text) {
+                            if !parameters.iter().any(|p| p.name == tag_name) {
+                                let description =
+                                    docblock::extract_param_description(doc_text, &tag_name);
+                                parameters.push(ParameterInfo {
+                                    name: tag_name,
+                                    is_required: false,
+                                    type_hint: Some(tag_type),
+                                    native_type_hint: None,
+                                    description,
+                                    default_value: None,
+                                    is_variadic: false,
+                                    is_reference: false,
+                                    closure_this_type: None,
+                                });
+                            }
+                        }
                     }
 
                     functions.push(FunctionInfo {

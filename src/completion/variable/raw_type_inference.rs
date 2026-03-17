@@ -300,11 +300,24 @@ fn find_variable_assignment_raw_type<'b>(
                 if ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end {
                     // Check parameter type hints first — `function f(int $x)`
                     // means `$x` has raw type `int` even without an assignment.
+                    // Also check docblock `@param` for a refined type (e.g.
+                    // `@param class-string $x` overriding native `string`).
                     for param in func.parameter_list.parameters.iter() {
                         if param.variable.name == ctx.var_name
                             && let Some(ref hint) = param.hint
                         {
-                            return Some(crate::parser::extract_hint_string(hint));
+                            let native = extract_hint_string(hint);
+                            let func_start = func.span().start.offset as usize;
+                            let doc_type = docblock::find_iterable_raw_type_in_source(
+                                ctx.content,
+                                func_start,
+                                ctx.var_name,
+                            );
+                            let effective = docblock::resolve_effective_type(
+                                Some(&native),
+                                doc_type.as_deref(),
+                            );
+                            return effective.or(Some(native));
                         }
                     }
                     return scan_statements_for_assignment_raw_type(

@@ -45,8 +45,8 @@ pub(crate) mod type_strings;
 
 // Core tags
 pub use tags::{
-    extract_deprecation_message, extract_deprecation_with_see, extract_link_urls,
-    extract_mixin_tags, extract_param_closure_this, extract_param_description,
+    extract_all_param_tags, extract_deprecation_message, extract_deprecation_with_see,
+    extract_link_urls, extract_mixin_tags, extract_param_closure_this, extract_param_description,
     extract_param_raw_type, extract_return_description, extract_return_type,
     extract_see_references, extract_type_assertions, extract_var_type, extract_var_type_with_name,
     find_enclosing_return_type, find_inline_var_docblock, find_iterable_raw_type_in_source,

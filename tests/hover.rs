@@ -7703,3 +7703,182 @@ function test() {
         text
     );
 }
+
+// ─── Extra @param tags & pseudo-type refinements ────────────────────────────
+
+#[test]
+fn hover_function_shows_extra_param_from_docblock() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param class-string $tz
+ * @param string $tz2 Deprecated
+ */
+function formatUtfDate(string $tz): void {
+    $tz2 = func_get_args()[1];
+}
+formatUtfDate('foo');
+"#;
+
+    // Hover on function call should show both the native param and the extra docblock param.
+    let hover = hover_at(&backend, uri, content, 8, 2).expect("expected hover on formatUtfDate");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$tz2"),
+        "should show extra @param $tz2 from docblock: {}",
+        text
+    );
+    assert!(
+        text.contains("Deprecated"),
+        "should show description for extra @param $tz2: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_method_shows_extra_param_from_docblock() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class DateHelper {
+    /**
+     * @param string $format
+     * @param string $extra Optional extra arg
+     */
+    public function format(string $format): string {
+        return '';
+    }
+}
+$d = new DateHelper();
+$d->format('Y-m-d');
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 6).expect("expected hover on format");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$extra"),
+        "should show extra @param $extra from method docblock: {}",
+        text
+    );
+    assert!(
+        text.contains("Optional extra arg"),
+        "should show description for extra @param $extra: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_variable_shows_class_string_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param class-string $tz
+ */
+function formatUtfDate(string $tz): void {
+    $tz;
+}
+"#;
+
+    // Hover on $tz inside the function body should show class-string, not string.
+    let hover = hover_at(&backend, uri, content, 5, 5).expect("expected hover on $tz");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string"),
+        "should show refined class-string type, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_function_shows_class_string_param_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param class-string $tz
+ */
+function formatUtfDate(string $tz): void {}
+formatUtfDate('foo');
+"#;
+
+    // Hover on function call should show class-string as param annotation.
+    let hover = hover_at(&backend, uri, content, 5, 2).expect("expected hover on formatUtfDate");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string"),
+        "should show class-string annotation for $tz param: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_variable_shows_non_empty_string_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param non-empty-string $name
+ */
+function greet(string $name): void {
+    $name;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 5).expect("expected hover on $name");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("non-empty-string"),
+        "should show refined non-empty-string type, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_variable_shows_positive_int_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param positive-int $count
+ */
+function repeat(int $count): void {
+    $count;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 5).expect("expected hover on $count");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("positive-int"),
+        "should show refined positive-int type, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_extra_param_does_not_duplicate_native_params() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param string $a First arg
+ * @param string $b Second arg
+ */
+function test(string $a, string $b): void {}
+test('x', 'y');
+"#;
+
+    // Both params are native — no extra params should be appended.
+    // The signature code block contains `$a` and the param description
+    // section contains `**$a**`, so exactly two occurrences are expected.
+    let hover = hover_at(&backend, uri, content, 6, 2).expect("expected hover on test");
+    let text = hover_text(&hover);
+    let sig_matches = text.matches("$a").count();
+    assert_eq!(
+        sig_matches, 2,
+        "should have exactly two occurrences of $a (signature + description, not duplicated): {}",
+        text
+    );
+}

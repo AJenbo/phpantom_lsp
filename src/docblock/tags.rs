@@ -518,6 +518,55 @@ pub fn extract_param_raw_type(docblock: &str, var_name: &str) -> Option<String> 
     None
 }
 
+/// Extract all `@param` tags from a docblock as `(name, type)` pairs.
+///
+/// Returns a list where each entry is `(param_name, type_string)`.
+/// The `param_name` includes the `$` prefix.  Variadic `...$name`
+/// parameters are returned with the `$name` only (the `...` is stripped).
+///
+/// This is used to discover extra `@param` tags that document parameters
+/// not present in the native function signature (e.g. parameters accessed
+/// via `func_get_args()`).
+pub fn extract_all_param_tags(docblock: &str) -> Vec<(String, String)> {
+    let inner = docblock
+        .trim()
+        .strip_prefix("/**")
+        .unwrap_or(docblock)
+        .strip_suffix("*/")
+        .unwrap_or(docblock);
+
+    let mut results = Vec::new();
+
+    for line in inner.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+
+        if let Some(rest) = trimmed.strip_prefix("@param") {
+            // Skip @param-closure-this and similar compound tags.
+            if rest.starts_with('-') {
+                continue;
+            }
+            let rest = rest.trim_start();
+            if rest.is_empty() {
+                continue;
+            }
+
+            // Extract the full type token (respects `<…>` nesting).
+            let (type_token, remainder) = split_type_token(rest);
+
+            // The next token should be the parameter name.
+            // Handle `...$name` (variadic) by stripping the leading `...`.
+            if let Some(name) = remainder.split_whitespace().next() {
+                let name = name.strip_prefix("...").unwrap_or(name);
+                if name.starts_with('$') {
+                    results.push((name.to_string(), type_token.to_string()));
+                }
+            }
+        }
+    }
+
+    results
+}
+
 /// Extract all `@param-closure-this` declarations from a docblock.
 ///
 /// The tag format is `@param-closure-this TypeName $paramName`, declaring
@@ -1141,6 +1190,15 @@ pub fn should_override_type(docblock_type: &str, native_type: &str) -> bool {
     // `class-string<T>`, `non-empty-array<int>`), it refines the
     // native type even when the native type is scalar.
     if clean_doc.contains('<') || clean_doc.contains('{') {
+        return true;
+    }
+
+    // PHPDoc pseudo-types like `class-string`, `non-empty-string`,
+    // `positive-int`, `literal-string`, etc. refine their native
+    // scalar counterparts and should be allowed to override.
+    // These contain hyphens which never appear in native PHP types,
+    // so a hyphen in the base type name is a reliable indicator.
+    if clean_doc.contains('-') {
         return true;
     }
 

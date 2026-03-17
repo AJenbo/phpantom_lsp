@@ -699,6 +699,46 @@ fn override_static_with_class() {
     assert!(should_override_type("ConcreteClass", "static"));
 }
 
+#[test]
+fn override_string_with_class_string() {
+    assert!(should_override_type("class-string", "string"));
+}
+
+#[test]
+fn override_string_with_non_empty_string() {
+    assert!(should_override_type("non-empty-string", "string"));
+}
+
+#[test]
+fn override_string_with_numeric_string() {
+    assert!(should_override_type("numeric-string", "string"));
+}
+
+#[test]
+fn override_string_with_literal_string() {
+    assert!(should_override_type("literal-string", "string"));
+}
+
+#[test]
+fn override_int_with_positive_int() {
+    assert!(should_override_type("positive-int", "int"));
+}
+
+#[test]
+fn override_int_with_negative_int() {
+    assert!(should_override_type("negative-int", "int"));
+}
+
+#[test]
+fn override_int_with_non_negative_int() {
+    assert!(should_override_type("non-negative-int", "int"));
+}
+
+#[test]
+fn override_nullable_string_with_non_empty_string() {
+    assert!(should_override_type("non-empty-string", "?string"));
+}
+
 // ── resolve_effective_type ──────────────────────────────────────────
 
 #[test]
