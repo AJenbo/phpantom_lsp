@@ -108,23 +108,6 @@ parameters in order.
 
 ---
 
-## B9. Update docblock action misparses `@param $name` with no type
-
-**Impact: Low-Medium · Effort: Low**
-
-When a docblock contains `@param $name Some description` (no type
-before the variable name), `split_type_token` consumes `$name` as
-the type token. The remainder then fails the `contains('$')` check,
-so the parameter is skipped. The action then considers the parameter
-"missing" and adds a duplicate `@param mixed $name`.
-
-**Fix:** In the `@param` parsing loop, detect when the first token
-starts with `$` and treat it as the parameter name with no type.
-
-**File:** `src/code_actions/update_docblock.rs` L475-483.
-
----
-
 ## B10. PHPStan cache written after file close causes stale diagnostics on reopen
 
 **Impact: Low-Medium · Effort: Low**

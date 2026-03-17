@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PHPStan diagnostics.** Fixed a path matching false positive where files with similar name suffixes (e.g. `AFoo.php` vs `Foo.php`) could receive each other's PHPStan diagnostics.
+- **Update docblock action.** Docblocks containing `@param $name` with no type (e.g. `@param $name Some description`) are now parsed correctly. Previously the parameter name was consumed as the type token, causing the action to add a duplicate `@param mixed $name` tag.
 - **Rename updates imports.** Renaming a class now updates `use` statement FQNs (last segment only), preserves explicit aliases, and introduces an alias when the new name collides with an existing import in the same file. Previously, `use` statements were left unchanged, breaking the file.
 - **Trait alias go-to-definition.** Clicking a trait alias (e.g. `$this->__foo()` from `use Foo { foo as __foo; }`) now jumps to the trait method instead of the class's own same-named method.
 - **Diagnostics.** Scalar member access errors now detect method-return chains where an intermediate call returns a scalar type. By-reference `@param` annotations no longer produce a false "unknown class" diagnostic.

@@ -868,3 +868,139 @@ class Foo {
         new_text
     );
 }
+
+// ── @param with no type ─────────────────────────────────────────────────────
+
+#[test]
+fn no_duplicate_when_param_has_no_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    /**
+     * @param $name The user name
+     */
+    public function bar($name): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    // The existing @param $name (no type) should be recognised as covering
+    // the $name parameter.  The action will be offered to add `mixed` as
+    // the explicit type, but the result must not contain a duplicate $name.
+    let actions = get_code_actions(&backend, uri, content, 6, 20);
+    let action = find_update_docblock_action(&actions);
+
+    if let Some(action) = action {
+        let new_text = extract_edit_text(action);
+        let param_name_count = new_text.matches("$name").count();
+        assert_eq!(
+            param_name_count, 1,
+            "should not duplicate $name param, got:\n{}",
+            new_text
+        );
+        assert!(
+            new_text.contains("The user name"),
+            "should preserve description, got:\n{}",
+            new_text
+        );
+    }
+}
+
+#[test]
+fn no_duplicate_when_param_has_no_type_with_native_hint() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    /**
+     * @param $name The user name
+     * @param int $age The age
+     */
+    public function bar(string $name, int $age): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions(&backend, uri, content, 7, 20);
+    let action = find_update_docblock_action(&actions);
+
+    // The action may or may not be offered (depends on whether the missing
+    // type is considered a contradiction), but if it IS offered, the result
+    // must not contain a duplicate $name param.
+    if let Some(action) = action {
+        let new_text = extract_edit_text(action);
+        let param_name_count = new_text.matches("$name").count();
+        assert_eq!(
+            param_name_count, 1,
+            "should not duplicate $name param, got:\n{}",
+            new_text
+        );
+    }
+}
+
+#[test]
+fn preserves_description_for_param_with_no_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    /**
+     * @param $a First param
+     */
+    public function bar(string $a, int $b): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions(&backend, uri, content, 5, 20);
+    let action =
+        find_update_docblock_action(&actions).expect("should offer Update docblock for missing $b");
+
+    let new_text = extract_edit_text(action);
+    assert!(
+        new_text.contains("First param"),
+        "should preserve description from @param $a: {}",
+        new_text
+    );
+    assert!(
+        contains_param(&new_text, "int", "$b"),
+        "should add missing $b param: {}",
+        new_text
+    );
+}
+
+#[test]
+fn no_duplicate_for_variadic_param_with_no_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    /**
+     * @param ...$args The arguments
+     */
+    public function bar(...$args): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions(&backend, uri, content, 6, 20);
+    let action = find_update_docblock_action(&actions);
+
+    // The action may be offered to add `mixed` as the explicit type, but
+    // the result must not contain a duplicate ...$args.
+    if let Some(action) = action {
+        let new_text = extract_edit_text(action);
+        let param_args_count = new_text.matches("$args").count();
+        assert_eq!(
+            param_args_count, 1,
+            "should not duplicate $args param, got:\n{}",
+            new_text
+        );
+        assert!(
+            new_text.contains("The arguments"),
+            "should preserve description, got:\n{}",
+            new_text
+        );
+    }
+}

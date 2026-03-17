@@ -466,12 +466,24 @@ fn parse_doc_params(docblock: &str, _base_offset: usize) -> Vec<DocParam> {
                 continue;
             }
 
-            // Extract type token.
-            let (type_str, remainder) = split_type_token(rest);
-            let remainder = remainder.trim_start();
+            // When the first token starts with `$` (or `...$` for variadic),
+            // there is no type — the token is the parameter name directly.
+            let first_token = rest.split_whitespace().next().unwrap_or("");
+            let is_name_first = first_token.starts_with('$') || first_token.starts_with("...$");
 
-            // Extract parameter name.
-            let name_token = remainder.split_whitespace().next().unwrap_or("");
+            let (type_str, name_token, after_params) = if is_name_first {
+                ("", first_token, &rest[first_token.len()..])
+            } else {
+                // Extract type token.
+                let (type_str, remainder) = split_type_token(rest);
+                let remainder = remainder.trim_start();
+
+                // Extract parameter name.
+                let name_token = remainder.split_whitespace().next().unwrap_or("");
+                let after_params = remainder.get(name_token.len()..).unwrap_or("");
+                (type_str, name_token, after_params)
+            };
+
             if name_token.is_empty() || (!name_token.contains('$')) {
                 i += 1;
                 continue;
@@ -480,7 +492,7 @@ fn parse_doc_params(docblock: &str, _base_offset: usize) -> Vec<DocParam> {
             let name = name_token.to_string();
 
             // Extract description (rest of line after name).
-            let after_name = remainder.get(name_token.len()..).unwrap_or("").trim_start();
+            let after_name = after_params.trim_start();
             let mut description = after_name.to_string();
 
             // Collect continuation lines.
@@ -1945,5 +1957,108 @@ class Foo {
             info.is_some(),
             "Should find function info when cursor is on opening /**"
         );
+    }
+
+    // ── @param with no type ─────────────────────────────────────────
+
+    #[test]
+    fn parse_param_no_type_recognised() {
+        let docblock = r#"/**
+     * @param $name The user name
+     */"#;
+        let params = parse_doc_params(docblock, 0);
+        assert_eq!(params.len(), 1, "should parse one param: {:?}", params);
+        assert_eq!(params[0].name, "$name");
+        assert_eq!(params[0].type_str, "");
+        assert_eq!(params[0].description, "The user name");
+    }
+
+    #[test]
+    fn parse_param_no_type_variadic() {
+        let docblock = r#"/**
+     * @param ...$args The arguments
+     */"#;
+        let params = parse_doc_params(docblock, 0);
+        assert_eq!(params.len(), 1, "should parse one param: {:?}", params);
+        assert_eq!(params[0].name, "...$args");
+        assert_eq!(params[0].type_str, "");
+        assert_eq!(params[0].description, "The arguments");
+    }
+
+    #[test]
+    fn parse_param_no_type_no_description() {
+        let docblock = r#"/**
+     * @param $name
+     */"#;
+        let params = parse_doc_params(docblock, 0);
+        assert_eq!(params.len(), 1, "should parse one param: {:?}", params);
+        assert_eq!(params[0].name, "$name");
+        assert_eq!(params[0].type_str, "");
+    }
+
+    #[test]
+    fn parse_param_no_type_mixed_with_typed() {
+        let docblock = r#"/**
+     * @param string $a First
+     * @param $b Second
+     * @param int $c Third
+     */"#;
+        let params = parse_doc_params(docblock, 0);
+        assert_eq!(params.len(), 3, "should parse three params: {:?}", params);
+        assert_eq!(params[0].name, "$a");
+        assert_eq!(params[0].type_str, "string");
+        assert_eq!(params[1].name, "$b");
+        assert_eq!(params[1].type_str, "");
+        assert_eq!(params[1].description, "Second");
+        assert_eq!(params[2].name, "$c");
+        assert_eq!(params[2].type_str, "int");
+    }
+
+    #[test]
+    fn update_needed_when_untyped_param_matches_untyped_sig() {
+        // Even when both the docblock and signature omit the type, the
+        // update action should fire to add `mixed` as the explicit type.
+        let php = r#"<?php
+class Foo {
+    /**
+     * @param $name The user name
+     */
+    public function bar($name): void {}
+}
+"#;
+        let pos = php.find("function bar").unwrap() as u32;
+        let info = find_info(php, pos).unwrap();
+        let cl = no_class_loader();
+        assert!(
+            check_needs_update(&info, php, &cl),
+            "should need update to add `mixed` type to @param $name"
+        );
+        // The param must still be recognised (not duplicated).
+        assert_eq!(info.doc_params.len(), 1);
+        assert_eq!(info.doc_params[0].name, "$name");
+        assert_eq!(info.doc_params[0].type_str, "");
+        assert_eq!(info.doc_params[0].description, "The user name");
+    }
+
+    #[test]
+    fn detects_missing_param_when_existing_has_no_type() {
+        let php = r#"<?php
+class Foo {
+    /**
+     * @param $a First param
+     */
+    public function bar(string $a, int $b): void {}
+}
+"#;
+        let pos = php.find("function bar").unwrap() as u32;
+        let info = find_info(php, pos).unwrap();
+        let cl = no_class_loader();
+        assert!(
+            check_needs_update(&info, php, &cl),
+            "should need update because $b is missing"
+        );
+        assert_eq!(info.doc_params.len(), 1);
+        assert_eq!(info.doc_params[0].name, "$a");
+        assert_eq!(info.doc_params[0].description, "First param");
     }
 }
