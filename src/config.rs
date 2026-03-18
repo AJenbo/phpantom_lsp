@@ -51,6 +51,15 @@ pub struct DiagnosticsConfig {
     /// diagnostics on codebases without comprehensive type annotations.
     #[serde(rename = "unresolved-member-access")]
     pub unresolved_member_access: Option<bool>,
+
+    /// Report calls that pass more arguments than the function accepts.
+    ///
+    /// Off by default. PHP does not error on extra arguments to
+    /// user-defined functions (the extras are silently ignored), and
+    /// many libraries exploit this for flexible APIs. Enable this if
+    /// you want stricter checking.
+    #[serde(rename = "extra-arguments")]
+    pub extra_arguments: Option<bool>,
 }
 
 impl DiagnosticsConfig {
@@ -59,6 +68,13 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn unresolved_member_access_enabled(&self) -> bool {
         self.unresolved_member_access.unwrap_or(false)
+    }
+
+    /// Whether the extra-arguments diagnostic is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn extra_arguments_enabled(&self) -> bool {
+        self.extra_arguments.unwrap_or(false)
     }
 }
 
@@ -253,6 +269,9 @@ pub const DEFAULT_CONFIG_CONTENT: &str = r#"# PHPantom project configuration
 # Report member access on subjects whose type could not be resolved.
 # Useful for discovering gaps in type coverage. Off by default.
 # unresolved-member-access = true
+# Report calls that pass more arguments than the function accepts.
+# PHP silently ignores extra arguments, so this is off by default.
+# extra-arguments = true
 
 [indexing]
 # How PHPantom discovers classes across the workspace.
@@ -406,6 +425,7 @@ mod tests {
         let config: Config = toml::from_str(DEFAULT_CONFIG_CONTENT).unwrap();
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+        assert!(!config.diagnostics.extra_arguments_enabled());
         assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -423,6 +443,7 @@ mod tests {
         let config = load_config(dir.path()).unwrap();
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+        assert!(!config.diagnostics.extra_arguments_enabled());
         assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -437,6 +458,7 @@ mod tests {
         let config = load_config(dir.path()).unwrap();
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+        assert!(!config.diagnostics.extra_arguments_enabled());
         assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -468,6 +490,24 @@ mod tests {
         std::fs::write(&path, "[diagnostics]\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+    }
+
+    #[test]
+    fn extra_arguments_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(!config.diagnostics.extra_arguments_enabled());
+    }
+
+    #[test]
+    fn parses_extra_arguments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\nextra-arguments = true\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.diagnostics.extra_arguments_enabled());
     }
 
     #[test]
@@ -567,6 +607,7 @@ version = "8.2"
 
 [diagnostics]
 unresolved-member-access = true
+extra-arguments = true
 
 [indexing]
 strategy = "self"
@@ -586,6 +627,7 @@ timeout = 30000
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.php.version.as_deref(), Some("8.2"));
         assert!(config.diagnostics.unresolved_member_access_enabled());
+        assert!(config.diagnostics.extra_arguments_enabled());
         assert_eq!(config.indexing.strategy, IndexingStrategy::SelfScan);
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(

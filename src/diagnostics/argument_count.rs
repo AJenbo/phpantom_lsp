@@ -128,6 +128,10 @@ impl Backend {
             }
 
             // ── Too many arguments ──────────────────────────────────
+            if !self.config().diagnostics.extra_arguments_enabled() {
+                continue;
+            }
+
             if let Some(max) = max_count
                 && actual_args > max
             {
@@ -174,8 +178,16 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    /// Enable the `extra-arguments` diagnostic on the given backend.
+    fn enable_extra_args(backend: &Backend) {
+        let mut cfg = backend.config.lock().clone();
+        cfg.diagnostics.extra_arguments = Some(true);
+        *backend.config.lock() = cfg;
+    }
+
     /// Helper: create a test backend with minimal function stubs and
-    /// collect argument-count diagnostics.
+    /// collect argument-count diagnostics.  Extra-arguments checking
+    /// is **off** (the default).
     fn collect(php: &str) -> Vec<Diagnostic> {
         let backend = Backend::new_test();
         let uri = "file:///test.php";
@@ -185,10 +197,21 @@ mod tests {
         out
     }
 
-    /// Helper that includes minimal stub functions so that built-in
-    /// functions like `strlen` are resolvable.
-    fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
-        let stub_fn_index: HashMap<&'static str, &'static str> = HashMap::from([
+    /// Like [`collect`] but with the `extra-arguments` diagnostic
+    /// enabled so that "too many arguments" errors are reported.
+    fn collect_extra(php: &str) -> Vec<Diagnostic> {
+        let backend = Backend::new_test();
+        enable_extra_args(&backend);
+        let uri = "file:///test.php";
+        backend.update_ast(uri, php);
+        let mut out = Vec::new();
+        backend.collect_argument_count_diagnostics(uri, php, &mut out);
+        out
+    }
+
+    /// Minimal stub function index shared by stub-aware helpers.
+    fn stub_fn_index() -> HashMap<&'static str, &'static str> {
+        HashMap::from([
             ("strlen", "<?php\nfunction strlen(string $string): int {}\n"),
             (
                 "array_map",
@@ -214,9 +237,28 @@ mod tests {
                 "substr",
                 "<?php\nfunction substr(string $string, int $offset, ?int $length = null): string {}\n",
             ),
-        ]);
+        ])
+    }
+
+    /// Helper that includes minimal stub functions so that built-in
+    /// functions like `strlen` are resolvable.  Extra-arguments
+    /// checking is **off** (the default).
+    fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
         let backend =
-            Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index, HashMap::new());
+            Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index(), HashMap::new());
+        let uri = "file:///test.php";
+        backend.update_ast(uri, php);
+        let mut out = Vec::new();
+        backend.collect_argument_count_diagnostics(uri, php, &mut out);
+        out
+    }
+
+    /// Like [`collect_with_stubs`] but with the `extra-arguments`
+    /// diagnostic enabled.
+    fn collect_with_stubs_extra(php: &str) -> Vec<Diagnostic> {
+        let backend =
+            Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index(), HashMap::new());
+        enable_extra_args(&backend);
         let uri = "file:///test.php";
         backend.update_ast(uri, php);
         let mut out = Vec::new();
@@ -289,7 +331,58 @@ function test(): void {
         );
     }
 
-    // ── Too many arguments ──────────────────────────────────────────
+    // ── Too many arguments (default off) ────────────────────────────
+
+    #[test]
+    fn too_many_args_suppressed_by_default() {
+        let php = r#"<?php
+function test(): void {
+    strlen("hello", "extra");
+}
+"#;
+        let diags = collect_with_stubs(php);
+        assert!(
+            diags.is_empty(),
+            "Extra-arguments diagnostic should be off by default, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn too_many_args_to_user_function_suppressed_by_default() {
+        let php = r#"<?php
+function myHelper(string $a): void {}
+function test(): void {
+    myHelper("x", "y");
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Extra-arguments diagnostic should be off by default, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn too_many_args_to_method_suppressed_by_default() {
+        let php = r#"<?php
+class Greeter {
+    public function greet(string $name): string {
+        return "Hello, " . $name;
+    }
+}
+function test(): void {
+    $g = new Greeter();
+    $g->greet("world", "extra", "more");
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Extra-arguments diagnostic should be off by default, got: {diags:?}",
+        );
+    }
+
+    // ── Too many arguments (opt-in) ─────────────────────────────────
 
     #[test]
     fn flags_too_many_args_to_function() {
@@ -298,7 +391,7 @@ function test(): void {
     strlen("hello", "extra");
 }
 "#;
-        let diags = collect_with_stubs(php);
+        let diags = collect_with_stubs_extra(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert!(
             diags[0].message.contains("got 2"),
@@ -320,7 +413,7 @@ function test(): void {
     $g->greet("world", "extra", "more");
 }
 "#;
-        let diags = collect(php);
+        let diags = collect_extra(php);
         assert!(
             diags.iter().any(|d| d.message.contains("got 3")),
             "Expected too-many-args diagnostic, got: {diags:?}",
@@ -462,7 +555,7 @@ function test(): void {
     myHelper("x", "y");
 }
 "#;
-        let diags = collect(php);
+        let diags = collect_extra(php);
         assert!(
             diags
                 .iter()
@@ -534,7 +627,7 @@ function test(): void {
     new User("Alice", "extra");
 }
 "#;
-        let diags = collect(php);
+        let diags = collect_extra(php);
         assert!(
             diags.iter().any(|d| d.message.contains("got 2")),
             "Expected too-many-args diagnostic for constructor, got: {diags:?}",
@@ -581,7 +674,7 @@ function test(): void {
     helper("x", "y", "z");
 }
 "#;
-        let diags = collect(php);
+        let diags = collect_extra(php);
         assert!(
             diags.iter().any(|d| d.message.contains("at most 2")),
             "Expected 'at most' wording, got: {diags:?}",
@@ -600,8 +693,32 @@ function test(): void {
     two(1, 2, 3);
 }
 "#;
-        let diags = collect(php);
+        let diags = collect_extra(php);
         assert_eq!(diags.len(), 2, "Expected 2 diagnostics, got: {diags:?}",);
+    }
+
+    #[test]
+    fn too_few_still_reported_when_extra_args_disabled() {
+        // "Too few" must always fire regardless of the extra-arguments flag.
+        let php = r#"<?php
+function one(int $a): void {}
+function two(int $a, int $b): void {}
+function test(): void {
+    one();
+    two(1, 2, 3);
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            diags.len(),
+            1,
+            "Only the too-few diagnostic should fire by default, got: {diags:?}",
+        );
+        assert!(
+            diags[0].message.contains("got 0"),
+            "message: {}",
+            diags[0].message,
+        );
     }
 
     // ── Scope methods (Laravel) ─────────────────────────────────────

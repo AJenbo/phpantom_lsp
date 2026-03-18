@@ -23,7 +23,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                                                           | Impact | Effort |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------ |
-| B13 | [Argument count: too many arguments off by default](todo/bugs.md#b13-argument-count-diagnostic-flags-too-many-arguments-by-default)                            | High   | Low    |
 | E0  | [Switch embedded stubs to master + LanguageLevelTypeAware](todo/external-stubs.md#e0-switch-embedded-stubs-to-master-and-apply-languageleveltypeaware-patches) | High   | Low    |
 
 ## Sprint 4 — Refactoring toolkit
