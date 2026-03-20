@@ -1,0 +1,47 @@
+// test: multi-level generic collection resolves element type in foreach
+// feature: completion
+// Adapted from phpactor generics/gh-1800.test
+// Three-level generic chain: interface -> abstract class -> concrete class
+// expect: argMethod(
+---
+<?php
+
+/**
+ * @template T
+ * @extends IteratorAggregate<T>
+ */
+interface ReflectionCollection extends IteratorAggregate
+{
+}
+
+/**
+ * @template T
+ * @implements ReflectionCollection<T>
+ */
+abstract class AbstractReflectionCollection implements ReflectionCollection
+{
+}
+
+/**
+ * @extends AbstractReflectionCollection<ReflectionArgument>
+ */
+class ReflectionArgumentCollection extends AbstractReflectionCollection
+{
+}
+
+class ReflectionArgument
+{
+    public function argMethod(): void {}
+}
+
+class ReflectionNode
+{
+    public function arguments(): ReflectionArgumentCollection {}
+}
+
+$node = new ReflectionNode();
+$collection = $node->arguments();
+
+foreach ($collection as $item) {
+    $item-><>
+}

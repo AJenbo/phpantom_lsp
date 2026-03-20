@@ -1,0 +1,22 @@
+// test: list destructuring from conditional produces union — both types' members visible
+// feature: completion
+// Adapted from phpactor assignment/list_assignment.test
+// ignore: ternary expression as RHS of list destructuring not yet resolved
+// expect: fooMethod(
+// expect: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+function yesOrNo(): bool {}
+
+[$transmitter, $receiver] = yesOrNo() ? [new Foo(), new Bar()] : [new Bar(), new Foo()];
+
+$transmitter-><>

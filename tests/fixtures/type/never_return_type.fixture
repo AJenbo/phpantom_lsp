@@ -1,0 +1,26 @@
+// test: never return type is treated as dead code — variable retains pre-branch type
+// feature: hover
+// Adapted from phpactor type/never.test
+// After a branch that calls a never-returning function, the variable keeps its original type
+// ignore: dead-code elimination after never-returning function calls not implemented
+// expect_hover: $foobar => string
+---
+<?php
+
+class Foobar {
+    public function fooMethod(): void {}
+}
+
+function never_return(): never
+{
+    die('nope');
+}
+
+$foobar = 'hello';
+
+if (rand(0, 1)) {
+    $foobar = 'other';
+    never_return();
+}
+
+$foobar<>;

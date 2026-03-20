@@ -1,0 +1,22 @@
+// test: null coalesce with non-nullable LHS resolves to LHS type only
+// feature: completion
+// Adapted from phpactor null-coalesce/null-coalesce_null.test
+// When LHS is not nullable, the ?? expression should resolve to only the LHS type
+// ignore: we don't yet optimize away the RHS when LHS is provably non-nullable
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+$foo = new Foo();
+$bar = new Bar();
+$baz = $foo ?? $bar;
+$baz-><>

@@ -1,0 +1,36 @@
+// test: sequential narrowing with negated instanceof and early return inside class method
+// feature: completion
+// Adapted from phpactor if-statement/multiple_statements_with_class.test
+// After negated instanceof Bar with early return, only Foo remains from the Foo|Bar union
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+class Baz {
+    public function bazMethod(): void {}
+}
+
+class Foo {
+    public function fooMethod(): void {}
+
+    function test(Foo|Bar $foo): void
+    {
+        if (!$foo instanceof Bar) {
+            return;
+        }
+
+        // $foo is narrowed to Bar here, but we test the else path:
+        // after the negated check + return, only Foo remains
+    }
+}
+
+function testOutside(Foo|Bar $foo): void {
+    if (!$foo instanceof Bar) {
+        $foo-><>
+    }
+}

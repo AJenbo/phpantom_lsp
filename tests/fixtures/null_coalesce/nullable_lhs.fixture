@@ -1,0 +1,25 @@
+// test: null coalesce with nullable LHS resolves to union of both sides
+// feature: completion
+// Adapted from phpactor null-coalesce/null-coalesce_nullable.test
+// When LHS is ?Foo, the ?? produces a union of Foo and the RHS type
+// ignore: function return type not flowing through ?? in top-level context
+// expect: fooMethod(
+// expect: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+function getOptional(): ?Foo { return null; }
+
+$nullable = getOptional();
+$bar = new Bar();
+
+$baz = $nullable ?? $bar;
+$baz-><>

@@ -1,0 +1,25 @@
+// test: circular trait dependency does not crash
+// feature: completion
+// Adapted from phpactor reflection/circular-dependency-trait.test
+// Two traits that use each other should not cause infinite loops
+// expect: onTraitOne(
+// expect: onTraitTwo(
+---
+<?php
+
+trait TraitTwo {
+    use TraitOne;
+    public function onTraitTwo(): string {}
+}
+
+trait TraitOne {
+    use TraitTwo;
+    public function onTraitOne(): string {}
+}
+
+class One {
+    use TraitOne;
+}
+
+$one = new One();
+$one-><>

@@ -1,0 +1,16 @@
+// test: or instanceof with unrelated boolean operands still narrows type
+// feature: completion
+// Adapted from phpactor if-statement/if_or.test
+// expect: fooMethod(
+---
+<?php
+
+class Foobar {
+    public function fooMethod(): void {}
+}
+
+function test($foo): void {
+    if ($foo instanceof Foobar || true || false or true or false) {
+        $foo-><>
+    }
+}

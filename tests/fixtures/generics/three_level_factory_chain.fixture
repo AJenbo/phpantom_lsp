@@ -1,0 +1,37 @@
+// test: three-level generic factory chain resolves return type through inheritance
+// feature: completion
+// Adapted from phpactor generics/gh-2295-test.test
+// expect: childMethod(
+---
+<?php
+
+abstract class Model {}
+
+/**
+ * @template TModel of Model
+ */
+class Factory {
+    /** @return TModel */
+    public function create(): object {}
+}
+
+/**
+ * @template TModel of Schedule
+ * @extends Factory<TModel>
+ */
+class ScheduleFactory extends Factory {
+    /** @param TModel $schedule */
+    public function __construct(Schedule $schedule) {}
+}
+
+class Schedule extends Model {}
+
+/** @extends ScheduleFactory<ChildSchedule> */
+class ChildScheduleFactory extends ScheduleFactory {}
+
+class ChildSchedule extends Schedule {
+    public function childMethod(): void {}
+}
+
+$s = (new ChildScheduleFactory())->create();
+$s-><>

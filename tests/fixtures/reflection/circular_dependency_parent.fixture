@@ -1,0 +1,17 @@
+// test: circular class extends does not crash the resolver
+// feature: completion
+// Adapted from phpactor reflection/circular-dependency_parent.test
+// Two classes extend each other — the resolver must not infinite loop
+// expect: bar(
+---
+<?php
+
+class Foobar extends One {
+    public function bar(): string {}
+}
+
+class One extends Foobar {
+}
+
+$one = new One();
+$one-><>

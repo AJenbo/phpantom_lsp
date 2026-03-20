@@ -112,6 +112,10 @@ unlikely to move the needle for most users.
 | T4  | Non-empty-\* type narrowing and propagation                                                                                                                  | Low        | Low         |
 | T5  | Fiber type resolution                                                                                                                                        | Low        | Low         |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                       | Low-Medium | Low-Medium  |
+| T8  | [Null coalesce (`??`) type refinement](todo/type-inference.md#t8-null-coalesce--type-refinement)                                                              | Low-Medium | Low         |
+| T9  | [Dead-code elimination after `never`-returning calls](todo/type-inference.md#t9-dead-code-elimination-after-never-returning-calls)                            | Low        | Low-Medium  |
+| T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                 | Low        | Low-Medium  |
+| T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                             | Low        | Low-Medium  |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                       |            |             |
 | D2  | Chain error propagation (flag only the first broken link)                                                                                                    | Medium     | Medium      |
 | D5  | Diagnostic suppression intelligence                                                                                                                          | Medium     | Medium      |

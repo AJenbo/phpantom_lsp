@@ -1,0 +1,20 @@
+// test: circular interface extends does not crash
+// feature: completion
+// Adapted from phpactor reflection/circular-dependency_interface.test
+// Two interfaces that extend each other should not cause infinite loop
+// expect: bar(
+---
+<?php
+
+interface Barfoo extends Foobar {}
+
+interface Foobar extends Barfoo {
+    public function bar(): string;
+}
+
+class One implements Foobar {
+    public function bar(): string { return ''; }
+}
+
+$one = new One();
+$one-><>

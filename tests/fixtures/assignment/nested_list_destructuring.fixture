@@ -1,0 +1,21 @@
+// test: nested list destructuring resolves inner element types
+// feature: completion
+// Adapted from phpactor assignment/list_desconstruct_nested.test
+// ignore: nested array shape destructuring not yet resolved
+// expect: fooMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+/** @return array{array{Foo, Bar}} */
+function getPair(): array { return [[new Foo(), new Bar()]]; }
+
+[[$one, $two]] = getPair();
+$one-><>

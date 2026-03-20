@@ -331,3 +331,105 @@ type:
 
 ---
 
+## T8. Null coalesce (`??`) type refinement
+**Impact: Low-Medium · Effort: Low**
+
+The `??` operator currently unions LHS and RHS unconditionally in both
+`raw_type_inference.rs` and `rhs_resolution.rs`. Two improvements:
+
+1. **Non-nullable LHS:** when the LHS type is provably non-nullable
+   (e.g. `new Foo()`, a non-nullable return type, a literal), the RHS
+   is dead code and the result should resolve to the LHS type only.
+2. **Nullable LHS via function return:** when a function returns
+   `?Foo`, `$x = getOptional() ?? $fallback` should strip `null` from
+   the LHS and union with the RHS. Today the function return type
+   doesn't flow through `??` in top-level variable contexts.
+
+**Fixtures to activate:**
+
+- `null_coalesce/non_nullable_lhs.fixture` — LHS is `new Foo()`, RHS
+  should be ignored
+- `null_coalesce/nullable_lhs.fixture` — LHS is `?Foo` from function
+  return, result is `Foo|Fallback`
+
+**phpactor ref:** `null-coalesce/null-coalesce_null.test`,
+`null-coalesce/null-coalesce_nullable.test`
+
+---
+
+## T9. Dead-code elimination after `never`-returning calls
+**Impact: Low · Effort: Low-Medium**
+
+When a function or method has return type `never`, any code path that
+calls it is guaranteed to terminate. Variables assigned before the
+`never` call in a conditional branch should not have their type
+polluted by the branch's assignments.
+
+```php
+$x = 'hello';
+if (rand(0,1)) {
+    $x = 'other';
+    abort(); // returns never
+}
+$x; // should be "hello", not "hello"|"other"
+```
+
+Today PHPantom's branch-merging logic unions all branch assignments
+regardless of whether the branch terminates. Recognising `never` as a
+terminating statement (alongside `return`, `throw`, `die`, `exit`)
+would fix this.
+
+**Fixture to activate:**
+
+- `type/never_return_type.fixture`
+
+**phpactor ref:** `type/never.test`
+
+---
+
+## T10. Ternary expression as RHS of list destructuring
+**Impact: Low · Effort: Low-Medium**
+
+List destructuring (`[$a, $b] = expr`) resolves element types when
+the RHS is a function call returning an array shape, or a simple
+array literal. When the RHS is a ternary expression whose branches
+are array literals or array-shape-returning calls, the resolver
+doesn't drill into the branches to union the element types.
+
+```php
+[$a, $b] = $cond ? [new Foo(), new Bar()] : [new Bar(), new Foo()];
+$a->  // should see Foo|Bar members
+```
+
+**Fixture to activate:**
+
+- `assignment/list_destructuring_conditional.fixture`
+
+**phpactor ref:** `assignment/list_assignment.test`
+
+---
+
+## T11. Nested list destructuring
+**Impact: Low · Effort: Low-Medium**
+
+Nested destructuring like `[[$one, $two]] = $source` is not resolved.
+When the RHS has a type like `array{array{Foo, Bar}}`, the outer
+destructuring peels the first dimension but the inner destructuring
+doesn't resolve individual elements.
+
+```php
+/** @return array{array{Foo, Bar}} */
+function getPair(): array { return [[new Foo(), new Bar()]]; }
+
+[[$one, $two]] = getPair();
+$one->  // should see Foo members
+```
+
+**Fixture to activate:**
+
+- `assignment/nested_list_destructuring.fixture`
+
+**phpactor ref:** `assignment/list_desconstruct_nested.test`
+
+---
+
