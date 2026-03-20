@@ -983,8 +983,13 @@ impl Backend {
 /// 1. `unknown_class` trumps `unresolved_member_access`
 /// 2. `unknown_member` trumps `unresolved_member_access`
 /// 3. `scalar_member_access` trumps `unresolved_member_access`
+/// 4. Any precise (sub-line) diagnostic suppresses full-line diagnostics
+///    on the same line (PHPStan only reports line numbers).
 ///
-/// Also removes exact duplicates (same range + same message).
+/// Each source's diagnostics are authoritative: if PHPStan reports five
+/// issues on a line, all five are shown; if PHPantom reports two issues
+/// on the same span, both are shown.  Cross-source overlap is handled
+/// by rule 4 above, not by collapsing identical ranges.
 fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
     if diagnostics.is_empty() {
         return;
@@ -1056,9 +1061,7 @@ fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
         true
     });
 
-    // Sort by range so that duplicates from different phases become
-    // adjacent.  Within the same range, put precise diagnostics before
-    // full-line ones so the dedup pass below keeps the precise version.
+    // Sort by range for stable output order.
     diagnostics.sort_by(|a, b| {
         a.range
             .start
@@ -1068,13 +1071,6 @@ fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
             .then_with(|| a.range.end.line.cmp(&b.range.end.line))
             .then_with(|| a.range.end.character.cmp(&b.range.end.character))
     });
-
-    // Remove duplicates that cover the same range, regardless of
-    // message wording.  Because the sort above is stable and precise
-    // diagnostics sort before full-line ones on the same start line
-    // (they have a smaller end character), the first occurrence in each
-    // group is the one we want to keep.
-    diagnostics.dedup_by(|a, b| a.range == b.range);
 }
 
 /// Returns `true` if the range spans a full line (character 0 to a
@@ -1453,91 +1449,45 @@ mod tests {
     }
 
     #[test]
-    fn dedup_removes_non_adjacent_duplicates_with_same_range() {
-        // Diagnostics from different phases can produce entries with
-        // the same range but with unrelated diagnostics sitting between
-        // them.  The old `dedup_by` only caught consecutive duplicates.
-        let range = make_range(10, 5, 10, 15);
-        let dup1 = make_diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            "unknown_class",
-            "Class 'Foo' not found",
-        );
-        let unrelated = make_diagnostic(
-            make_range(20, 0, 20, 8),
-            DiagnosticSeverity::WARNING,
-            "unused_import",
-            "Unused import Bar",
-        );
-        let dup2 = make_diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            "unknown_class",
-            "Class 'Foo' not found",
-        );
-        let mut diags = vec![dup1, unrelated, dup2];
-        deduplicate_diagnostics(&mut diags);
-        // The two diagnostics on line 10 collapse into one; the
-        // unrelated diagnostic on line 20 survives.
-        assert_eq!(diags.len(), 2);
-        let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
-        assert!(lines.contains(&10));
-        assert!(lines.contains(&20));
-    }
-
-    #[test]
-    fn dedup_by_range_ignores_message_differences() {
-        // Two diagnostics covering the same range are redundant even
-        // when their messages differ (e.g. PHPStan vs native wording).
+    fn keeps_multiple_diagnostics_on_same_range() {
+        // Each source is authoritative — two PHPantom diagnostics on
+        // the same span are both shown.
         let range = make_range(7, 3, 7, 12);
-        let native = make_diagnostic(
+        let diag1 = make_diagnostic(
             range,
-            DiagnosticSeverity::ERROR,
-            "unknown_class",
-            "Class 'Baz' not found",
+            DiagnosticSeverity::WARNING,
+            "unknown_member",
+            "Method 'foo' not found on class Bar",
         );
-        let phpstan = Diagnostic {
+        let diag2 = make_diagnostic(
             range,
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("class.notFound".to_string())),
-            source: Some("phpstan".to_string()),
-            message: "Instantiated class Baz not found.".to_string(),
-            ..Default::default()
-        };
-        let mut diags = vec![native, phpstan];
+            DiagnosticSeverity::HINT,
+            "deprecated",
+            "Method 'foo' is deprecated",
+        );
+        let mut diags = vec![diag1, diag2];
         deduplicate_diagnostics(&mut diags);
-        assert_eq!(diags.len(), 1);
+        assert_eq!(diags.len(), 2);
     }
 
     #[test]
-    fn dedup_cross_phase_keeps_one_per_range() {
-        // Simulate Phase 1 (fast), Phase 2 (slow), and Phase 3
-        // (PHPStan) each contributing a diagnostic on the same range.
-        let range = make_range(15, 4, 15, 18);
-        let fast = make_diagnostic(
-            range,
-            DiagnosticSeverity::WARNING,
-            "unknown_class",
-            "Phase 1: Class 'X' not found",
-        );
-        let slow = make_diagnostic(
-            range,
-            DiagnosticSeverity::WARNING,
-            "unknown_class",
-            "Phase 2: Class 'X' not found",
-        );
-        let phpstan = Diagnostic {
-            range,
+    fn keeps_multiple_phpstan_diagnostics_on_same_line() {
+        // If PHPStan reports five issues on a line, all five survive.
+        let make_phpstan = |code: &str, msg: &str| Diagnostic {
+            range: make_range(10, 0, 10, u32::MAX),
             severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("class.notFound".to_string())),
+            code: Some(NumberOrString::String(code.to_string())),
             source: Some("phpstan".to_string()),
-            message: "Phase 3: Class X not found.".to_string(),
+            message: msg.to_string(),
             ..Default::default()
         };
-        let mut diags = vec![fast, slow, phpstan];
+        let mut diags = vec![
+            make_phpstan("argument.type", "Parameter #1 expects int, string given."),
+            make_phpstan("return.type", "Should return int but returns string."),
+            make_phpstan("missingType.return", "Method has no return type."),
+        ];
         deduplicate_diagnostics(&mut diags);
-        assert_eq!(diags.len(), 1);
+        assert_eq!(diags.len(), 3);
     }
 
     // ── is_stale_phpstan_diagnostic ─────────────────────────────────

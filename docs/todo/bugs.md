@@ -15,26 +15,6 @@ within the same impact tier.
 
 ---
 
-## B11.  Diagnostic deduplication drops distinct diagnostics on the same range
-
-- **Impact:** Medium · **Effort:** Low
-- The diagnostic publisher deduplicates by LSP range. When two
-  different diagnostics land on the same span (e.g. an unknown-member
-  warning and a deprecation notice on the same call), the second one
-  is silently dropped.
-
----
-
-## B13. Argument count diagnostic flags too many arguments by default
-
-- **Impact:** High · **Effort:** Low
-- PHP silently ignores extra arguments, so flagging them as errors
-  produces false positives in codebases that rely on this behaviour.
-  The check should be off by default and gated behind an opt-in
-  config key.
-
----
-
 ## B14. Redundant file re-parsing in unknown-member diagnostics
 
 - **Impact:** Medium · **Effort:** Medium-High
