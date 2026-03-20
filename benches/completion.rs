@@ -575,15 +575,11 @@ $b->a()->b()->c()->d()->e()->
 /// class and iterates its methods.  We trigger completion on an instance.
 fn bench_completion_carbon(c: &mut Criterion) {
     let runtime = rt();
-    let carbon_src =
-        std::fs::read_to_string("benches/fixtures/reflection/carbon.php")
-            .expect("carbon.php fixture missing");
+    let carbon_src = std::fs::read_to_string("benches/fixtures/reflection/carbon.php")
+        .expect("carbon.php fixture missing");
 
     // Build a wrapper that instantiates Carbon and triggers completion.
-    let wrapper = format!(
-        "{}\n$c = new \\Carbon\\Carbon();\n$c->\n",
-        carbon_src
-    );
+    let wrapper = format!("{}\n$c = new \\Carbon\\Carbon();\n$c->\n", carbon_src);
     // Find the cursor line: last line with `$c->`
     let cursor_line = wrapper.lines().count() as u32 - 2;
 
@@ -622,8 +618,7 @@ fn bench_completion_yii_hierarchy(c: &mut Criterion) {
     .iter()
     .map(|name| {
         let path = format!("benches/fixtures/yii/{name}.php");
-        let content =
-            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let content = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
         let uri_name: &str = *name;
         (uri_name, content)
     })
@@ -658,17 +653,15 @@ $r->
 /// This measures how completion scales with file complexity.
 fn bench_completion_large_file(c: &mut Criterion) {
     let runtime = rt();
-    let content =
-        std::fs::read_to_string("benches/fixtures/completion/example1_long.php")
-            .expect("example1_long.php fixture missing");
+    let content = std::fs::read_to_string("benches/fixtures/completion/example1_long.php")
+        .expect("example1_long.php fixture missing");
 
     // Cursor is on line 207 (0-based: 206), at `$foobar->` (col 24).
     c.bench_function("completion_large_file", |b| {
         b.iter(|| {
             runtime.block_on(async {
                 let backend = Backend::new_test();
-                let uri =
-                    open_file(&backend, "file:///bench_large.php", &content).await;
+                let uri = open_file(&backend, "file:///bench_large.php", &content).await;
                 fire_completion(&backend, &uri, 206, 24).await;
             })
         })
