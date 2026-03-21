@@ -137,7 +137,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             break;
                         }
                         if use_colour && i.is_multiple_of(20) {
-                            eprint!("\r\x1b[2K  Analyzing... {}/{}", i + 1, file_count);
+                            eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count));
                         }
 
                         let file_path = &files[i];
@@ -210,7 +210,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         .sum();
 
     if use_colour {
-        eprint!("\r\x1b[2K");
+        eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count));
     }
 
     // ── 5. Render output ────────────────────────────────────────────
@@ -409,7 +409,7 @@ fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_colour: bool
     // Header.
     println!("{sep}");
     if use_colour {
-        println!("  {:>line_col_w$}   \x1b[1m{path}\x1b[0m", "Line");
+        println!("  \x1b[32m{:>line_col_w$}\x1b[0m   \x1b[32m{path}\x1b[0m", "Line");
     } else {
         println!("  {:>line_col_w$}   {path}", "Line");
     }
@@ -434,28 +434,61 @@ fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_colour: bool
 }
 
 /// Print the `[OK]` success box.
-fn print_success_box(file_count: usize, use_colour: bool) {
-    println!();
+fn print_success_box(_file_count: usize, use_colour: bool) {
+    let text = " [OK] No errors ";
     if use_colour {
-        println!(" \x1b[30;42m [OK] No errors \x1b[0m");
-    } else {
-        println!(" [OK] No errors");
-    }
-    println!();
-    eprintln!(" {file_count} files analysed");
-}
-
-/// Print the `[ERROR]` summary box.
-fn print_error_box(total_errors: usize, file_count: usize, use_colour: bool) {
-    let label = if total_errors == 1 { "error" } else { "errors" };
-    let text = format!(" [ERROR] Found {total_errors} {label} ");
-    if use_colour {
-        println!(" \x1b[97;41m{text}\x1b[0m");
+        let pad = " ".repeat(text.len());
+        println!();
+        println!(" \x1b[30;42m{pad}\x1b[0m");
+        println!(" \x1b[30;42m{text}\x1b[0m");
+        println!(" \x1b[30;42m{pad}\x1b[0m");
+        println!();
     } else {
         println!("{text}");
     }
-    println!();
-    eprintln!(" {file_count} files analysed");
+}
+
+/// Print the `[ERROR]` summary box.
+fn print_error_box(total_errors: usize, _file_count: usize, use_colour: bool) {
+    let label = if total_errors == 1 { "error" } else { "errors" };
+    let text = format!(" [ERROR] Found {total_errors} {label} ");
+    if use_colour {
+        let pad = " ".repeat(text.len());
+        println!();
+        println!(" \x1b[97;41m{pad}\x1b[0m");
+        println!(" \x1b[97;41m{text}\x1b[0m");
+        println!(" \x1b[97;41m{pad}\x1b[0m");
+        println!();
+    } else {
+        println!("{text}");
+    }
+}
+
+// ── Progress bar ────────────────────────────────────────────────────────────
+
+const BAR_WIDTH: usize = 28;
+
+/// Render a PHPStan-style progress bar string:
+/// ` 120/883 [▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░]  13%`
+fn progress_bar(done: usize, total: usize) -> String {
+    let pct = if total == 0 {
+        100
+    } else {
+        (done * 100) / total
+    };
+    let filled = if total == 0 {
+        BAR_WIDTH
+    } else {
+        (done * BAR_WIDTH) / total
+    };
+    let empty = BAR_WIDTH - filled;
+
+    format!(
+        " {done:>width$}/{total} [{bar_fill}{bar_empty}] {pct:>3}%",
+        width = total.to_string().len(),
+        bar_fill = "▓".repeat(filled),
+        bar_empty = "░".repeat(empty),
+    )
 }
 
 #[cfg(test)]
