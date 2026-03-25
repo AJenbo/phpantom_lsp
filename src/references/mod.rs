@@ -1304,7 +1304,7 @@ impl Backend {
 
         std::thread::scope(|s| {
             for chunk in &chunks {
-                std::thread::Builder::new()
+                let handle = std::thread::Builder::new()
                     .stack_size(PARSE_STACK_SIZE)
                     .spawn_scoped(s, move || {
                         for (uri, content) in chunk {
@@ -1314,8 +1314,10 @@ impl Backend {
                                 self.update_ast(uri, &c);
                             }
                         }
-                    })
-                    .expect("failed to spawn parse thread");
+                    });
+                if let Err(e) = handle {
+                    tracing::error!("failed to spawn parse thread: {e}");
+                }
             }
         });
     }
@@ -1354,7 +1356,7 @@ impl Backend {
 
         std::thread::scope(|s| {
             for chunk in &chunks {
-                std::thread::Builder::new()
+                let handle = std::thread::Builder::new()
                     .stack_size(PARSE_STACK_SIZE)
                     .spawn_scoped(s, move || {
                         for (uri, path) in *chunk {
@@ -1362,8 +1364,10 @@ impl Backend {
                                 self.update_ast(uri, &content);
                             }
                         }
-                    })
-                    .expect("failed to spawn parse thread");
+                    });
+                if let Err(e) = handle {
+                    tracing::error!("failed to spawn parse thread: {e}");
+                }
             }
         });
     }

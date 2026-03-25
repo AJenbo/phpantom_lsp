@@ -48,7 +48,6 @@ pub(crate) struct SymbolSpan {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum SymbolKind {
     /// Class/interface/trait/enum name in a type context:
     /// type hint, `new Foo`, `extends Foo`, `implements Foo`,
@@ -442,7 +441,6 @@ impl SymbolMap {
     /// the `effective_from`-based lookup, because the assignment LHS token
     /// exists at the definition site even though the definition hasn't
     /// "taken effect" yet (its `effective_from` is past the cursor).
-    #[allow(dead_code)]
     pub fn is_at_var_definition(&self, var_name: &str, cursor_offset: u32) -> bool {
         self.var_def_kind_at(var_name, cursor_offset).is_some()
     }

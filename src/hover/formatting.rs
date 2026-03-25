@@ -50,15 +50,6 @@ pub(super) fn format_visibility(vis: Visibility) -> &'static str {
     }
 }
 
-/// Format a parameter list for display using effective (docblock-overridden) types.
-///
-/// Used in the FQN header line and signature help where the richer
-/// docblock type information is most useful.
-#[allow(dead_code)]
-pub(super) fn format_params(params: &[ParameterInfo]) -> String {
-    format_params_inner(params, false)
-}
-
 /// Format a parameter list using native PHP type hints only.
 ///
 /// Used inside `<?php` code blocks so the displayed declaration matches

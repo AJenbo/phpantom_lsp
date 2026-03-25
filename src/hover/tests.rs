@@ -44,7 +44,7 @@ fn namespace_line_without_namespace() {
 
 #[test]
 fn format_params_empty() {
-    assert_eq!(format_params(&[]), "");
+    assert_eq!(format_native_params(&[]), "");
 }
 
 #[test]
@@ -73,7 +73,10 @@ fn format_params_with_types() {
             closure_this_type: None,
         },
     ];
-    assert_eq!(format_params(&params), "string $name, int $age = ...");
+    assert_eq!(
+        format_native_params(&params),
+        "string $name, int $age = ..."
+    );
 }
 
 #[test]
@@ -89,7 +92,7 @@ fn format_params_variadic() {
         is_reference: false,
         closure_this_type: None,
     }];
-    assert_eq!(format_params(&params), "string ...$items");
+    assert_eq!(format_native_params(&params), "string ...$items");
 }
 
 #[test]
@@ -105,7 +108,7 @@ fn format_params_reference() {
         is_reference: true,
         closure_this_type: None,
     }];
-    assert_eq!(format_params(&params), "array &$arr");
+    assert_eq!(format_native_params(&params), "array &$arr");
 }
 
 #[test]
