@@ -1,15 +1,18 @@
-//! Per-project configuration loaded from `.phpantom.toml`.
+//! Configuration loaded from `.phpantom.toml`.
 //!
-//! The config file lives in the project root (next to `composer.json`)
-//! and controls optional features like diagnostic toggles and PHP
-//! version overrides.  When the file is missing, all settings use their
-//! defaults.
+//! Settings are read from two locations (in order of precedence):
 //!
-//! See `docs/todo/config.md` for the full specification of planned
-//! settings.  Only settings that are actually wired up appear here.
+//! 1. **Project** — `.phpantom.toml` in the workspace root (next to
+//!    `composer.json`).
+//! 2. **Global** — `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml`
+//!    (typically `~/.config/phpantom_lsp/.phpantom.toml` on Linux).
+//!
+//! Project settings override global settings.  When neither file
+//! exists, all settings use their defaults.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use etcetera::BaseStrategy as _;
 use serde::Deserialize;
 
 /// Top-level configuration parsed from `.phpantom.toml`.
@@ -174,7 +177,7 @@ impl PhpStanConfig {
 
 /// `[indexing]` section — controls how PHPantom discovers classes across
 /// the workspace.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct IndexingConfig {
     /// The indexing strategy.
@@ -189,14 +192,12 @@ pub struct IndexingConfig {
     /// - `"none"` — no proactive scanning. Still uses Composer's classmap
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
-    pub strategy: IndexingStrategy,
+    pub strategy: Option<IndexingStrategy>,
 }
 
-impl Default for IndexingConfig {
-    fn default() -> Self {
-        Self {
-            strategy: IndexingStrategy::Composer,
-        }
+impl IndexingConfig {
+    pub fn strategy(&self) -> IndexingStrategy {
+        self.strategy.unwrap_or_default()
     }
 }
 
@@ -252,8 +253,32 @@ impl std::fmt::Display for IndexingStrategy {
     }
 }
 
+/// Recursively merge `overlay` into `base`.  Keys in `overlay` take
+/// precedence; sub-tables are merged recursively rather than replaced
+/// wholesale so that a project config section inherits individual
+/// keys from the global config.
+fn merge_toml(base: &mut toml::Table, overlay: toml::Table) {
+    for (key, overlay_val) in overlay {
+        match overlay_val {
+            toml::Value::Table(overlay_table)
+                if matches!(base.get(&key), Some(toml::Value::Table(_))) =>
+            {
+                if let Some(toml::Value::Table(base_table)) = base.get_mut(&key) {
+                    merge_toml(base_table, overlay_table);
+                }
+            }
+            val => {
+                base.insert(key, val);
+            }
+        }
+    }
+}
+
 /// The config file name that PHPantom looks for in the project root.
 pub const CONFIG_FILE_NAME: &str = ".phpantom.toml";
+
+/// The subdirectory under the user's XDG config directory.
+const CONFIG_APP_DIR: &str = "phpantom_lsp";
 
 /// Default content for a newly created `.phpantom.toml` file.
 ///
@@ -311,6 +336,17 @@ pub const DEFAULT_CONFIG_CONTENT: &str = r#"# PHPantom project configuration
 # timeout = 60000
 "#;
 
+/// Return the path to the global config file, if the platform's config
+/// directory can be determined.
+///
+/// On Linux this is typically `$XDG_CONFIG_HOME/phpantom/.phpantom.toml`
+/// (defaulting to `~/.config/phpantom_lsp/.phpantom.toml`).
+pub fn global_config_path() -> Option<PathBuf> {
+    etcetera::choose_base_strategy()
+        .ok()
+        .map(|s| s.config_dir().join(CONFIG_APP_DIR).join(CONFIG_FILE_NAME))
+}
+
 /// Create a default `.phpantom.toml` in the given workspace root.
 ///
 /// Returns `Ok(true)` if the file was created, `Ok(false)` if it
@@ -330,26 +366,42 @@ pub fn create_default_config(workspace_root: &Path) -> Result<bool, ConfigError>
     Ok(true)
 }
 
-/// Load the project configuration from `.phpantom.toml` in the given
-/// workspace root directory.
-///
-/// Returns `Config::default()` when the file does not exist or cannot
-/// be parsed.  Parse errors are returned as `Err` so the caller can
-/// log a warning to the user.
-pub fn load_config(workspace_root: &Path) -> Result<Config, ConfigError> {
-    let config_path = workspace_root.join(CONFIG_FILE_NAME);
-
-    if !config_path.exists() {
-        return Ok(Config::default());
+fn load_toml_table(path: &Path) -> Result<Option<toml::Table>, ConfigError> {
+    if !path.exists() {
+        return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&config_path).map_err(|e| ConfigError::Io {
-        path: config_path.display().to_string(),
+    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::Io {
+        path: path.display().to_string(),
         source: e,
     })?;
 
-    let config: Config = toml::from_str(&content).map_err(|e| ConfigError::Parse {
-        path: config_path.display().to_string(),
+    let table: toml::Table = content.parse().map_err(|e| ConfigError::Parse {
+        path: path.display().to_string(),
+        source: e,
+    })?;
+
+    Ok(Some(table))
+}
+
+/// Load the project configuration, merging the global config (from the
+/// user's XDG config directory) with the project-level `.phpantom.toml`.
+///
+/// Project settings override global settings.  When neither file exists,
+/// returns `Config::default()`.
+pub fn load_config(workspace_root: &Path) -> Result<Config, ConfigError> {
+    let mut table = global_config_path()
+        .and_then(|p| load_toml_table(&p).transpose())
+        .transpose()?
+        .unwrap_or_default();
+
+    let project_path = workspace_root.join(CONFIG_FILE_NAME);
+    if let Some(project) = load_toml_table(&project_path)? {
+        merge_toml(&mut table, project);
+    }
+
+    let config: Config = table.try_into().map_err(|e| ConfigError::Parse {
+        path: project_path.display().to_string(),
         source: e,
     })?;
 
@@ -428,7 +480,7 @@ mod tests {
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
-        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.formatting.timeout.is_none());
@@ -446,7 +498,7 @@ mod tests {
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
-        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.phpstan.command.is_none());
@@ -461,7 +513,7 @@ mod tests {
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
-        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.phpstan.command.is_none());
@@ -630,7 +682,7 @@ timeout = 30000
         assert_eq!(config.php.version.as_deref(), Some("8.2"));
         assert!(config.diagnostics.unresolved_member_access_enabled());
         assert!(config.diagnostics.extra_arguments_enabled());
-        assert_eq!(config.indexing.strategy, IndexingStrategy::SelfScan);
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(
             config.formatting.phpcbf.as_deref(),
@@ -651,7 +703,7 @@ timeout = 30000
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(&path, "[indexing]\nstrategy = \"composer\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Composer));
     }
 
     #[test]
@@ -660,7 +712,7 @@ timeout = 30000
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(&path, "[indexing]\nstrategy = \"self\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.strategy, IndexingStrategy::SelfScan);
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
     }
 
     #[test]
@@ -669,7 +721,7 @@ timeout = 30000
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(&path, "[indexing]\nstrategy = \"full\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.strategy, IndexingStrategy::Full);
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Full));
     }
 
     #[test]
@@ -678,7 +730,7 @@ timeout = 30000
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(&path, "[indexing]\nstrategy = \"none\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.strategy, IndexingStrategy::None);
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::None));
     }
 
     #[test]
@@ -696,7 +748,7 @@ timeout = 30000
         let path = dir.path().join(CONFIG_FILE_NAME);
         std::fs::write(&path, "[indexing]\n").unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+        assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
     }
 
     #[test]
@@ -765,5 +817,71 @@ timeout = 30000
         assert!(config.formatting.timeout.is_none());
         assert_eq!(config.formatting.timeout_ms(), 10_000);
         assert!(!config.formatting.is_disabled());
+    }
+
+    #[test]
+    fn merge_toml_overlay_wins() {
+        let mut base: toml::Table = toml::from_str("[php]\nversion = \"8.2\"\n").unwrap();
+        let overlay: toml::Table = toml::from_str("[php]\nversion = \"8.4\"\n").unwrap();
+        merge_toml(&mut base, overlay);
+        let config: Config = base.try_into().unwrap();
+        assert_eq!(config.php.version.as_deref(), Some("8.4"));
+    }
+
+    #[test]
+    fn merge_toml_base_preserved_when_overlay_missing() {
+        let mut base: toml::Table =
+            toml::from_str("[php]\nversion = \"8.2\"\n\n[phpstan]\ntimeout = 30000\n").unwrap();
+        let overlay: toml::Table = toml::from_str("[phpstan]\ncommand = \"phpstan\"\n").unwrap();
+        merge_toml(&mut base, overlay);
+        let config: Config = base.try_into().unwrap();
+        assert_eq!(config.php.version.as_deref(), Some("8.2"));
+        assert_eq!(config.phpstan.command.as_deref(), Some("phpstan"));
+        assert_eq!(config.phpstan.timeout_ms(), 30_000);
+    }
+
+    #[test]
+    fn merge_toml_deep_merge_within_section() {
+        let mut base: toml::Table =
+            toml::from_str("[formatting]\ntimeout = 5000\nphpcbf = \"/usr/bin/phpcbf\"\n").unwrap();
+        let overlay: toml::Table =
+            toml::from_str("[formatting]\nphp-cs-fixer = \"vendor/bin/php-cs-fixer\"\n").unwrap();
+        merge_toml(&mut base, overlay);
+        let config: Config = base.try_into().unwrap();
+        assert_eq!(
+            config.formatting.php_cs_fixer.as_deref(),
+            Some("vendor/bin/php-cs-fixer")
+        );
+        assert_eq!(config.formatting.phpcbf.as_deref(), Some("/usr/bin/phpcbf"));
+        assert_eq!(config.formatting.timeout_ms(), 5000);
+    }
+
+    #[test]
+    fn merge_toml_empty_overlay() {
+        let mut base: toml::Table = toml::from_str("[php]\nversion = \"8.3\"\n").unwrap();
+        let overlay: toml::Table = toml::Table::new();
+        merge_toml(&mut base, overlay);
+        let config: Config = base.try_into().unwrap();
+        assert_eq!(config.php.version.as_deref(), Some("8.3"));
+    }
+
+    #[test]
+    fn merge_toml_empty_base() {
+        let mut base = toml::Table::new();
+        let overlay: toml::Table =
+            toml::from_str("[diagnostics]\nextra-arguments = true\n").unwrap();
+        merge_toml(&mut base, overlay);
+        let config: Config = base.try_into().unwrap();
+        assert!(config.diagnostics.extra_arguments_enabled());
+    }
+
+    #[test]
+    fn merge_toml_overlay_replaces_non_table_with_value() {
+        let mut base: toml::Table =
+            toml::from_str("[indexing]\nstrategy = \"composer\"\n").unwrap();
+        let overlay: toml::Table = toml::from_str("[indexing]\nstrategy = \"self\"\n").unwrap();
+        merge_toml(&mut base, overlay);
+        let config: Config = base.try_into().unwrap();
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
     }
 }

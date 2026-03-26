@@ -1030,7 +1030,7 @@ impl Backend {
         *self.psr4_mappings.write() = mappings;
 
         // ── Build the classmap ──────────────────────────────────────
-        let strategy = self.config().indexing.strategy;
+        let strategy = self.config().indexing.strategy();
 
         if let Some(tok) = progress_token {
             self.progress_report(tok, 20, Some("Building class index".to_string()))

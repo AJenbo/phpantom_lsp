@@ -23,6 +23,7 @@ memchr = "2"
 parking_lot = "0.12"
 tempfile = "3"
 toml = "1"
+etcetera = "0.11"
 
 [build-dependencies]
 ureq = "3"

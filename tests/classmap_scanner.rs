@@ -639,28 +639,28 @@ fn scan_directories_ignores_non_php_files() {
 fn config_strategy_defaults_to_composer() {
     use phpantom_lsp::config::{Config, IndexingStrategy};
     let config: Config = toml::from_str("").unwrap();
-    assert_eq!(config.indexing.strategy, IndexingStrategy::Composer);
+    assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
 }
 
 #[test]
 fn config_strategy_self_scan() {
     use phpantom_lsp::config::{Config, IndexingStrategy};
     let config: Config = toml::from_str("[indexing]\nstrategy = \"self\"\n").unwrap();
-    assert_eq!(config.indexing.strategy, IndexingStrategy::SelfScan);
+    assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
 }
 
 #[test]
 fn config_strategy_none() {
     use phpantom_lsp::config::{Config, IndexingStrategy};
     let config: Config = toml::from_str("[indexing]\nstrategy = \"none\"\n").unwrap();
-    assert_eq!(config.indexing.strategy, IndexingStrategy::None);
+    assert_eq!(config.indexing.strategy, Some(IndexingStrategy::None));
 }
 
 #[test]
 fn config_strategy_full() {
     use phpantom_lsp::config::{Config, IndexingStrategy};
     let config: Config = toml::from_str("[indexing]\nstrategy = \"full\"\n").unwrap();
-    assert_eq!(config.indexing.strategy, IndexingStrategy::Full);
+    assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Full));
 }
 
 #[test]
