@@ -97,38 +97,6 @@ descriptions (that is M4). After this step, we still extract the raw
 description string from tags and process it with our existing
 string-based type code. The structured type migration happens in M4.
 
-### Completed
-
-1. ✅ **Added `mago-docblock` to `Cargo.toml`.**
-
-2. ✅ **Created `src/docblock/parser.rs` — the parsing adapter.**
-   `DocblockInfo` / `TagInfo` structs own parsed tag data (name,
-   kind, description). `parse_docblock()` takes a raw `&str` +
-   `Span`, allocates into a short-lived bumpalo arena, and returns
-   owned `DocblockInfo`. `parse_docblock_trivia()` ready for future
-   use from `get_docblock_text_for_node` callers.
-
-3. ✅ **Migrated all tag extraction functions in `tags.rs`.**
-   `extract_return_type`, `extract_var_type`, `extract_var_type_with_name`,
-   `extract_deprecation_message`, `has_deprecated_tag`,
-   `extract_removed_version`, `extract_see_references`,
-   `extract_deprecation_with_see`, `extract_mixin_tags`,
-   `extract_throws_tags`, `extract_type_assertions`,
-   `extract_param_raw_type`, `extract_all_param_tags`,
-   `extract_param_closure_this`, `extract_param_description`,
-   `extract_return_description`, `extract_link_urls`.
-   Deleted dead code: `extract_tag_type`, `normalize_bracket_whitespace`.
-
-4. ✅ **Migrated template/generics tag extraction in `templates.rs`.**
-   `extract_template_params_full`, `extract_template_param_bindings`,
-   `extract_generics_tag`, `extract_type_aliases`,
-   `find_class_string_param_name`. Handles `@phpstan-extends` /
-   `@phpstan-use` / `@phpstan-implements` via name-based fallback
-   (mago-docblock classifies these as `TagKind::Other`).
-
-5. ✅ **Migrated virtual member tag extraction in `virtual_members.rs`.**
-   `extract_property_tags`, `extract_method_tags`.
-
 ### Remaining
 
 These are optional follow-up items that would benefit from being

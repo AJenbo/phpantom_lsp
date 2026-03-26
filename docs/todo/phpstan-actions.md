@@ -4,14 +4,6 @@ Code actions that respond to PHPStan diagnostics. Each action parses the PHPStan
 error message, extracts the relevant information, and offers a quickfix that
 modifies the source code to resolve the issue.
 
-**Already implemented:**
-
-- `missingType.checkedException` — Add `@throws` tag (`add_throws.rs`)
-- `throws.unusedType` / `throws.notThrowable` — Remove `@throws` tag (`remove_throws.rs`)
-- `ignore.unmatched*` — Remove unnecessary `@phpstan-ignore` (`phpstan_ignore.rs`)
-- Any identifier — Add `@phpstan-ignore <identifier>` (`phpstan_ignore.rs`)
-
----
 
 ## Prerequisites — Infrastructure improvements
 

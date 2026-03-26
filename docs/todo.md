@@ -110,7 +110,6 @@ unlikely to move the needle for most users.
 | A7   | [Extract constant](todo/actions.md#a7-extract-constant)                                                                                                      | Medium      | Medium      |
 | A8   | [Update docblock to match signature](todo/actions.md#a8-update-docblock-to-match-signature)                                                                  | Medium      | Medium      |
 | A6   | [Inline function/method](todo/actions.md#a6-inline-functionmethod)                                                                                           | Medium      | High        |
-| A11  | ✅ [ScopeCollector infrastructure](todo/actions.md#a11-scopecollector-infrastructure)                                                          | Medium      | Medium      |
 | A10  | Generate interface from class                                                                                                                                | Low-Medium  | Medium      |
 | A3   | Switch → match conversion                                                                                                                                    | Low         | Medium      |
 |      | **[PHPStan Code Actions](todo/phpstan-actions.md)**                                                                                                          |             |             |

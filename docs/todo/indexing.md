@@ -262,23 +262,11 @@ scanning, and complete completion item detail.
 
 **Prerequisites (from [performance.md](performance.md)):**
 
-- **FQN secondary index.** Done. `fqn_index` provides O(1) lookups
-  by fully-qualified name, so the second pass populating `ast_map`
-  with thousands of entries no longer causes linear scans.
 - **`Arc<ClassInfo>` (P1).** Full indexing stores a `ClassInfo` for
   every class in the project. Without `Arc`, every resolution clones
   the entire struct out of the map. With `Arc`, retrieval is a
   reference-count increment. This is the difference between full
   indexing using ~200 MB vs. ~500 MB for a large project.
-- **`RwLock`.** Done. The second pass writes to `ast_map` at Low
-  priority while High-priority LSP requests read from it. `Mutex`
-  would force every completion/hover request to wait for the current
-  background parse to finish its map insertion. `RwLock` lets reads
-  proceed concurrently with other reads; only the brief write window
-  blocks.
-- **`HashSet` dedup.** Done. All member deduplication during
-  inheritance merging now uses `HashSet` lookups, bringing the
-  per-resolution cost from O(N²) to O(N).
 
 ### Trigger
 

@@ -377,25 +377,6 @@ initial value argument.
 
 ---
 
-## 26. Circular dependency smoke tests
-
-Already ported and passing. Listed for completeness:
-
-- `reflection/circular_dependency_parent.fixture` ✅
-- `reflection/circular_dependency_interface.fixture` ✅
-- `reflection/circular_dependency_trait.fixture` ✅
-
----
-
-## 27. Generics edge cases already ported
-
-Already ported and passing:
-
-- `generics/multi_level_collection_foreach.fixture` ✅ (gh-1800)
-- `generics/three_level_factory_chain.fixture` ✅ (gh-2295)
-
----
-
 ## Summary by effort
 
 ### Low effort (likely already work, just need fixtures)
