@@ -256,59 +256,7 @@ impl std::fmt::Display for IndexingStrategy {
 pub const CONFIG_FILE_NAME: &str = ".phpantom.toml";
 
 /// Default content for a newly created `.phpantom.toml` file.
-///
-/// All settings are commented out so that the file is a self-documenting
-/// reference. The user uncomments the lines they want to change.
-pub const DEFAULT_CONFIG_CONTENT: &str = r#"# PHPantom project configuration
-# https://github.com/AJenbo/phpantom_lsp
-
-[php]
-# Override the detected PHP version.
-# When unset, PHPantom infers from composer.json's platform or require.php.
-# version = "8.5"
-
-[diagnostics]
-# Report member access on subjects whose type could not be resolved.
-# Useful for discovering gaps in type coverage. Off by default.
-# unresolved-member-access = true
-# Report calls that pass more arguments than the function accepts.
-# PHP silently ignores extra arguments, so this is off by default.
-# extra-arguments = true
-
-[indexing]
-# How PHPantom discovers classes across the workspace.
-#   "composer" (default) - use Composer classmap, self-scan on fallback
-#   "self"    - always self-scan, ignore Composer classmap
-#   "full"    - background-parse all project files (not yet implemented)
-#   "none"    - no proactive scanning, Composer classmap only
-# strategy = "composer"
-
-[formatting]
-# Built-in formatting works out of the box (PER-CS 2.0 style).
-# Projects with php-cs-fixer or PHP_CodeSniffer in composer.json
-# require-dev automatically use those tools instead.
-#
-# Explicit path: always use this tool, skip require-dev detection.
-# php-cs-fixer = "/usr/local/bin/php-cs-fixer"
-# phpcbf = "/usr/local/bin/phpcbf"
-#
-# Empty string: disable this tool entirely.
-# php-cs-fixer = ""
-# phpcbf = ""
-#
-# Maximum runtime in milliseconds per external tool (default 10000).
-# timeout = 10000
-
-[phpstan]
-# PHPStan proxy. PHPantom can run PHPStan in editor mode on each file
-# save and surface its errors as LSP diagnostics. When unset, PHPStan
-# is auto-detected via vendor/bin/phpstan then $PATH. Set to "" to
-# disable.
-# command = "vendor/bin/phpstan"
-# Memory limit passed to PHPStan (default "1G").
-# memory-limit = "1G"
-# Maximum runtime in milliseconds (default 60000).
-# timeout = 60000
+pub const DEFAULT_CONFIG_CONTENT: &str = r#"# $schema: https://github.com/AJenbo/phpantom_lsp/raw/main/config-schema.json
 "#;
 
 /// Create a default `.phpantom.toml` in the given workspace root.
@@ -403,9 +351,7 @@ mod tests {
         let path = dir.path().join(CONFIG_FILE_NAME);
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("[php]"));
-        assert!(content.contains("[diagnostics]"));
-        assert!(content.contains("unresolved-member-access"));
+        assert!(content.contains("$schema"));
     }
 
     #[test]

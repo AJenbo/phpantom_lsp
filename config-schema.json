@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema",
+  "$comment": "`taplo` and the corresponding VS Code plugins only support version draft-04 of JSON Schema, see <https://taplo.tamasfe.dev/configuration/developing-schemas.html>. draft-07 is mostly compatible with it, newer versions may not be.",
+  "title": "PHPantom Configuration",
+  "description": "User configuration schema for .phpantom.toml: per-project settings for the PHPantom PHP language server.",
+  "type": "object",
+  "properties": {
+    "php": {
+      "type": "object",
+      "description": "PHP version and language settings.",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Override the detected PHP version (e.g. \"8.3\"). When unset, PHPantom infers from composer.json's platform or require.php.",
+          "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Toggle individual diagnostic providers.",
+      "properties": {
+        "unresolved-member-access": {
+          "type": "boolean",
+          "description": "Report member access (->, ?->, ::) on subjects whose type could not be resolved. Useful for discovering gaps in type coverage but produces too many diagnostics on codebases without comprehensive type annotations.",
+          "default": false
+        },
+        "extra-arguments": {
+          "type": "boolean",
+          "description": "Report calls that pass more arguments than the function accepts. PHP silently ignores extra arguments to user-defined functions, and many libraries exploit this for flexible APIs.",
+          "default": false
+        }
+      }
+    },
+    "indexing": {
+      "type": "object",
+      "description": "Controls how PHPantom discovers classes across the workspace.",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "description": "The indexing strategy for class discovery. \"composer\" (default): use Composer's classmap, fall back to self-scan. \"self\": scan all PHP files, ignore classmap. \"full\": background-parse all files (not yet implemented). \"none\": no proactive scanning, classmap only.",
+          "enum": [
+            "composer",
+            "self",
+            "full",
+            "none"
+          ],
+          "default": "composer"
+        }
+      }
+    },
+    "formatting": {
+      "type": "object",
+      "description": "Controls the formatting strategy. PHPantom ships a built-in formatter (PER-CS 2.0 style). Projects with php-cs-fixer or PHP_CodeSniffer in composer.json require-dev automatically use those tools instead. Explicit configuration here always takes priority.",
+      "properties": {
+        "php-cs-fixer": {
+          "type": "string",
+          "description": "Command or path to run php-cs-fixer. Unset: auto-detect from composer.json require-dev. Empty string: disable php-cs-fixer. Any other value: use as the command."
+        },
+        "phpcbf": {
+          "type": "string",
+          "description": "Command or path to run phpcbf. Unset: auto-detect from composer.json require-dev. Empty string: disable phpcbf. Any other value: use as the command."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Maximum runtime in milliseconds per external formatting tool before it is killed. Applied per tool, not for the combined pipeline.",
+          "default": 10000,
+          "minimum": 0
+        }
+      }
+    },
+    "phpstan": {
+      "type": "object",
+      "description": "PHPStan proxy settings. PHPantom can run PHPStan in editor mode on each file save and surface its errors as LSP diagnostics.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command or path to run PHPStan. Unset: auto-detect via vendor/bin/phpstan then $PATH. Empty string: disable PHPStan integration. Any other value: use as the command."
+        },
+        "memory-limit": {
+          "type": "string",
+          "description": "Memory limit passed to PHPStan via --memory-limit.",
+          "default": "1G"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Maximum runtime in milliseconds before PHPStan is killed.",
+          "default": 60000,
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
