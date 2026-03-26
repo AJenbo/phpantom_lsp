@@ -121,6 +121,7 @@ mod signature_help;
 pub mod stubs;
 pub mod subject_expr;
 pub(crate) mod subject_extraction;
+pub(crate) mod scope_collector;
 pub(crate) mod symbol_map;
 mod type_hierarchy;
 pub mod types;
