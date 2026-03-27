@@ -718,6 +718,59 @@ async fn test_completion_class_body_keywords_are_contextual() {
 }
 
 #[tokio::test]
+async fn test_completion_after_visibility_suggests_member_keywords() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_after_visibility.php").unwrap();
+    let text = concat!("<?php\n", "class User {\n", "    public \n", "}\n",).to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `public ` on line 2.
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+
+    assert!(
+        items
+            .iter()
+            .any(|i| i.label == "function" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "After visibility, completion should suggest `function`, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        items
+            .iter()
+            .any(|i| i.label == "const" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "After visibility, completion should suggest `const`, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_completion_inside_class_returns_methods() {
     let backend = create_test_backend();
 

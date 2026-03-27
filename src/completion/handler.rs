@@ -325,6 +325,55 @@ fn declaration_header_kind(content: &str, position: Position) -> Option<Declarat
     Some(kind)
 }
 
+/// Whether the cursor is right after a class-member modifier chain
+/// followed by whitespace, e.g. `public ` or `private static `.
+fn is_after_member_modifier_chain(content: &str, position: Position) -> bool {
+    let chars: Vec<char> = content.chars().collect();
+    let Some(offset) = crate::completion::named_args::position_to_char_offset(&chars, position)
+    else {
+        return false;
+    };
+    if offset == 0 || !chars[offset - 1].is_ascii_whitespace() {
+        return false;
+    }
+
+    // Limit to the current statement-ish segment after the latest hard
+    // boundary (`{`, `}`, `;`, or newline) before the cursor.
+    let mut start = 0usize;
+    for i in (0..offset).rev() {
+        if matches!(chars[i], '{' | '}' | ';' | '\n' | '\r') {
+            start = i + 1;
+            break;
+        }
+    }
+
+    let mut words: Vec<String> = Vec::new();
+    let mut i = start;
+    while i < offset {
+        if chars[i].is_ascii_alphanumeric() || chars[i] == '_' {
+            let j = i;
+            i += 1;
+            while i < offset && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            words.push(chars[j..i].iter().collect::<String>().to_ascii_lowercase());
+            continue;
+        }
+        i += 1;
+    }
+
+    if words.is_empty() {
+        return false;
+    }
+
+    words.iter().all(|w| {
+        matches!(
+            w.as_str(),
+            "public" | "protected" | "private" | "static" | "abstract" | "final" | "readonly"
+        )
+    })
+}
+
 impl Backend {
     /// Main completion handler — called by `LanguageServer::completion`.
     ///
@@ -1250,9 +1299,27 @@ impl Backend {
         ctx: &FileContext,
         current_uri: &str,
     ) -> Option<CompletionResponse> {
-        let partial = Self::extract_partial_class_name(content, position)?;
         let class_ctx = detect_class_name_context(content, position);
         let keyword_ctx = self.keyword_context_for_position(current_uri, content, position, ctx);
+        let partial = match Self::extract_partial_class_name(content, position) {
+            Some(p) => p,
+            None => {
+                // Allow keyword completion on empty prefix inside class-like
+                // bodies (e.g. after typing `public `).
+                if keyword_ctx.after_member_modifier_chain {
+                    let items = crate::completion::keyword_completion::build_keyword_completions(
+                        "",
+                        class_ctx,
+                        keyword_ctx,
+                    );
+                    if items.is_empty() {
+                        return None;
+                    }
+                    return Some(CompletionResponse::Array(items));
+                }
+                return None;
+            }
+        };
 
         // ── `use function` → only functions ─────────────────────────
         if matches!(class_ctx, ClassNameContext::UseFunction) {
@@ -1464,6 +1531,8 @@ impl Backend {
         };
         let in_top_level =
             !in_function_like && !in_class_like && brace_depth_before(content, position) == 0;
+        let after_member_modifier_chain =
+            class_body_kind.is_some() && is_after_member_modifier_chain(content, position);
 
         crate::completion::keyword_completion::KeywordContext {
             in_function_like,
@@ -1477,6 +1546,7 @@ impl Backend {
                 Some(DeclarationHeaderKind::Class | DeclarationHeaderKind::Enum)
             ),
             class_body_kind,
+            after_member_modifier_chain,
         }
     }
 

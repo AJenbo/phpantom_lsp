@@ -128,6 +128,16 @@ fn property_after_public() {
 }
 
 #[test]
+fn no_type_hint_immediately_after_public_modifier() {
+    let src = "<?php\nclass Foo {\n    public \n}";
+    let ctx = detect(src, 2, 11);
+    assert!(
+        ctx.is_none(),
+        "Empty partial right after `public` should defer to keyword completion"
+    );
+}
+
+#[test]
 fn property_after_private_readonly() {
     let src = "<?php\nclass Foo {\n    private readonly Us\n}";
     let ctx = detect(src, 2, 23).unwrap();

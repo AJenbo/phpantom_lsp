@@ -23,6 +23,9 @@ pub(crate) struct KeywordContext {
     pub in_implements_declaration_header: bool,
     /// Cursor is in a class-like body (outside method/function scope).
     pub class_body_kind: Option<ClassLikeKind>,
+    /// Cursor is right after a class-member modifier chain followed by
+    /// whitespace (e.g. `public `, `private static `).
+    pub after_member_modifier_chain: bool,
 }
 
 /// Core PHP keywords that can be completed in generic code contexts.
