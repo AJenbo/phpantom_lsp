@@ -86,6 +86,9 @@ const PHP_KEYWORDS: &[&str] = &[
     "yield",
 ];
 
+/// Scalar types allowed as enum backing types in `enum Name: …`.
+const BACKED_ENUM_TYPES: &[&str] = &["string", "int"];
+
 /// Build keyword completion items for the typed `prefix`.
 ///
 /// Keywords are only shown in unrestricted contexts (`Any`) to avoid
@@ -113,6 +116,25 @@ pub(crate) fn build_keyword_completions(
             insert_text: Some((*keyword).to_string()),
             filter_text: Some((*keyword).to_string()),
             sort_text: Some(format!("3_{idx:03}_{keyword}")),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+/// Build completion items for enum backing types (`string`, `int`).
+pub(crate) fn build_backed_enum_type_completions(prefix: &str) -> Vec<CompletionItem> {
+    let prefix_lower = prefix.to_ascii_lowercase();
+    BACKED_ENUM_TYPES
+        .iter()
+        .enumerate()
+        .filter(|(_, ty)| ty.starts_with(&prefix_lower))
+        .map(|(idx, ty)| CompletionItem {
+            label: (*ty).to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("Enum backing type".to_string()),
+            insert_text: Some((*ty).to_string()),
+            filter_text: Some((*ty).to_string()),
+            sort_text: Some(format!("0_enum_backed_{idx:03}_{ty}")),
             ..CompletionItem::default()
         })
         .collect()

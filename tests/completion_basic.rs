@@ -771,6 +771,105 @@ async fn test_completion_after_visibility_suggests_member_keywords() {
 }
 
 #[tokio::test]
+async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_enum_backed_type.php").unwrap();
+    let text = concat!("<?php\n", "enum Role: \n", "enum Status: st\n",).to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `enum Role: ` on line 1.
+    let empty_prefix_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 1,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let empty_prefix_items = match backend
+        .completion(empty_prefix_params)
+        .await
+        .unwrap()
+        .unwrap()
+    {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        empty_prefix_items
+            .iter()
+            .any(|i| i.label == "string" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Backed enum type completion should suggest `string`, got: {:?}",
+        empty_prefix_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        empty_prefix_items
+            .iter()
+            .any(|i| i.label == "int" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Backed enum type completion should suggest `int`, got: {:?}",
+        empty_prefix_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // Cursor right after `enum Status: st` on line 2.
+    let st_prefix_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let st_prefix_items = match backend.completion(st_prefix_params).await.unwrap().unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        st_prefix_items
+            .iter()
+            .any(|i| i.label == "string" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Backed enum type prefix `st` should suggest `string`, got: {:?}",
+        st_prefix_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !st_prefix_items
+            .iter()
+            .any(|i| i.label == "int" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Backed enum type prefix `st` should not suggest `int`, got: {:?}",
+        st_prefix_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_completion_inside_class_returns_methods() {
     let backend = create_test_backend();
 

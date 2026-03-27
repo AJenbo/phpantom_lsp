@@ -374,6 +374,58 @@ fn is_after_member_modifier_chain(content: &str, position: Position) -> bool {
     })
 }
 
+/// Detect `enum Name: <partial>` backed-type position and return `<partial>`.
+///
+/// Examples that return `Some`:
+/// - `enum Role: |`
+/// - `enum Role: st|`
+///
+/// Returns `None` outside enum declaration headers.
+fn enum_backing_type_partial(content: &str, position: Position) -> Option<String> {
+    let chars: Vec<char> = content.chars().collect();
+    let offset = crate::completion::named_args::position_to_char_offset(&chars, position)?;
+
+    // Walk backward through the currently typed token.
+    let mut partial_start = offset;
+    while partial_start > 0
+        && (chars[partial_start - 1].is_ascii_alphanumeric() || chars[partial_start - 1] == '_')
+    {
+        partial_start -= 1;
+    }
+
+    // Reject obvious non-keyword contexts.
+    if partial_start > 0 && chars[partial_start - 1] == '$' {
+        return None;
+    }
+    if partial_start >= 2 && chars[partial_start - 2] == '-' && chars[partial_start - 1] == '>' {
+        return None;
+    }
+    if partial_start >= 2 && chars[partial_start - 2] == ':' && chars[partial_start - 1] == ':' {
+        return None;
+    }
+
+    let partial: String = chars[partial_start..offset].iter().collect();
+
+    // Back up over whitespace before the partial and require `:`.
+    let mut i = partial_start;
+    while i > 0 && chars[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i == 0 || chars[i - 1] != ':' {
+        return None;
+    }
+
+    // Only valid inside `enum` declaration headers.
+    if !matches!(
+        declaration_header_kind(content, position),
+        Some(DeclarationHeaderKind::Enum)
+    ) {
+        return None;
+    }
+
+    Some(partial)
+}
+
 impl Backend {
     /// Main completion handler — called by `LanguageServer::completion`.
     ///
@@ -1299,6 +1351,15 @@ impl Backend {
         ctx: &FileContext,
         current_uri: &str,
     ) -> Option<CompletionResponse> {
+        if let Some(partial) = enum_backing_type_partial(content, position) {
+            let items =
+                crate::completion::keyword_completion::build_backed_enum_type_completions(&partial);
+            if items.is_empty() {
+                return None;
+            }
+            return Some(CompletionResponse::Array(items));
+        }
+
         let class_ctx = detect_class_name_context(content, position);
         let keyword_ctx = self.keyword_context_for_position(current_uri, content, position, ctx);
         let partial = match Self::extract_partial_class_name(content, position) {
