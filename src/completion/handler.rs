@@ -315,9 +315,8 @@ fn declaration_header_kind(content: &str, position: Position) -> Option<Declarat
     }
 
     // Need at least the declaration name token after `class|interface|enum`.
-    let Some(name_token) = words.get(decl_idx + 1) else {
-        return None;
-    };
+    let name_token = words.get(decl_idx + 1)?;
+
     if name_token.is_empty() {
         return None;
     }
