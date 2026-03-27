@@ -213,9 +213,9 @@ class Validator {
     let action = find_extract_action(&actions).expect("should offer extract for void guards");
     let result = apply_edit(content, action.edit.as_ref().unwrap());
 
-    // Call site should be: if (!$this->extracted($request)) return;
+    // Call site should be: if (!$this->handleGuard($request)) return;
     assert!(
-        result.contains("if (!$this->extracted($request)) return;"),
+        result.contains("if (!$this->handleGuard($request)) return;"),
         "call site should use bool-flag pattern:\n{result}"
     );
     // Extracted method should return bool.
@@ -258,8 +258,8 @@ class Validator {
 
     // Call site should use the bool-flag pattern with false.
     // Parameter order depends on the scope classifier (first-use order).
-    let has_bool_guard_call = result.contains("if (!$this->extracted($dog, $cat)) return false;")
-        || result.contains("if (!$this->extracted($cat, $dog)) return false;");
+    let has_bool_guard_call = result.contains("if (!$this->validateGuard($dog, $cat)) return false;")
+        || result.contains("if (!$this->validateGuard($cat, $dog)) return false;");
     assert!(
         has_bool_guard_call,
         "call site should use bool-flag pattern with false:\n{result}"
@@ -300,9 +300,9 @@ class Lookup {
         find_extract_action(&actions).expect("should offer extract for uniform null guards");
     let result = apply_edit(content, action.edit.as_ref().unwrap());
 
-    // Call site should be: if (!$this->extracted($id)) return null;
+    // Call site should be: if (!$this->findGuard($id)) return null;
     assert!(
-        result.contains("if (!$this->extracted($id)) return null;"),
+        result.contains("if (!$this->findGuard($id)) return null;"),
         "call site should use bool-flag pattern with null:\n{result}"
     );
     // Extracted method should return bool.
@@ -317,7 +317,7 @@ class Lookup {
     );
     // Should NOT contain return null in the extracted method body.
     // The `return null;` should only appear at the call site.
-    let extracted_method_start = result.find("private function extracted").unwrap();
+    let extracted_method_start = result.find("private function findGuard").unwrap();
     let extracted_body = &result[extracted_method_start..];
     assert!(
         !extracted_body.contains("return null;"),
@@ -352,7 +352,7 @@ function classify(int $code): string
     //   $__early = extracted($code);
     //   if ($__early !== null) return $__early;
     assert!(
-        result.contains("$__early = extracted($code);"),
+        result.contains("$__early = tryClassify($code);"),
         "call site should assign to $__early:\n{result}"
     );
     assert!(
@@ -397,11 +397,10 @@ class Animal {
     let result = apply_edit(content, action.edit.as_ref().unwrap());
 
     // Call site should assign and check for null:
-    //   $sound = $this->extracted();
+    //   $sound = $this->getSoundGuard();
     //   if ($sound === null) return null;
     assert!(
-        result.contains("$sound = $this->extracted(")
-            || result.contains("$sound = $this->extracted2("),
+        result.contains("$sound = $this->getSoundGuard("),
         "call site should assign $sound from extracted call:\n{result}"
     );
     assert!(
@@ -409,7 +408,7 @@ class Animal {
         "call site should check $sound for null:\n{result}"
     );
     // Extracted method should keep the guard's return null.
-    let extracted_start = result.find("private function extracted").unwrap();
+    let extracted_start = result.find("private function getSoundGuard").unwrap();
     let extracted_body = &result[extracted_start..];
     assert!(
         extracted_body.contains("return null;"),
@@ -447,11 +446,10 @@ class Animal {
 
     // Call site should assign and check for null, but return bare
     // (matching the original void return):
-    //   $sound = $this->extracted();
+    //   $sound = $this->processGuard();
     //   if ($sound === null) return;
     assert!(
-        result.contains("$sound = $this->extracted(")
-            || result.contains("$sound = $this->extracted2("),
+        result.contains("$sound = $this->processGuard("),
         "call site should assign $sound from extracted call:\n{result}"
     );
     assert!(
@@ -466,7 +464,7 @@ class Animal {
         "call site should not use return null in a void method:\n{result}"
     );
     // Extracted method should rewrite bare `return;` to `return null;`.
-    let extracted_start = result.find("private function extracted").unwrap();
+    let extracted_start = result.find("private function processGuard").unwrap();
     let extracted_body = &result[extracted_start..];
     assert!(
         extracted_body.contains("return null;"),
@@ -513,7 +511,7 @@ class Foo {
     // Call site should be `return $this->extracted(…);` since the
     // selection ends with return.
     assert!(
-        result.contains("return $this->extracted("),
+        result.contains("return $this->getMultiAssignResult("),
         "call site should pass return through:\n{result}"
     );
     // The extracted method should contain the guard clause returns.
@@ -541,7 +539,7 @@ function foo(): int {
 
     // Call site should wrap with `return`.
     assert!(
-        result.contains("return extracted(") || result.contains("return $this->extracted("),
+        result.contains("return getFooResult(") || result.contains("return $this->getFooResult("),
         "call site should pass return through:\n{result}"
     );
 }
@@ -588,12 +586,12 @@ function foo() {
     );
     // The call site should reference the extracted function.
     assert!(
-        result.contains("extracted()"),
+        result.contains("computeX()"),
         "should contain call to extracted function: {result}"
     );
     // The new function should be defined.
     assert!(
-        result.contains("function extracted()"),
+        result.contains("function computeX()"),
         "should define extracted function: {result}"
     );
 }
@@ -641,7 +639,7 @@ function foo() {
 
     // $x should be assigned from the extracted function's return value.
     assert!(
-        result.contains("$x = extracted("),
+        result.contains("$x = computeX("),
         "should assign return value to $x: {result}"
     );
     assert!(
@@ -669,11 +667,11 @@ function foo() {
 
     // $x should be a parameter of the extracted function.
     assert!(
-        result.contains("extracted($x)"),
+        result.contains("computeY($x)"),
         "should pass $x as argument: {result}"
     );
     assert!(
-        result.contains("$y = extracted("),
+        result.contains("$y = computeY("),
         "should assign $y from return value: {result}"
     );
 }
@@ -791,12 +789,11 @@ class Foo {
 
     // $a should be passed as argument.
     assert!(
-        result.contains("$this->extracted($a)") || result.contains("extracted($a)"),
+        result.contains("$this->computeB($a)") || result.contains("computeB($a)"),
         "should pass $a as argument: {result}"
     );
-    // $b should be assigned from the return.
     assert!(
-        result.contains("$b = $this->extracted(") || result.contains("$b = extracted("),
+        result.contains("$b = $this->computeB(") || result.contains("$b = computeB("),
         "should assign $b from return: {result}"
     );
     assert!(
@@ -825,8 +822,8 @@ function foo() {
     let action = find_extract_action(&actions).expect("should offer extract action");
 
     assert!(
-        action.title.contains("extracted2"),
-        "should deduplicate name: {}",
+        action.title.contains("computeX"),
+        "should use contextual name: {}",
         action.title
     );
 }
@@ -1113,7 +1110,7 @@ function foo() {
 
     // For a top-level function, the definition should have no leading indent.
     assert!(
-        result.contains("\nfunction extracted()"),
+        result.contains("\nfunction computeX()"),
         "extracted function should be at top level:\n{result}"
     );
 }
@@ -1150,13 +1147,12 @@ class Foo {
     // must NOT appear as a parameter at the call site.  It should only
     // be a return value.
     assert!(
-        !result.contains("extracted($count") && !result.contains("extracted2($count"),
+        !result.contains("computeCount($count"),
         "$count must not be passed as parameter (first write is inside selection):\n{result}"
     );
     // $count should be assigned from the return value.
     assert!(
-        result.contains("$count = $this->extracted(")
-            || result.contains("$count = $this->extracted2("),
+        result.contains("$count = $this->computeCount("),
         "$count should be assigned from the extracted method's return value:\n{result}"
     );
 }

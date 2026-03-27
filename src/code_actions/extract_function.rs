@@ -159,6 +159,13 @@ struct EnclosingContext {
     body_start: usize,
     /// Whether the enclosing method is static.
     is_static: bool,
+    /// The name of the enclosing function/method (e.g. `"run"`, `"process"`).
+    /// Used by name generation to produce contextual names like `runGuard`.
+    enclosing_name: String,
+    /// Method names that already exist in the enclosing class (for
+    /// deduplication when extracting a method).  Empty when extracting
+    /// a standalone function.
+    sibling_method_names: Vec<String>,
 }
 
 /// Determine the extraction target and insertion point by walking the AST.
@@ -170,9 +177,25 @@ fn find_enclosing_context(content: &str, offset: u32, uses_this: bool) -> Option
     let ctx = find_cursor_context(&program.statements, offset);
 
     match ctx {
-        CursorContext::InClassLike { member, .. } => {
+        CursorContext::InClassLike {
+            member,
+            all_members,
+        } => {
             if let MemberContext::Method(method, true) = member {
                 let is_static = method.modifiers.iter().any(|m| m.is_static());
+                let enclosing_name = method.name.value.to_string();
+
+                // Collect sibling method names for scoped deduplication.
+                let sibling_method_names: Vec<String> = all_members
+                    .iter()
+                    .filter_map(|m| {
+                        if let ClassLikeMember::Method(m) = m {
+                            Some(m.name.value.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 // For method extraction, insert before the closing `}` of the class.
                 // Find the class closing brace by walking up from the method.
@@ -191,6 +214,8 @@ fn find_enclosing_context(content: &str, offset: u32, uses_this: bool) -> Option
                                 .unwrap_or(func_end),
                             body_start,
                             is_static,
+                            enclosing_name,
+                            sibling_method_names: Vec::new(),
                         });
                     }
 
@@ -199,6 +224,8 @@ fn find_enclosing_context(content: &str, offset: u32, uses_this: bool) -> Option
                         insert_offset: class_end.unwrap_or(block.right_brace.end.offset as usize),
                         body_start,
                         is_static,
+                        enclosing_name,
+                        sibling_method_names,
                     });
                 }
             }
@@ -207,6 +234,7 @@ fn find_enclosing_context(content: &str, offset: u32, uses_this: bool) -> Option
         CursorContext::InFunction(func, true) => {
             let body_start = func.body.left_brace.start.offset as usize;
             let func_end = func.body.right_brace.end.offset as usize;
+            let enclosing_name = func.name.value.to_string();
 
             // For function extraction, insert after the enclosing function.
             // Find the end of the line containing the closing `}`.
@@ -217,6 +245,8 @@ fn find_enclosing_context(content: &str, offset: u32, uses_this: bool) -> Option
                 insert_offset,
                 body_start,
                 is_static: false,
+                enclosing_name,
+                sibling_method_names: Vec::new(),
             })
         }
         _ => None,
@@ -431,19 +461,212 @@ fn resolve_var_type(
 
 /// Generate a unique function/method name that doesn't conflict with
 /// existing members or functions.
-fn generate_function_name(content: &str, _enclosing_ctx: &EnclosingContext) -> String {
-    let base = "extracted";
+/// Context passed to [`generate_function_name`] to produce meaningful names.
+struct NamingContext<'a> {
+    /// The enclosing function/method name (e.g. `"run"`, `"process"`).
+    enclosing_name: &'a str,
+    /// The return strategy chosen for the extraction.
+    return_strategy: &'a ReturnStrategy,
+    /// The selected body text (trimmed source of the extracted statements).
+    body_text: &'a str,
+    /// Names of return-value variables (written inside, read after).
+    return_var_names: &'a [String],
+    /// The trailing return type hint (e.g. `"Collection"`, `"User"`).
+    trailing_return_type: &'a str,
+}
 
-    // Check if the name already exists in the content and deduplicate.
+/// Generate a contextual name for the extracted function/method.
+///
+/// The naming follows these heuristics (first match wins):
+///
+/// 1. **Guard strategies** (`VoidGuards`, `UniformGuards`,
+///    `NullGuardWithValue`): `{enclosing}Guard` — the user extracted
+///    validation / precondition logic.
+/// 2. **`SentinelNull`**: `try{Enclosing}` — a "try" pattern where
+///    `null` signals failure.
+/// 3. **`TrailingReturn` with `new ClassName`** in the body:
+///    `create{ClassName}` — a factory pattern.
+/// 4. **`TrailingReturn`** (other): `get{Enclosing}Result`.
+/// 5. **Body is pure output** (every statement is `echo`/`print`/
+///    `printf`/`var_dump`): `render{Enclosing}`.
+/// 6. **Single return variable**: `compute{VarName}` — the user
+///    extracted a calculation into its own function.
+/// 7. **Fallback**: `"extracted"`.
+///
+/// After choosing a base name, the function deduplicates against
+/// existing names in the appropriate scope (class members for methods,
+/// file-level `function` declarations for standalone functions).
+fn generate_function_name(content: &str, enclosing_ctx: &EnclosingContext, naming: &NamingContext) -> String {
+    let base = derive_base_name(naming);
+
+    // Deduplicate against the right scope.
+    deduplicate_name(&base, content, enclosing_ctx)
+}
+
+/// Pick a base name from the naming context (before deduplication).
+fn derive_base_name(ctx: &NamingContext) -> String {
+    let enc = ctx.enclosing_name;
+
+    // 1. Guard strategies → {enclosing}Guard
+    match ctx.return_strategy {
+        ReturnStrategy::VoidGuards
+        | ReturnStrategy::UniformGuards(_)
+        | ReturnStrategy::NullGuardWithValue(_) => {
+            if !enc.is_empty() {
+                return format!("{}Guard", enc);
+            }
+            return "guard".to_string();
+        }
+
+        // 2. SentinelNull → try{Enclosing}
+        ReturnStrategy::SentinelNull => {
+            if !enc.is_empty() {
+                return format!("try{}", capitalise(enc));
+            }
+            return "tryExtract".to_string();
+        }
+
+        // 3–4. TrailingReturn
+        ReturnStrategy::TrailingReturn => {
+            // 3. Factory: body contains `new ClassName` → create{ClassName}
+            if let Some(class_name) = detect_factory_pattern(ctx.body_text) {
+                return format!("create{}", class_name);
+            }
+            // 4. Generic trailing return
+            if !enc.is_empty() {
+                // If there's a return type, use it for a more descriptive name
+                if !ctx.trailing_return_type.is_empty() {
+                    let clean = strip_generics_for_hint(ctx.trailing_return_type);
+                    // Only use the return type if it's a class name (starts uppercase)
+                    if clean.starts_with(|c: char| c.is_ascii_uppercase()) {
+                        return format!("get{}", clean);
+                    }
+                }
+                return format!("get{}Result", capitalise(enc));
+            }
+        }
+
+        ReturnStrategy::None | ReturnStrategy::Unsafe => {}
+    }
+
+    // 5. Pure output → render{Enclosing}
+    if is_pure_output(ctx.body_text) && !enc.is_empty() {
+        return format!("render{}", capitalise(enc));
+    }
+
+    // 6. Single return variable → compute{VarName}
+    if ctx.return_var_names.len() == 1 {
+        let var = ctx.return_var_names[0].trim_start_matches('$');
+        if !var.is_empty() {
+            return format!("compute{}", capitalise(var));
+        }
+    }
+
+    // 7. Fallback
+    "extracted".to_string()
+}
+
+/// Capitalise the first character of a string (ASCII).
+fn capitalise(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => {
+            let upper: String = c.to_uppercase().collect();
+            format!("{}{}", upper, chars.as_str())
+        }
+        None => String::new(),
+    }
+}
+
+/// Detect if the body text is a factory pattern: it contains `new ClassName`
+/// and the last non-empty statement is a `return`.
+///
+/// Returns the class name if a factory pattern is detected.
+fn detect_factory_pattern(body: &str) -> Option<String> {
+    // Look for `new ClassName` patterns.
+    let mut class_name = None;
+    for (i, _) in body.match_indices("new ") {
+        let after = &body[i + 4..];
+        let name: String = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '\\')
+            .collect();
+        if !name.is_empty() && name.starts_with(|c: char| c.is_ascii_uppercase()) {
+            class_name = Some(name);
+        }
+    }
+
+    // Only use the factory name if the body actually returns something
+    // (the TrailingReturn strategy already guarantees this, but let's
+    // verify the `new` is the thing being constructed and returned).
+    if let Some(name) = class_name {
+        // Strip namespace prefix, keep only the short class name.
+        let short = name.rsplit('\\').next().unwrap_or(&name);
+        return Some(short.to_string());
+    }
+
+    None
+}
+
+/// Check whether every statement in the body is a pure output statement
+/// (`echo`, `print`, `printf`, `var_dump`, `print_r`, `var_export`).
+fn is_pure_output(body: &str) -> bool {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let output_prefixes = [
+        "echo ", "echo(", "print ", "print(",
+        "printf(", "var_dump(", "print_r(", "var_export(",
+    ];
+
+    for line in trimmed.lines() {
+        let line = line.trim().trim_end_matches(';').trim();
+        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+            continue;
+        }
+        let is_output = output_prefixes.iter().any(|p| line.starts_with(p));
+        // Also match string interpolation in echo: echo "..."
+        let is_echo_string = line.starts_with("echo \"") || line.starts_with("echo '");
+        if !is_output && !is_echo_string {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Deduplicate a base name against existing names in the appropriate scope.
+///
+/// For methods, checks against sibling method names in the class.
+/// For functions, checks against `function <name>` patterns in the file.
+fn deduplicate_name(base: &str, content: &str, ctx: &EnclosingContext) -> String {
     let mut name = base.to_string();
     let mut counter = 1u32;
-    loop {
-        let pattern_fn = format!("function {}", name);
-        if !content.contains(&pattern_fn) {
-            break;
+
+    match ctx.target {
+        ExtractionTarget::Method => {
+            // Check against sibling method names in the class.
+            loop {
+                if !ctx.sibling_method_names.contains(&name) {
+                    break;
+                }
+                counter += 1;
+                name = format!("{}{}", base, counter);
+            }
         }
-        counter += 1;
-        name = format!("{}{}", base, counter);
+        ExtractionTarget::Function => {
+            // Check against function declarations in the file.
+            loop {
+                let pattern_fn = format!("function {}", name);
+                if !content.contains(&pattern_fn) {
+                    break;
+                }
+                counter += 1;
+                name = format!("{}{}", base, counter);
+            }
+        }
     }
 
     name
@@ -1784,8 +2007,31 @@ impl Backend {
             None => return,
         };
 
-        // Generate the function/method name.
-        let fn_name = generate_function_name(content, &enclosing);
+        // Generate the function/method name.  We need the return
+        // strategy and body text for contextual naming, so this
+        // happens after strategy analysis.
+        let body_line_start_for_naming = find_line_start(content, start);
+        let body_text_for_naming = &content[body_line_start_for_naming..end];
+        let naming_ctx = NamingContext {
+            enclosing_name: &enclosing.enclosing_name,
+            return_strategy: &return_strategy,
+            body_text: body_text_for_naming,
+            return_var_names: &classification.return_values,
+            trailing_return_type: "",
+        };
+        // We don't have the trailing return type yet (it's resolved
+        // below), but the naming heuristic only uses it for
+        // TrailingReturn, which we can approximate here.
+        let pre_trailing_return_type = if matches!(return_strategy, ReturnStrategy::TrailingReturn) {
+            resolve_enclosing_return_type(content, start as u32)
+        } else {
+            String::new()
+        };
+        let naming_ctx = NamingContext {
+            trailing_return_type: &pre_trailing_return_type,
+            ..naming_ctx
+        };
+        let fn_name = generate_function_name(content, &enclosing, &naming_ctx);
 
         // Resolve types for parameters and return values.
         let typed_params =
@@ -2739,8 +2985,17 @@ mod tests {
             insert_offset: content.len(),
             body_start: 20,
             is_static: false,
+            enclosing_name: String::new(),
+            sibling_method_names: Vec::new(),
         };
-        let name = generate_function_name(content, &ctx);
+        let naming = NamingContext {
+            enclosing_name: "",
+            return_strategy: &ReturnStrategy::None,
+            body_text: "echo 'hello';",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
         assert_eq!(name, "extracted2");
     }
 
@@ -2752,9 +3007,218 @@ mod tests {
             insert_offset: content.len(),
             body_start: 20,
             is_static: false,
+            enclosing_name: String::new(),
+            sibling_method_names: Vec::new(),
         };
-        let name = generate_function_name(content, &ctx);
+        let naming = NamingContext {
+            enclosing_name: "",
+            return_strategy: &ReturnStrategy::None,
+            body_text: "$x = 1;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
         assert_eq!(name, "extracted");
+    }
+
+    #[test]
+    fn name_guard_from_void_guards() {
+        let content = "<?php\nclass Foo { function run() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "run".to_string(),
+            sibling_method_names: vec!["run".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "run",
+            return_strategy: &ReturnStrategy::VoidGuards,
+            body_text: "if (!$x) return;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "runGuard");
+    }
+
+    #[test]
+    fn name_guard_dedup_against_class() {
+        let content = "<?php\nclass Foo { function run() {} function runGuard() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "run".to_string(),
+            sibling_method_names: vec!["run".to_string(), "runGuard".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "run",
+            return_strategy: &ReturnStrategy::VoidGuards,
+            body_text: "if (!$x) return;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "runGuard2");
+    }
+
+    #[test]
+    fn name_try_from_sentinel_null() {
+        let content = "<?php\nclass Foo { function fetch() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "fetch".to_string(),
+            sibling_method_names: vec!["fetch".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "fetch",
+            return_strategy: &ReturnStrategy::SentinelNull,
+            body_text: "return $result;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "tryFetch");
+    }
+
+    #[test]
+    fn name_factory_from_trailing_return() {
+        let content = "<?php\nclass Foo { function build() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "build".to_string(),
+            sibling_method_names: vec!["build".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "build",
+            return_strategy: &ReturnStrategy::TrailingReturn,
+            body_text: "$u = new User('Alice');\nreturn $u;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "createUser");
+    }
+
+    #[test]
+    fn name_render_from_pure_output() {
+        let content = "<?php\nclass Foo { function show() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "show".to_string(),
+            sibling_method_names: vec!["show".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "show",
+            return_strategy: &ReturnStrategy::None,
+            body_text: "echo $name;\necho $age;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "renderShow");
+    }
+
+    #[test]
+    fn name_compute_from_single_return_var() {
+        let content = "<?php\nfunction calc() {}\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Function,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "calc".to_string(),
+            sibling_method_names: Vec::new(),
+        };
+        let naming = NamingContext {
+            enclosing_name: "calc",
+            return_strategy: &ReturnStrategy::None,
+            body_text: "$total = $a + $b;",
+            return_var_names: &["$total".to_string()],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "computeTotal");
+    }
+
+    #[test]
+    fn name_method_dedup_scoped_to_class() {
+        // "extracted" exists as a function elsewhere in the file, but
+        // the class has no method called "extracted" → no dedup needed.
+        let content = "<?php\nfunction extracted() {}\nclass Foo { function run() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 50,
+            is_static: false,
+            enclosing_name: String::new(),
+            sibling_method_names: vec!["run".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "",
+            return_strategy: &ReturnStrategy::None,
+            body_text: "$x = 1;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "extracted");
+    }
+
+    #[test]
+    fn name_trailing_return_with_return_type() {
+        let content = "<?php\nclass Foo { function getUsers() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "getUsers".to_string(),
+            sibling_method_names: vec!["getUsers".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "getUsers",
+            return_strategy: &ReturnStrategy::TrailingReturn,
+            body_text: "$users = query();\nreturn $users;",
+            return_var_names: &[],
+            trailing_return_type: "Collection",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "getCollection");
+    }
+
+    #[test]
+    fn name_uniform_guards() {
+        let content = "<?php\nclass Foo { function validate() {} }\n";
+        let ctx = EnclosingContext {
+            target: ExtractionTarget::Method,
+            insert_offset: content.len(),
+            body_start: 20,
+            is_static: false,
+            enclosing_name: "validate".to_string(),
+            sibling_method_names: vec!["validate".to_string()],
+        };
+        let naming = NamingContext {
+            enclosing_name: "validate",
+            return_strategy: &ReturnStrategy::UniformGuards("false".to_string()),
+            body_text: "if (!$x) return false;",
+            return_var_names: &[],
+            trailing_return_type: "",
+        };
+        let name = generate_function_name(content, &ctx, &naming);
+        assert_eq!(name, "validateGuard");
     }
 
     // ── Call site generation ────────────────────────────────────────
@@ -2822,7 +3286,7 @@ mod tests {
     #[test]
     fn call_site_method() {
         let info = ExtractionInfo {
-            name: "extracted".to_string(),
+            name: "runGuard".to_string(),
             params: vec![("$x".to_string(), "int".to_string())],
             returns: vec![],
             body: String::new(),
@@ -2835,13 +3299,13 @@ mod tests {
             docblock: String::new(),
         };
         let result = build_call_site(&info, "        ");
-        assert_eq!(result, "        $this->extracted($x);\n");
+        assert_eq!(result, "        $this->runGuard($x);\n");
     }
 
     #[test]
     fn call_site_static_method() {
         let info = ExtractionInfo {
-            name: "extracted".to_string(),
+            name: "computeTotal".to_string(),
             params: vec![],
             returns: vec![],
             body: String::new(),
@@ -2854,7 +3318,7 @@ mod tests {
             docblock: String::new(),
         };
         let result = build_call_site(&info, "        ");
-        assert_eq!(result, "        self::extracted();\n");
+        assert_eq!(result, "        self::computeTotal();\n");
     }
 
     #[test]
