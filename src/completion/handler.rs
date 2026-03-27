@@ -230,6 +230,37 @@ enum DeclarationHeaderKind {
     Enum,
 }
 
+/// Return the start index of the current statement-ish segment ending at
+/// `offset` (exclusive), using `{`, `}`, `;`, and newlines as hard boundaries.
+fn statement_segment_start(chars: &[char], offset: usize) -> usize {
+    for i in (0..offset).rev() {
+        if matches!(chars[i], '{' | '}' | ';' | '\n' | '\r') {
+            return i + 1;
+        }
+    }
+    0
+}
+
+/// Collect lowercase ASCII identifier-like words (`[A-Za-z0-9_]+`) from
+/// `chars[start..end]`.
+fn collect_ascii_words(chars: &[char], start: usize, end: usize) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut i = start;
+    while i < end {
+        if chars[i].is_ascii_alphanumeric() || chars[i] == '_' {
+            let j = i;
+            i += 1;
+            while i < end && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            words.push(chars[j..i].iter().collect::<String>().to_ascii_lowercase());
+            continue;
+        }
+        i += 1;
+    }
+    words
+}
+
 /// Compute brace depth before `position` using a lightweight text scan.
 ///
 /// This is used for top-level keyword gating (`namespace`) and does not try
@@ -253,31 +284,8 @@ fn declaration_header_kind(content: &str, position: Position) -> Option<Declarat
     let chars: Vec<char> = content.chars().collect();
     let offset = crate::completion::named_args::position_to_char_offset(&chars, position)?;
 
-    // Limit to the current statement-ish segment after the latest hard
-    // boundary (`{`, `}`, `;`, or newline) before the cursor.
-    let mut start = 0usize;
-    for i in (0..offset).rev() {
-        if matches!(chars[i], '{' | '}' | ';' | '\n' | '\r') {
-            start = i + 1;
-            break;
-        }
-    }
-
-    // Tokenize simple identifier words in this segment.
-    let mut words: Vec<String> = Vec::new();
-    let mut i = start;
-    while i < offset {
-        if chars[i].is_ascii_alphanumeric() || chars[i] == '_' {
-            let j = i;
-            i += 1;
-            while i < offset && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-            words.push(chars[j..i].iter().collect::<String>().to_ascii_lowercase());
-            continue;
-        }
-        i += 1;
-    }
+    let start = statement_segment_start(&chars, offset);
+    let words = collect_ascii_words(&chars, start, offset);
 
     if words.is_empty() {
         return None;
@@ -337,30 +345,8 @@ fn is_after_member_modifier_chain(content: &str, position: Position) -> bool {
         return false;
     }
 
-    // Limit to the current statement-ish segment after the latest hard
-    // boundary (`{`, `}`, `;`, or newline) before the cursor.
-    let mut start = 0usize;
-    for i in (0..offset).rev() {
-        if matches!(chars[i], '{' | '}' | ';' | '\n' | '\r') {
-            start = i + 1;
-            break;
-        }
-    }
-
-    let mut words: Vec<String> = Vec::new();
-    let mut i = start;
-    while i < offset {
-        if chars[i].is_ascii_alphanumeric() || chars[i] == '_' {
-            let j = i;
-            i += 1;
-            while i < offset && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-            words.push(chars[j..i].iter().collect::<String>().to_ascii_lowercase());
-            continue;
-        }
-        i += 1;
-    }
+    let start = statement_segment_start(&chars, offset);
+    let words = collect_ascii_words(&chars, start, offset);
 
     if words.is_empty() {
         return false;
