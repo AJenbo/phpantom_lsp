@@ -320,6 +320,15 @@ pub(crate) struct SymbolMap {
     /// Used by signature help to find the innermost call containing the
     /// cursor and to compute the active parameter index from AST data.
     pub call_sites: Vec<CallSite>,
+    /// Breakable block boundaries `(start_offset, end_offset)` where
+    /// `break` is valid (loops and `switch`).
+    pub breakable_scopes: Vec<(u32, u32)>,
+    /// Loop block boundaries `(start_offset, end_offset)` where
+    /// `continue` is valid (`while`, `do/while`, `for`, `foreach`).
+    pub loop_scopes: Vec<(u32, u32)>,
+    /// Switch body boundaries `(start_offset, end_offset)` where
+    /// `case` / `default` labels are valid.
+    pub switch_scopes: Vec<(u32, u32)>,
 }
 
 impl SymbolMap {
@@ -539,6 +548,34 @@ impl SymbolMap {
                 && offset >= body_start
                 && offset <= body_end
         })
+    }
+
+    /// Whether `offset` is inside a function-like scope
+    /// (function/method/closure/arrow function body).
+    pub fn is_inside_function_like_scope(&self, offset: u32) -> bool {
+        self.find_enclosing_scope(offset) != 0
+    }
+
+    /// Whether `offset` is inside a breakable scope where `break` is valid.
+    pub fn is_inside_breakable_scope(&self, offset: u32) -> bool {
+        self.breakable_scopes
+            .iter()
+            .any(|&(start, end)| start <= offset && offset <= end)
+    }
+
+    /// Whether `offset` is inside a loop scope where `continue` is valid.
+    pub fn is_inside_loop_scope(&self, offset: u32) -> bool {
+        self.loop_scopes
+            .iter()
+            .any(|&(start, end)| start <= offset && offset <= end)
+    }
+
+    /// Whether `offset` is inside a switch scope where `case/default`
+    /// labels are valid.
+    pub fn is_inside_switch_scope(&self, offset: u32) -> bool {
+        self.switch_scopes
+            .iter()
+            .any(|&(start, end)| start <= offset && offset <= end)
     }
 }
 

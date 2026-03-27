@@ -179,6 +179,545 @@ async fn test_completion_returns_none_when_nothing_matches() {
 }
 
 #[tokio::test]
+async fn test_completion_suggests_php_keywords() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords.php").unwrap();
+    let text = concat!("<?php\n", "function demo(): void {\n", "    ret\n", "}\n",).to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor right after `ret` on line 2.
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return keyword suggestions for a keyword prefix"
+    );
+
+    let items = match result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        items
+            .iter()
+            .any(|i| i.label == "return" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Expected `return` keyword completion, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_does_not_suggest_return_at_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_top_level.php").unwrap();
+    let text = concat!("<?php\n", "ret\n").to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 1,
+                character: 3,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !items
+            .iter()
+            .any(|i| i.label == "return" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Top-level completion should not suggest `return`, got: {:?}",
+        items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_break_inside_loop_only() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_break.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function loopDemo(bool $cond): void {\n",
+        "    while ($cond) {\n",
+        "        br\n",
+        "    }\n",
+        "}\n",
+        "function nonLoopDemo(): void {\n",
+        "    br\n",
+        "}\n",
+    )
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let loop_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let loop_result = backend.completion(loop_params).await.unwrap();
+    let loop_items = match loop_result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        loop_items
+            .iter()
+            .any(|i| i.label == "break" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Inside loop completion should suggest `break`, got: {:?}",
+        loop_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    let non_loop_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let non_loop_result = backend.completion(non_loop_params).await.unwrap();
+    let non_loop_items = match non_loop_result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        !non_loop_items
+            .iter()
+            .any(|i| i.label == "break" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Outside loop completion should not suggest `break`, got: {:?}",
+        non_loop_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_namespace_only_at_top_level() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_namespace.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "nam\n",
+        "function demo(): void {\n",
+        "    nam\n",
+        "}\n",
+    )
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let top_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 1,
+                character: 3,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let top_result = backend.completion(top_params).await.unwrap();
+    let top_items = match top_result.unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        top_items
+            .iter()
+            .any(|i| i.label == "namespace" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Top-level completion should suggest `namespace`, got: {:?}",
+        top_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    let fn_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 3,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let fn_result = backend.completion(fn_params).await.unwrap();
+    let fn_items = match fn_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !fn_items
+            .iter()
+            .any(|i| i.label == "namespace" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Function-scope completion should not suggest `namespace`, got: {:?}",
+        fn_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_extends_implements_only_in_declaration_header() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_decl_header.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Child ex\n",
+        "class Another extends Base im\n",
+        "interface Contract im\n",
+        "function demo(): void {\n",
+        "    ex\n",
+        "}\n",
+    )
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `class Child ex|`
+    let extends_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 1,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let extends_items = match backend.completion(extends_params).await.unwrap().unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        extends_items
+            .iter()
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Class declaration header should suggest `extends`, got: {:?}",
+        extends_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `class Another extends Base im|`
+    let impl_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let impl_items = match backend.completion(impl_params).await.unwrap().unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        impl_items
+            .iter()
+            .any(|i| i.label == "implements" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Class declaration header should suggest `implements`, got: {:?}",
+        impl_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `interface Contract im|` should NOT suggest implements.
+    let iface_impl_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let iface_result = backend.completion(iface_impl_params).await.unwrap();
+    let iface_items = match iface_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !iface_items
+            .iter()
+            .any(|i| i.label == "implements" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Interface declaration header should not suggest `implements`, got: {:?}",
+        iface_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `function demo() { ex| }` should NOT suggest extends.
+    let fn_extends_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 5,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let fn_result = backend.completion(fn_extends_params).await.unwrap();
+    let fn_items = match fn_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !fn_items
+            .iter()
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Function scope should not suggest `extends`, got: {:?}",
+        fn_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_class_body_keywords_are_contextual() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_class_body.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class User {\n",
+        "    pu\n",
+        "    if\n",
+        "    ca\n",
+        "}\n",
+        "enum Status {\n",
+        "    ca\n",
+        "}\n",
+    )
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `class User { pu| }` => should suggest `public`.
+    let vis_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let vis_items = match backend.completion(vis_params).await.unwrap().unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        vis_items
+            .iter()
+            .any(|i| i.label == "public" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Class body should suggest visibility keyword `public`, got: {:?}",
+        vis_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `class User { if| }` => should NOT suggest `if`.
+    let if_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let if_items = match backend.completion(if_params).await.unwrap() {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !if_items
+            .iter()
+            .any(|i| i.label == "if" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Class body should not suggest statement keyword `if`, got: {:?}",
+        if_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+
+    // `class User { ca| }` => should NOT suggest enum `case`.
+    let class_case_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let class_case_items = match backend.completion(class_case_params).await.unwrap() {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !class_case_items
+            .iter()
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Class body should not suggest enum keyword `case`, got: {:?}",
+        class_case_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `enum Status { ca| }` => should suggest `case`.
+    let enum_case_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let enum_case_items = match backend.completion(enum_case_params).await.unwrap().unwrap() {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(
+        enum_case_items
+            .iter()
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "Enum body should suggest `case`, got: {:?}",
+        enum_case_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_completion_inside_class_returns_methods() {
     let backend = create_test_backend();
 

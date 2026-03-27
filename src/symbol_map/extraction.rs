@@ -51,6 +51,12 @@ struct ExtractionCtx<'a> {
     template_defs: Vec<TemplateParamDef>,
     /// Call-site records for signature help and conditional return types.
     call_sites: Vec<CallSite>,
+    /// Ranges where `break` is valid (loops and `switch`).
+    breakable_scopes: Vec<(u32, u32)>,
+    /// Ranges where `continue` is valid (loops only).
+    loop_scopes: Vec<(u32, u32)>,
+    /// Ranges of `switch` bodies (where `case/default` labels are valid).
+    switch_scopes: Vec<(u32, u32)>,
     /// Trivia (comments, whitespace) from the parsed program.
     trivias: &'a [Trivia<'a>],
     /// The full source text of the file being extracted.
@@ -73,6 +79,9 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         assert_narrowing_offsets: Vec::new(),
         template_defs: Vec::new(),
         call_sites: Vec::new(),
+        breakable_scopes: Vec::new(),
+        loop_scopes: Vec::new(),
+        switch_scopes: Vec::new(),
         trivias: program.trivia.as_slice(),
         content,
     };
@@ -109,6 +118,9 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
 
     // Sort call_sites by args_start for reverse-scan lookup.
     ctx.call_sites.sort_by_key(|cs| cs.args_start);
+    ctx.breakable_scopes.sort_by_key(|s| s.0);
+    ctx.loop_scopes.sort_by_key(|s| s.0);
+    ctx.switch_scopes.sort_by_key(|s| s.0);
 
     SymbolMap {
         spans: ctx.spans,
@@ -119,6 +131,9 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         assert_narrowing_offsets: ctx.assert_narrowing_offsets,
         template_defs: ctx.template_defs,
         call_sites: ctx.call_sites,
+        breakable_scopes: ctx.breakable_scopes,
+        loop_scopes: ctx.loop_scopes,
+        switch_scopes: ctx.switch_scopes,
     }
 }
 
@@ -181,9 +196,15 @@ fn extract_from_statement<'a>(
         }
         Statement::While(while_stmt) => {
             extract_from_expression(while_stmt.condition, ctx, scope_start);
+            let body_span = while_stmt.body.span();
+            record_breakable_scope(body_span.start.offset, body_span.end.offset, ctx);
+            record_loop_scope(body_span.start.offset, body_span.end.offset, ctx);
             extract_from_while_body(&while_stmt.body, ctx, scope_start);
         }
         Statement::DoWhile(do_while) => {
+            let body_span = do_while.statement.span();
+            record_breakable_scope(body_span.start.offset, body_span.end.offset, ctx);
+            record_loop_scope(body_span.start.offset, body_span.end.offset, ctx);
             extract_from_statement(do_while.statement, ctx, scope_start);
             extract_from_expression(do_while.condition, ctx, scope_start);
         }
@@ -197,6 +218,9 @@ fn extract_from_statement<'a>(
             for expr in for_stmt.increments.iter() {
                 extract_from_expression(expr, ctx, scope_start);
             }
+            let body_span = for_stmt.body.span();
+            record_breakable_scope(body_span.start.offset, body_span.end.offset, ctx);
+            record_loop_scope(body_span.start.offset, body_span.end.offset, ctx);
             extract_from_for_body(&for_stmt.body, ctx, scope_start);
         }
         Statement::Foreach(foreach_stmt) => {
@@ -231,12 +255,19 @@ fn extract_from_statement<'a>(
                     effective_from: offset,
                 });
             }
+            let body_span = foreach_stmt.body.span();
+            record_breakable_scope(body_span.start.offset, body_span.end.offset, ctx);
+            record_loop_scope(body_span.start.offset, body_span.end.offset, ctx);
             for inner in foreach_stmt.body.statements() {
                 extract_from_statement(inner, ctx, scope_start);
             }
         }
         Statement::Switch(switch_stmt) => {
             extract_from_expression(switch_stmt.expression, ctx, scope_start);
+            let switch_span = switch_stmt.body.span();
+            record_breakable_scope(switch_span.start.offset, switch_span.end.offset, ctx);
+            ctx.switch_scopes
+                .push((switch_span.start.offset, switch_span.end.offset));
             extract_from_switch_body(&switch_stmt.body, ctx, scope_start);
         }
         Statement::Try(try_stmt) => {
@@ -359,6 +390,18 @@ fn extract_from_statement<'a>(
 }
 
 // ─── If / While / For / Switch body helpers ─────────────────────────────────
+
+fn record_breakable_scope(start: u32, end: u32, ctx: &mut ExtractionCtx<'_>) {
+    if start <= end {
+        ctx.breakable_scopes.push((start, end));
+    }
+}
+
+fn record_loop_scope(start: u32, end: u32, ctx: &mut ExtractionCtx<'_>) {
+    if start <= end {
+        ctx.loop_scopes.push((start, end));
+    }
+}
 
 fn extract_from_if_body<'a>(body: &'a IfBody<'a>, ctx: &mut ExtractionCtx<'a>, scope_start: u32) {
     match body {
