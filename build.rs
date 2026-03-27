@@ -25,6 +25,10 @@
 //!
 //! To update the pinned version run `scripts/update-stubs.sh`.
 //!
+//! During `cargo publish`, stubs are downloaded into `OUT_DIR` so the source
+//! directory is not modified (Cargo forbids build scripts from modifying
+//! anything outside `OUT_DIR` during publish/verify).
+//!
 //! ## Re-run strategy
 //!
 //! The `stubs/` directory is gitignored, so Cargo's default "re-run when
@@ -46,17 +50,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 use tar::Archive;
 
-/// Relative path from the crate root to the stubs map file.
-const MAP_FILE: &str = "stubs/jetbrains/phpstorm-stubs/PhpStormStubsMap.php";
+/// Relative path (from the stubs root) to the stubs map file.
+const MAP_FILE_REL: &str = "jetbrains/phpstorm-stubs/PhpStormStubsMap.php";
 
-/// Relative path from the crate root to the stubs directory (the base for
-/// relative paths found in the map file).
-const STUBS_DIR: &str = "stubs/jetbrains/phpstorm-stubs";
+/// Relative path (from the stubs root) to the actual stub PHP files.
+const STUBS_DIR_REL: &str = "jetbrains/phpstorm-stubs";
 
 /// Contents of `stubs.lock`.
 struct StubsLock {
@@ -64,6 +67,28 @@ struct StubsLock {
     repo: String,
     commit: String,
     sha256: String,
+}
+
+/// Locate the stubs root directory.
+///
+/// 1. If `CARGO_MANIFEST_DIR/stubs` exists (local dev), use that.
+/// 2. Otherwise, download into `OUT_DIR/stubs` (safe during `cargo publish`).
+fn resolve_stubs_root() -> (PathBuf, bool) {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let local_stubs = Path::new(&manifest_dir).join("stubs");
+
+    if local_stubs.join(MAP_FILE_REL).exists() {
+        // Stubs already present in source tree (normal local development).
+        // Still need to check staleness via .commit marker.
+        return (local_stubs, false);
+    }
+
+    // Stubs not in source tree — use OUT_DIR so we never modify the source
+    // directory. This is required for `cargo publish` verification.
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
+    let out_stubs = Path::new(&out_dir).join("stubs");
+    let needs_fetch = !out_stubs.join(MAP_FILE_REL).exists();
+    (out_stubs, needs_fetch)
 }
 
 fn main() {
@@ -77,28 +102,31 @@ fn main() {
     println!("cargo:rerun-if-changed=stubs.lock");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let stubs_path = Path::new(&manifest_dir).join(STUBS_DIR);
-    let map_path = Path::new(&manifest_dir).join(MAP_FILE);
-
     let lock = read_stubs_lock(&manifest_dir);
+
+    let (stubs_root, mut needs_fetch) = resolve_stubs_root();
 
     // Check whether the stubs need to be (re-)fetched.  A `.commit`
     // marker file inside the stubs directory records which commit was
     // last downloaded.  When `stubs.lock` pins a different commit the
     // stubs are stale and must be replaced.
-    let commit_marker = stubs_path.join(".commit");
-    let needs_fetch = if !map_path.exists() {
-        true
-    } else if let Ok(marker) = fs::read_to_string(&commit_marker) {
-        marker.trim() != lock.commit
-    } else {
-        // Stubs exist but no marker — written before this check was
-        // added.  Treat as stale so we re-fetch and create the marker.
-        true
-    };
+    if !needs_fetch {
+        let stubs_path = stubs_root.join(STUBS_DIR_REL);
+        let commit_marker = stubs_path.join(".commit");
+        if let Ok(marker) = fs::read_to_string(&commit_marker) {
+            if marker.trim() != lock.commit {
+                needs_fetch = true;
+            }
+        } else {
+            // Stubs exist but no marker — written before this check was
+            // added.  Treat as stale so we re-fetch and create the marker.
+            needs_fetch = true;
+        }
+    }
 
     if needs_fetch {
-        if map_path.exists() {
+        let stubs_path = stubs_root.join(STUBS_DIR_REL);
+        if stubs_path.exists() {
             eprintln!(
                 "cargo:warning=Stubs are stale (expected commit {}), re-fetching...",
                 &lock.commit[..lock.commit.len().min(10)]
@@ -108,7 +136,7 @@ fn main() {
         } else {
             eprintln!("cargo:warning=Stubs not found, fetching from GitHub...");
         }
-        if let Err(e) = fetch_stubs(&manifest_dir, &lock) {
+        if let Err(e) = fetch_stubs(&stubs_root, &lock) {
             eprintln!("cargo:warning=Failed to fetch stubs from GitHub: {}", e);
             eprintln!("cargo:warning=Building without stubs (network may be unavailable).");
             println!("cargo:rustc-env=PHPANTOM_STUBS_VERSION=none");
@@ -116,6 +144,9 @@ fn main() {
             return;
         }
     }
+
+    let stubs_path = stubs_root.join(STUBS_DIR_REL);
+    let map_path = stubs_root.join(MAP_FILE_REL);
 
     // Emit the stubs version so the binary can log it at runtime.
     let short = &lock.commit[..lock.commit.len().min(10)];
@@ -183,8 +214,8 @@ fn main() {
     ));
     for rel_path in &existing_files {
         // Build the include_str! path relative to the generated file's
-        // location ($OUT_DIR).  We use an absolute path rooted at CARGO_MANIFEST_DIR
-        // to avoid fragile relative path arithmetic.
+        // location ($OUT_DIR).  We use an absolute path rooted at the stubs
+        // directory to avoid fragile relative path arithmetic.
         let abs = stubs_path.join(rel_path);
         let abs_str = abs.to_string_lossy().replace('\\', "/");
         out.push_str(&format!("    include_str!(\"{}\")", abs_str));
@@ -407,7 +438,7 @@ fn sha256_hex(data: &[u8]) -> String {
     )
 }
 
-fn fetch_stubs(manifest_dir: &str, lock: &StubsLock) -> Result<(), Box<dyn std::error::Error>> {
+fn fetch_stubs(stubs_root: &Path, lock: &StubsLock) -> Result<(), Box<dyn std::error::Error>> {
     let short = &lock.commit[..lock.commit.len().min(10)];
     let tarball_url = format!(
         "https://github.com/{}/archive/{}.tar.gz",
@@ -446,7 +477,7 @@ fn fetch_stubs(manifest_dir: &str, lock: &StubsLock) -> Result<(), Box<dyn std::
     let decoder = GzDecoder::new(&tarball_bytes[..]);
     let mut archive = Archive::new(decoder);
 
-    let target_dir = Path::new(manifest_dir).join("stubs/jetbrains/phpstorm-stubs");
+    let target_dir = stubs_root.join("jetbrains/phpstorm-stubs");
     fs::create_dir_all(&target_dir)?;
 
     // Safety: disable platform-specific features we don't need.

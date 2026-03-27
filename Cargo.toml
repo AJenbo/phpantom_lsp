@@ -3,6 +3,10 @@ name = "phpantom_lsp"
 version = "0.6.0"
 edition = "2024"
 license = "MIT"
+description = "Fast PHP language server with deep type intelligence. Generics, Laravel, PHPStan annotations. Ready in an instant."
+repository = "https://github.com/AJenbo/phpantom_lsp"
+readme = "README.md"
+exclude = [".gitignore", ".github/*", "target/*"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive", "wrap_help"] }

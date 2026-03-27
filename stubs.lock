@@ -8,10 +8,10 @@
 # The GitHub repository to fetch stubs from.
 # Use "JetBrains/phpstorm-stubs" for upstream, or a fork like
 # "AJenbo/phpstorm-stubs" for fixes not yet merged upstream.
-repo = "AJenbo/phpstorm-stubs"
+repo = "JetBrains/phpstorm-stubs"
 
 # The pinned commit SHA.
-commit = "0ea6b443d24260c23d1266e73d2db9b0b265bc6c"
+commit = "3327932472f512d2eb9e122b19702b335083fd9d"
 
 # SHA-256 hash of the GitHub-generated tarball for the commit above.
-sha256 = "3b97df3d79c9631adc3c415b145a6a11b0aa90696ebf1f791c865d84e4f40782"
+sha256 = "ec342f07dcbe50d90c6e1e07cbf5e4771ca878ce9036d825dac46a3608120d0e"
