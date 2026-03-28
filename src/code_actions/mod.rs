@@ -42,6 +42,12 @@
 //!   hooks inline on the property.  Static properties are skipped.
 //!   Readonly properties only get a `get` hook.  Interface properties
 //!   generate abstract hook signatures without bodies.
+//! - **Simplify with null coalescing / null-safe operator** — when the
+//!   cursor is on a ternary expression that can be simplified, offer
+//!   to rewrite it.  Supported patterns: `isset($x) ? $x : $d` →
+//!   `$x ?? $d`, `$x !== null ? $x : $d` → `$x ?? $d`, `$x === null
+//!   ? $d : $x` → `$x ?? $d`, `$x !== null ? $x->foo() : null` →
+//!   `$x?->foo()` (PHP 8.0+).
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -71,6 +77,7 @@ mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
 mod replace_deprecated;
+mod simplify_null;
 mod update_docblock;
 
 use serde::{Deserialize, Serialize};
@@ -159,6 +166,9 @@ impl Backend {
 
         // ── Inline variable (deferred) ──────────────────────────────────
         self.collect_inline_variable_actions(uri, content, params, &mut actions);
+
+        // ── Simplify with null coalescing / null-safe operator ──────────
+        self.collect_simplify_null_actions(uri, content, params, &mut actions);
 
         actions
     }

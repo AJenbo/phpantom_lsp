@@ -26,7 +26,6 @@ within the same impact tier.
 | M3  | [Migrate to mago-names](todo/mago.md#m3-mago-names)                                                                                              | High     | Medium-High |
 | M4  | [Migrate to mago-type-syntax](todo/mago.md#m4-mago-type-syntax)                                                                                  | Critical | Very High   |
 | F4  | [`codeAction/resolve` — deferred edit computation](todo/lsp-features.md#f4-codeactionresolve--deferred-edit-computation-and-diagnostic-clearing) | High     | Medium      |
-| A1  | [Simplify with null coalescing / null-safe operator](todo/actions.md#a1-simplify-with-null-coalescing--null-safe-operator)                       | Medium   | Medium      |
 | A7  | [Extract constant](todo/actions.md#a7-extract-constant)                                                                                          | Medium   | Medium      |
 |     | **Release 0.7.0**                                                                                                                                |          |             |
 

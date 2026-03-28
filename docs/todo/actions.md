@@ -13,35 +13,6 @@ within the same impact tier.
 forward-pass variable usage tracking with byte offsets across function
 scopes.
 
-## A1. Simplify with null coalescing / null-safe operator
-
-**Impact: Medium · Effort: Medium**
-
-Offer code actions to simplify common nullable patterns:
-
-- `isset($x) ? $x : $default` → `$x ?? $default`
-- `$x !== null ? $x : $default` → `$x ?? $default`
-- `$x === null ? $default : $x` → `$x ?? $default`
-- `$x !== null ? $x->foo() : null` → `$x?->foo()`
-- `if ($x !== null) { return $x->foo(); } return null;` → `return $x?->foo();`
-
-### Implementation
-
-- Register as code actions with kind `quickfix` or `refactor.rewrite`.
-- Pattern-match on ternary expressions and simple if-null-return blocks
-  in the AST. The conditions are structural — no type resolution needed
-  for the basic patterns (just checking for `=== null` / `!== null` /
-  `isset()`).
-- Generate replacement text preserving the original variable/expression
-  names.
-- Only offer `?->` suggestions when the project targets PHP 8.0+
-  (check `self.php_version()`).
-
-**Scope:** Start with ternary expressions (simplest AST match). The
-if-statement patterns are a follow-up.
-
----
-
 ## A3. Switch → match conversion
 
 **Impact: Low · Effort: Medium**

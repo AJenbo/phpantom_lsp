@@ -87,6 +87,13 @@ pub fn is_stub_function_removed(
     func_name: &str,
     php_version: crate::types::PhpVersion,
 ) -> bool {
+    // Fast path: if the entire file doesn't contain `@removed`, no
+    // function in it can be version-gated.  This skips ~92% of stub
+    // files without any allocations or string searches.
+    if !source.contains("@removed") {
+        return false;
+    }
+
     // Use the short (unqualified) name for the search pattern.
     let short = func_name.rsplit('\\').next().unwrap_or(func_name);
 
@@ -112,6 +119,11 @@ pub fn is_stub_class_removed(
     class_name: &str,
     php_version: crate::types::PhpVersion,
 ) -> bool {
+    // Fast path: skip files that don't mention `@removed` at all.
+    if !source.contains("@removed") {
+        return false;
+    }
+
     // Use the short (unqualified) name for the search pattern.
     let short = class_name.rsplit('\\').next().unwrap_or(class_name);
 
@@ -178,19 +190,26 @@ fn is_preceding_docblock_removed(
 
     let docblock = &source[doc_start..doc_end + 2];
 
-    if let Some(info) = crate::docblock::parser::parse_docblock_for_tags(docblock) {
-        use mago_docblock::document::TagKind;
-        // @removed is a non-standard tag, so mago-docblock classifies it as
-        // TagKind::Other with name == "removed".
-        for tag in info.tags_by_kind(TagKind::Other) {
-            if tag.name == "removed" {
-                let rest = tag.description.trim();
-                if let Some(ver) = crate::types::PhpVersion::from_composer_constraint(rest)
-                    && php_version >= ver
-                {
-                    return true;
-                }
-            }
+    // Simple line-by-line scan for `@removed X.Y` instead of a full
+    // docblock parse.  This is called for every stub entry during
+    // `set_php_version`, so avoiding the mago-docblock parser here
+    // saves significant startup time.
+    for line in docblock.lines() {
+        let trimmed = line.trim().trim_start_matches('*').trim();
+        let rest = if let Some(r) = trimmed.strip_prefix("@removed") {
+            r
+        } else {
+            continue;
+        };
+        // The version string follows the tag, separated by whitespace.
+        let rest = rest.trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+        if let Some(ver) = crate::types::PhpVersion::from_composer_constraint(rest)
+            && php_version >= ver
+        {
+            return true;
         }
     }
 

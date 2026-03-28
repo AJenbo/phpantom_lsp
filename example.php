@@ -2883,6 +2883,45 @@ class PromoteConstructorParamDemo
     }
 }
 
+// ── Simplify Null Coalescing / Null-Safe ────────────────────────────────────
+// Place your cursor on any ternary below and trigger code actions.
+// PHPantom offers "Simplify to ??" or "Simplify to ?->" where applicable.
+
+class SimplifyNullDemo
+{
+    public function demo(?Pen $pen, ?User $user): void
+    {
+        // ── isset → ?? ─────────────────────────────────────────────
+        // Code action: "Simplify to ??"  →  $pen ?? makePen()
+        $tool = isset($pen) ? $pen : makePen();
+
+        // ── !== null → ?? ──────────────────────────────────────────
+        // Code action: "Simplify to ??"  →  $pen ?? makePen()
+        $tool2 = $pen !== null ? $pen : makePen();
+
+        // ── === null (reversed) → ?? ───────────────────────────────
+        // Code action: "Simplify to ??"  →  $user ?? createUser()
+        $fallback = $user === null ? createUser() : $user;
+
+        // ── !== null + method call → ?-> ───────────────────────────
+        // Code action: "Simplify to ?->"  →  $pen?->color()
+        $color = $pen !== null ? $pen->color() : null;
+
+        // ── !== null + property access → ?-> ───────────────────────
+        // Code action: "Simplify to ?->"  →  $user?->email
+        $email = $user !== null ? $user->email : null;
+
+        // ── === null + method (reversed) → ?-> ─────────────────────
+        // Code action: "Simplify to ?->"  →  $pen?->label()
+        $label = $pen === null ? null : $pen->label();
+
+        // ── Compound subject → correct ?-> placement ───────────────
+        // Code action: "Simplify to ?->"  →  $user->getProfile()?->getDisplayName()
+        $profile = $user->getProfile();
+        $name = $profile !== null ? $profile->getDisplayName() : null;
+    }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
