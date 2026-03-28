@@ -556,26 +556,31 @@ impl SymbolMap {
         self.find_enclosing_scope(offset) != 0
     }
 
+    /// Binary-search helper: check whether `offset` falls inside any
+    /// `(start, end)` range in a vec sorted by start offset.
+    fn offset_in_sorted_ranges(ranges: &[(u32, u32)], offset: u32) -> bool {
+        // Find the first range whose start is past `offset`.
+        let idx = ranges.partition_point(|&(start, _)| start <= offset);
+        // Check all candidate ranges (those with start <= offset) from
+        // the closest one backward.  Usually only one or two iterations
+        // are needed since scopes are rarely deeply nested.
+        ranges[..idx].iter().rev().any(|&(_, end)| offset <= end)
+    }
+
     /// Whether `offset` is inside a breakable scope where `break` is valid.
     pub fn is_inside_breakable_scope(&self, offset: u32) -> bool {
-        self.breakable_scopes
-            .iter()
-            .any(|&(start, end)| start <= offset && offset <= end)
+        Self::offset_in_sorted_ranges(&self.breakable_scopes, offset)
     }
 
     /// Whether `offset` is inside a loop scope where `continue` is valid.
     pub fn is_inside_loop_scope(&self, offset: u32) -> bool {
-        self.loop_scopes
-            .iter()
-            .any(|&(start, end)| start <= offset && offset <= end)
+        Self::offset_in_sorted_ranges(&self.loop_scopes, offset)
     }
 
     /// Whether `offset` is inside a switch scope where `case/default`
     /// labels are valid.
     pub fn is_inside_switch_scope(&self, offset: u32) -> bool {
-        self.switch_scopes
-            .iter()
-            .any(|&(start, end)| start <= offset && offset <= end)
+        Self::offset_in_sorted_ranges(&self.switch_scopes, offset)
     }
 }
 

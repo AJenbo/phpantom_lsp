@@ -342,9 +342,10 @@ async fn test_completion_suggests_break_inside_loop_only() {
         context: None,
     };
     let non_loop_result = backend.completion(non_loop_params).await.unwrap();
-    let non_loop_items = match non_loop_result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+    let non_loop_items = match non_loop_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
     };
     assert!(
         !non_loop_items
@@ -356,6 +357,246 @@ async fn test_completion_suggests_break_inside_loop_only() {
             .map(|i| i.label.clone())
             .collect::<Vec<_>>()
     );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_continue_in_loop_not_switch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_continue.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function loopDemo(): void {\n",
+        "    foreach ([1, 2] as $v) {\n",
+        "        con\n",
+        "    }\n",
+        "}\n",
+        "function switchDemo(): void {\n",
+        "    switch (1) {\n",
+        "        case 1:\n",
+        "            con\n",
+        "    }\n",
+        "}\n",
+    )
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `continue` inside a foreach loop — should be suggested.
+    let loop_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let loop_result = backend.completion(loop_params).await.unwrap();
+    let loop_items = match loop_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        loop_items
+            .iter()
+            .any(|i| i.label == "continue" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "`continue` should be suggested inside a loop, got: {:?}",
+        loop_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `continue` inside a switch (but not a loop) — should NOT be suggested.
+    let switch_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let switch_result = backend.completion(switch_params).await.unwrap();
+    let switch_items = match switch_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !switch_items
+            .iter()
+            .any(|i| i.label == "continue" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "`continue` should NOT be suggested inside a switch (without a loop), got: {:?}",
+        switch_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_case_default_inside_switch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_switch.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function switchDemo(int $x): void {\n",
+        "    switch ($x) {\n",
+        "        case 1:\n",
+        "            break;\n",
+        "        cas\n",
+        "    }\n",
+        "}\n",
+        "function nonSwitchDemo(): void {\n",
+        "    cas\n",
+        "}\n",
+    )
+    .to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `case` inside a switch — should be suggested.
+    let switch_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let switch_result = backend.completion(switch_params).await.unwrap();
+    let switch_items = match switch_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        switch_items
+            .iter()
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "`case` should be suggested inside a switch, got: {:?}",
+        switch_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+
+    // `case` outside a switch — should NOT be suggested.
+    let non_switch_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 7,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let non_switch_result = backend.completion(non_switch_params).await.unwrap();
+    let non_switch_items = match non_switch_result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    assert!(
+        !non_switch_items
+            .iter()
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+        "`case` should NOT be suggested outside a switch, got: {:?}",
+        non_switch_items
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_completion_interface_body_keyword_restrictions() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///keywords_interface_body.php").unwrap();
+    let text = concat!("<?php\n", "interface Loggable {\n", "    pu\n", "}\n",).to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 2,
+                character: 6,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let result = backend.completion(params).await.unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let keyword_labels: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .map(|i| i.label.as_str())
+        .collect();
+
+    assert!(
+        keyword_labels.contains(&"public"),
+        "`public` should be suggested in interface body, got: {:?}",
+        keyword_labels
+    );
+    // Interfaces only allow `public`, `function`, and `const`.
+    for excluded in &["private", "protected", "static", "abstract", "readonly"] {
+        assert!(
+            !keyword_labels.contains(excluded),
+            "`{excluded}` should NOT be suggested in interface body, got: {:?}",
+            keyword_labels
+        );
+    }
 }
 
 #[tokio::test]

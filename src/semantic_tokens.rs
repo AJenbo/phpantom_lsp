@@ -246,11 +246,13 @@ impl Backend {
                         (TT_VARIABLE, TM_READONLY | TM_DEFAULT_LIBRARY)
                     } else if keyword == "parent" {
                         // Resolve to the parent class kind when possible.
-                        let tt = self.resolve_self_static_parent_token_type(keyword, uri, ctx, span.start);
+                        let tt = self
+                            .resolve_self_static_parent_token_type(keyword, uri, ctx, span.start);
                         (tt, TM_DEFAULT_LIBRARY)
                     } else {
                         // self, static — resolve to enclosing class kind.
-                        let tt = self.resolve_self_static_parent_token_type(keyword, uri, ctx, span.start);
+                        let tt = self
+                            .resolve_self_static_parent_token_type(keyword, uri, ctx, span.start);
                         (tt, TM_DEFAULT_LIBRARY)
                     }
                 }

@@ -76,7 +76,7 @@ impl Backend {
         // the data into an owned `OwnedResolvedNames` so it survives
         // the arena drop.
         let name_resolver = mago_names::resolver::NameResolver::new(&arena);
-        let mago_resolved = name_resolver.resolve(&program);
+        let mago_resolved = name_resolver.resolve(program);
         let owned_resolved = crate::names::OwnedResolvedNames::from_resolved(&mago_resolved);
 
         // Cache parse errors for the syntax-error diagnostic collector.
@@ -477,10 +477,9 @@ impl Backend {
             .write()
             .insert(uri_string.clone(), symbol_map);
         self.use_map.write().insert(uri_string.clone(), use_map);
-        self.resolved_names.write().insert(
-            uri_string.clone(),
-            Arc::new(owned_resolved),
-        );
+        self.resolved_names
+            .write()
+            .insert(uri_string.clone(), Arc::new(owned_resolved));
         self.namespace_map.write().insert(uri_string, namespace);
 
         // Selectively invalidate the resolved-class cache with

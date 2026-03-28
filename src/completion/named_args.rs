@@ -96,42 +96,9 @@ pub fn detect_named_arg_context(content: &str, position: Position) -> Option<Nam
     })
 }
 
-/// Convert an LSP `Position` (line/character) to a character offset into
-/// the char array.
-pub fn position_to_char_offset(chars: &[char], position: Position) -> Option<usize> {
-    let target_line = position.line as usize;
-    let target_col = position.character as usize;
-    let mut line = 0usize;
-    let mut col = 0usize;
-
-    for (i, &ch) in chars.iter().enumerate() {
-        if line == target_line && col == target_col {
-            return Some(i);
-        }
-        if ch == '\n' {
-            // If we're at the target line and the target column is at or
-            // past the end of the line, clamp to end-of-line.
-            if line == target_line {
-                return Some(i);
-            }
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16();
-        }
-    }
-
-    // Cursor at very end of content
-    if line == target_line && col == target_col {
-        return Some(chars.len());
-    }
-    // Target column past end of last line (no trailing newline)
-    if line == target_line {
-        return Some(chars.len());
-    }
-
-    None
-}
+// Re-exported from `crate::util` for backward compatibility with
+// existing import paths.
+pub use crate::util::position_to_char_offset;
 
 /// Walk backward from `start` (exclusive) to find the unmatched `(` that
 /// encloses the cursor.

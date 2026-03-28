@@ -47,7 +47,6 @@ impl Backend {
             cache.get(uri).cloned().unwrap_or_default()
         };
 
-
         for diag in &phpstan_diags {
             if !ranges_overlap(&diag.range, &params.range) {
                 continue;

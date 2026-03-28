@@ -97,7 +97,8 @@ impl Backend {
                         _ => current_class.cloned(),
                     };
                     if let Some(ref t) = target {
-                        return self.resolve_class_implementation(uri, content, &t.name, &ctx, sym.start);
+                        return self
+                            .resolve_class_implementation(uri, content, &t.name, &ctx, sym.start);
                     }
                     return None;
                 }

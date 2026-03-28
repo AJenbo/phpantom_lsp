@@ -1799,10 +1799,10 @@ impl FileContext {
     /// `offset` is the starting byte offset of the identifier in the
     /// source file.
     pub fn resolve_name_at(&self, name: &str, offset: u32) -> String {
-        if let Some(ref rn) = self.resolved_names {
-            if let Some(fqn) = rn.get(offset) {
-                return fqn.to_string();
-            }
+        if let Some(ref rn) = self.resolved_names
+            && let Some(fqn) = rn.get(offset)
+        {
+            return fqn.to_string();
         }
         // Fallback: replicate resolve_to_fqn logic inline to avoid
         // a cross-module dependency on diagnostics::helpers.

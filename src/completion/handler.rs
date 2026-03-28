@@ -223,194 +223,6 @@ fn append_semicolon_to_insert_text(items: Vec<CompletionItem>) -> Vec<Completion
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeclarationHeaderKind {
-    Class,
-    Interface,
-    Enum,
-}
-
-/// Return the start index of the current statement-ish segment ending at
-/// `offset` (exclusive), using `{`, `}`, `;`, and newlines as hard boundaries.
-fn statement_segment_start(chars: &[char], offset: usize) -> usize {
-    for i in (0..offset).rev() {
-        if matches!(chars[i], '{' | '}' | ';' | '\n' | '\r') {
-            return i + 1;
-        }
-    }
-    0
-}
-
-/// Collect lowercase ASCII identifier-like words (`[A-Za-z0-9_]+`) from
-/// `chars[start..end]`.
-fn collect_ascii_words(chars: &[char], start: usize, end: usize) -> Vec<String> {
-    let mut words: Vec<String> = Vec::new();
-    let mut i = start;
-    while i < end {
-        if chars[i].is_ascii_alphanumeric() || chars[i] == '_' {
-            let j = i;
-            i += 1;
-            while i < end && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-            words.push(chars[j..i].iter().collect::<String>().to_ascii_lowercase());
-            continue;
-        }
-        i += 1;
-    }
-    words
-}
-
-/// Compute brace depth before `position` using a lightweight text scan.
-///
-/// This is used for top-level keyword gating (`namespace`) and does not try
-/// to fully parse strings/comments.
-fn brace_depth_before(content: &str, position: Position) -> i32 {
-    let off = position_to_byte_offset(content, position);
-    let mut depth = 0_i32;
-    for &b in content.as_bytes().iter().take(off.min(content.len())) {
-        match b {
-            b'{' => depth += 1,
-            b'}' => depth -= 1,
-            _ => {}
-        }
-    }
-    depth.max(0)
-}
-
-/// Detect whether the cursor is inside a class/interface/enum declaration
-/// header (before the opening `{`).
-fn declaration_header_kind(content: &str, position: Position) -> Option<DeclarationHeaderKind> {
-    let chars: Vec<char> = content.chars().collect();
-    let offset = crate::completion::named_args::position_to_char_offset(&chars, position)?;
-
-    let start = statement_segment_start(&chars, offset);
-    let words = collect_ascii_words(&chars, start, offset);
-
-    if words.is_empty() {
-        return None;
-    }
-
-    let mut decl_idx_kind: Option<(usize, DeclarationHeaderKind)> = None;
-    for (idx, w) in words.iter().enumerate() {
-        let kind = match w.as_str() {
-            "class" => Some(DeclarationHeaderKind::Class),
-            "interface" => Some(DeclarationHeaderKind::Interface),
-            "enum" => Some(DeclarationHeaderKind::Enum),
-            _ => None,
-        };
-        if let Some(kind) = kind {
-            decl_idx_kind = Some((idx, kind));
-            break;
-        }
-    }
-    let (decl_idx, kind) = decl_idx_kind?;
-
-    // Only declaration modifiers may appear before the declaration keyword.
-    let valid_prefix = words[..decl_idx]
-        .iter()
-        .all(|w| matches!(w.as_str(), "abstract" | "final" | "readonly"));
-    if !valid_prefix {
-        return None;
-    }
-
-    // Need at least the declaration name token after `class|interface|enum`.
-    let name_token = words.get(decl_idx + 1)?;
-
-    if name_token.is_empty() {
-        return None;
-    }
-
-    // Guard out anonymous classes (`new class`).
-    if kind == DeclarationHeaderKind::Class
-        && decl_idx > 0
-        && words.get(decl_idx - 1).is_some_and(|w| w == "new")
-    {
-        return None;
-    }
-
-    Some(kind)
-}
-
-/// Whether the cursor is right after a class-member modifier chain
-/// followed by whitespace, e.g. `public ` or `private static `.
-fn is_after_member_modifier_chain(content: &str, position: Position) -> bool {
-    let chars: Vec<char> = content.chars().collect();
-    let Some(offset) = crate::completion::named_args::position_to_char_offset(&chars, position)
-    else {
-        return false;
-    };
-    if offset == 0 || !chars[offset - 1].is_ascii_whitespace() {
-        return false;
-    }
-
-    let start = statement_segment_start(&chars, offset);
-    let words = collect_ascii_words(&chars, start, offset);
-
-    if words.is_empty() {
-        return false;
-    }
-
-    words.iter().all(|w| {
-        matches!(
-            w.as_str(),
-            "public" | "protected" | "private" | "static" | "abstract" | "final" | "readonly"
-        )
-    })
-}
-
-/// Detect `enum Name: <partial>` backed-type position and return `<partial>`.
-///
-/// Examples that return `Some`:
-/// - `enum Role: |`
-/// - `enum Role: st|`
-///
-/// Returns `None` outside enum declaration headers.
-fn enum_backing_type_partial(content: &str, position: Position) -> Option<String> {
-    let chars: Vec<char> = content.chars().collect();
-    let offset = crate::completion::named_args::position_to_char_offset(&chars, position)?;
-
-    // Walk backward through the currently typed token.
-    let mut partial_start = offset;
-    while partial_start > 0
-        && (chars[partial_start - 1].is_ascii_alphanumeric() || chars[partial_start - 1] == '_')
-    {
-        partial_start -= 1;
-    }
-
-    // Reject obvious non-keyword contexts.
-    if partial_start > 0 && chars[partial_start - 1] == '$' {
-        return None;
-    }
-    if partial_start >= 2 && chars[partial_start - 2] == '-' && chars[partial_start - 1] == '>' {
-        return None;
-    }
-    if partial_start >= 2 && chars[partial_start - 2] == ':' && chars[partial_start - 1] == ':' {
-        return None;
-    }
-
-    let partial: String = chars[partial_start..offset].iter().collect();
-
-    // Back up over whitespace before the partial and require `:`.
-    let mut i = partial_start;
-    while i > 0 && chars[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-    if i == 0 || chars[i - 1] != ':' {
-        return None;
-    }
-
-    // Only valid inside `enum` declaration headers.
-    if !matches!(
-        declaration_header_kind(content, position),
-        Some(DeclarationHeaderKind::Enum)
-    ) {
-        return None;
-    }
-
-    Some(partial)
-}
-
 impl Backend {
     /// Main completion handler — called by `LanguageServer::completion`.
     ///
@@ -1336,7 +1148,9 @@ impl Backend {
         ctx: &FileContext,
         current_uri: &str,
     ) -> Option<CompletionResponse> {
-        if let Some(partial) = enum_backing_type_partial(content, position) {
+        if let Some(partial) =
+            crate::completion::keyword_completion::enum_backing_type_partial(content, position)
+        {
             let items =
                 crate::completion::keyword_completion::build_backed_enum_type_completions(&partial);
             if items.is_empty() {
@@ -1346,7 +1160,18 @@ impl Backend {
         }
 
         let class_ctx = detect_class_name_context(content, position);
-        let keyword_ctx = self.keyword_context_for_position(current_uri, content, position, ctx);
+        let keyword_ctx = {
+            let cursor_offset = position_to_offset(content, position);
+            let maps = self.symbol_maps.read();
+            let map = maps.get(current_uri);
+            crate::completion::keyword_completion::build_keyword_context(
+                content,
+                position,
+                cursor_offset,
+                map.map(|m| m.as_ref()),
+                &ctx.classes,
+            )
+        };
         let partial = match Self::extract_partial_class_name(content, position) {
             Some(p) => p,
             None => {
@@ -1550,50 +1375,6 @@ impl Backend {
             is_incomplete: class_incomplete || const_incomplete || func_incomplete,
             items,
         }))
-    }
-
-    /// Build contextual keyword flags from the precomputed symbol map.
-    fn keyword_context_for_position(
-        &self,
-        uri: &str,
-        content: &str,
-        position: Position,
-        file_ctx: &FileContext,
-    ) -> crate::completion::keyword_completion::KeywordContext {
-        let cursor_offset = position_to_offset(content, position);
-        let decl_kind = declaration_header_kind(content, position);
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri);
-        let in_function_like = map.is_some_and(|m| m.is_inside_function_like_scope(cursor_offset));
-        let in_breakable = map.is_some_and(|m| m.is_inside_breakable_scope(cursor_offset));
-        let in_loop = map.is_some_and(|m| m.is_inside_loop_scope(cursor_offset));
-        let in_switch = map.is_some_and(|m| m.is_inside_switch_scope(cursor_offset));
-        let class_at_cursor = find_class_at_offset(&file_ctx.classes, cursor_offset);
-        let in_class_like = class_at_cursor.is_some();
-        let class_body_kind = if in_function_like {
-            None
-        } else {
-            class_at_cursor.map(|c| c.kind)
-        };
-        let in_top_level =
-            !in_function_like && !in_class_like && brace_depth_before(content, position) == 0;
-        let after_member_modifier_chain =
-            class_body_kind.is_some() && is_after_member_modifier_chain(content, position);
-
-        crate::completion::keyword_completion::KeywordContext {
-            in_function_like,
-            in_breakable,
-            in_loop,
-            in_switch,
-            in_top_level,
-            in_extends_declaration_header: decl_kind.is_some(),
-            in_implements_declaration_header: matches!(
-                decl_kind,
-                Some(DeclarationHeaderKind::Class | DeclarationHeaderKind::Enum)
-            ),
-            class_body_kind,
-            after_member_modifier_chain,
-        }
     }
 
     // ─── Shared helpers ─────────────────────────────────────────────────
