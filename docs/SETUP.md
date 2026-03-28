@@ -30,10 +30,11 @@ PHPantom communicates over stdin/stdout using the standard [Language Server Prot
 
 A Zed extension is included in the `zed-extension/` directory:
 
-1. Open Zed
-2. Open the Extensions panel
-3. Click **Install Dev Extension**
-4. Select the `zed-extension/` directory
+1. Ensure you have `rustc` available in your `$PATH`. This is part of the Rust [toolchain](https://rust-lang.org/tools/install/)
+2. Open Zed
+3. Open the Extensions panel
+4. Click **Install Dev Extension**
+5. Select the `zed-extension/` directory
 
 The extension automatically downloads the correct pre-built binary from GitHub releases for your platform. If you'd prefer to use a locally built binary, ensure `phpantom_lsp` is on your `PATH` and the extension will use it instead.
 
