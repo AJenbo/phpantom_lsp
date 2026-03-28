@@ -153,6 +153,13 @@ pub(crate) fn detect_type_hint_context(
     // This covers both class property declarations (`public int $x`)
     // and promoted constructor parameters (`private readonly string $y`).
     if prev_char.is_alphabetic() && is_after_modifier_keyword(&chars, before) {
+        // With an empty partial right after a modifier (e.g. `public |`),
+        // keyword completion should drive the next token (`function`,
+        // `const`, `static`, …).  Type-hint completion kicks in once the
+        // user actually starts typing a type token.
+        if partial.is_empty() {
+            return None;
+        }
         // Make sure the partial is NOT a keyword that forms part of a
         // function declaration (e.g. `public function`).  If the user
         // has typed `function` or `fn` we should not offer type hints.

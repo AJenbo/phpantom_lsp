@@ -1148,8 +1148,49 @@ impl Backend {
         ctx: &FileContext,
         current_uri: &str,
     ) -> Option<CompletionResponse> {
-        let partial = Self::extract_partial_class_name(content, position)?;
+        if let Some(partial) =
+            crate::completion::keyword_completion::enum_backing_type_partial(content, position)
+        {
+            let items =
+                crate::completion::keyword_completion::build_backed_enum_type_completions(&partial);
+            if items.is_empty() {
+                return None;
+            }
+            return Some(CompletionResponse::Array(items));
+        }
+
         let class_ctx = detect_class_name_context(content, position);
+        let keyword_ctx = {
+            let cursor_offset = position_to_offset(content, position);
+            let maps = self.symbol_maps.read();
+            let map = maps.get(current_uri);
+            crate::completion::keyword_completion::build_keyword_context(
+                content,
+                position,
+                cursor_offset,
+                map.map(|m| m.as_ref()),
+                &ctx.classes,
+            )
+        };
+        let partial = match Self::extract_partial_class_name(content, position) {
+            Some(p) => p,
+            None => {
+                // Allow keyword completion on empty prefix inside class-like
+                // bodies (e.g. after typing `public `).
+                if keyword_ctx.after_member_modifier_chain {
+                    let items = crate::completion::keyword_completion::build_keyword_completions(
+                        "",
+                        class_ctx,
+                        keyword_ctx,
+                    );
+                    if items.is_empty() {
+                        return None;
+                    }
+                    return Some(CompletionResponse::Array(items));
+                }
+                return None;
+            }
+        };
 
         // ── `use function` → only functions ─────────────────────────
         if matches!(class_ctx, ClassNameContext::UseFunction) {
@@ -1294,6 +1335,11 @@ impl Backend {
             }));
         }
 
+        let keyword_items = crate::completion::keyword_completion::build_keyword_completions(
+            &partial,
+            class_ctx,
+            keyword_ctx,
+        );
         let (constant_items, const_incomplete) =
             self.build_constant_completions(&partial, current_uri, position);
         let (function_items, func_incomplete) = self.build_function_completions(
@@ -1304,11 +1350,16 @@ impl Backend {
             current_uri,
         );
 
-        if class_items.is_empty() && constant_items.is_empty() && function_items.is_empty() {
+        if class_items.is_empty()
+            && keyword_items.is_empty()
+            && constant_items.is_empty()
+            && function_items.is_empty()
+        {
             return None;
         }
 
-        let mut items = class_items;
+        let mut items = keyword_items;
+        items.extend(class_items);
         items.extend(constant_items);
         items.extend(function_items);
 

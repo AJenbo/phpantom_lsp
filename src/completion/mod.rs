@@ -103,4 +103,5 @@ pub(crate) use types::resolution as type_resolution;
 // context/
 pub(crate) use context::catch_completion;
 pub(crate) use context::class_completion;
+pub(crate) use context::keyword_completion;
 pub(crate) use context::type_hint_completion;

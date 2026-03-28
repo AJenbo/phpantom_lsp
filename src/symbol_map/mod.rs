@@ -320,6 +320,15 @@ pub(crate) struct SymbolMap {
     /// Used by signature help to find the innermost call containing the
     /// cursor and to compute the active parameter index from AST data.
     pub call_sites: Vec<CallSite>,
+    /// Breakable block boundaries `(start_offset, end_offset)` where
+    /// `break` is valid (loops and `switch`).
+    pub breakable_scopes: Vec<(u32, u32)>,
+    /// Loop block boundaries `(start_offset, end_offset)` where
+    /// `continue` is valid (`while`, `do/while`, `for`, `foreach`).
+    pub loop_scopes: Vec<(u32, u32)>,
+    /// Switch body boundaries `(start_offset, end_offset)` where
+    /// `case` / `default` labels are valid.
+    pub switch_scopes: Vec<(u32, u32)>,
 }
 
 impl SymbolMap {
@@ -539,6 +548,39 @@ impl SymbolMap {
                 && offset >= body_start
                 && offset <= body_end
         })
+    }
+
+    /// Whether `offset` is inside a function-like scope
+    /// (function/method/closure/arrow function body).
+    pub fn is_inside_function_like_scope(&self, offset: u32) -> bool {
+        self.find_enclosing_scope(offset) != 0
+    }
+
+    /// Binary-search helper: check whether `offset` falls inside any
+    /// `(start, end)` range in a vec sorted by start offset.
+    fn offset_in_sorted_ranges(ranges: &[(u32, u32)], offset: u32) -> bool {
+        // Find the first range whose start is past `offset`.
+        let idx = ranges.partition_point(|&(start, _)| start <= offset);
+        // Check all candidate ranges (those with start <= offset) from
+        // the closest one backward.  Usually only one or two iterations
+        // are needed since scopes are rarely deeply nested.
+        ranges[..idx].iter().rev().any(|&(_, end)| offset <= end)
+    }
+
+    /// Whether `offset` is inside a breakable scope where `break` is valid.
+    pub fn is_inside_breakable_scope(&self, offset: u32) -> bool {
+        Self::offset_in_sorted_ranges(&self.breakable_scopes, offset)
+    }
+
+    /// Whether `offset` is inside a loop scope where `continue` is valid.
+    pub fn is_inside_loop_scope(&self, offset: u32) -> bool {
+        Self::offset_in_sorted_ranges(&self.loop_scopes, offset)
+    }
+
+    /// Whether `offset` is inside a switch scope where `case/default`
+    /// labels are valid.
+    pub fn is_inside_switch_scope(&self, offset: u32) -> bool {
+        Self::offset_in_sorted_ranges(&self.switch_scopes, offset)
     }
 }
 
