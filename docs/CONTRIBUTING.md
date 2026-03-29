@@ -39,6 +39,10 @@ Note that clippy runs twice, once for library code and once including test code.
 
 See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 
+## Changelog
+
+Update [CHANGELOG.md](CHANGELOG.md) when your PR adds, changes, or fixes something a user would notice. Add entries under `## [Unreleased]` in the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, or `### Removed`). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched. See the existing entries for the style and level of detail expected.
+
 ## Reporting Issues
 
 Open an issue on GitHub with:

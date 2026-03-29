@@ -25,7 +25,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use mago_composer::{ComposerPackage, ComposerPackageExtra};
+pub use mago_composer::ComposerPackage;
+use mago_composer::ComposerPackageExtra;
 
 use crate::types::PhpVersion;
 
@@ -863,17 +864,15 @@ pub(crate) fn detect_drupal_web_root(
     }
 
     // 1. Read from extra.drupal-scaffold.locations.web-root
-    if let Some(ComposerPackageExtra::Object(extra_map)) = &package.extra {
-        if let Some(scaffold) = extra_map.get("drupal-scaffold") {
-            if let Some(web_root_str) = scaffold
-                .get("locations")
-                .and_then(|l| l.get("web-root"))
-                .and_then(|v| v.as_str())
-            {
-                let path = workspace_root.join(web_root_str.trim_end_matches('/'));
-                return Some(path);
-            }
-        }
+    if let Some(ComposerPackageExtra::Object(extra_map)) = &package.extra
+        && let Some(scaffold) = extra_map.get("drupal-scaffold")
+        && let Some(web_root_str) = scaffold
+            .get("locations")
+            .and_then(|l| l.get("web-root"))
+            .and_then(|v| v.as_str())
+    {
+        let path = workspace_root.join(web_root_str.trim_end_matches('/'));
+        return Some(path);
     }
 
     // 2. Filesystem fallback: find which common dir contains core/lib/Drupal.php

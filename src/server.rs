@@ -1126,36 +1126,36 @@ impl Backend {
         // contain every base interface and hook definition that modules
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
-        if let Some(ref pkg) = composer_json {
-            if let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg) {
-                let drupal_result = classmap_scanner::scan_drupal_directories(&drupal_web_root);
-                let drupal_count = drupal_result.classmap.len()
-                    + drupal_result.function_index.len()
-                    + drupal_result.constant_index.len();
-                {
-                    let mut cm = self.classmap.write();
-                    for (fqn, path) in drupal_result.classmap {
-                        cm.entry(fqn).or_insert(path);
-                    }
+        if let Some(ref pkg) = composer_json
+            && let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg)
+        {
+            let drupal_result = classmap_scanner::scan_drupal_directories(&drupal_web_root);
+            let drupal_count = drupal_result.classmap.len()
+                + drupal_result.function_index.len()
+                + drupal_result.constant_index.len();
+            {
+                let mut cm = self.classmap.write();
+                for (fqn, path) in drupal_result.classmap {
+                    cm.entry(fqn).or_insert(path);
                 }
-                {
-                    let mut fi = self.autoload_function_index.write();
-                    for (fqn, path) in drupal_result.function_index {
-                        fi.entry(fqn).or_insert(path);
-                    }
-                }
-                {
-                    let mut ci = self.autoload_constant_index.write();
-                    for (name, path) in drupal_result.constant_index {
-                        ci.entry(name).or_insert(path);
-                    }
-                }
-                tracing::info!(
-                    "PHPantom: Drupal web root {:?}, {} symbols indexed",
-                    drupal_web_root,
-                    drupal_count
-                );
             }
+            {
+                let mut fi = self.autoload_function_index.write();
+                for (fqn, path) in drupal_result.function_index {
+                    fi.entry(fqn).or_insert(path);
+                }
+            }
+            {
+                let mut ci = self.autoload_constant_index.write();
+                for (name, path) in drupal_result.constant_index {
+                    ci.entry(name).or_insert(path);
+                }
+            }
+            tracing::info!(
+                "PHPantom: Drupal web root {:?}, {} symbols indexed",
+                drupal_web_root,
+                drupal_count
+            );
         }
 
         // ── PSR-0 (legacy) classmap ─────────────────────────────────

@@ -162,7 +162,7 @@ impl Backend {
                 (
                     CodeActionKind::QUICKFIX,
                     // The most-restrictive valid target is preferred.
-                    Some(phpstan_targets.first().map_or(false, |t| t == new_keyword)),
+                    Some(phpstan_targets.first().is_some_and(|t| t == new_keyword)),
                     phpstan_diag.as_ref().map(|d| vec![d.clone()]),
                 )
             } else {
