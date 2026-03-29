@@ -190,6 +190,20 @@ impl Backend {
         }
     }
 
+    /// Resolve class name keywords (`self`, `static`, `parent`) to actual
+    /// class names in the context of the current class.
+    fn resolve_class_name_keyword(class_name: &str, current_class: Option<&ClassInfo>) -> String {
+        match class_name {
+            "self" | "static" => current_class
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| class_name.to_string()),
+            "parent" => current_class
+                .and_then(|c| c.parent_class.clone())
+                .unwrap_or_else(|| class_name.to_string()),
+            _ => class_name.to_string(),
+        }
+    }
+
     /// Build a [`ResolvedCallableTarget`] for a constructor call.
     ///
     /// Loads and merges the class, then extracts `__construct` parameters.
@@ -265,11 +279,15 @@ impl Backend {
 
         match effective {
             // ── Constructor: `new ClassName` or `new ClassName()` ────
-            SubjectExpr::NewExpr { class_name } => Self::resolve_constructor_callable(
-                class_name,
-                &class_loader,
-                &self.resolved_class_cache,
-            ),
+            SubjectExpr::NewExpr { class_name } => {
+                let resolved_class_name =
+                    Self::resolve_class_name_keyword(class_name, rctx.current_class.as_deref());
+                Self::resolve_constructor_callable(
+                    &resolved_class_name,
+                    &class_loader,
+                    &self.resolved_class_cache,
+                )
+            }
 
             // ── Instance method call: `$subject->method(…)` ─────────
             SubjectExpr::MethodCall { base, method } => {

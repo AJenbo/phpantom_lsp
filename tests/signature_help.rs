@@ -282,6 +282,89 @@ async fn constructor_second_param() {
     assert_eq!(active_param(&sh), 1);
 }
 
+#[tokio::test]
+async fn constructor_self_keyword() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_ctor_self.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public function __construct(string $host, int $port) {}\n",
+        "    public static function create(): self {\n",
+        "        return new self(\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 4, 24).await.unwrap();
+    assert!(sig_label(&sh).contains("string $host"));
+    assert!(sig_label(&sh).contains("int $port"));
+    assert_eq!(active_param(&sh), 0);
+}
+
+#[tokio::test]
+async fn constructor_static_keyword() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_ctor_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function __construct(array $options, bool $debug = false) {}\n",
+        "    public static function make(): static {\n",
+        "        return new static(\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 4, 26).await.unwrap();
+    assert!(sig_label(&sh).contains("array $options"));
+    assert!(sig_label(&sh).contains("bool $debug"));
+    assert_eq!(active_param(&sh), 0);
+}
+
+#[tokio::test]
+async fn constructor_parent_keyword() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_ctor_parent.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Animal {\n",
+        "    public function __construct(string $name, int $age) {}\n",
+        "}\n",
+        "class Dog extends Animal {\n",
+        "    public function __construct(string $name, int $age, string $breed) {\n",
+        "        parent::__construct(\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 6, 28).await.unwrap();
+    assert!(sig_label(&sh).contains("string $name"));
+    assert!(sig_label(&sh).contains("int $age"));
+    assert_eq!(active_param(&sh), 0);
+}
+
+#[tokio::test]
+async fn constructor_parent_keyword_with_new() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///sig_ctor_new_parent.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function __construct(string $value) {}\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public function test(): void {\n",
+        "        $x = new parent(\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 6, 24).await.unwrap();
+    assert!(sig_label(&sh).contains("string $value"));
+    assert_eq!(active_param(&sh), 0);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  No signature help outside parentheses
 // ═══════════════════════════════════════════════════════════════════════════

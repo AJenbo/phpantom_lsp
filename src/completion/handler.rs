@@ -41,6 +41,7 @@ use crate::completion::class_completion::{
 use crate::completion::named_args::{NamedArgContext, parse_existing_args};
 use crate::docblock::types::PHPDOC_TYPE_KEYWORDS;
 use crate::symbol_map::SymbolKind;
+use crate::types::ClassInfo;
 use crate::types::{CompletionTarget, FileContext};
 use crate::util::{find_class_at_offset, position_to_byte_offset, position_to_offset};
 
@@ -1089,6 +1090,92 @@ impl Backend {
 
     // ─── Strategy: class / constant / function completion ────────────────
 
+    /// Build completion item for class keywords (`self`, `static`, `parent`)
+    /// in `new` expression contexts.
+    ///
+    /// When the cursor is inside a class and typing `new s`, these keywords
+    /// should be offered alongside regular class names. If the current class
+    /// has a constructor, the completion includes parameter snippets.
+    fn build_class_keyword_completions(
+        &self,
+        prefix: &str,
+        current_class: Option<&ClassInfo>,
+    ) -> Option<CompletionItem> {
+        let Some(current_class) = current_class else {
+            return None;
+        };
+
+        let prefix_lower = prefix.to_lowercase();
+
+        for keyword in ["self", "static"] {
+            if !keyword.starts_with(&prefix_lower) {
+                continue;
+            }
+
+            let mut item = CompletionItem {
+                label: keyword.to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some(format!("Instantiate current class")),
+                filter_text: Some(keyword.to_string()),
+                sort_text: Some(format!("0_{}", keyword)),
+                ..CompletionItem::default()
+            };
+
+            // Add constructor snippet if available
+            if let Some(ctor) = current_class
+                .methods
+                .iter()
+                .find(|m| m.name == "__construct")
+            {
+                let snippet =
+                    crate::completion::builder::build_callable_snippet(keyword, &ctor.parameters);
+                item.insert_text = Some(snippet);
+                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+            } else {
+                item.insert_text = Some(format!("{}()$0", keyword));
+                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+            }
+
+            return Some(item);
+        }
+
+        // `parent` - reference the parent class
+        if "parent".starts_with(&prefix_lower)
+            && let Some(parent_name) = &current_class.parent_class
+        {
+            let mut item = CompletionItem {
+                label: "parent".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some(format!("Instantiate parent class ({})", parent_name)),
+                filter_text: Some("parent".to_string()),
+                sort_text: Some("0_parent".to_string()),
+                ..CompletionItem::default()
+            };
+
+            // Try to load parent class and get its constructor
+            if let Some(parent_cls) = self.find_or_load_class(parent_name) {
+                if let Some(ctor) = parent_cls.methods.iter().find(|m| m.name == "__construct") {
+                    let snippet = crate::completion::builder::build_callable_snippet(
+                        "parent",
+                        &ctor.parameters,
+                    );
+                    item.insert_text = Some(snippet);
+                    item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                } else {
+                    item.insert_text = Some("parent()$0".to_string());
+                    item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                }
+            } else {
+                item.insert_text = Some("parent()$0".to_string());
+                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+            }
+
+            return Some(item);
+        }
+
+        None
+    }
+
     /// Try to offer class name, constant, and function completions.
     ///
     /// When there is no `->` or `::` operator, check whether the user is
@@ -1327,14 +1414,26 @@ impl Backend {
         // instanceof), only class names are valid — skip constants
         // and functions.
         if class_ctx.is_class_only() {
-            if class_items.is_empty() {
-                return None;
-            }
-            let items = if paren_follows_cursor(content, position) {
+            let mut items = if paren_follows_cursor(content, position) {
                 strip_snippet_parens(class_items)
             } else {
                 class_items
             };
+
+            // For `new` expressions, also offer `self`, `static`, and `parent`
+            // keywords when inside a class.
+            if class_ctx.is_new() {
+                let cursor_offset = position_to_offset(content, position);
+                let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
+                let keyword_items =
+                    self.build_class_keyword_completions(&partial, current_class.as_deref());
+                items.extend(keyword_items);
+            }
+
+            if items.is_empty() {
+                return None;
+            }
+
             return Some(CompletionResponse::List(CompletionList {
                 is_incomplete: class_incomplete,
                 items,

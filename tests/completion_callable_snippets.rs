@@ -408,8 +408,8 @@ async fn test_snippet_user_function_multiple_required() {
 
 // ─── `new ClassName` Snippet Tests ──────────────────────────────────────────
 
-/// Non-namespaced classes are discovered via class_index (a file map),
-/// so they get `Name()$0` without constructor params.
+/// Non-namespaced classes in the same file are available via ast_map (source 2),
+/// so they get constructor params included in the snippet.
 #[tokio::test]
 async fn test_snippet_new_class_non_namespaced_gets_empty_parens() {
     let backend = create_test_backend();
@@ -427,8 +427,8 @@ async fn test_snippet_new_class_non_namespaced_gets_empty_parens() {
 
     assert_eq!(
         item.insert_text.as_deref(),
-        Some("MoneyFactory()$0"),
-        "Non-namespaced class from class_index should get empty parens"
+        Some("MoneyFactory(${1:\\$amount})$0"),
+        "Non-namespaced class in same file has constructor info available"
     );
     assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
 }
@@ -677,8 +677,8 @@ async fn test_snippet_new_inside_method_same_namespace() {
     assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
 }
 
-/// `new ClassName` for a non-namespaced class (class_index source) gets
-/// just empty parens since we don't do extra lookups for file maps.
+/// `new ClassName` for a non-namespaced class in the same file has
+/// constructor info available via ast_map (source 2).
 #[tokio::test]
 async fn test_snippet_new_inside_method_non_namespaced() {
     let backend = create_test_backend();
@@ -700,8 +700,8 @@ async fn test_snippet_new_inside_method_non_namespaced() {
 
     assert_eq!(
         item.insert_text.as_deref(),
-        Some("Logger()$0"),
-        "Non-namespaced class from class_index gets empty parens"
+        Some("Logger(${1:\\$channel})$0"),
+        "Non-namespaced class in same file has constructor info available"
     );
     assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
 }
@@ -1068,5 +1068,186 @@ async fn test_snippet_suppressed_for_static_call_when_parens_follow() {
     assert!(
         item.insert_text_format != Some(InsertTextFormat::SNIPPET),
         "should not use snippet format for static call when parens already follow"
+    );
+}
+
+// ─── Class Keywords (self, static, parent) in new expressions ───────────────
+
+/// `new self` should be offered with constructor snippet when inside a class.
+#[tokio::test]
+async fn test_snippet_new_self_with_constructor() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_self.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public function __construct(string $host, int $port) {}\n",
+        "    public static function create(): self {\n",
+        "        return new sel\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 22).await;
+    let item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "self")
+        .expect("Should find 'self' keyword");
+
+    assert_eq!(
+        item.insert_text.as_deref(),
+        Some("self(${1:\\$host}, ${2:\\$port})$0"),
+        "self should include constructor parameters"
+    );
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert!(
+        item.detail
+            .as_ref()
+            .unwrap()
+            .contains("Instantiate current class")
+    );
+}
+
+/// `new static` should be offered with constructor snippet when inside a class.
+#[tokio::test]
+async fn test_snippet_new_static_with_constructor() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_static.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Factory {\n",
+        "    public function __construct(array $options, bool $debug = false) {}\n",
+        "    public static function make(): static {\n",
+        "        return new sta\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 4, 22).await;
+    let item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "static")
+        .expect("Should find 'static' keyword");
+
+    assert_eq!(
+        item.insert_text.as_deref(),
+        Some("static(${1:\\$options})$0"),
+        "static should include required constructor parameters only"
+    );
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+}
+
+/// `new parent` should be offered with parent constructor snippet when inside a child class.
+#[tokio::test]
+async fn test_snippet_new_parent_with_constructor() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_parent.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Animal {\n",
+        "    public function __construct(string $name, int $age) {}\n",
+        "}\n",
+        "class Dog extends Animal {\n",
+        "    public function test(): void {\n",
+        "        $x = new par\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 6, 19).await;
+    let item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "parent")
+        .expect("Should find 'parent' keyword");
+
+    assert_eq!(
+        item.insert_text.as_deref(),
+        Some("parent(${1:\\$name}, ${2:\\$age})$0"),
+        "parent should include parent class constructor parameters"
+    );
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert!(item.detail.as_ref().unwrap().contains("Animal"));
+}
+
+/// `new self` without constructor should offer empty parens snippet.
+#[tokio::test]
+async fn test_snippet_new_self_no_constructor() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_self_noctor.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Simple {\n",
+        "    public static function create(): self {\n",
+        "        return new sel\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 22).await;
+    let item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "self")
+        .expect("Should find 'self' keyword");
+
+    assert_eq!(
+        item.insert_text.as_deref(),
+        Some("self()$0"),
+        "self without constructor should have empty parens"
+    );
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+}
+
+/// `parent` should not be offered when class has no parent.
+#[tokio::test]
+async fn test_snippet_new_parent_not_offered_without_parent() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_no_parent.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Standalone {\n",
+        "    public function test(): void {\n",
+        "        $x = new par\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 3, 20).await;
+    let parent_item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "parent");
+
+    assert!(
+        parent_item.is_none(),
+        "parent should not be offered when class has no parent"
+    );
+}
+
+/// `self`/`static`/`parent` should not be offered outside a class context.
+#[tokio::test]
+async fn test_snippet_new_keywords_not_offered_outside_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///new_outside_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function test(): void {\n",
+        "    $x = new sel\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 2, 16).await;
+    let self_item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "self");
+    let static_item = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "static");
+
+    assert!(
+        self_item.is_none(),
+        "self should not be offered outside a class"
+    );
+    assert!(
+        static_item.is_none(),
+        "static should not be offered outside a class"
     );
 }
