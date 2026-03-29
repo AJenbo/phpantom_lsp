@@ -19,6 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::util::ranges_overlap;
 
 /// PHPStan identifier prefix for unmatched ignore errors.
 ///
@@ -568,15 +569,6 @@ fn is_ignorable(diag: &Diagnostic) -> bool {
             .unwrap_or(true),
         None => true,
     }
-}
-
-/// Check whether two LSP ranges overlap (share at least one character
-/// position).
-fn ranges_overlap(a: &Range, b: &Range) -> bool {
-    !(a.end.line < b.start.line
-        || (a.end.line == b.start.line && a.end.character <= b.start.character)
-        || b.end.line < a.start.line
-        || (b.end.line == a.start.line && b.end.character <= a.start.character))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

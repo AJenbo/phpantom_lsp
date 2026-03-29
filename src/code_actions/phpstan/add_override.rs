@@ -24,6 +24,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::util::ranges_overlap;
 
 /// The PHPStan identifier we match on.
 const MISSING_OVERRIDE_ID: &str = "method.missingOverride";
@@ -483,11 +484,6 @@ fn byte_offset_to_lsp(content: &str, offset: usize) -> Position {
     let last_newline = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
     let character = content[last_newline..offset].chars().count() as u32;
     Position { line, character }
-}
-
-/// Check if two LSP ranges overlap.
-fn ranges_overlap(a: &Range, b: &Range) -> bool {
-    a.start <= b.end && b.start <= a.end
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

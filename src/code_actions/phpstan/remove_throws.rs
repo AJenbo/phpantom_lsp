@@ -22,6 +22,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
+use crate::util::ranges_overlap;
 
 /// PHPStan identifiers we match on.
 const UNUSED_TYPE_ID: &str = "throws.unusedType";
@@ -393,10 +394,6 @@ fn byte_offset_to_lsp(content: &str, offset: usize) -> Position {
     let last_newline = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
     let character = content[last_newline..offset].chars().count() as u32;
     Position { line, character }
-}
-
-fn ranges_overlap(a: &Range, b: &Range) -> bool {
-    a.start.line <= b.end.line && b.start.line <= a.end.line
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

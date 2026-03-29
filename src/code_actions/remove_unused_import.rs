@@ -25,6 +25,7 @@ use tower_lsp::lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
+use crate::util::ranges_overlap;
 
 impl Backend {
     /// Collect "Remove unused import" code actions.
@@ -205,10 +206,6 @@ fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
     }
 
     depth <= 0
-}
-
-fn ranges_overlap(a: &Range, b: &Range) -> bool {
-    a.start <= b.end && b.start <= a.end
 }
 
 /// Build a `TextEdit` that deletes the full line(s) covered by `range`,
@@ -400,10 +397,10 @@ mod tests {
     }
 
     #[test]
-    fn touching_ranges_overlap() {
+    fn touching_ranges_do_not_overlap() {
         let a = Range::new(Position::new(1, 0), Position::new(1, 5));
         let b = Range::new(Position::new(1, 5), Position::new(1, 10));
-        assert!(ranges_overlap(&a, &b));
+        assert!(!ranges_overlap(&a, &b));
     }
 
     #[test]

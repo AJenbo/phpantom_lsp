@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
-use crate::util::{offset_to_position, position_to_offset};
+use crate::util::{offset_to_position, position_to_offset, ranges_overlap};
 
 /// Symbols that cannot be renamed.
 const NON_RENAMEABLE_KEYWORDS: &[&str] = &["self", "static", "parent"];
@@ -438,7 +438,7 @@ impl Backend {
                 // If this reference falls inside the use-statement line,
                 // skip it — the whole-line edit below will handle it.
                 if let Some(ref ul) = use_line_range
-                    && ranges_overlap(loc.range, ul.range)
+                    && ranges_overlap(&loc.range, &ul.range)
                 {
                     continue;
                 }
@@ -680,14 +680,6 @@ fn pick_collision_alias(base_name: &str, use_map: &HashMap<String, String>) -> S
     }
     // Extremely unlikely fallback.
     format!("{}Alias99", base_name)
-}
-
-/// Check whether two LSP ranges overlap.
-fn ranges_overlap(a: Range, b: Range) -> bool {
-    !(a.end.line < b.start.line
-        || (a.end.line == b.start.line && a.end.character <= b.start.character)
-        || b.end.line < a.start.line
-        || (b.end.line == a.start.line && b.end.character <= a.start.character))
 }
 
 /// Find the LSP range of the `use` statement line that imports `old_fqn`.

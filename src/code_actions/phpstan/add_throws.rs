@@ -34,6 +34,7 @@ use crate::code_actions::make_code_action_data;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::parser::with_parsed_program;
 use crate::util::offset_to_position;
+use crate::util::ranges_overlap;
 
 /// The PHPStan identifier we match on.
 const CHECKED_EXCEPTION_ID: &str = "missingType.checkedException";
@@ -564,10 +565,6 @@ fn byte_range_to_lsp(content: &str, start: usize, end: usize) -> Range {
         start: byte_offset_to_lsp(content, start),
         end: byte_offset_to_lsp(content, end),
     }
-}
-
-fn ranges_overlap(a: &Range, b: &Range) -> bool {
-    a.start.line <= b.end.line && b.start.line <= a.end.line
 }
 
 /// Find the line range (start, end) of the enclosing function/method body

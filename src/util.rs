@@ -16,6 +16,19 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
+/// Check whether two LSP ranges overlap (share at least one character
+/// position).
+///
+/// Two ranges do **not** overlap when one ends exactly where the other
+/// starts (i.e. touching ranges are non-overlapping).  This matches
+/// the LSP convention where a range's `end` position is exclusive.
+pub(crate) fn ranges_overlap(a: &Range, b: &Range) -> bool {
+    !(a.end.line < b.start.line
+        || (a.end.line == b.start.line && a.end.character <= b.start.character)
+        || b.end.line < a.start.line
+        || (b.end.line == a.start.line && b.end.character <= a.start.character))
+}
+
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
 /// panic.
 ///

@@ -10,25 +10,38 @@ modifies the source code to resolve the issue.
 Before diving into new actions, these small improvements will pay dividends
 across the board.
 
-### R1. Parse and store `ignorable` from PHPStan output
+### R1. Parse and store `ignorable` from PHPStan output ✅
 
 PHPStan's JSON output includes an `"ignorable"` field per message, but
 `parse_phpstan_message()` in `phpstan.rs` currently ignores it. We should:
 
-1. Store `ignorable` in `Diagnostic.data` as a JSON boolean.
-2. In `phpstan_ignore.rs`, skip the "Add `@phpstan-ignore`" action when
+1. ✅ Store `ignorable` in `Diagnostic.data` as a JSON boolean.
+2. ✅ In `phpstan_ignore.rs`, skip the "Add `@phpstan-ignore`" action when
    `ignorable` is `false`. This prevents offering an ignore comment for
    errors like `method.visibility` that PHPStan will not honour.
 
 This is referenced by H11 and is generally good hygiene.
 
-### R2. Extract `ranges_overlap` into a shared utility
+**Status:** Complete. `parse_phpstan_message()` in `phpstan.rs` parses the
+`"ignorable"` field and stores it in `Diagnostic.data`. The `is_ignorable()`
+helper in `ignore.rs` reads it and `collect_phpstan_ignore_actions()` skips
+non-ignorable diagnostics. Tests cover both sides (parsing and consumption).
+
+### R2. Extract `ranges_overlap` into a shared utility ✅
 
 Every code action file has its own private `ranges_overlap` function. Move
 it to `crate::util` and import it everywhere. This avoids drift and
 makes new actions slightly less boilerplate.
 
-### R3. Shared tip extraction helper
+**Status:** Complete. A single `pub(crate) fn ranges_overlap(&Range, &Range) -> bool`
+now lives in `src/util.rs` using the full character-level overlap check. All
+7 previous copies (in `add_override.rs`, `add_throws.rs`, `ignore.rs`,
+`remove_throws.rs`, `remove_unused_import.rs`, `diagnostics/mod.rs`, and
+`rename/mod.rs`) have been removed and replaced with `use crate::util::ranges_overlap`.
+The `rename/mod.rs` call site was updated from by-value to by-reference parameters.
+All 2,950 unit tests pass; clippy clean.
+
+### R3. Shared tip extraction helper ✅
 
 Tips are available in `Diagnostic.message` — they're appended after a `\n`
 by `parse_phpstan_message()`. Add a small helper:
@@ -44,6 +57,10 @@ fn split_phpstan_tip(message: &str) -> (&str, Option<&str>) {
 ```
 
 This is used by H4, H5, H12, H14, H15, H20.
+
+**Status:** Complete. `pub(crate) fn split_phpstan_tip` lives in
+`src/code_actions/phpstan/mod.rs`. Three unit tests cover: message with
+tip, message without tip, and empty tip after newline. All pass.
 
 ---
 

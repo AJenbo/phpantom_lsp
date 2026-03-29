@@ -29,6 +29,23 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
+/// Split a PHPStan diagnostic message into the primary message and optional tip.
+///
+/// `parse_phpstan_message()` in `phpstan.rs` appends the tip after a `\n`
+/// separator when the PHPStan JSON includes a `"tip"` field.  This helper
+/// reverses that so code actions can inspect the tip independently (e.g. to
+/// extract a suggested type or attribute name).
+///
+/// Returns `(message, Some(tip))` when a tip is present, or
+/// `(message, None)` when there is no tip.
+#[allow(dead_code)] // consumers land with H4, H5, H12, H14, H15, H20
+pub(crate) fn split_phpstan_tip(message: &str) -> (&str, Option<&str>) {
+    match message.split_once('\n') {
+        Some((msg, tip)) => (msg, Some(tip)),
+        None => (message, None),
+    }
+}
+
 impl Backend {
     /// Collect all PHPStan-specific code actions.
     ///
@@ -52,5 +69,31 @@ impl Backend {
 
         // ── Add #[Override] for overriding methods ──────────────────
         self.collect_add_override_actions(uri, content, params, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_message_with_tip() {
+        let (msg, tip) = split_phpstan_tip("Some error.\nUse #[Override] to fix.");
+        assert_eq!(msg, "Some error.");
+        assert_eq!(tip, Some("Use #[Override] to fix."));
+    }
+
+    #[test]
+    fn returns_none_when_no_tip() {
+        let (msg, tip) = split_phpstan_tip("Some error.");
+        assert_eq!(msg, "Some error.");
+        assert_eq!(tip, None);
+    }
+
+    #[test]
+    fn empty_tip_after_newline() {
+        let (msg, tip) = split_phpstan_tip("Some error.\n");
+        assert_eq!(msg, "Some error.");
+        assert_eq!(tip, Some(""));
     }
 }

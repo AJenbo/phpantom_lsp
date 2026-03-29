@@ -27,6 +27,12 @@ within the same impact tier.
 | M4  | [Migrate to mago-type-syntax](todo/mago.md#m4-mago-type-syntax) — Phase 1 ✅, Phase 2 ✅, next: Phase 3                                             | Critical | Very High   |
 | F4  | [`codeAction/resolve` — deferred edit computation](todo/lsp-features.md#f4-codeactionresolve--deferred-edit-computation-and-diagnostic-clearing) | High     | Medium      |
 | A7  | [Extract constant](todo/actions.md#a7-extract-constant)                                                                                          | Medium   | Medium      |
+| R1  | ✅ [Parse and store `ignorable` from PHPStan output](todo/phpstan-actions.md#r1-parse-and-store-ignorable-from-phpstan-output)                      | Medium   | Low         |
+| R2  | ✅ [Extract `ranges_overlap` into a shared utility](todo/phpstan-actions.md#r2-extract-ranges_overlap-into-a-shared-utility)                        | Low      | Low         |
+| R3  | ✅ [Shared tip extraction helper](todo/phpstan-actions.md#r3-shared-tip-extraction-helper)                                                          | Low      | Low         |
+| H1  | [`new.static` — add `final` or `@phpstan-consistent-constructor`](todo/phpstan-actions.md#h1-newstatic--unsafe-usage-of-new-static)              | Medium   | Low         |
+| H3  | [`method.override` / `property.override` — remove `#[Override]`](todo/phpstan-actions.md#h3-methodoverride--propertyoverride--remove-override-attribute) | Medium   | Low         |
+| H5  | [`method.tentativeReturnType` — add `#[\ReturnTypeWillChange]`](todo/phpstan-actions.md#h5-methodtentativereturntype--add-returntypewillchange)  | Medium   | Low         |
 |     | **Release 0.7.0**                                                                                                                                |          |             |
 
 ## Sprint 5 — Polish for office adoption
@@ -113,9 +119,7 @@ unlikely to move the needle for most users.
 | A10  | [Generate interface from class](todo/actions.md#a10-generate-interface-from-class)                                                                                          | Low-Medium  | Medium         |
 | A3   | Switch → match conversion                                                                                                                                                   | Low         | Medium         |
 |      | **[PHPStan Code Actions](todo/phpstan-actions.md)**                                                                                                                         |             |                |
-| H1   | `new.static` — add `final` or `@phpstan-consistent-constructor`                                                                                                             | Medium      | Low            |
-| H3   | `method.override` / `property.override` — remove `#[Override]`                                                                                                              | Medium      | Low            |
-| H5   | `method.tentativeReturnType` — add `#[\ReturnTypeWillChange]`                                                                                                               | Medium      | Low            |
+
 | H7   | `return.phpDocType` — fix `@return` to match native type                                                                                                                    | Medium      | Low            |
 | H8   | `parameter.phpDocType` — fix `@param` to match native type                                                                                                                  | Medium      | Low            |
 | H9   | `property.phpDocType` — fix property docblock type                                                                                                                          | Medium      | Low            |
