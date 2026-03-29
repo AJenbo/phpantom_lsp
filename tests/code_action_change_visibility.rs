@@ -1068,25 +1068,23 @@ class Child extends Base {
     };
     {
         let mut cache = backend.phpstan_last_diags().lock();
-        cache
-            .entry(uri.to_string())
-            .or_default()
-            .push(diag.clone());
+        cache.entry(uri.to_string()).or_default().push(diag.clone());
     }
 
     let actions = get_code_actions(&backend, uri, content, 5, 6);
 
     // There should be a fix-visibility action.
     let vis_actions = find_visibility_actions(&actions);
-    assert!(!vis_actions.is_empty(), "should offer fix-visibility action");
+    assert!(
+        !vis_actions.is_empty(),
+        "should offer fix-visibility action"
+    );
 
     // But there should NOT be an "Ignore" action (because ignorable: false).
     let ignore_actions: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.contains("@phpstan-ignore") => {
-                Some(ca)
-            }
+            CodeActionOrCommand::CodeAction(ca) if ca.title.contains("@phpstan-ignore") => Some(ca),
             _ => None,
         })
         .collect();

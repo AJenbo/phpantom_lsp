@@ -680,6 +680,83 @@ pub fn scan_workspace_fallback_full(
     scan_files_parallel_full(&php_files)
 }
 
+/// Scan Drupal-specific directories for PHP symbols, bypassing `.gitignore`.
+///
+/// Drupal projects typically exclude their web root directories
+/// (`web/core`, `web/modules/contrib`, etc.) from version control via
+/// `.gitignore` because those files are managed by Composer.  The normal
+/// gitignore-aware walkers would therefore silently skip the most important
+/// parts of the codebase.  This function walks with gitignore **disabled**
+/// so that those directories are always indexed.
+///
+/// In addition to `.php` files, Drupal uses several other file extensions
+/// for valid PHP source: `.module`, `.install`, `.theme`, `.profile`,
+/// `.inc`, and `.engine`.  All are included by this scanner.
+///
+/// Test directories (`tests/` and `Tests/`) are excluded by name to avoid
+/// indexing duplicate class definitions from unit-test fixtures.
+pub fn scan_drupal_directories(web_root: &Path) -> WorkspaceScanResult {
+    use ignore::WalkBuilder;
+
+    let drupal_dirs = [
+        "core",
+        "modules/contrib",
+        "modules/custom",
+        "themes/contrib",
+        "themes/custom",
+        "profiles",
+        "sites",
+    ];
+
+    let mut php_files: Vec<PathBuf> = Vec::new();
+
+    for rel in &drupal_dirs {
+        let dir = web_root.join(rel);
+        if !dir.exists() {
+            continue;
+        }
+
+        let walker = WalkBuilder::new(&dir)
+            // Gitignore is intentionally disabled — Drupal's .gitignore
+            // excludes web/core and web/modules/contrib which are the
+            // most critical directories to index.
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .hidden(true) // still skip .git, .idea, etc.
+            .parents(false)
+            .ignore(false)
+            .filter_entry(|entry| {
+                if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                    let name = entry.file_name().to_str().unwrap_or("");
+                    // Exclude test directories (both conventional casings)
+                    if name == "tests" || name == "Tests" {
+                        return false;
+                    }
+                }
+                true
+            })
+            .build();
+
+        for entry in walker.flatten() {
+            let path = entry.path();
+            if path.is_file() && is_drupal_php_file(path) {
+                php_files.push(path.to_path_buf());
+            }
+        }
+    }
+
+    scan_files_parallel_full(&php_files)
+}
+
+/// Return `true` for file extensions that Drupal treats as PHP source.
+fn is_drupal_php_file(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("php" | "module" | "install" | "theme" | "profile" | "inc" | "engine")
+    )
+}
+
 // ─── Core scanner ───────────────────────────────────────────────────────────
 
 /// The **full-scan**: a single-pass byte-level scanner that extracts

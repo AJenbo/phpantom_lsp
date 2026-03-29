@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use mago_composer::ComposerPackage;
+pub use mago_composer::{ComposerPackage, ComposerPackageExtra};
 
 use crate::types::PhpVersion;
 
@@ -837,6 +837,54 @@ pub fn detect_php_version_from_package(package: &ComposerPackage) -> Option<PhpV
 /// `"friendsofphp/php-cs-fixer"`, `"squizlabs/php_codesniffer"`).
 pub(crate) fn has_require_dev(package: &ComposerPackage, dep: &str) -> bool {
     package.require_dev.contains_key(dep)
+}
+
+/// Detect whether the project is a Drupal project and resolve the web root.
+///
+/// Returns `Some(web_root)` if one of the canonical Drupal core packages is
+/// listed in `require` or `require-dev`, and we can determine the web root.
+///
+/// **Web-root resolution order:**
+/// 1. `extra.drupal-scaffold.locations.web-root` in `composer.json`.
+/// 2. Filesystem fallback: the first of `web/`, `docroot/`, `public/`,
+///    `html/` that contains `core/lib/Drupal.php`.
+pub(crate) fn detect_drupal_web_root(
+    workspace_root: &Path,
+    package: &ComposerPackage,
+) -> Option<PathBuf> {
+    const DRUPAL_PACKAGES: &[&str] = &["drupal/core", "drupal/core-recommended", "drupal/core-dev"];
+
+    let is_drupal = DRUPAL_PACKAGES
+        .iter()
+        .any(|pkg| package.require.contains_key(*pkg) || package.require_dev.contains_key(*pkg));
+
+    if !is_drupal {
+        return None;
+    }
+
+    // 1. Read from extra.drupal-scaffold.locations.web-root
+    if let Some(ComposerPackageExtra::Object(extra_map)) = &package.extra {
+        if let Some(scaffold) = extra_map.get("drupal-scaffold") {
+            if let Some(web_root_str) = scaffold
+                .get("locations")
+                .and_then(|l| l.get("web-root"))
+                .and_then(|v| v.as_str())
+            {
+                let path = workspace_root.join(web_root_str.trim_end_matches('/'));
+                return Some(path);
+            }
+        }
+    }
+
+    // 2. Filesystem fallback: find which common dir contains core/lib/Drupal.php
+    for candidate in &["web", "docroot", "public", "html"] {
+        let path = workspace_root.join(candidate);
+        if path.join("core/lib/Drupal.php").exists() {
+            return Some(path);
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

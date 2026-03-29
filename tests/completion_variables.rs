@@ -7580,6 +7580,84 @@ async fn test_completion_phpstan_assert_second_parameter() {
     }
 }
 
+/// `@phpstan-assert-if-true $this` on an instance method narrows the
+/// receiver variable in the then-body.
+///
+/// Pattern (common in Drupal and other frameworks):
+/// ```php
+/// if ($app->isTestApp()) {
+///     $app->testAppMethod(); // $app is TestApplication here
+/// }
+/// ```
+#[tokio::test]
+async fn test_completion_phpstan_assert_if_true_this_narrows_receiver() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///assert_if_true_this.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                                              // 0
+        "class TestApplication extends Application {\n",                                        // 1
+        "    public function testAppMethod(): void {}\n",                                       // 2
+        "}\n",                                                                                  // 3
+        "class Application {\n",                                                                // 4
+        "    /**\n",                                                                            // 5
+        "     * @phpstan-assert-if-true \\TestApplication $this\n",                             // 6
+        "     */\n",                                                                            // 7
+        "    public function isTestApp(): bool { return $this instanceof TestApplication; }\n", // 8
+        "}\n",                                                                                  // 9
+        "function test(Application $app): void {\n", // 10
+        "    if ($app->isTestApp()) {\n",            // 11
+        "        $app->\n",                          // 12
+        "    }\n",                                   // 13
+        "}\n",                                       // 14
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"testAppMethod"),
+                "Should include TestApplication's 'testAppMethod' after @phpstan-assert-if-true $this narrowing, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// `@phpstan-assert-if-true` + `@phpstan-assert-if-false` on the same
 /// function: each applies in the correct branch.
 #[tokio::test]

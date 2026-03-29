@@ -881,10 +881,6 @@ pub(in crate::completion) fn try_apply_assert_condition_narrowing(
         Expression::Call(c) => c,
         _ => return,
     };
-    let info = match extract_call_assertions(call, ctx) {
-        Some(info) => info,
-        None => return,
-    };
 
     // Determine whether the function returned true in this branch.
     //
@@ -894,32 +890,124 @@ pub(in crate::completion) fn try_apply_assert_condition_narrowing(
     // - else-body (inverted=true),  negated       → function returned true
     let function_returned_true = !(inverted ^ condition_negated);
 
-    for assertion in info.assertions {
-        // Determine if this assertion's condition is satisfied in this
-        // branch.  IfTrue assertions apply positively when the function
-        // returned true; IfFalse assertions apply positively when the
-        // function returned false.  In the opposite branch, we apply
-        // the *inverse* (exclude instead of include, and vice-versa).
-        let applies_positively = match assertion.kind {
-            AssertionKind::IfTrue => function_returned_true,
-            AssertionKind::IfFalse => !function_returned_true,
-            AssertionKind::Always => continue, // handled elsewhere
-        };
+    if let Some(info) = extract_call_assertions(call, ctx) {
+        for assertion in info.assertions {
+            // Determine if this assertion's condition is satisfied in this
+            // branch.  IfTrue assertions apply positively when the function
+            // returned true; IfFalse assertions apply positively when the
+            // function returned false.  In the opposite branch, we apply
+            // the *inverse* (exclude instead of include, and vice-versa).
+            let applies_positively = match assertion.kind {
+                AssertionKind::IfTrue => function_returned_true,
+                AssertionKind::IfFalse => !function_returned_true,
+                AssertionKind::Always => continue, // handled elsewhere
+            };
 
-        if let Some(arg_var) =
-            find_assertion_arg_variable(info.argument_list, &assertion.param_name, info.parameters)
-            && arg_var == ctx.var_name
-        {
-            // XOR the assertion's own negation with whether we're in the
-            // opposite branch: positive + non-negated → include,
-            // positive + negated → exclude, opposite + non-negated → exclude,
-            // opposite + negated → include.
-            let should_exclude = assertion.negated ^ !applies_positively;
-            if should_exclude {
-                apply_instanceof_exclusion(&assertion.asserted_type, ctx, results);
-            } else {
-                apply_instanceof_inclusion(&assertion.asserted_type, false, ctx, results);
+            if let Some(arg_var) = find_assertion_arg_variable(
+                info.argument_list,
+                &assertion.param_name,
+                info.parameters,
+            ) && arg_var == ctx.var_name
+            {
+                // XOR the assertion's own negation with whether we're in the
+                // opposite branch: positive + non-negated → include,
+                // positive + negated → exclude, opposite + non-negated → exclude,
+                // opposite + negated → include.
+                let should_exclude = assertion.negated ^ !applies_positively;
+                if should_exclude {
+                    apply_instanceof_exclusion(&assertion.asserted_type, ctx, results);
+                } else {
+                    apply_instanceof_inclusion(&assertion.asserted_type, false, ctx, results);
+                }
             }
+        }
+    } else {
+        // Handle instance method calls: `$var->method()` where the method
+        // carries `@phpstan-assert-if-true $this` (or the -if-false / psalm
+        // variants).  The receiver variable itself is the assertion subject.
+        apply_this_assert_condition_narrowing(call, ctx, results, function_returned_true);
+    }
+}
+
+/// Apply `@phpstan-assert-if-true $this` / `@phpstan-assert-if-false $this`
+/// narrowing for instance method calls used as an `if` condition.
+///
+/// Handles the pattern:
+/// ```php
+/// if ($app->isTestApp()) {
+///     $app->testMethod(); // $app narrowed to TestApplication
+/// }
+/// ```
+/// where `isTestApp()` is annotated with
+/// `@phpstan-assert-if-true \TestApplication $this`.
+///
+/// The receiver's current known types (from `results`) are searched for a
+/// matching method with `$this` assertions.  Assertions are collected first
+/// and applied after the iteration to avoid borrow-check conflicts.
+fn apply_this_assert_condition_narrowing(
+    call: &Call<'_>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ClassInfo>,
+    function_returned_true: bool,
+) {
+    // Extract receiver expression and method name from the call.
+    let (receiver, method_name) = match call {
+        Call::Method(mc) => (
+            mc.object,
+            match &mc.method {
+                ClassLikeMemberSelector::Identifier(ident) => ident.value,
+                _ => return,
+            },
+        ),
+        Call::NullSafeMethod(mc) => (
+            mc.object,
+            match &mc.method {
+                ClassLikeMemberSelector::Identifier(ident) => ident.value,
+                _ => return,
+            },
+        ),
+        _ => return,
+    };
+
+    // The receiver must be the variable we are currently narrowing.
+    let receiver_key = match expr_to_subject_key(receiver) {
+        Some(k) => k,
+        None => return,
+    };
+    if receiver_key != ctx.var_name {
+        return;
+    }
+
+    // Collect (asserted_type, should_exclude) pairs from every current
+    // candidate class that declares the method with a $this assertion.
+    // We collect before mutating `results` to avoid borrow conflicts.
+    let mut to_apply: Vec<(String, bool)> = Vec::new();
+    for class_info in results.iter() {
+        let method = class_info
+            .methods
+            .iter()
+            .find(|m| m.name == method_name && !m.is_static);
+        if let Some(method) = method {
+            for assertion in &method.type_assertions {
+                if assertion.param_name != "$this" {
+                    continue;
+                }
+                let applies_positively = match assertion.kind {
+                    AssertionKind::IfTrue => function_returned_true,
+                    AssertionKind::IfFalse => !function_returned_true,
+                    AssertionKind::Always => continue,
+                };
+                let should_exclude = assertion.negated ^ !applies_positively;
+                to_apply.push((assertion.asserted_type.clone(), should_exclude));
+            }
+        }
+    }
+
+    for (asserted_type, should_exclude) in to_apply {
+        if should_exclude {
+            apply_instanceof_exclusion(&asserted_type, ctx, results);
+        } else {
+            apply_instanceof_inclusion(&asserted_type, false, ctx, results);
         }
     }
 }
