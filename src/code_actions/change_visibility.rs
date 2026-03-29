@@ -153,9 +153,7 @@ impl Backend {
             .unwrap_or_default();
 
         for &(new_keyword, title) in &alternatives {
-            let is_phpstan_target = phpstan_targets
-                .iter()
-                .any(|t| t == new_keyword);
+            let is_phpstan_target = phpstan_targets.iter().any(|t| t == new_keyword);
 
             // When a PHPStan diagnostic drives this action, only the
             // matching targets are emitted as quickfixes; the others
@@ -164,7 +162,7 @@ impl Backend {
                 (
                     CodeActionKind::QUICKFIX,
                     // The most-restrictive valid target is preferred.
-                    Some(phpstan_targets.first().map_or(false, |t| t == new_keyword)),
+                    Some(phpstan_targets.first().is_some_and(|t| t == new_keyword)),
                     phpstan_diag.as_ref().map(|d| vec![d.clone()]),
                 )
             } else {
@@ -354,25 +352,24 @@ impl Backend {
     /// PHPStan may report the error on an attribute line (e.g.
     /// `#[Override]`) rather than the method signature line, so we
     /// search the full span of the member declaration.
-    fn find_visibility_diagnostic(
-        &self,
-        uri: &str,
-        line_range: (u32, u32),
-    ) -> Option<Diagnostic> {
+    fn find_visibility_diagnostic(&self, uri: &str, line_range: (u32, u32)) -> Option<Diagnostic> {
         let cache = self.phpstan_last_diags.lock();
         let diags = cache.get(uri)?;
         let (start_line, end_line) = line_range;
-        diags.iter().find(|d| {
-            let diag_line = d.range.start.line;
-            let in_range = diag_line >= start_line && diag_line <= end_line;
-            let is_vis_id = match &d.code {
-                Some(NumberOrString::String(s)) => {
-                    s == METHOD_VISIBILITY_ID || s == PROPERTY_VISIBILITY_ID
-                }
-                _ => false,
-            };
-            in_range && is_vis_id
-        }).cloned()
+        diags
+            .iter()
+            .find(|d| {
+                let diag_line = d.range.start.line;
+                let in_range = diag_line >= start_line && diag_line <= end_line;
+                let is_vis_id = match &d.code {
+                    Some(NumberOrString::String(s)) => {
+                        s == METHOD_VISIBILITY_ID || s == PROPERTY_VISIBILITY_ID
+                    }
+                    _ => false,
+                };
+                in_range && is_vis_id
+            })
+            .cloned()
     }
 }
 
@@ -458,12 +455,10 @@ fn extract_member_kind(ctx: &CursorContext<'_>) -> Option<MemberKind> {
             }
             MemberContext::Property(property) => {
                 let name = match property {
-                    Property::Plain(plain) => {
-                        plain.items.first().map(|item| {
-                            let var = item.variable();
-                            var.name.strip_prefix('$').unwrap_or(var.name).to_string()
-                        })
-                    }
+                    Property::Plain(plain) => plain.items.first().map(|item| {
+                        let var = item.variable();
+                        var.name.strip_prefix('$').unwrap_or(var.name).to_string()
+                    }),
                     Property::Hooked(hooked) => {
                         let var = hooked.item.variable();
                         Some(var.name.strip_prefix('$').unwrap_or(var.name).to_string())
@@ -471,11 +466,10 @@ fn extract_member_kind(ctx: &CursorContext<'_>) -> Option<MemberKind> {
                 };
                 name.map(MemberKind::Property)
             }
-            MemberContext::Constant(constant) => {
-                constant.items.first().map(|item| {
-                    MemberKind::Constant(item.name.value.to_string())
-                })
-            }
+            MemberContext::Constant(constant) => constant
+                .items
+                .first()
+                .map(|item| MemberKind::Constant(item.name.value.to_string())),
             _ => None,
         },
         _ => None,
@@ -487,24 +481,21 @@ fn extract_member_kind(ctx: &CursorContext<'_>) -> Option<MemberKind> {
 /// Find the visibility of a member in a class's own declarations.
 fn find_member_visibility_in_class(cls: &ClassInfo, member_kind: &MemberKind) -> Option<u8> {
     match member_kind {
-        MemberKind::Method(name) => {
-            cls.methods
-                .iter()
-                .find(|m| m.name == *name)
-                .map(|m| min_visibility_level(&m.visibility))
-        }
-        MemberKind::Property(name) => {
-            cls.properties
-                .iter()
-                .find(|p| p.name == *name)
-                .map(|p| min_visibility_level(&p.visibility))
-        }
-        MemberKind::Constant(name) => {
-            cls.constants
-                .iter()
-                .find(|c| c.name == *name)
-                .map(|c| min_visibility_level(&c.visibility))
-        }
+        MemberKind::Method(name) => cls
+            .methods
+            .iter()
+            .find(|m| m.name == *name)
+            .map(|m| min_visibility_level(&m.visibility)),
+        MemberKind::Property(name) => cls
+            .properties
+            .iter()
+            .find(|p| p.name == *name)
+            .map(|p| min_visibility_level(&p.visibility)),
+        MemberKind::Constant(name) => cls
+            .constants
+            .iter()
+            .find(|c| c.name == *name)
+            .map(|c| min_visibility_level(&c.visibility)),
     }
 }
 
