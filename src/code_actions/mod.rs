@@ -229,6 +229,10 @@ impl Backend {
             "phpstan.addOverride" => self.resolve_add_override(&data, &content),
             "phpstan.addIgnore" => self.resolve_add_ignore(&data, &content),
             "phpstan.removeIgnore" => self.resolve_remove_ignore(&data, &content),
+            "phpstan.removeOverride" => self.resolve_remove_override(&data, &content),
+            "phpstan.addReturnTypeWillChange" => {
+                self.resolve_add_return_type_will_change(&data, &content)
+            }
             "phpstan.newStatic.addTag"
             | "phpstan.newStatic.finalClass"
             | "phpstan.newStatic.finalConstructor" => self.resolve_new_static(&data, &content),

@@ -249,6 +249,29 @@ fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> bool {
     // (see `clear_phpstan_diagnostics_after_resolve` in code_actions).
     // The `@phpstan-ignore` check above still covers manual edits.
 
+    // ── method.override / property.override / property.overrideAttribute ─
+    // The user may remove the attribute by hand, so check whether
+    // `#[Override]` is still present near the diagnostic line.
+    if identifier == "method.override"
+        || identifier == "property.override"
+        || identifier == "property.overrideAttribute"
+    {
+        return crate::code_actions::phpstan::remove_override::is_remove_override_stale(
+            content,
+            diag.range.start.line as usize,
+        );
+    }
+
+    // ── method.tentativeReturnType — #[\ReturnTypeWillChange] added ─
+    // The user may add the attribute by hand, so check whether it is
+    // now present near the diagnostic line.
+    if identifier == "method.tentativeReturnType" {
+        return crate::code_actions::phpstan::add_return_type_will_change::is_add_return_type_will_change_stale(
+            content,
+            diag.range.start.line as usize,
+        );
+    }
+
     // ── new.static — check if the user manually fixed the class ─────
     // Unlike the actions above, `new.static` fixes are commonly applied
     // by hand (adding `final` to the class or constructor), so we keep

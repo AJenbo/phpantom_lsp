@@ -16,14 +16,22 @@
 //! - **Add `#[Override]`** — when PHPStan reports
 //!   `method.missingOverride`, offer to insert `#[\Override]` above
 //!   the method declaration.
+//! - **Remove `#[Override]`** — when PHPStan reports
+//!   `method.override` or `property.override`, offer to remove the
+//!   `#[\Override]` attribute from the declaration.
+//! - **Add `#[\ReturnTypeWillChange]`** — when PHPStan reports
+//!   `method.tentativeReturnType`, offer to insert the attribute
+//!   above the method declaration.
 //! - **PHPStan ignore** — when the cursor is on a line with a PHPStan
 //!   error, offer to add `@phpstan-ignore <identifier>`.  When PHPStan
 //!   reports an unnecessary ignore, offer to remove it.
 
 mod add_override;
+pub(crate) mod add_return_type_will_change;
 pub(crate) mod add_throws;
 mod ignore;
 pub(crate) mod new_static;
+pub(crate) mod remove_override;
 mod remove_throws;
 
 use tower_lsp::lsp_types::*;
@@ -70,6 +78,12 @@ impl Backend {
 
         // ── Add #[Override] for overriding methods ──────────────────
         self.collect_add_override_actions(uri, content, params, out);
+
+        // ── Remove #[Override] from non-overriding members ──────────
+        self.collect_remove_override_actions(uri, content, params, out);
+
+        // ── Add #[\ReturnTypeWillChange] for tentative return types ─
+        self.collect_add_return_type_will_change_actions(uri, content, params, out);
 
         // ── Fix unsafe `new static()` ───────────────────────────────
         self.collect_new_static_actions(uri, content, params, out);

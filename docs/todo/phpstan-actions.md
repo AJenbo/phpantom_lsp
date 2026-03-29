@@ -13,34 +13,7 @@ No outstanding items.
 
 ## Tier 1 — Trivial (no message parsing or simple static message)
 
-### H3. `method.override` / `property.override` — Remove `#[Override]` attribute
-
-**Identifiers:** `method.override`, `property.override`
-**Messages:**
-- `Method Foo::bar() has #[\Override] attribute but does not override any method.`
-- `Property Foo::$baz has #[\Override] attribute but does not override any property.`
-
-Find and remove the `#[Override]` or `#[\Override]` attribute above the
-declaration. If the attribute is on its own line (the common case), remove
-the entire line including the trailing newline. If it shares a line with other
-attributes (e.g. `#[Override, SomeOther]`), remove just the `Override,` or
-`,Override` token — but start with the own-line case only.
-
-**Stale detection:** no `#[Override]` attribute found within a few lines above
-the diagnostic line.
-
----
-
-### H5. `method.tentativeReturnType` — Add `#[\ReturnTypeWillChange]`
-
-**Identifier:** `method.tentativeReturnType`
-**Tip (in message):** `Make it covariant, or use the #[\ReturnTypeWillChange] attribute to temporarily suppress the error.`
-
-Same insertion pattern as P2: add `#[\ReturnTypeWillChange]` on the line
-before the method declaration. Reuse the same attribute-insertion logic.
-
-**Stale detection:** a line above the method contains `#[\ReturnTypeWillChange]`
-or `#[ReturnTypeWillChange]`.
+No outstanding items.
 
 ---
 
@@ -470,16 +443,14 @@ the list.
 Based on effort-to-value ratio and shared infrastructure:
 
 1. **R1, R2, R3** — prerequisites (small, unblocks everything)
-2. **H3** — `#[Override]` remove (shares logic with H2, already shipped)
-3. **H5** — `#[\ReturnTypeWillChange]` (reuses attribute insertion pattern)
-4. **H7, H8, H9** — PHPDoc type mismatch family (implement together)
-5. **H11** — visibility fix (leverages existing `change_visibility.rs`)
-6. **H14** — narrow `@throws` (extends existing `remove_throws.rs`)
-7. **H6** — return type update
-8. **H10** — remove unused union member
-9. **H12** — prefixed class name
-10. **H4** — unset by-ref foreach variable
-11. Everything else based on user demand
+2. **H7, H8, H9** — PHPDoc type mismatch family (implement together)
+3. **H11** — visibility fix (leverages existing `change_visibility.rs`)
+4. **H14** — narrow `@throws` (extends existing `remove_throws.rs`)
+5. **H6** — return type update
+6. **H10** — remove unused union member
+7. **H12** — prefixed class name
+8. **H4** — unset by-ref foreach variable
+9. Everything else based on user demand
 
 ---
 
@@ -514,7 +485,7 @@ let (message, tip) = match diag.message.split_once('\n') {
 };
 ```
 
-Actions that depend on tip text (H4, H5, H12, H14, H15, H20) should use this
+Actions that depend on tip text (H4, H12, H14, H15, H20) should use this
 pattern. The tip text has ANSI/HTML tags already stripped by `strip_ansi_tags`.
 
 ### Stale diagnostic detection
@@ -540,19 +511,12 @@ Each action needs tests following the existing pattern:
 - Stale detection tests that construct `Diagnostic` objects and call
   `is_stale_phpstan_diagnostic`
 
-### Attribute insertion pattern (H3, H5)
+### Attribute insertion pattern (H3, H5) — Implemented
 
-H3 and H5 both need to insert or remove an attribute on the line before a
-method. Factor this into a shared helper (H2 is already implemented in
-`add_override.rs` and can serve as a reference):
-
-```rust
-/// Insert an attribute line before the declaration at `line`.
-fn build_insert_attribute_edit(content: &str, line: u32, attribute: &str) -> TextEdit { ... }
-
-/// Remove an attribute line containing `attribute` near `line`.
-fn build_remove_attribute_edit(content: &str, line: u32, attribute: &str) -> Option<TextEdit> { ... }
-```
+H3 (`remove_override.rs`) and H5 (`add_return_type_will_change.rs`) are now
+implemented. Each module contains its own `find_method_insertion_point` and
+attribute detection helpers, following the same pattern as `add_override.rs`.
+Future attribute-related actions can reference any of these three modules.
 
 ### PHPDoc type mismatch pattern (H7, H8, H9)
 
