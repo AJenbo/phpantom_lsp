@@ -995,6 +995,34 @@ class Handler {
     );
 }
 
+#[test]
+fn no_diagnostic_for_method_via_param_docblock_override() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Node {}
+
+class FuncCall extends Node {
+    public function isFirstClassCallable(): bool {}
+}
+
+class Handler {
+    /**
+     * @param FuncCall $node
+     */
+    public function handle(Node $node): void {
+        $node->isFirstClassCallable();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "No diagnostics expected for existing method via @param override, got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Interface method access
 // ═══════════════════════════════════════════════════════════════════════════

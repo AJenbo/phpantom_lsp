@@ -4052,7 +4052,9 @@ class Foo {
         let backend = Backend::new_test();
         let diags = collect(&backend, "file:///test.php", php);
         assert!(
-            diags.iter().any(|d| d.message.contains("nonExistentMethod")),
+            diags
+                .iter()
+                .any(|d| d.message.contains("nonExistentMethod")),
             "expected unknown member diagnostic for nonExistentMethod, got: {diags:?}",
         );
     }

@@ -1365,10 +1365,15 @@ impl Backend {
                     let bound_display = bound
                         .map(|b| format!(" of `{}`", PhpType::parse(&b).shorten()))
                         .unwrap_or_default();
-                    let default_display = default
-                        .map(|d| format!(" = `{}`", d))
-                        .unwrap_or_default();
-                    format!("**{}** `{}`{}{}", variance.tag_name(), name, bound_display, default_display)
+                    let default_display =
+                        default.map(|d| format!(" = `{}`", d)).unwrap_or_default();
+                    format!(
+                        "**{}** `{}`{}{}",
+                        variance.tag_name(),
+                        name,
+                        bound_display,
+                        default_display
+                    )
                 })
                 .collect();
             if !tpl_entries.is_empty() {
@@ -1562,9 +1567,7 @@ fn find_template_info_in_class(type_str: &str, owner: &ClassInfo) -> Option<Stri
     let bound_display = bound
         .map(|b| format!(" of `{}`", PhpType::parse(&b).shorten()))
         .unwrap_or_default();
-    let default_display = default
-        .map(|d| format!(" = `{}`", d))
-        .unwrap_or_default();
+    let default_display = default.map(|d| format!(" = `{}`", d)).unwrap_or_default();
 
     Some(format!(
         "**{}** `{}`{}{}",

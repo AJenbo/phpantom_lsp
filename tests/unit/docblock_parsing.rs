@@ -1573,11 +1573,7 @@ fn enclosing_return_type_deeply_nested_control_flow() {
 
 #[test]
 fn template_default_simple_bool() {
-    let doc = concat!(
-        "/**\n",
-        " * @template TAsync of bool = false\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template TAsync of bool = false\n", " */",);
     let result = extract_template_params_full(doc);
     assert_eq!(result.len(), 1);
     let (name, bound, _, default) = &result[0];
@@ -1588,11 +1584,7 @@ fn template_default_simple_bool() {
 
 #[test]
 fn template_default_true() {
-    let doc = concat!(
-        "/**\n",
-        " * @template TSync of bool = true\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template TSync of bool = true\n", " */",);
     let result = extract_template_params_full(doc);
     assert_eq!(result.len(), 1);
     let (name, bound, _, default) = &result[0];
@@ -1603,11 +1595,7 @@ fn template_default_true() {
 
 #[test]
 fn template_default_null() {
-    let doc = concat!(
-        "/**\n",
-        " * @template TValue of mixed = null\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template TValue of mixed = null\n", " */",);
     let result = extract_template_params_full(doc);
     assert_eq!(result.len(), 1);
     let (name, bound, _, default) = &result[0];
@@ -1618,11 +1606,7 @@ fn template_default_null() {
 
 #[test]
 fn template_no_default() {
-    let doc = concat!(
-        "/**\n",
-        " * @template T of string\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template T of string\n", " */",);
     let result = extract_template_params_full(doc);
     assert_eq!(result.len(), 1);
     let (name, bound, _, default) = &result[0];
@@ -1633,11 +1617,7 @@ fn template_no_default() {
 
 #[test]
 fn template_no_bound_no_default() {
-    let doc = concat!(
-        "/**\n",
-        " * @template T\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template T\n", " */",);
     let result = extract_template_params_full(doc);
     assert_eq!(result.len(), 1);
     let (name, bound, _, default) = &result[0];
@@ -1677,11 +1657,7 @@ fn template_multiple_with_defaults() {
 #[test]
 fn template_default_stripped_from_bound() {
     // Ensure the bound is just the type, not "bool = false"
-    let doc = concat!(
-        "/**\n",
-        " * @template TAsync of bool = false\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template TAsync of bool = false\n", " */",);
     let params_with_bounds = extract_template_params_with_bounds(doc);
     assert_eq!(params_with_bounds.len(), 1);
     let (name, bound) = &params_with_bounds[0];
@@ -1692,11 +1668,7 @@ fn template_default_stripped_from_bound() {
 #[test]
 fn template_default_stripped_from_names() {
     // extract_template_params should still just return names
-    let doc = concat!(
-        "/**\n",
-        " * @template TAsync of bool = false\n",
-        " */",
-    );
+    let doc = concat!("/**\n", " * @template TAsync of bool = false\n", " */",);
     let params = extract_template_params(doc);
     assert_eq!(params, vec!["TAsync"]);
 }
@@ -1705,8 +1677,8 @@ fn template_default_stripped_from_names() {
 
 #[test]
 fn conditional_resolves_with_template_default_false() {
-    use std::collections::HashMap;
     use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use std::collections::HashMap;
 
     // Simulates: @template TAsync of bool = false
     // @return (TAsync is false ? Response : PromiseInterface)
@@ -1727,8 +1699,8 @@ fn conditional_resolves_with_template_default_false() {
 
 #[test]
 fn conditional_resolves_with_template_default_true() {
-    use std::collections::HashMap;
     use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use std::collections::HashMap;
 
     // Simulates: @template TAsync of bool = true
     // @return (TAsync is false ? Response : PromiseInterface)
@@ -1749,8 +1721,8 @@ fn conditional_resolves_with_template_default_true() {
 
 #[test]
 fn conditional_no_template_default_falls_through() {
-    use std::collections::HashMap;
     use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use std::collections::HashMap;
 
     // When template has no default, the function should fall through
     // to normal resolution (else branch for non-null conditions).
@@ -1772,8 +1744,8 @@ fn conditional_no_template_default_falls_through() {
 
 #[test]
 fn conditional_negated_with_template_default() {
-    use std::collections::HashMap;
     use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use std::collections::HashMap;
 
     // Simulates: @template TAsync of bool = false
     // @return (TAsync is not false ? PromiseInterface : Response)

@@ -253,7 +253,9 @@ pub(crate) fn try_inject_mixin_builder_scopes(
     // Also check the class itself (it might directly declare @mixin Builder<X>).
     loop {
         // Check for Builder mixin on the current class.
-        if let Some(model_name) = find_builder_mixin_model(&current, &active_subs, raw_cls, class_loader) {
+        if let Some(model_name) =
+            find_builder_mixin_model(&current, &active_subs, raw_cls, class_loader)
+        {
             inject_scopes_and_model_methods(result, &model_name, class_loader);
             return;
         }
@@ -315,9 +317,7 @@ fn find_builder_mixin_model(
     use crate::util::short_name;
 
     for mixin_name in &class.mixins {
-        if short_name(mixin_name) != "Builder"
-            && mixin_name != ELOQUENT_BUILDER_FQN
-        {
+        if short_name(mixin_name) != "Builder" && mixin_name != ELOQUENT_BUILDER_FQN {
             continue;
         }
         // Verify it's actually the Eloquent Builder (not some other
@@ -348,9 +348,7 @@ fn find_builder_mixin_model(
             let model_name = resolved.to_string();
             // Only inject if we resolved to a concrete type
             // (not still a template parameter name).
-            if !model_name.is_empty()
-                && !root_cls.template_params.contains(&model_name)
-            {
+            if !model_name.is_empty() && !root_cls.template_params.contains(&model_name) {
                 return Some(model_name);
             }
         }

@@ -816,10 +816,7 @@ fn resolve_rhs_array_access<'b>(
         )
         .into_iter()
         .find_map(|cls| {
-            let merged = crate::virtual_members::resolve_class_fully(
-                &cls,
-                ctx.class_loader,
-            );
+            let merged = crate::virtual_members::resolve_class_fully(&cls, ctx.class_loader);
             super::foreach_resolution::extract_iterable_element_type_from_class(
                 &merged,
                 ctx.class_loader,

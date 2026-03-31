@@ -850,6 +850,78 @@ async fn test_completion_static_double_colon() {
     }
 }
 
+#[tokio::test]
+async fn test_completion_parameter_uses_param_docblock_override() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///param_docblock_override.php").unwrap();
+    let text = r#"<?php
+class Node {}
+class FuncCall extends Node {
+    public function isFirstClassCallable(): bool {}
+    public function getName(): string {}
+}
+class Handler {
+    /**
+     * @param FuncCall $node
+     */
+    public function handle(Node $node): void {
+        $node->
+    }
+}
+"#;
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 11,
+                character: 15,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should resolve $node via @param override"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter_map(|i| i.filter_text.as_deref())
+                .collect();
+            assert!(
+                method_names.contains(&"isFirstClassCallable"),
+                "Should include 'isFirstClassCallable', got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName', got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ─── Completion: new ClassName()->  and  (new ClassName())-> ─────────────────
 
 #[tokio::test]

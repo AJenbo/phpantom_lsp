@@ -756,10 +756,28 @@ fn resolve_variable_in_members<'b>(
                     let type_str_for_resolution =
                         enriched_type_str.as_deref().or(native_type_str.as_deref());
 
-                    let resolved_from_native = type_str_for_resolution
-                        .map(|ts| {
-                            crate::completion::type_resolution::type_hint_to_classes(
-                                ts,
+                    // Check the `@param` docblock annotation which may
+                    // carry a more specific type than the native hint
+                    // (e.g. `@param FuncCall $node` on `Node $node`).
+                    let method_start = method.span().start.offset as usize;
+                    let raw_docblock_type = crate::docblock::find_iterable_raw_type_in_source(
+                        ctx.content,
+                        method_start,
+                        ctx.var_name,
+                    );
+
+                    // Pick the effective type: docblock overrides native
+                    // when it is a compatible refinement.
+                    let effective_type = crate::docblock::resolve_effective_type(
+                        type_str_for_resolution,
+                        raw_docblock_type.as_deref(),
+                    );
+
+                    let resolved_from_effective = effective_type
+                        .as_ref()
+                        .map(|ty| {
+                            crate::completion::type_resolution::type_hint_to_classes_typed(
+                                ty,
                                 &ctx.current_class.name,
                                 ctx.all_classes,
                                 ctx.class_loader,
@@ -767,24 +785,21 @@ fn resolve_variable_in_members<'b>(
                         })
                         .unwrap_or_default();
 
-                    if !resolved_from_native.is_empty() {
+                    if !resolved_from_effective.is_empty() {
                         param_results = ResolvedType::from_classes_with_hint(
-                            resolved_from_native,
-                            PhpType::parse(type_str_for_resolution.unwrap_or("")),
+                            resolved_from_effective,
+                            effective_type.unwrap_or_else(|| {
+                                PhpType::parse(type_str_for_resolution.unwrap_or(""))
+                            }),
                         );
                         break;
                     }
 
-                    // Native hint didn't resolve (e.g. `object`, `mixed`).
-                    // Fall back to the `@param` docblock annotation which
-                    // may carry a more specific type such as
+                    // The effective type didn't resolve to a class (e.g.
+                    // `object`, `mixed`, or an object shape). Fall back to
+                    // the raw `@param` docblock annotation which may carry
+                    // a more specific non-class type such as
                     // `object{foo: int, bar: string}`.
-                    let method_start = method.span().start.offset as usize;
-                    let raw_docblock_type = crate::docblock::find_iterable_raw_type_in_source(
-                        ctx.content,
-                        method_start,
-                        ctx.var_name,
-                    );
                     if let Some(ref raw_docblock_type) = raw_docblock_type {
                         let resolved = crate::completion::type_resolution::type_hint_to_classes(
                             raw_docblock_type,
@@ -894,10 +909,7 @@ fn resolve_variable_in_members<'b>(
                     // Fall back to a standalone `@var` docblock scan
                     // when parameter resolution and assignment walking
                     // yielded no type.
-                    super::closure_resolution::try_standalone_var_docblock(
-                        &body_ctx,
-                        &mut results,
-                    );
+                    super::closure_resolution::try_standalone_var_docblock(&body_ctx, &mut results);
                     if !results.is_empty() {
                         return results;
                     }

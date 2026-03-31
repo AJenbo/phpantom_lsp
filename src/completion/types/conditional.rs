@@ -151,7 +151,9 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         for arg in args.iter().skip(param_idx) {
                             let trimmed = arg.trim();
                             if let Some(class_name) = extract_class_name_from_text(trimmed) {
-                                let class_name = resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
+                                let class_name =
+                                    resolve_self_keyword(&class_name, calling_class_name)
+                                        .unwrap_or(class_name);
                                 if !class_names.contains(&class_name) {
                                     class_names.push(class_name);
                                 }
@@ -182,7 +184,8 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     if let Some(arg) = arg_text
                         && let Some(class_name) = extract_class_name_from_text(arg)
                     {
-                        let class_name = resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
+                        let class_name = resolve_self_keyword(&class_name, calling_class_name)
+                            .unwrap_or(class_name);
                         return Some(class_name);
                     }
                     // Check if the argument is a variable holding class-string
@@ -198,7 +201,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
                     }
                     // Argument isn't a ::class literal or resolvable variable → try else branch
-                    resolve_conditional_with_text_args_and_defaults(else_type, params, text_args, var_resolver, calling_class_name, template_defaults)
+                    resolve_conditional_with_text_args_and_defaults(
+                        else_type,
+                        params,
+                        text_args,
+                        var_resolver,
+                        calling_class_name,
+                        template_defaults,
+                    )
                 }
                 PhpType::Named(s) if s == "null" => {
                     if arg_text.is_none() || arg_text == Some("") || arg_text == Some("null") {
@@ -250,7 +260,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
                     }
                     // Argument doesn't match the literal → else branch.
-                    resolve_conditional_with_text_args_and_defaults(else_type, params, text_args, var_resolver, calling_class_name, template_defaults)
+                    resolve_conditional_with_text_args_and_defaults(
+                        else_type,
+                        params,
+                        text_args,
+                        var_resolver,
+                        calling_class_name,
+                        template_defaults,
+                    )
                 }
                 _ => {
                     // IsType equivalent: can't statically determine most
@@ -271,7 +288,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         );
                     }
                     // Can't statically determine; fall through to else.
-                    resolve_conditional_with_text_args_and_defaults(else_type, params, text_args, var_resolver, calling_class_name, template_defaults)
+                    resolve_conditional_with_text_args_and_defaults(
+                        else_type,
+                        params,
+                        text_args,
+                        var_resolver,
+                        calling_class_name,
+                        template_defaults,
+                    )
                 }
             }
         }
@@ -447,7 +471,8 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 PhpType::ClassString(_) => {
                     // Check if the argument is `X::class`
                     if let Some(class_name) = arg_expr.and_then(extract_class_string_from_expr) {
-                        let class_name = resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
+                        let class_name = resolve_self_keyword(&class_name, calling_class_name)
+                            .unwrap_or(class_name);
                         return Some(class_name);
                     }
                     // Check if the argument is a variable holding class-string
@@ -461,7 +486,14 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         }
                     }
                     // Argument isn't a ::class literal or resolvable variable → try else branch
-                    resolve_conditional_with_args_and_defaults(else_type, params, argument_list, var_resolver, calling_class_name, template_defaults)
+                    resolve_conditional_with_args_and_defaults(
+                        else_type,
+                        params,
+                        argument_list,
+                        var_resolver,
+                        calling_class_name,
+                        template_defaults,
+                    )
                 }
                 PhpType::Named(s) if s == "null" => {
                     if arg_expr.is_none() {
@@ -543,7 +575,14 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     }
                     // We can't statically determine the type of an
                     // arbitrary expression; fall through to else.
-                    resolve_conditional_with_args_and_defaults(else_type, params, argument_list, var_resolver, calling_class_name, template_defaults)
+                    resolve_conditional_with_args_and_defaults(
+                        else_type,
+                        params,
+                        argument_list,
+                        var_resolver,
+                        calling_class_name,
+                        template_defaults,
+                    )
                 }
             }
         }
@@ -614,11 +653,19 @@ pub fn resolve_conditional_without_args_and_defaults(
 
             match condition.as_ref() {
                 PhpType::Named(s) if s == "null" && has_null_default => {
-                    resolve_conditional_without_args_and_defaults(then_type, params, template_defaults)
+                    resolve_conditional_without_args_and_defaults(
+                        then_type,
+                        params,
+                        template_defaults,
+                    )
                 }
                 _ => {
                     // Try else branch
-                    resolve_conditional_without_args_and_defaults(else_type, params, template_defaults)
+                    resolve_conditional_without_args_and_defaults(
+                        else_type,
+                        params,
+                        template_defaults,
+                    )
                 }
             }
         }
@@ -690,7 +737,11 @@ fn try_resolve_with_template_default(
         condition_matches
     };
 
-    let branch = if effective_match { then_type } else { else_type };
+    let branch = if effective_match {
+        then_type
+    } else {
+        else_type
+    };
     let ty = branch.to_string();
     if ty == "mixed" || ty == "void" || ty == "never" {
         return None;
