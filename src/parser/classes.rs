@@ -168,6 +168,8 @@ struct ClassDocblockInfo {
     template_params: Vec<String>,
     /// Upper bounds for template parameters (`@template T of Bound`).
     template_param_bounds: HashMap<String, PhpType>,
+    /// Default values for template parameters (`@template T of bool = false`).
+    template_param_defaults: HashMap<String, String>,
     /// Generic arguments from `@extends` / `@phpstan-extends`.
     extends_generics: Vec<(String, Vec<PhpType>)>,
     /// Generic arguments from `@implements` / `@phpstan-implements`.
@@ -211,11 +213,15 @@ fn extract_class_docblock<'a>(
         return ClassDocblockInfo::default();
     };
 
-    let params_with_bounds = docblock::extract_template_params_with_bounds_from_info(&info);
-    let template_params = params_with_bounds.iter().map(|(n, _)| n.clone()).collect();
-    let template_param_bounds: HashMap<String, PhpType> = params_with_bounds
+    let params_full = docblock::extract_template_params_full_from_info(&info);
+    let template_params: Vec<String> = params_full.iter().map(|(n, _, _, _)| n.clone()).collect();
+    let template_param_bounds: HashMap<String, PhpType> = params_full
+        .iter()
+        .filter_map(|(name, bound, _, _)| bound.as_ref().map(|b| (name.clone(), PhpType::parse(b))))
+        .collect();
+    let template_param_defaults: HashMap<String, String> = params_full
         .into_iter()
-        .filter_map(|(name, bound)| bound.map(|b| (name, PhpType::parse(&b))))
+        .filter_map(|(name, _, _, default)| default.map(|d| (name, d)))
         .collect();
 
     let mixin_data = docblock::extract_mixin_tags_from_info(&info);
@@ -230,6 +236,7 @@ fn extract_class_docblock<'a>(
         deprecation_message: docblock::extract_deprecation_message_from_info(&info),
         template_params,
         template_param_bounds,
+        template_param_defaults,
         extends_generics: docblock::extract_generics_tag_from_info(&info, "@extends")
             .into_iter()
             .map(|(name, args)| (name, args.into_iter().map(|a| PhpType::parse(&a)).collect()))
@@ -861,6 +868,7 @@ impl Backend {
                         see_refs: doc_info.see_refs,
                         template_params: doc_info.template_params,
                         template_param_bounds: doc_info.template_param_bounds,
+                        template_param_defaults: doc_info.template_param_defaults,
                         extends_generics: doc_info.extends_generics,
                         implements_generics: doc_info.implements_generics,
                         use_generics,
@@ -959,6 +967,7 @@ impl Backend {
                         see_refs: doc_info.see_refs,
                         template_params: doc_info.template_params,
                         template_param_bounds: doc_info.template_param_bounds,
+                        template_param_defaults: doc_info.template_param_defaults,
                         extends_generics: doc_info.extends_generics,
                         implements_generics: doc_info.implements_generics,
                         use_generics: {
@@ -1040,6 +1049,7 @@ impl Backend {
                         see_refs: doc_info.see_refs,
                         template_params: doc_info.template_params,
                         template_param_bounds: doc_info.template_param_bounds,
+                        template_param_defaults: doc_info.template_param_defaults,
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: {
@@ -1146,6 +1156,7 @@ impl Backend {
                         see_refs: doc_info.see_refs,
                         template_params: vec![],
                         template_param_bounds: HashMap::new(),
+                        template_param_defaults: HashMap::new(),
                         extends_generics: vec![],
                         implements_generics: vec![],
                         use_generics: vec![],
@@ -1247,6 +1258,7 @@ impl Backend {
             deprecated_replacement: None,
             template_params: vec![],
             template_param_bounds: HashMap::new(),
+            template_param_defaults: HashMap::new(),
             extends_generics: vec![],
             implements_generics: vec![],
             use_generics: vec![],

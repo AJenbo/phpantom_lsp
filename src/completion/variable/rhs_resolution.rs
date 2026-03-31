@@ -1133,6 +1133,7 @@ fn resolve_rhs_function_call<'b>(
                 &func_info.parameters,
                 &func_call.argument_list,
                 Some(&var_resolver),
+                Some(current_class_name),
             );
             if let Some(ref ty) = resolved_type {
                 let resolved = crate::completion::type_resolution::type_hint_to_classes(
@@ -1445,6 +1446,7 @@ fn resolve_rhs_method_call_inner<'b>(
             template_subs: &template_subs,
             var_resolver: Some(&var_resolver),
             cache: ctx.resolved_class_cache,
+            calling_class_name: Some(&ctx.current_class.name),
         };
         // Recover the effective return type string from the method.
         // Look up the method on the (possibly merged) owner and apply
@@ -1568,6 +1570,7 @@ fn resolve_rhs_static_call(
                 template_subs: &template_subs,
                 var_resolver: Some(&var_resolver),
                 cache: ctx.resolved_class_cache,
+                calling_class_name: Some(&ctx.current_class.name),
             };
             // Recover the effective return type string from the method.
             // Look up the method on the (possibly merged) owner and apply

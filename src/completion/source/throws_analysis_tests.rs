@@ -789,6 +789,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         see_refs: Vec::new(),
         template_params: Vec::new(),
         template_param_bounds: std::collections::HashMap::new(),
+        template_param_defaults: std::collections::HashMap::new(),
         extends_generics: Vec::new(),
         implements_generics: Vec::new(),
         use_generics: Vec::new(),

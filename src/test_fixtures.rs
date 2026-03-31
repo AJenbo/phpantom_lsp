@@ -52,6 +52,7 @@ pub fn make_class(name: &str) -> ClassInfo {
         see_refs: Vec::new(),
         template_params: Vec::new(),
         template_param_bounds: HashMap::new(),
+        template_param_defaults: HashMap::new(),
         extends_generics: Vec::new(),
         implements_generics: Vec::new(),
         use_generics: Vec::new(),

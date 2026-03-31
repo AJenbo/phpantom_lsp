@@ -32,7 +32,7 @@ use crate::util::{strip_fqn_prefix, strip_nullable};
 pub fn extract_template_params(docblock: &str) -> Vec<String> {
     extract_template_params_full(docblock)
         .into_iter()
-        .map(|(name, _, _)| name)
+        .map(|(name, _, _, _)| name)
         .collect()
 }
 
@@ -40,7 +40,7 @@ pub fn extract_template_params(docblock: &str) -> Vec<String> {
 pub fn extract_template_params_from_info(info: &DocblockInfo) -> Vec<String> {
     extract_template_params_full_from_info(info)
         .into_iter()
-        .map(|(name, _, _)| name)
+        .map(|(name, _, _, _)| name)
         .collect()
 }
 
@@ -56,7 +56,7 @@ pub fn extract_template_params_from_info(info: &DocblockInfo) -> Vec<String> {
 pub fn extract_template_params_with_bounds(docblock: &str) -> Vec<(String, Option<String>)> {
     extract_template_params_full(docblock)
         .into_iter()
-        .map(|(name, bound, _)| (name, bound))
+        .map(|(name, bound, _, _)| (name, bound))
         .collect()
 }
 
@@ -66,7 +66,7 @@ pub fn extract_template_params_with_bounds_from_info(
 ) -> Vec<(String, Option<String>)> {
     extract_template_params_full_from_info(info)
         .into_iter()
-        .map(|(name, bound, _)| (name, bound))
+        .map(|(name, bound, _, _)| (name, bound))
         .collect()
 }
 
@@ -80,7 +80,7 @@ pub fn extract_template_params_with_bounds_from_info(
 ///   - `@template-contravariant TInput of Foo` → `("TInput", Some("Foo"), Contravariant)`
 pub fn extract_template_params_full(
     docblock: &str,
-) -> Vec<(String, Option<String>, TemplateVariance)> {
+) -> Vec<(String, Option<String>, TemplateVariance, Option<String>)> {
     let Some(info) = parse_docblock_for_tags(docblock) else {
         return Vec::new();
     };
@@ -116,7 +116,7 @@ pub(crate) const TEMPLATE_KINDS: &[TagKind] = &[
 /// Like [`extract_template_params_full`], but operates on a pre-parsed [`DocblockInfo`].
 pub fn extract_template_params_full_from_info(
     info: &DocblockInfo,
-) -> Vec<(String, Option<String>, TemplateVariance)> {
+) -> Vec<(String, Option<String>, TemplateVariance, Option<String>)> {
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(TEMPLATE_KINDS) {
@@ -137,12 +137,21 @@ pub fn extract_template_params_full_from_info(
                 .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
             {
                 // Check for an `of` bound: `@template T of SomeClass`
-                let bound = if tokens.next().is_some_and(|kw| kw == "of") {
-                    tokens.next().map(|b| b.to_string())
+                let mut next_token = tokens.next();
+                let bound = if next_token.as_ref().is_some_and(|kw| *kw == "of") {
+                    let b = tokens.next().map(|b| b.to_string());
+                    next_token = tokens.next();
+                    b
                 } else {
                     None
                 };
-                results.push((name.to_string(), bound, variance));
+                // Check for a `= default` value: `@template T of bool = false`
+                let default = if next_token.is_some_and(|kw| kw == "=") {
+                    tokens.next().map(|d| d.to_string())
+                } else {
+                    None
+                };
+                results.push((name.to_string(), bound, variance, default));
             }
         }
     }

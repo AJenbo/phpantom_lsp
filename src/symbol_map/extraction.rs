@@ -171,9 +171,12 @@ fn extract_from_statement<'a>(
         }
         Statement::Expression(expr_stmt) => {
             extract_inline_docblock(expr_stmt, ctx);
-            // Detect `assert($var instanceof ...)` and record its offset
-            // as a sequential narrowing boundary for the diagnostic cache.
-            if is_assert_instanceof(expr_stmt.expression) {
+            // Detect `assert($var instanceof ...)` and calls to functions
+            // whose name starts with "assert" (e.g. `assertNotNull()`,
+            // `self::assertNotNull()`, `$this->assertNotNull()`) and
+            // record the offset as a sequential narrowing boundary for
+            // the diagnostic cache.
+            if is_assert_narrowing_call(expr_stmt.expression) {
                 ctx.assert_narrowing_offsets
                     .push(expr_stmt.expression.span().start.offset);
             }
@@ -2677,28 +2680,58 @@ fn format_first_class_arg(args: &TokenSeparatedSequence<'_, Argument<'_>>) -> St
 /// being narrowed.  The diagnostic cache uses the result only to know
 /// that *some* assert-instanceof boundary exists at this offset, which
 /// is enough to split cache entries before vs after the assert.
-fn is_assert_instanceof(expr: &Expression<'_>) -> bool {
+fn is_assert_narrowing_call(expr: &Expression<'_>) -> bool {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
     };
-    if let Expression::Call(Call::Function(func_call)) = expr {
-        let func_name = match func_call.function {
-            Expression::Identifier(ident) => ident.value(),
-            _ => return false,
-        };
-        if func_name != "assert" {
-            return false;
-        }
-        if let Some(first_arg) = func_call.argument_list.arguments.iter().next() {
-            let arg_expr = match first_arg {
-                Argument::Positional(pos) => pos.value,
-                Argument::Named(named) => named.value,
+    match expr {
+        Expression::Call(Call::Function(func_call)) => {
+            let func_name = match func_call.function {
+                Expression::Identifier(ident) => ident.value(),
+                _ => return false,
             };
-            return arg_contains_instanceof(arg_expr);
+            // `assert($x instanceof Foo)` — check args for instanceof.
+            if func_name.eq_ignore_ascii_case("assert") {
+                if let Some(first_arg) = func_call.argument_list.arguments.iter().next() {
+                    let arg_expr = match first_arg {
+                        Argument::Positional(pos) => pos.value,
+                        Argument::Named(named) => named.value,
+                    };
+                    return arg_contains_instanceof(arg_expr);
+                }
+                return false;
+            }
+            // `assertNotNull($x)`, `assertInstanceOf(...)`, etc.
+            // Any free function whose name starts with "assert" is
+            // treated as a potential narrowing boundary so that
+            // `@phpstan-assert` annotations take effect.
+            starts_with_assert(func_name)
         }
+        Expression::Call(Call::StaticMethod(static_call)) => {
+            // `self::assertNotNull(...)`, `Assert::assertNotNull(...)`, etc.
+            if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
+                return starts_with_assert(&ident.value);
+            }
+            false
+        }
+        Expression::Call(Call::Method(method_call)) => {
+            // `$this->assertNotNull(...)`, etc.
+            if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
+                return starts_with_assert(&ident.value);
+            }
+            false
+        }
+        _ => false,
     }
-    false
+}
+
+/// Returns `true` when `name` starts with "assert" (case-insensitive)
+/// and is longer than just "assert" itself (plain `assert()` is handled
+/// separately via the `instanceof` arg check).
+fn starts_with_assert(name: &str) -> bool {
+    name.len() > "assert".len()
+        && name[.."assert".len()].eq_ignore_ascii_case("assert")
 }
 
 /// Recursively check whether an expression contains an `instanceof` operator.

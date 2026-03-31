@@ -30,8 +30,9 @@ use crate::types::*;
 use crate::util::{find_class_at_offset, position_to_offset};
 
 use super::conditional_resolution::{
-    VarClassStringResolver, resolve_conditional_with_text_args, resolve_conditional_without_args,
-    split_call_subject, split_text_args,
+    VarClassStringResolver, resolve_conditional_with_text_args,
+    resolve_conditional_with_text_args_and_defaults, resolve_conditional_without_args,
+    resolve_conditional_without_args_and_defaults, split_call_subject, split_text_args,
 };
 use super::resolver::{Loaders, ResolutionCtx};
 use crate::util::find_class_by_name;
@@ -55,6 +56,10 @@ pub(super) struct MethodReturnCtx<'a> {
     pub var_resolver: VarClassStringResolver<'a>,
     /// Shared resolved-class cache (when available).
     pub cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+    /// The class at the call site (where `self::class` / `static::class`
+    /// appears), as opposed to the class that owns the method being called.
+    /// Used to resolve `self`/`static`/`parent` in conditional return types.
+    pub calling_class_name: Option<&'a str>,
 }
 
 /// Build a [`VarClassStringResolver`] closure from a [`ResolutionCtx`].
@@ -383,6 +388,7 @@ impl Backend {
                         template_subs: &template_subs,
                         var_resolver: Some(&var_resolver),
                         cache: ctx.resolved_class_cache,
+                        calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                     };
                     results.extend(Self::resolve_method_return_types_with_args(
                         owner,
@@ -420,6 +426,7 @@ impl Backend {
                         template_subs: &template_subs,
                         var_resolver: Some(&var_resolver),
                         cache: ctx.resolved_class_cache,
+                        calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                     };
                     return Self::resolve_method_return_types_with_args(
                         owner,
@@ -482,6 +489,7 @@ impl Backend {
                                 &func_info.parameters,
                                 text_args,
                                 Some(&var_resolver),
+                                ctx.current_class.map(|c| c.name.as_str()),
                             )
                         } else {
                             resolve_conditional_without_args(cond, &func_info.parameters)
@@ -722,14 +730,20 @@ impl Backend {
             // Try conditional return type first (PHPStan syntax)
             if let Some(ref cond) = method.conditional_return {
                 let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args(
+                    resolve_conditional_with_text_args_and_defaults(
                         cond,
                         &method.parameters,
                         text_args,
                         var_resolver,
+                        mr_ctx.calling_class_name,
+                        Some(&class_info.template_param_defaults),
                     )
                 } else {
-                    resolve_conditional_without_args(cond, &method.parameters)
+                    resolve_conditional_without_args_and_defaults(
+                        cond,
+                        &method.parameters,
+                        Some(&class_info.template_param_defaults),
+                    )
                 };
                 if let Some(ref ty) = resolved_type {
                     // Apply method-level template substitutions to the

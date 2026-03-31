@@ -5,6 +5,6 @@
 ///   intersections, generics, type aliases, object shapes, property types)
 /// - **narrowing**: instanceof / assert / custom type guard narrowing
 /// - **conditional**: PHPStan conditional return type resolution at call sites
-pub(crate) mod conditional;
+pub mod conditional;
 pub(crate) mod narrowing;
 pub(crate) mod resolution;

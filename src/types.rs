@@ -1392,6 +1392,15 @@ pub struct ClassInfo {
     /// concretely substituted, the resolver falls back to this bound so that
     /// completion and go-to-definition still work against the bound type.
     pub template_param_bounds: HashMap<String, PhpType>,
+    /// Default values for template parameters, keyed by parameter name.
+    ///
+    /// Populated from the `= default` clause in `@template` tags. For example,
+    /// `@template TAsync of bool = false` produces `("TAsync", "false")`.
+    ///
+    /// When a conditional return type references a template parameter that
+    /// has no explicit binding at the call site, the resolver uses the
+    /// default value to evaluate the condition.
+    pub template_param_defaults: HashMap<String, String>,
     /// Generic type arguments from `@extends` / `@phpstan-extends` tags.
     ///
     /// Each entry is `(ClassName, [TypeArg1, TypeArg2, …])`.

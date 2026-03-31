@@ -97,7 +97,7 @@ pub(crate) mod variable;
 pub use source::comment_position;
 
 // types/
-pub(crate) use types::conditional as conditional_resolution;
+pub use types::conditional as conditional_resolution;
 pub(crate) use types::resolution as type_resolution;
 
 // context/

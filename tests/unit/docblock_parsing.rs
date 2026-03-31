@@ -1568,3 +1568,227 @@ fn enclosing_return_type_deeply_nested_control_flow() {
         "Should find return type when scanning from just past the method's opening brace"
     );
 }
+
+// ─── Template default value parsing ─────────────────────────────────
+
+#[test]
+fn template_default_simple_bool() {
+    let doc = concat!(
+        "/**\n",
+        " * @template TAsync of bool = false\n",
+        " */",
+    );
+    let result = extract_template_params_full(doc);
+    assert_eq!(result.len(), 1);
+    let (name, bound, _, default) = &result[0];
+    assert_eq!(name, "TAsync");
+    assert_eq!(bound.as_deref(), Some("bool"));
+    assert_eq!(default.as_deref(), Some("false"));
+}
+
+#[test]
+fn template_default_true() {
+    let doc = concat!(
+        "/**\n",
+        " * @template TSync of bool = true\n",
+        " */",
+    );
+    let result = extract_template_params_full(doc);
+    assert_eq!(result.len(), 1);
+    let (name, bound, _, default) = &result[0];
+    assert_eq!(name, "TSync");
+    assert_eq!(bound.as_deref(), Some("bool"));
+    assert_eq!(default.as_deref(), Some("true"));
+}
+
+#[test]
+fn template_default_null() {
+    let doc = concat!(
+        "/**\n",
+        " * @template TValue of mixed = null\n",
+        " */",
+    );
+    let result = extract_template_params_full(doc);
+    assert_eq!(result.len(), 1);
+    let (name, bound, _, default) = &result[0];
+    assert_eq!(name, "TValue");
+    assert_eq!(bound.as_deref(), Some("mixed"));
+    assert_eq!(default.as_deref(), Some("null"));
+}
+
+#[test]
+fn template_no_default() {
+    let doc = concat!(
+        "/**\n",
+        " * @template T of string\n",
+        " */",
+    );
+    let result = extract_template_params_full(doc);
+    assert_eq!(result.len(), 1);
+    let (name, bound, _, default) = &result[0];
+    assert_eq!(name, "T");
+    assert_eq!(bound.as_deref(), Some("string"));
+    assert!(default.is_none());
+}
+
+#[test]
+fn template_no_bound_no_default() {
+    let doc = concat!(
+        "/**\n",
+        " * @template T\n",
+        " */",
+    );
+    let result = extract_template_params_full(doc);
+    assert_eq!(result.len(), 1);
+    let (name, bound, _, default) = &result[0];
+    assert_eq!(name, "T");
+    assert!(bound.is_none());
+    assert!(default.is_none());
+}
+
+#[test]
+fn template_multiple_with_defaults() {
+    let doc = concat!(
+        "/**\n",
+        " * @template TKey of int\n",
+        " * @template TAsync of bool = false\n",
+        " * @template TValue of string = null\n",
+        " */",
+    );
+    let result = extract_template_params_full(doc);
+    assert_eq!(result.len(), 3);
+
+    let (name0, bound0, _, default0) = &result[0];
+    assert_eq!(name0, "TKey");
+    assert_eq!(bound0.as_deref(), Some("int"));
+    assert!(default0.is_none());
+
+    let (name1, bound1, _, default1) = &result[1];
+    assert_eq!(name1, "TAsync");
+    assert_eq!(bound1.as_deref(), Some("bool"));
+    assert_eq!(default1.as_deref(), Some("false"));
+
+    let (name2, bound2, _, default2) = &result[2];
+    assert_eq!(name2, "TValue");
+    assert_eq!(bound2.as_deref(), Some("string"));
+    assert_eq!(default2.as_deref(), Some("null"));
+}
+
+#[test]
+fn template_default_stripped_from_bound() {
+    // Ensure the bound is just the type, not "bool = false"
+    let doc = concat!(
+        "/**\n",
+        " * @template TAsync of bool = false\n",
+        " */",
+    );
+    let params_with_bounds = extract_template_params_with_bounds(doc);
+    assert_eq!(params_with_bounds.len(), 1);
+    let (name, bound) = &params_with_bounds[0];
+    assert_eq!(name, "TAsync");
+    assert_eq!(bound.as_deref(), Some("bool"));
+}
+
+#[test]
+fn template_default_stripped_from_names() {
+    // extract_template_params should still just return names
+    let doc = concat!(
+        "/**\n",
+        " * @template TAsync of bool = false\n",
+        " */",
+    );
+    let params = extract_template_params(doc);
+    assert_eq!(params, vec!["TAsync"]);
+}
+
+// ─── Conditional resolution with template defaults ──────────────────
+
+#[test]
+fn conditional_resolves_with_template_default_false() {
+    use std::collections::HashMap;
+    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+
+    // Simulates: @template TAsync of bool = false
+    // @return (TAsync is false ? Response : PromiseInterface)
+    let cond = PhpType::Conditional {
+        param: "TAsync".to_string(),
+        negated: false,
+        condition: Box::new(PhpType::Named("false".to_string())),
+        then_type: Box::new(PhpType::Named("Response".to_string())),
+        else_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+    };
+
+    let mut defaults = HashMap::new();
+    defaults.insert("TAsync".to_string(), "false".to_string());
+
+    let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
+    assert_eq!(result, Some("Response".to_string()));
+}
+
+#[test]
+fn conditional_resolves_with_template_default_true() {
+    use std::collections::HashMap;
+    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+
+    // Simulates: @template TAsync of bool = true
+    // @return (TAsync is false ? Response : PromiseInterface)
+    let cond = PhpType::Conditional {
+        param: "TAsync".to_string(),
+        negated: false,
+        condition: Box::new(PhpType::Named("false".to_string())),
+        then_type: Box::new(PhpType::Named("Response".to_string())),
+        else_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+    };
+
+    let mut defaults = HashMap::new();
+    defaults.insert("TAsync".to_string(), "true".to_string());
+
+    let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
+    assert_eq!(result, Some("PromiseInterface".to_string()));
+}
+
+#[test]
+fn conditional_no_template_default_falls_through() {
+    use std::collections::HashMap;
+    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+
+    // When template has no default, the function should fall through
+    // to normal resolution (else branch for non-null conditions).
+    let cond = PhpType::Conditional {
+        param: "TAsync".to_string(),
+        negated: false,
+        condition: Box::new(PhpType::Named("false".to_string())),
+        then_type: Box::new(PhpType::Named("Response".to_string())),
+        else_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+    };
+
+    let defaults = HashMap::new();
+
+    // Empty defaults map — should not resolve via template default
+    let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
+    // Falls through to else branch since TAsync is not a $param either
+    assert_eq!(result, Some("PromiseInterface".to_string()));
+}
+
+#[test]
+fn conditional_negated_with_template_default() {
+    use std::collections::HashMap;
+    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+
+    // Simulates: @template TAsync of bool = false
+    // @return (TAsync is not false ? PromiseInterface : Response)
+    let cond = PhpType::Conditional {
+        param: "TAsync".to_string(),
+        negated: true,
+        condition: Box::new(PhpType::Named("false".to_string())),
+        then_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+        else_type: Box::new(PhpType::Named("Response".to_string())),
+    };
+
+    let mut defaults = HashMap::new();
+    defaults.insert("TAsync".to_string(), "false".to_string());
+
+    // negated: TAsync is not false → false (since default IS false) → else branch → Response
+    let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
+    assert_eq!(result, Some("Response".to_string()));
+}
