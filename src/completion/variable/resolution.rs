@@ -612,6 +612,13 @@ fn try_resolve_in_function(
         return Some(results);
     }
 
+    // Fall back to a standalone `@var` docblock scan when parameter
+    // resolution and assignment walking yielded no type.
+    super::closure_resolution::try_standalone_var_docblock(&body_ctx, &mut results);
+    if !results.is_empty() {
+        return Some(results);
+    }
+
     // Generator yield reverse inference for top-level functions.
     if let Some(ref ret_type) = body_ctx.enclosing_return_type {
         let yield_results =
@@ -879,6 +886,17 @@ fn resolve_variable_in_members<'b>(
                         &body_ctx,
                         &mut results,
                         false,
+                    );
+                    if !results.is_empty() {
+                        return results;
+                    }
+
+                    // Fall back to a standalone `@var` docblock scan
+                    // when parameter resolution and assignment walking
+                    // yielded no type.
+                    super::closure_resolution::try_standalone_var_docblock(
+                        &body_ctx,
+                        &mut results,
                     );
                     if !results.is_empty() {
                         return results;

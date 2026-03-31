@@ -787,6 +787,17 @@ pub(in crate::completion) fn try_resolve_in_closure_expr<'b>(
                     results,
                     false,
                 );
+                // When parameter resolution and assignment walking
+                // yielded no type (common for untyped closure params),
+                // fall back to a backward `@var` docblock scan.
+                // This handles the pattern:
+                //   function ($app, $params) {
+                //       /** @var App $app */
+                //       $app->make(...);
+                //   }
+                if results.is_empty() {
+                    try_standalone_var_docblock(ctx, results);
+                }
                 return true;
             }
             false
@@ -1139,6 +1150,51 @@ where
 /// Resolve a variable's type from a closure / arrow-function
 /// parameter list.  If the variable matches a typed parameter,
 /// the resolved classes replace whatever is currently in `results`.
+/// Fall back to a backward `@var Type $varName` docblock scan when
+/// normal parameter resolution and assignment walking produced no type.
+///
+/// This covers the common pattern where closure parameters lack type
+/// hints and a standalone multi-variable `@var` block declares their
+/// types without a following assignment:
+///
+/// ```php
+/// app()->bind(Foo::class, function ($app, $params) {
+///     /**
+///      * @var App                      $app
+///      * @var array{indexName: string} $params
+///      */
+///     $app->make(Client::class);
+/// });
+/// ```
+pub(in crate::completion) fn try_standalone_var_docblock(
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    if let Some(raw_type) = crate::docblock::find_var_raw_type_in_source(
+        ctx.content,
+        ctx.cursor_offset as usize,
+        ctx.var_name,
+    ) {
+        let resolved = crate::completion::type_resolution::type_hint_to_classes(
+            &raw_type,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        if !resolved.is_empty() {
+            *results = ResolvedType::from_classes_with_hint(
+                resolved,
+                crate::php_type::PhpType::parse(&raw_type),
+            );
+        } else if crate::php_type::PhpType::parse(&raw_type).is_informative() {
+            // Non-class types like `array{key: string}` or `int[]`.
+            *results = vec![ResolvedType::from_type_string(
+                crate::php_type::PhpType::parse(&raw_type),
+            )];
+        }
+    }
+}
+
 pub(in crate::completion) fn resolve_closure_params(
     parameter_list: &FunctionLikeParameterList<'_>,
     ctx: &VarResolutionCtx<'_>,

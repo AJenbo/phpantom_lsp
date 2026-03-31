@@ -4000,4 +4000,60 @@ function test(): void {
             "expected unknown member diagnostic, got: {diags:?}",
         );
     }
+
+    #[test]
+    fn no_diagnostic_for_standalone_var_docblock_in_closure() {
+        // A standalone multi-variable `@var` block inside a closure body
+        // (without a following assignment) should declare types for
+        // untyped closure parameters.
+        let php = r#"<?php
+class App {
+    public function make(string $class): mixed { return new $class; }
+}
+
+class Foo {
+    public function test(): void {
+        $fn = function ($app, $params) {
+            /**
+             * @var App                      $app
+             * @var array{indexName: string} $params
+             */
+            $app->make('Something');
+        };
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics when @var declares closure param type, got: {diags:?}",
+        );
+    }
+
+    #[test]
+    fn flags_unknown_member_with_standalone_var_docblock_in_closure() {
+        // When `@var` resolves the type, unknown members should still
+        // be flagged (proves the type was actually resolved).
+        let php = r#"<?php
+class App {
+    public function make(string $class): mixed { return new $class; }
+}
+
+class Foo {
+    public function test(): void {
+        $fn = function ($app) {
+            /** @var App $app */
+            $app->nonExistentMethod();
+        };
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("nonExistentMethod")),
+            "expected unknown member diagnostic for nonExistentMethod, got: {diags:?}",
+        );
+    }
 }
