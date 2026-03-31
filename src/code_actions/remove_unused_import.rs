@@ -19,7 +19,7 @@
 //! published set so the squiggly lines disappear before the text edit
 //! is applied.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tower_lsp::lsp_types::*;
 
@@ -140,9 +140,14 @@ impl Backend {
                 return None;
             }
 
+            let removed_import_lines: HashSet<usize> = fresh_diags
+                .iter()
+                .map(|d| d.range.start.line as usize)
+                .collect();
+
             let mut edits: Vec<TextEdit> = fresh_diags
                 .iter()
-                .map(|d| build_line_deletion_edit(content, &d.range))
+                .map(|d| build_line_deletion_edit(content, &d.range, &removed_import_lines))
                 .collect();
 
             // Sort edits in reverse order so that byte offsets remain
@@ -161,7 +166,9 @@ impl Backend {
             // Single-import removal: use the diagnostic range from the
             // action to build the deletion edit.
             let diag = &diags[0];
-            let removal_edit = build_line_deletion_edit(content, &diag.range);
+            let removed_import_lines = HashSet::from([diag.range.start.line as usize]);
+            let removal_edit =
+                build_line_deletion_edit(content, &diag.range, &removed_import_lines);
 
             let mut changes = HashMap::new();
             changes.insert(doc_uri, vec![removal_edit]);
@@ -214,7 +221,11 @@ fn cursor_on_use_import_line(content: &str, line: u32) -> bool {
 /// When the diagnostic targets a single member inside a group `use`
 /// statement (e.g. `use Foo\{Bar, Baz};` where only `Bar` is unused),
 /// the edit removes just the member entry rather than the whole line.
-fn build_line_deletion_edit(content: &str, range: &Range) -> TextEdit {
+fn build_line_deletion_edit(
+    content: &str,
+    range: &Range,
+    removed_import_lines: &HashSet<usize>,
+) -> TextEdit {
     // Try to extend the range to cover the full group member first.
     if let Some(edit) = extend_range_for_group_member(content, range) {
         return edit;
@@ -230,24 +241,35 @@ fn build_line_deletion_edit(content: &str, range: &Range) -> TextEdit {
         start_offset += line.len() + 1; // +1 for newline
     }
 
+    let mut edit_start_offset = start_offset;
+    if should_consume_previous_blank_line(
+        lines.as_slice(),
+        start_line,
+        end_line,
+        removed_import_lines,
+    ) {
+        edit_start_offset -= lines[start_line - 1].len() + 1;
+    }
+
     // Find the byte offset of the end of the last line (including newline).
     let mut end_offset = start_offset;
     for line in &lines[start_line..=end_line.min(lines.len() - 1)] {
         end_offset += line.len() + 1;
     }
 
+    if should_consume_following_blank_line(
+        lines.as_slice(),
+        start_line,
+        end_line,
+        removed_import_lines,
+    ) {
+        end_offset += lines[end_line + 1].len() + 1;
+    }
+
     // Clamp to content length.
     end_offset = end_offset.min(content.len());
 
-    // If there's a blank line after the deletion and a blank line before,
-    // consume the extra blank line to avoid doubled blank lines.
-    let after = &content[end_offset..];
-    let before = &content[..start_offset];
-    if after.starts_with('\n') && before.ends_with("\n\n") {
-        // The blank line before is already at the start_offset boundary.
-    }
-
-    let start_pos = offset_to_position(content, start_offset);
+    let start_pos = offset_to_position(content, edit_start_offset);
     let end_pos = offset_to_position(content, end_offset);
 
     TextEdit {
@@ -257,6 +279,88 @@ fn build_line_deletion_edit(content: &str, range: &Range) -> TextEdit {
         },
         new_text: String::new(),
     }
+}
+
+/// Check whether the blank line following the deleted range should also
+/// be consumed.  This is true when:
+/// - There IS a blank line immediately after `end_line`.
+/// - AND either there is a surviving import after the gap (we're
+///   collapsing a gap between two import groups) OR there is no
+///   surviving import before the deletion (the entire leading block is
+///   being removed, so the separator to the class body should go too).
+fn should_consume_following_blank_line(
+    lines: &[&str],
+    start_line: usize,
+    end_line: usize,
+    removed_import_lines: &HashSet<usize>,
+) -> bool {
+    if !matches!(lines.get(end_line + 1), Some(line) if line.trim().is_empty()) {
+        return false;
+    }
+
+    nearest_surviving_import_line(lines, end_line as isize + 2, 1, removed_import_lines).is_some()
+        || nearest_surviving_import_line(lines, start_line as isize - 1, -1, removed_import_lines)
+            .is_none()
+}
+
+/// Check whether the blank line preceding the deleted range should also
+/// be consumed.  This is true when:
+/// - `start_line` is not the first line.
+/// - There IS a blank line immediately before `start_line`.
+/// - AND there are surviving imports on BOTH sides (we're collapsing a
+///   gap that would otherwise be doubled).
+fn should_consume_previous_blank_line(
+    lines: &[&str],
+    start_line: usize,
+    end_line: usize,
+    removed_import_lines: &HashSet<usize>,
+) -> bool {
+    if start_line == 0 {
+        return false;
+    }
+
+    if !matches!(lines.get(start_line - 1), Some(line) if line.trim().is_empty()) {
+        return false;
+    }
+
+    nearest_surviving_import_line(lines, start_line as isize - 2, -1, removed_import_lines)
+        .is_some()
+        && nearest_surviving_import_line(lines, end_line as isize + 1, 1, removed_import_lines)
+            .is_some()
+}
+
+/// Walk lines from `line` in `direction` (+1 or -1) looking for the
+/// nearest `use` import line that is NOT in `removed_import_lines`.
+/// Blank lines are skipped; any non-blank, non-`use` line stops the
+/// search and returns `None`.
+fn nearest_surviving_import_line(
+    lines: &[&str],
+    mut line: isize,
+    direction: isize,
+    removed_import_lines: &HashSet<usize>,
+) -> Option<usize> {
+    while let Some(current) = usize::try_from(line).ok().and_then(|idx| lines.get(idx)) {
+        let trimmed = current.trim();
+
+        if trimmed.is_empty() {
+            line += direction;
+            continue;
+        }
+
+        if trimmed.starts_with("use ") {
+            let idx = usize::try_from(line).ok()?;
+            if !removed_import_lines.contains(&idx) {
+                return Some(idx);
+            }
+
+            line += direction;
+            continue;
+        }
+
+        return None;
+    }
+
+    None
 }
 
 /// When the diagnostic range falls inside a group `use` statement
@@ -372,6 +476,13 @@ mod tests {
         position_to_byte_offset(content, pos)
     }
 
+    /// Test-only wrapper: builds a deletion edit treating only the
+    /// diagnostic's own line as removed (single-import scenario).
+    fn build_single_line_deletion_edit(content: &str, range: &Range) -> TextEdit {
+        let removed = HashSet::from([range.start.line as usize]);
+        build_line_deletion_edit(content, range, &removed)
+    }
+
     // ── Range helpers ───────────────────────────────────────────────
 
     #[test]
@@ -408,11 +519,55 @@ mod tests {
     fn deletes_full_use_line() {
         let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n";
         let range = Range::new(Position::new(1, 4), Position::new(1, 11));
-        let edit = build_line_deletion_edit(content, &range);
+        let edit = build_single_line_deletion_edit(content, &range);
         // Should delete the entire "use Foo\Bar;\n" line.
         let start = lsp_position_to_byte_offset(content, edit.range.start);
         let end = lsp_position_to_byte_offset(content, edit.range.end);
         assert_eq!(&content[start..end], "use Foo\\Bar;\n");
+    }
+
+    #[test]
+    fn deletes_use_line_and_separator_when_last_import_removed() {
+        let content = "<?php\nuse Foo\\Bar;\n\nclass Test {}\n";
+        let range = Range::new(Position::new(1, 4), Position::new(1, 11));
+        let edit = build_single_line_deletion_edit(content, &range);
+        let start = lsp_position_to_byte_offset(content, edit.range.start);
+        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        assert_eq!(&content[start..end], "use Foo\\Bar;\n\n");
+    }
+
+    #[test]
+    fn keeps_separator_when_other_imports_remain() {
+        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass Test extends Qux {}\n";
+        let range = Range::new(Position::new(2, 4), Position::new(2, 11));
+        let edit = build_single_line_deletion_edit(content, &range);
+        let start = lsp_position_to_byte_offset(content, edit.range.start);
+        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        assert_eq!(&content[start..end], "use Baz\\Qux;\n");
+    }
+
+    #[test]
+    fn removes_following_blank_line_between_remaining_imports() {
+        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nuse Quux\\Quuz;\n";
+        let range = Range::new(Position::new(2, 4), Position::new(2, 11));
+        let edit = build_single_line_deletion_edit(content, &range);
+        let start = lsp_position_to_byte_offset(content, edit.range.start);
+        let end = lsp_position_to_byte_offset(content, edit.range.end);
+        assert_eq!(&content[start..end], "use Baz\\Qux;\n\n");
+    }
+
+    #[test]
+    fn removes_previous_blank_line_between_remaining_imports() {
+        let content = "<?php\nuse Foo\\Bar;\n\nuse Baz\\Qux;\nuse Quux\\Quuz;\n";
+        let range = Range::new(Position::new(3, 4), Position::new(3, 11));
+        let edit = build_single_line_deletion_edit(content, &range);
+        let start = lsp_position_to_byte_offset(content, edit.range.start);
+        let end = lsp_position_to_byte_offset(content, edit.range.end);
+
+        let mut result = content.to_string();
+        result.replace_range(start..end, &edit.new_text);
+
+        assert_eq!(result, "<?php\nuse Foo\\Bar;\nuse Quux\\Quuz;\n");
     }
 
     #[test]
@@ -869,6 +1024,141 @@ class Demo extends UsedBravo
         assert!(
             result.contains("UsedBravo"),
             "UsedBravo should be kept:\n{result}"
+        );
+    }
+
+    #[test]
+    fn bulk_remove_consumes_separator_when_import_block_becomes_empty() {
+        let backend = crate::Backend::new_test();
+        let uri = "file:///test.php";
+        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nclass Test {}\n";
+
+        backend.update_ast(uri, content);
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: uri.parse().unwrap(),
+            },
+            range: Range {
+                start: Position::new(1, 4),
+                end: Position::new(1, 4),
+            },
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let actions = backend.handle_code_action(uri, content, &params);
+        let bulk = actions
+            .iter()
+            .find_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) if ca.title == "Remove all unused imports" => {
+                    Some(ca)
+                }
+                _ => None,
+            })
+            .expect("should offer bulk remove");
+
+        let (resolved, _) = backend.resolve_code_action(bulk.clone());
+        let edit = resolved
+            .edit
+            .as_ref()
+            .expect("resolve should produce an edit");
+        let changes = edit.changes.as_ref().unwrap();
+        let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
+
+        let mut result = content.to_string();
+        let mut sorted: Vec<&TextEdit> = edits.clone();
+        sorted.sort_by(|a, b| {
+            b.range
+                .start
+                .line
+                .cmp(&a.range.start.line)
+                .then(b.range.start.character.cmp(&a.range.start.character))
+        });
+        for edit in sorted {
+            let start = lsp_position_to_byte_offset(&result, edit.range.start);
+            let end = lsp_position_to_byte_offset(&result, edit.range.end);
+            result.replace_range(start..end, &edit.new_text);
+        }
+
+        assert_eq!(result, "<?php\nclass Test {}\n");
+    }
+
+    #[test]
+    fn bulk_remove_collapses_gap_when_unused_import_is_between_used_ones() {
+        let backend = crate::Backend::new_test();
+        let uri = "file:///test.php";
+        let content = "<?php\nuse Foo\\Bar;\nuse Baz\\Qux;\n\nuse Quux\\Quuz;\n\nclass Test extends Bar\n{\n    public function make(): Quuz\n    {\n        return new Quuz();\n    }\n}\n";
+
+        backend.update_ast(uri, content);
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier {
+                uri: uri.parse().unwrap(),
+            },
+            range: Range {
+                start: Position::new(2, 4),
+                end: Position::new(2, 4),
+            },
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let actions = backend.handle_code_action(uri, content, &params);
+        let bulk = actions
+            .iter()
+            .find_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) if ca.title == "Remove all unused imports" => {
+                    Some(ca)
+                }
+                _ => None,
+            })
+            .expect("should offer bulk remove");
+
+        let (resolved, _) = backend.resolve_code_action(bulk.clone());
+        let edit = resolved
+            .edit
+            .as_ref()
+            .expect("resolve should produce an edit");
+        let changes = edit.changes.as_ref().unwrap();
+        let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
+
+        let mut result = content.to_string();
+        let mut sorted: Vec<&TextEdit> = edits.clone();
+        sorted.sort_by(|a, b| {
+            b.range
+                .start
+                .line
+                .cmp(&a.range.start.line)
+                .then(b.range.start.character.cmp(&a.range.start.character))
+        });
+        for edit in sorted {
+            let start = lsp_position_to_byte_offset(&result, edit.range.start);
+            let end = lsp_position_to_byte_offset(&result, edit.range.end);
+            result.replace_range(start..end, &edit.new_text);
+        }
+
+        assert_eq!(
+            result,
+            "<?php\nuse Foo\\Bar;\nuse Quux\\Quuz;\n\nclass Test extends Bar\n{\n    public function make(): Quuz\n    {\n        return new Quuz();\n    }\n}\n"
         );
     }
 }
