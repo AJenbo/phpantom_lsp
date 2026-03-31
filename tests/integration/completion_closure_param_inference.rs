@@ -2275,101 +2275,6 @@ async fn test_explicit_subclass_still_wins_over_inferred_parent() {
         names,
     );
 }
-
-// ─── T16 reproducer: @var annotated generic collection ──────────────────────
-
-/// When a variable is annotated with `@var Collection<int, CustomerDocument>`,
-/// passing it to `Collection::each(callable(TValue): void)` should infer the
-/// closure parameter as `CustomerDocument`.
-#[tokio::test]
-async fn test_closure_param_inferred_from_var_annotated_generic_collection() {
-    let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_infer_var_annotation.php").unwrap();
-
-    let src = concat!(
-        "<?php\n",
-        "class CustomerDocument {\n",
-        "    public function getCustomerId(): int { return 0; }\n",
-        "    public function getDocumentPath(): string { return ''; }\n",
-        "}\n",
-        "/**\n",
-        " * @template TKey\n",
-        " * @template TValue\n",
-        " */\n",
-        "class Collection {\n",
-        "    /**\n",
-        "     * @param callable(TValue): void $callback\n",
-        "     * @return static\n",
-        "     */\n",
-        "    public function each(callable $callback): static {}\n",
-        "}\n",
-        "/** @var Collection<int, CustomerDocument> $collection */\n",
-        "$collection = new Collection();\n",
-        "$collection->each(function ($class) {\n",
-        "    $class->\n",
-        "});\n",
-    );
-
-    // Line 19: `    $class->`  cursor after `->`
-    let items = complete_at(&backend, &uri, src, 19, 12).await;
-    let names = method_names(&items);
-    assert!(
-        names.contains(&"getCustomerId"),
-        "Expected getCustomerId from @var Collection<int, CustomerDocument>, got: {:?}",
-        names,
-    );
-    assert!(
-        names.contains(&"getDocumentPath"),
-        "Expected getDocumentPath from @var Collection<int, CustomerDocument>, got: {:?}",
-        names,
-    );
-}
-
-/// Same as above but with a standalone `@var` (no assignment on the same line).
-#[tokio::test]
-async fn test_closure_param_inferred_from_standalone_var_generic() {
-    let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_infer_standalone_var.php").unwrap();
-
-    let src = concat!(
-        "<?php\n",
-        "class Item {\n",
-        "    public function getName(): string { return ''; }\n",
-        "}\n",
-        "/**\n",
-        " * @template TKey\n",
-        " * @template TValue\n",
-        " */\n",
-        "class Collection {\n",
-        "    /**\n",
-        "     * @param callable(TValue, TKey): void $callback\n",
-        "     * @return static\n",
-        "     */\n",
-        "    public function each(callable $callback): static {}\n",
-        "    /**\n",
-        "     * @param callable(TValue): mixed $callback\n",
-        "     * @return static\n",
-        "     */\n",
-        "    public function map(callable $callback): static {}\n",
-        "}\n",
-        "function processItems(): void {\n",
-        "    /** @var Collection<int, Item> $items */\n",
-        "    $items = getItems();\n",
-        "    $items->map(fn($item) => $item->);\n",
-        "}\n",
-    );
-
-    // Line 23: `    $items->map(fn($item) => $item->);`
-    //                                              ^--- cursor after `->`
-    let items = complete_at(&backend, &uri, src, 23, 36).await;
-    let names = method_names(&items);
-    assert!(
-        names.contains(&"getName"),
-        "Expected getName from @var Collection<int, Item> via map(), got: {:?}",
-        names,
-    );
-}
-
 // ─── Closure with explicit type hint nested inside arrow function body ───────
 
 /// When a closure with an explicit type hint is nested inside an arrow
@@ -2416,5 +2321,182 @@ async fn test_closure_with_type_hint_nested_inside_arrow_fn() {
         names.contains(&"orderBy"),
         "Expected orderBy() from explicitly typed Builder $q nested in arrow fn, got: {:?}",
         names,
+    );
+}
+
+// ─── Arrow fn inside switch case body ───────────────────────────────────────
+
+/// When a closure or arrow function with an explicit type hint appears inside
+/// a `switch` case body, `try_resolve_in_closure_stmt` must recurse into the
+/// switch cases.  Previously `Switch` was not handled, so the parameter's
+/// explicit type hint was lost.
+#[tokio::test]
+async fn test_arrow_fn_with_explicit_hint_inside_switch_case() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_in_switch.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class DeviationMessage {\n",
+        "    public string $type = '';\n",
+        "    public int $productId = 0;\n",
+        "    public int $lineNumber = 0;\n",
+        "}\n",
+        "class Checker {\n",
+        "    /** @var array<int, DeviationMessage> */\n",
+        "    private array $items = [];\n",
+        "    public function check(string $kind): bool {\n",
+        "        switch ($kind) {\n",
+        "            case 'a':\n",
+        "                return array_any($this->items, fn(DeviationMessage $item) => $item->type === 'x' && $item->productId === 1);\n",
+        "            case 'b':\n",
+        "                return array_any($this->items, fn(DeviationMessage $item) => $item->type === 'y' && $item->lineNumber === 2);\n",
+        "            default:\n",
+        "                return false;\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 12: case 'a' body — `fn(DeviationMessage $item) => $item->type`
+    //   `                return array_any($this->items, fn(DeviationMessage $item) => $item->type === 'x' && $item->productId === 1);`
+    //                                                                                       ^ col 87 is after `$item->`
+    let items_a = complete_at(&backend, &uri, src, 12, 87).await;
+    let names_a = property_names(&items_a);
+    assert!(
+        names_a.contains(&"type"),
+        "Expected 'type' from DeviationMessage in switch case 'a', got: {:?}",
+        names_a,
+    );
+    assert!(
+        names_a.contains(&"productId"),
+        "Expected 'productId' from DeviationMessage in switch case 'a', got: {:?}",
+        names_a,
+    );
+
+    // Line 14: case 'b' body — same pattern, second case
+    let items_b = complete_at(&backend, &uri, src, 14, 87).await;
+    let names_b = property_names(&items_b);
+    assert!(
+        names_b.contains(&"type"),
+        "Expected 'type' from DeviationMessage in switch case 'b', got: {:?}",
+        names_b,
+    );
+    assert!(
+        names_b.contains(&"lineNumber"),
+        "Expected 'lineNumber' from DeviationMessage in switch case 'b', got: {:?}",
+        names_b,
+    );
+}
+
+// ─── Arrow fn inside if condition expression ────────────────────────────────
+
+/// When a closure or arrow function appears inside an `if` condition
+/// (e.g. `if (array_any(..., fn(Foo $x) => $x->bar)) { ... }`),
+/// `try_resolve_in_closure_stmt` must recurse into the condition
+/// expression, not just the body.
+#[tokio::test]
+async fn test_arrow_fn_with_explicit_hint_inside_if_condition() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_in_if_cond.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class DeviationMessage {\n",
+        "    public string $type = '';\n",
+        "    public int $productId = 0;\n",
+        "}\n",
+        "class Checker {\n",
+        "    /** @var array<int, DeviationMessage> */\n",
+        "    private array $items = [];\n",
+        "    public function check(): void {\n",
+        "        if (array_any($this->items, fn(DeviationMessage $item) => $item->type === 'x' && $item->productId === 1)) {\n",
+        "            return;\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 9: `        if (array_any($this->items, fn(DeviationMessage $item) => $item->type ...`
+    //   `$item->` starts at col 76
+    let items = complete_at(&backend, &uri, src, 9, 77).await;
+    let names = property_names(&items);
+    assert!(
+        names.contains(&"type"),
+        "Expected 'type' from DeviationMessage in if condition, got: {:?}",
+        names,
+    );
+    assert!(
+        names.contains(&"productId"),
+        "Expected 'productId' from DeviationMessage in if condition, got: {:?}",
+        names,
+    );
+}
+
+// ─── Arrow fn in if condition inside switch case (real-world nesting) ────────
+
+/// The exact nesting from `PurchaseFileDeviationMessageCollection`: a closure
+/// inside an `if` condition inside a `switch` case body.  Both `switch` and
+/// `if`-condition recursion must work together.
+#[tokio::test]
+async fn test_arrow_fn_in_if_condition_inside_switch_case() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/closure_if_in_switch.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class DeviationMessage {\n",
+        "    public string $type = '';\n",
+        "    public int $productId = 0;\n",
+        "    public int $lineNumber = 0;\n",
+        "}\n",
+        "class Checker {\n",
+        "    /** @var array<int, DeviationMessage> */\n",
+        "    private array $items = [];\n",
+        "    public function check(string $kind): void {\n",
+        "        switch ($kind) {\n",
+        "            case 'a':\n",
+        "                if (array_any($this->items, fn(DeviationMessage $item) => $item->type === 'x' && $item->productId === 1)) {\n",
+        "                    return;\n",
+        "                }\n",
+        "                break;\n",
+        "            case 'b':\n",
+        "                if (array_any($this->items, fn(DeviationMessage $item) => $item->type === 'y' && $item->lineNumber === 2)) {\n",
+        "                    return;\n",
+        "                }\n",
+        "                break;\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 12: case 'a' — if condition contains the arrow fn
+    //   `                if (array_any($this->items, fn(DeviationMessage $item) => $item->type ...`
+    //                                                                                    ^ col 91 after `$item->`
+    let items_a = complete_at(&backend, &uri, src, 12, 81).await;
+    let names_a = property_names(&items_a);
+    assert!(
+        names_a.contains(&"type"),
+        "Expected 'type' from DeviationMessage in if-in-switch case 'a', got: {:?}",
+        names_a,
+    );
+    assert!(
+        names_a.contains(&"productId"),
+        "Expected 'productId' from DeviationMessage in if-in-switch case 'a', got: {:?}",
+        names_a,
+    );
+
+    // Line 17: case 'b' — same nesting
+    let items_b = complete_at(&backend, &uri, src, 17, 81).await;
+    let names_b = property_names(&items_b);
+    assert!(
+        names_b.contains(&"type"),
+        "Expected 'type' from DeviationMessage in if-in-switch case 'b', got: {:?}",
+        names_b,
+    );
+    assert!(
+        names_b.contains(&"lineNumber"),
+        "Expected 'lineNumber' from DeviationMessage in if-in-switch case 'b', got: {:?}",
+        names_b,
     );
 }

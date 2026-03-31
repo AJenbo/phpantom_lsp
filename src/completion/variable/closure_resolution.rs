@@ -647,21 +647,51 @@ pub(in crate::completion) fn try_resolve_in_closure_stmt<'b>(
             }
             false
         }
-        Statement::If(if_stmt) => match &if_stmt.body {
-            IfBody::Statement(body) => try_resolve_in_closure_stmt(body.statement, ctx, results),
-            IfBody::ColonDelimited(body) => {
-                for inner in body.statements.iter() {
-                    let s = inner.span();
-                    if ctx.cursor_offset >= s.start.offset
-                        && ctx.cursor_offset <= s.end.offset
-                        && try_resolve_in_closure_stmt(inner, ctx, results)
-                    {
+        Statement::If(if_stmt) => {
+            // Check the condition expression first — the closure may
+            // be inside `if (array_any(..., fn(Foo $x) => $x->...))`.
+            if try_resolve_in_closure_expr(if_stmt.condition, ctx, results) {
+                return true;
+            }
+            // Then check elseif conditions.
+            if let IfBody::Statement(body) = &if_stmt.body {
+                for elseif in body.else_if_clauses.iter() {
+                    if try_resolve_in_closure_expr(elseif.condition, ctx, results) {
                         return true;
                     }
                 }
-                false
             }
-        },
+            match &if_stmt.body {
+                IfBody::Statement(body) => {
+                    if try_resolve_in_closure_stmt(body.statement, ctx, results) {
+                        return true;
+                    }
+                    for elseif in body.else_if_clauses.iter() {
+                        if try_resolve_in_closure_stmt(elseif.statement, ctx, results) {
+                            return true;
+                        }
+                    }
+                    if let Some(else_clause) = &body.else_clause {
+                        if try_resolve_in_closure_stmt(else_clause.statement, ctx, results) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                IfBody::ColonDelimited(body) => {
+                    for inner in body.statements.iter() {
+                        let s = inner.span();
+                        if ctx.cursor_offset >= s.start.offset
+                            && ctx.cursor_offset <= s.end.offset
+                            && try_resolve_in_closure_stmt(inner, ctx, results)
+                        {
+                            return true;
+                        }
+                    }
+                    false
+                }
+            }
+        }
         Statement::Foreach(foreach) => match &foreach.body {
             ForeachBody::Statement(inner) => try_resolve_in_closure_stmt(inner, ctx, results),
             ForeachBody::ColonDelimited(body) => {
@@ -743,6 +773,20 @@ pub(in crate::completion) fn try_resolve_in_closure_stmt<'b>(
             }
             if let Some(finally) = &try_stmt.finally_clause {
                 for inner in finally.block.statements.iter() {
+                    let s = inner.span();
+                    if ctx.cursor_offset >= s.start.offset
+                        && ctx.cursor_offset <= s.end.offset
+                        && try_resolve_in_closure_stmt(inner, ctx, results)
+                    {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+        Statement::Switch(switch) => {
+            for case in switch.body.cases().iter() {
+                for inner in case.statements().iter() {
                     let s = inner.span();
                     if ctx.cursor_offset >= s.start.offset
                         && ctx.cursor_offset <= s.end.offset
