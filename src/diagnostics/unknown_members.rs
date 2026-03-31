@@ -4631,4 +4631,201 @@ function test(): void {
             "expected exactly 2 diagnostics (whereInvalid + unknown), got: {messages:?}"
         );
     }
+
+    // ── B17: && short-circuit narrowing does not eliminate null ──────
+
+    /// B17: `$lastPaidEnd !== null && $lastPaidEnd->diffInDays(…)` must
+    /// not produce a scalar_member_access diagnostic.  The `!== null`
+    /// check on the left side of `&&` should narrow away `null` for
+    /// the right side.
+    #[test]
+    fn no_false_positive_and_short_circuit_null_narrowing() {
+        let php = r#"<?php
+class Carbon {
+    public function diffInDays(Carbon $other): int { return 0; }
+    public function startOfDay(): static { return $this; }
+}
+class Period {
+    public Carbon $ending;
+}
+class Svc {
+    /** @param list<Period> $periods */
+    public function gaps(array $periods): void {
+        $lastPaidEnd = null;
+        $periodStart = new Carbon();
+        foreach ($periods as $period) {
+            if ($lastPaidEnd !== null && $lastPaidEnd->diffInDays($periodStart) > 0) {
+                // should not report: Cannot access method 'diffInDays' on type 'null'
+            }
+            $lastPaidEnd = $period->ending->startOfDay();
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let scalar_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+            .collect();
+        assert!(
+            scalar_diags.is_empty(),
+            "should not flag scalar_member_access on $lastPaidEnd->diffInDays() after !== null guard in &&, got: {scalar_diags:?}"
+        );
+    }
+
+    /// B17 variant: bare truthy check `$var && $var->method()`.
+    #[test]
+    fn no_false_positive_and_short_circuit_truthy_narrowing() {
+        let php = r#"<?php
+class Logger {
+    public function log(string $msg): void {}
+}
+class Svc {
+    public function run(): void {
+        $logger = null;
+        if (rand(0,1)) {
+            $logger = new Logger();
+        }
+        $logger && $logger->log('hello');
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let scalar_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+            .collect();
+        assert!(
+            scalar_diags.is_empty(),
+            "should not flag scalar_member_access on $logger->log() after truthy guard in &&, got: {scalar_diags:?}"
+        );
+    }
+
+    /// B17 variant: chained `&&` with null check as first operand.
+    /// `$a !== null && $b !== null && $a->method()` — the null check
+    /// for `$a` is two levels up in the `&&` chain.
+    #[test]
+    fn no_false_positive_chained_and_null_narrowing() {
+        let php = r#"<?php
+class Foo {
+    public function bar(): int { return 0; }
+}
+class Svc {
+    public function test(): void {
+        $a = null;
+        $b = null;
+        if (rand(0,1)) { $a = new Foo(); }
+        if (rand(0,1)) { $b = new Foo(); }
+        if ($a !== null && $b !== null && $a->bar() > 0) {
+            // both $a and $b are non-null here
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let scalar_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+            .collect();
+        assert!(
+            scalar_diags.is_empty(),
+            "should not flag scalar_member_access on $a->bar() in chained && with null guards, got: {scalar_diags:?}"
+        );
+    }
+
+    /// B17 variant: three null-init vars with compound && guard, cursor on
+    /// third var inside the if-body (not inside the condition).
+    #[test]
+    fn no_false_positive_if_body_triple_null_narrowing() {
+        let php = r#"<?php
+class Foo {
+    public function bar(): int { return 0; }
+    public function baz(): static { return $this; }
+}
+class Svc {
+    public function test(): void {
+        $x = null;
+        $y = null;
+        $z = null;
+        if (rand(0,1)) { $x = new Foo(); }
+        if (rand(0,1)) { $y = new Foo(); }
+        if (rand(0,1)) { $z = new Foo(); }
+        if ($x !== null && $y !== null && $z !== null && $x->baz()->bar() > 0) {
+            $z->bar();
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let scalar_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+            .collect();
+        assert!(
+            scalar_diags.is_empty(),
+            "should not flag scalar_member_access on $z->bar() inside if-body after triple && null guard, got: {scalar_diags:?}"
+        );
+    }
+
+    /// B17 variant: null check in if-condition narrows inside the then-body.
+    #[test]
+    fn no_false_positive_if_body_null_narrowing() {
+        let php = r#"<?php
+class Foo {
+    public function bar(): int { return 0; }
+}
+class Svc {
+    public function test(): void {
+        $a = null;
+        $b = null;
+        if (rand(0,1)) { $a = new Foo(); }
+        if (rand(0,1)) { $b = new Foo(); }
+        if ($a !== null && $b !== null && $a->bar() > 0) {
+            $b->bar();
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let scalar_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+            .collect();
+        assert!(
+            scalar_diags.is_empty(),
+            "should not flag scalar_member_access on $b->bar() inside if-body after && null guard, got: {scalar_diags:?}"
+        );
+    }
+
+    /// B17 variant: && inside a ternary condition in a return statement.
+    #[test]
+    fn no_false_positive_ternary_wrapped_and_null_narrowing() {
+        let php = r#"<?php
+class Foo {
+    public function val(): int { return 0; }
+}
+class Svc {
+    public function test(): int {
+        $c = null;
+        if (rand(0,1)) { $c = new Foo(); }
+        return $c !== null && $c->val() > 5 ? 1 : 0;
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let scalar_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+            .collect();
+        assert!(
+            scalar_diags.is_empty(),
+            "should not flag scalar_member_access on $c->val() inside ternary-wrapped &&, got: {scalar_diags:?}"
+        );
+    }
 }

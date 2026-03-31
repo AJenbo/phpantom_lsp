@@ -1405,8 +1405,46 @@ pub(in crate::completion) fn try_apply_inline_and_narrowing(
             try_apply_inline_and_narrowing(bin.lhs, ctx, results);
             try_apply_inline_and_narrowing(bin.rhs, ctx, results);
         }
+        // Recurse through common wrapper expressions so `&&` nodes
+        // buried inside ternaries, assignments, other binary ops, etc.
+        // are still discovered.
         Expression::Parenthesized(inner) => {
             try_apply_inline_and_narrowing(inner.expression, ctx, results);
+        }
+        Expression::Conditional(cond_expr) => {
+            try_apply_inline_and_narrowing(cond_expr.condition, ctx, results);
+            if let Some(then_expr) = cond_expr.then {
+                try_apply_inline_and_narrowing(then_expr, ctx, results);
+            }
+            try_apply_inline_and_narrowing(cond_expr.r#else, ctx, results);
+        }
+        Expression::Assignment(assign) => {
+            try_apply_inline_and_narrowing(assign.rhs, ctx, results);
+        }
+        Expression::Binary(bin) => {
+            try_apply_inline_and_narrowing(bin.lhs, ctx, results);
+            try_apply_inline_and_narrowing(bin.rhs, ctx, results);
+        }
+        Expression::UnaryPrefix(prefix) => {
+            try_apply_inline_and_narrowing(prefix.operand, ctx, results);
+        }
+        Expression::UnaryPostfix(postfix) => {
+            try_apply_inline_and_narrowing(postfix.operand, ctx, results);
+        }
+        Expression::Call(call) => {
+            let args = match call {
+                Call::Function(fc) => &fc.argument_list.arguments,
+                Call::Method(mc) => &mc.argument_list.arguments,
+                Call::NullSafeMethod(mc) => &mc.argument_list.arguments,
+                Call::StaticMethod(sc) => &sc.argument_list.arguments,
+            };
+            for arg in args.iter() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                try_apply_inline_and_narrowing(arg_expr, ctx, results);
+            }
         }
         _ => {}
     }
@@ -1449,6 +1487,130 @@ fn apply_and_lhs_narrowing(
                         ctx,
                         results,
                     );
+                }
+            }
+        }
+    }
+}
+
+// ── Inline && null narrowing ─────────────────────────────────────
+
+/// Apply null-check narrowing from `&&` short-circuit semantics.
+///
+/// This is the `ResolvedType`-level counterpart of
+/// [`try_apply_inline_and_narrowing`] (which handles `instanceof`).
+/// When the cursor is inside the RHS of `$var !== null && $var->…`,
+/// the `!== null` check on the LHS guarantees the variable is
+/// non-null in the RHS, so we strip `null` from the resolved types.
+///
+/// Works on `Vec<ResolvedType>` directly because `null` is not a
+/// class and would be missed by class-level narrowing.
+pub(in crate::completion) fn try_apply_inline_and_null_narrowing(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    match expr {
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+            ) =>
+        {
+            let rhs_span = bin.rhs.span();
+            let cursor_in_rhs = ctx.cursor_offset >= rhs_span.start.offset
+                && ctx.cursor_offset <= rhs_span.end.offset;
+
+            if cursor_in_rhs {
+                apply_and_lhs_null_narrowing(bin.lhs, ctx, results);
+            }
+
+            // Recurse into both sides so that deeply nested `&&`
+            // chains are handled.
+            try_apply_inline_and_null_narrowing(bin.lhs, ctx, results);
+            try_apply_inline_and_null_narrowing(bin.rhs, ctx, results);
+        }
+        // Recurse through common wrapper expressions so `&&` nodes
+        // buried inside ternaries, assignments, other binary ops, etc.
+        // are still discovered.
+        Expression::Parenthesized(inner) => {
+            try_apply_inline_and_null_narrowing(inner.expression, ctx, results);
+        }
+        Expression::Conditional(cond_expr) => {
+            try_apply_inline_and_null_narrowing(cond_expr.condition, ctx, results);
+            if let Some(then_expr) = cond_expr.then {
+                try_apply_inline_and_null_narrowing(then_expr, ctx, results);
+            }
+            try_apply_inline_and_null_narrowing(cond_expr.r#else, ctx, results);
+        }
+        Expression::Assignment(assign) => {
+            try_apply_inline_and_null_narrowing(assign.rhs, ctx, results);
+        }
+        Expression::Binary(bin) => {
+            try_apply_inline_and_null_narrowing(bin.lhs, ctx, results);
+            try_apply_inline_and_null_narrowing(bin.rhs, ctx, results);
+        }
+        Expression::UnaryPrefix(prefix) => {
+            try_apply_inline_and_null_narrowing(prefix.operand, ctx, results);
+        }
+        Expression::UnaryPostfix(postfix) => {
+            try_apply_inline_and_null_narrowing(postfix.operand, ctx, results);
+        }
+        Expression::Call(call) => {
+            let args = match call {
+                Call::Function(fc) => &fc.argument_list.arguments,
+                Call::Method(mc) => &mc.argument_list.arguments,
+                Call::NullSafeMethod(mc) => &mc.argument_list.arguments,
+                Call::StaticMethod(sc) => &sc.argument_list.arguments,
+            };
+            for arg in args.iter() {
+                let arg_expr = match arg {
+                    Argument::Positional(pos) => pos.value,
+                    Argument::Named(named) => named.value,
+                };
+                try_apply_inline_and_null_narrowing(arg_expr, ctx, results);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect and apply all null-check narrowing from the LHS of a `&&`
+/// expression.
+///
+/// When the LHS contains `$var !== null` (or `!is_null($var)`, or a
+/// bare truthy `$var`), and the variable matches `ctx.var_name`, we
+/// remove `null` from `results`.
+fn apply_and_lhs_null_narrowing(
+    expr: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    match expr {
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+            ) =>
+        {
+            // Both sides of the inner `&&` are known-true.
+            apply_and_lhs_null_narrowing(bin.lhs, ctx, results);
+            apply_and_lhs_null_narrowing(bin.rhs, ctx, results);
+        }
+        Expression::Parenthesized(inner) => {
+            apply_and_lhs_null_narrowing(inner.expression, ctx, results);
+        }
+        _ => {
+            // `try_extract_null_check` returns `Some(true)` when the
+            // expression checks that the variable is NOT null (e.g.
+            // `$var !== null`, `!is_null($var)`, bare `$var`).
+            if let Some(true) = try_extract_null_check(expr, ctx.var_name) {
+                // The LHS proved the variable is non-null → remove null.
+                results.retain(|rt| !rt.type_string.is_null());
+                for rt in results.iter_mut() {
+                    if let Some(non_null) = rt.type_string.non_null_type() {
+                        rt.type_string = non_null;
+                    }
                 }
             }
         }
@@ -2186,5 +2348,99 @@ pub(in crate::completion) fn apply_guard_clause_null_narrowing(
         // The "exits when non-null" case (condition_checks_null == true)
         // is unusual and not worth handling — the code after would only
         // see null, which has no class members to complete on.
+    }
+}
+
+/// Apply null narrowing inside the then-body of an `if` / `elseif`
+/// whose condition proves the variable is non-null.
+///
+/// Handles:
+///   - Simple: `if ($var !== null) { … }`
+///   - Compound `&&`: `if ($a !== null && $b !== null && …) { … }`
+///     — each operand that checks non-null for `ctx.var_name`
+///     contributes narrowing.
+///   - `!is_null($var)`, bare truthy `$var`
+///
+/// This is the if-body counterpart of the inline `&&` narrowing
+/// ([`try_apply_inline_and_null_narrowing`]) and the guard-clause
+/// narrowing ([`apply_guard_clause_null_narrowing`]).
+pub(in crate::completion) fn try_apply_if_body_null_narrowing(
+    condition: &Expression<'_>,
+    body_span: mago_span::Span,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
+        return;
+    }
+
+    if condition_checks_non_null(condition, ctx.var_name) {
+        results.retain(|rt| !rt.type_string.is_null());
+        for rt in results.iter_mut() {
+            if let Some(non_null) = rt.type_string.non_null_type() {
+                rt.type_string = non_null;
+            }
+        }
+    }
+}
+
+/// Apply inverse null narrowing inside the else-body of an `if`
+/// whose condition proves the variable is non-null.
+///
+/// When the condition is a simple `$var !== null` (not compound `&&`),
+/// the else-body knows the variable IS null.  This is only useful for
+/// stripping non-null types, but we include it for completeness so
+/// that hover shows `null` rather than `Carbon|null` in the else
+/// branch.
+///
+/// For compound `&&` conditions we cannot safely invert — any single
+/// operand being false enters the else branch, so we skip those.
+pub(in crate::completion) fn try_apply_if_body_null_narrowing_inverse(
+    condition: &Expression<'_>,
+    body_span: mago_span::Span,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
+        return;
+    }
+
+    // Only invert simple (non-compound) null checks.
+    // `if ($var !== null) { … } else { ← $var is null here }`
+    if let Some(true) = try_extract_null_check(condition, ctx.var_name) {
+        // The condition proved NOT null, so the else-body sees null.
+        // Keep only null entries.
+        results.retain(|rt| rt.type_string.is_null());
+    } else if let Some(false) = try_extract_null_check(condition, ctx.var_name) {
+        // The condition proved IS null (e.g. `$var === null`), so the
+        // else-body sees non-null.
+        results.retain(|rt| !rt.type_string.is_null());
+        for rt in results.iter_mut() {
+            if let Some(non_null) = rt.type_string.non_null_type() {
+                rt.type_string = non_null;
+            }
+        }
+    }
+}
+
+/// Check whether `condition` proves that `var_name` is non-null.
+///
+/// Returns `true` when the condition (or any operand in a `&&` chain)
+/// is a non-null check for the given variable.
+fn condition_checks_non_null(condition: &Expression<'_>, var_name: &str) -> bool {
+    match condition {
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_)
+            ) =>
+        {
+            // In `A && B`, both A and B are true — if either checks
+            // non-null, the variable is non-null.
+            condition_checks_non_null(bin.lhs, var_name)
+                || condition_checks_non_null(bin.rhs, var_name)
+        }
+        Expression::Parenthesized(inner) => condition_checks_non_null(inner.expression, var_name),
+        _ => matches!(try_extract_null_check(condition, var_name), Some(true)),
     }
 }

@@ -1212,6 +1212,11 @@ pub(in crate::completion) fn walk_statements_for_assignments<'b>(
                 ResolvedType::apply_narrowing(results, |classes| {
                     narrowing::try_apply_inline_and_narrowing(expr_stmt.expression, ctx, classes);
                 });
+                // ── inline && null narrowing ──
+                // `$var !== null && $var->method()`
+                // When the cursor is inside the RHS of `&&` whose
+                // LHS checks for non-null, strip null from resolved types.
+                narrowing::try_apply_inline_and_null_narrowing(expr_stmt.expression, ctx, results);
             }
             // ── Return statements ──
             // The return value expression can contain narrowing
@@ -1230,6 +1235,7 @@ pub(in crate::completion) fn walk_statements_for_assignments<'b>(
                     ResolvedType::apply_narrowing(results, |classes| {
                         narrowing::try_apply_inline_and_narrowing(val, ctx, classes);
                     });
+                    narrowing::try_apply_inline_and_null_narrowing(val, ctx, results);
                 }
             }
             // Recurse into blocks — these are just `{ … }` groupings,
@@ -1330,6 +1336,7 @@ fn walk_if_statement<'b>(
     ResolvedType::apply_narrowing(results, |classes| {
         narrowing::try_apply_inline_and_narrowing(if_stmt.condition, ctx, classes);
     });
+    narrowing::try_apply_inline_and_null_narrowing(if_stmt.condition, ctx, results);
 
     match &if_stmt.body {
         IfBody::Statement(body) => {
@@ -1361,6 +1368,13 @@ fn walk_if_statement<'b>(
                     classes,
                 );
             });
+            // ── null narrowing for then-body ──
+            narrowing::try_apply_if_body_null_narrowing(
+                if_stmt.condition,
+                body.statement.span(),
+                ctx,
+                results,
+            );
             check_statement_for_assignments(body.statement, ctx, results, true);
 
             for else_if in body.else_if_clauses.iter() {
@@ -1368,6 +1382,7 @@ fn walk_if_statement<'b>(
                 ResolvedType::apply_narrowing(results, |classes| {
                     narrowing::try_apply_inline_and_narrowing(else_if.condition, ctx, classes);
                 });
+                narrowing::try_apply_inline_and_null_narrowing(else_if.condition, ctx, results);
                 // ── instanceof narrowing for elseif-body ──
                 ResolvedType::apply_narrowing(results, |classes| {
                     narrowing::try_apply_instanceof_narrowing(
@@ -1394,6 +1409,13 @@ fn walk_if_statement<'b>(
                         classes,
                     );
                 });
+                // ── null narrowing for elseif-body ──
+                narrowing::try_apply_if_body_null_narrowing(
+                    else_if.condition,
+                    else_if.statement.span(),
+                    ctx,
+                    results,
+                );
                 check_statement_for_assignments(else_if.statement, ctx, results, true);
             }
             if let Some(else_clause) = &body.else_clause {
@@ -1426,6 +1448,13 @@ fn walk_if_statement<'b>(
                         classes,
                     );
                 });
+                // ── inverse null narrowing for else-body ──
+                narrowing::try_apply_if_body_null_narrowing_inverse(
+                    if_stmt.condition,
+                    else_span,
+                    ctx,
+                    results,
+                );
                 // Also apply inverse narrowing for every elseif condition.
                 // In the else branch, all preceding conditions were false,
                 // so each elseif's condition is also inverted.
@@ -1500,12 +1529,15 @@ fn walk_if_statement<'b>(
             ResolvedType::apply_narrowing(results, |classes| {
                 narrowing::try_apply_in_array_narrowing(if_stmt.condition, then_span, ctx, classes);
             });
+            // ── null narrowing for then-body ──
+            narrowing::try_apply_if_body_null_narrowing(if_stmt.condition, then_span, ctx, results);
             walk_statements_for_assignments(body.statements.iter(), ctx, results, true);
             for else_if in body.else_if_clauses.iter() {
                 // ── inline && narrowing for elseif condition ──
                 ResolvedType::apply_narrowing(results, |classes| {
                     narrowing::try_apply_inline_and_narrowing(else_if.condition, ctx, classes);
                 });
+                narrowing::try_apply_inline_and_null_narrowing(else_if.condition, ctx, results);
                 let ei_span = mago_span::Span::new(
                     else_if.colon.file_id,
                     else_if.colon.start,
@@ -1542,6 +1574,13 @@ fn walk_if_statement<'b>(
                         classes,
                     );
                 });
+                // ── null narrowing for elseif-body ──
+                narrowing::try_apply_if_body_null_narrowing(
+                    else_if.condition,
+                    ei_span,
+                    ctx,
+                    results,
+                );
                 walk_statements_for_assignments(else_if.statements.iter(), ctx, results, true);
             }
             if let Some(else_clause) = &body.else_clause {
@@ -1582,6 +1621,13 @@ fn walk_if_statement<'b>(
                         classes,
                     );
                 });
+                // ── inverse null narrowing for else-body ──
+                narrowing::try_apply_if_body_null_narrowing_inverse(
+                    if_stmt.condition,
+                    else_span,
+                    ctx,
+                    results,
+                );
                 // Also apply inverse narrowing for every elseif condition.
                 for else_if in body.else_if_clauses.iter() {
                     ResolvedType::apply_narrowing(results, |classes| {
@@ -1690,6 +1736,12 @@ fn walk_if_branch_aware<'b>(
                         classes,
                     );
                 });
+                narrowing::try_apply_if_body_null_narrowing(
+                    if_stmt.condition,
+                    then_span,
+                    ctx,
+                    results,
+                );
                 check_statement_for_assignments(body.statement, ctx, results, false);
                 return Some(());
             }
@@ -1725,6 +1777,12 @@ fn walk_if_branch_aware<'b>(
                             classes,
                         );
                     });
+                    narrowing::try_apply_if_body_null_narrowing(
+                        else_if.condition,
+                        ei_span,
+                        ctx,
+                        results,
+                    );
                     check_statement_for_assignments(else_if.statement, ctx, results, false);
                     return Some(());
                 }
@@ -1761,6 +1819,12 @@ fn walk_if_branch_aware<'b>(
                             classes,
                         );
                     });
+                    narrowing::try_apply_if_body_null_narrowing_inverse(
+                        if_stmt.condition,
+                        el_span,
+                        ctx,
+                        results,
+                    );
                     // Also apply inverse narrowing for every elseif condition.
                     for else_if in body.else_if_clauses.iter() {
                         ResolvedType::apply_narrowing(results, |classes| {
@@ -1842,6 +1906,12 @@ fn walk_if_branch_aware<'b>(
                         classes,
                     );
                 });
+                narrowing::try_apply_if_body_null_narrowing(
+                    if_stmt.condition,
+                    then_span,
+                    ctx,
+                    results,
+                );
                 walk_statements_for_assignments(body.statements.iter(), ctx, results, false);
                 return Some(());
             }
@@ -1891,6 +1961,12 @@ fn walk_if_branch_aware<'b>(
                             classes,
                         );
                     });
+                    narrowing::try_apply_if_body_null_narrowing(
+                        else_if.condition,
+                        ei_span,
+                        ctx,
+                        results,
+                    );
                     walk_statements_for_assignments(else_if.statements.iter(), ctx, results, false);
                     return Some(());
                 }
@@ -1932,6 +2008,12 @@ fn walk_if_branch_aware<'b>(
                             classes,
                         );
                     });
+                    narrowing::try_apply_if_body_null_narrowing_inverse(
+                        if_stmt.condition,
+                        else_span,
+                        ctx,
+                        results,
+                    );
                     // Also apply inverse narrowing for every elseif condition.
                     for else_if in body.else_if_clauses.iter() {
                         ResolvedType::apply_narrowing(results, |classes| {
@@ -2055,6 +2137,7 @@ fn walk_while_statement<'b>(
     ResolvedType::apply_narrowing(results, |classes| {
         narrowing::try_apply_inline_and_narrowing(while_stmt.condition, ctx, classes);
     });
+    narrowing::try_apply_inline_and_null_narrowing(while_stmt.condition, ctx, results);
 
     match &while_stmt.body {
         WhileBody::Statement(inner) => {
@@ -2083,6 +2166,13 @@ fn walk_while_statement<'b>(
                     classes,
                 );
             });
+            // ── null narrowing for while-body ──
+            narrowing::try_apply_if_body_null_narrowing(
+                while_stmt.condition,
+                inner.span(),
+                ctx,
+                results,
+            );
             check_statement_for_assignments(inner, ctx, results, true);
         }
         WhileBody::ColonDelimited(body) => {
@@ -2116,6 +2206,13 @@ fn walk_while_statement<'b>(
                     classes,
                 );
             });
+            // ── null narrowing for while-body ──
+            narrowing::try_apply_if_body_null_narrowing(
+                while_stmt.condition,
+                body_span,
+                ctx,
+                results,
+            );
             walk_statements_for_assignments(body.statements.iter(), ctx, results, true);
         }
     }
