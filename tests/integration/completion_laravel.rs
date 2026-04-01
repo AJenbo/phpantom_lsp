@@ -11329,3 +11329,35 @@ class Product extends Model {
         methods
     );
 }
+
+#[tokio::test]
+async fn test_legacy_dates_property_produces_typed_virtual_properties() {
+    let use_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    protected $dates = ['published_at', 'expires_at'];
+    public function test() {
+        $user = new User();
+        $user->
+    }
+}    
+";
+
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", use_php)]);
+
+    let items = complete_at(&backend, &dir, "src/Models/User.php", use_php, 7, 15).await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"published_at"),
+        "Legacy $dates property should produce virtual property 'published_at'; got: {:?}",
+        props
+    );
+    assert!(
+        props.contains(&"expires_at"),
+        "Legacy $dates property should produce virtual property 'expires_at'; got: {:?}",
+        props
+    );
+}
