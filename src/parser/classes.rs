@@ -373,27 +373,24 @@ fn extract_dates_definitions<'a>(
     let mut property_text: Option<String> = None;
 
     for member in members {
-        match member {
-            ClassLikeMember::Property(Property::Plain(plain)) => {
-                for item in plain.items.iter() {
-                    let var_name = item.variable().name.to_string();
-                    let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
+        if let ClassLikeMember::Property(Property::Plain(plain)) = member {
+            for item in plain.items.iter() {
+                let var_name = item.variable().name.to_string();
+                let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
 
-                    if stripped != "dates" {
-                        continue;
-                    }
+                if stripped != "dates" {
+                    continue;
+                }
 
-                    if let PropertyItem::Concrete(concrete) = item {
-                        let span = concrete.value.span();
-                        let start = span.start.offset as usize;
-                        let end = span.end.offset as usize;
-                        if let Some(text) = content.get(start..end) {
-                            property_text = Some(text.to_string());
-                        }
+                if let PropertyItem::Concrete(concrete) = item {
+                    let span = concrete.value.span();
+                    let start = span.start.offset as usize;
+                    let end = span.end.offset as usize;
+                    if let Some(text) = content.get(start..end) {
+                        property_text = Some(text.to_string());
                     }
                 }
             }
-            _ => {}
         }
     }
 
@@ -432,7 +429,7 @@ fn parse_dates_array(text: &str) -> Vec<(String, String)> {
         if let Some(k) = key
             && !k.is_empty()
         {
-            results.push((k, "Carbon\\Carbon".to_string()));
+            results.push((k, "datetime".to_string()));
         }
     }
 
@@ -567,6 +564,15 @@ fn parse_casts_array(text: &str) -> Vec<(String, String)> {
     }
 
     results
+}
+
+/// Merge a list of additional cast definitions into the given list, adding any entries that don't already exist.
+fn merge_missing_cast_definitions(merged: &mut Vec<(String, String)>, defs: Vec<(String, String)>) {
+    for (key, value) in defs {
+        if !merged.iter().any(|(existing_key, _)| *existing_key == key) {
+            merged.push((key, value));
+        }
+    }
 }
 
 /// Extract the string content from a PHP string literal.
@@ -911,8 +917,11 @@ impl Backend {
                         content,
                     );
 
-                    let casts_definitions =
+                    let mut casts_definitions =
                         extract_casts_definitions(class.members.iter(), content);
+                    let dates_definitions =
+                        extract_dates_definitions(class.members.iter(), content);
+                    merge_missing_cast_definitions(&mut casts_definitions, dates_definitions);
 
                     let attributes_definitions =
                         extract_attributes_definitions(class.members.iter(), content);
