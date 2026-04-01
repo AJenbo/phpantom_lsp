@@ -2237,6 +2237,24 @@ fn try_extract_null_check(condition: &Expression<'_>, var_name: &str) -> Option<
         // is a falsy check (negated=true → IS null → return false).
         Expression::Variable(Variable::Direct(dv)) if dv.name == var_name => Some(!negated),
 
+        // Assignment used as a condition:
+        //   `if ($var = expr())` → truthy when assigned value is truthy
+        //   `if (!($var = expr()))` → truthy when assigned value is falsy
+        // This is equivalent to a bare variable truthy check.
+        Expression::Assignment(assign)
+            if assign.operator.is_assign()
+                && matches!(
+                    assign.lhs,
+                    Expression::Variable(Variable::Direct(dv)) if dv.name == var_name
+                ) =>
+        {
+            Some(!negated)
+        }
+
+        // Parenthesized assignment used as a condition:
+        //   `if (($var = expr()))` — same as above but wrapped in parens.
+        Expression::Parenthesized(inner) => try_extract_null_check(inner.expression, var_name),
+
         // `$var === null` / `$var == null` / `$var !== null` / `$var != null`
         Expression::Binary(bin) => {
             let is_identity = matches!(
@@ -2265,9 +2283,7 @@ fn try_extract_null_check(condition: &Expression<'_>, var_name: &str) -> Option<
                 return None;
             };
 
-            if let Expression::Variable(Variable::Direct(dv)) = var_side
-                && dv.name == var_name
-            {
+            if is_var_or_assignment_to(var_side, var_name) {
                 return Some(negated ^ op_negates);
             }
             None
@@ -2296,6 +2312,29 @@ fn try_extract_null_check(condition: &Expression<'_>, var_name: &str) -> Option<
         }
 
         _ => None,
+    }
+}
+
+/// Check whether an expression is a direct variable reference to
+/// `var_name`, or an assignment (possibly parenthesized) whose LHS
+/// is that variable.
+///
+/// This lets null-check extraction recognise patterns like
+/// `($x = expr()) !== null` in addition to `$x !== null`.
+fn is_var_or_assignment_to(expr: &Expression<'_>, var_name: &str) -> bool {
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => dv.name == var_name,
+        Expression::Assignment(assign)
+            if assign.operator.is_assign()
+                && matches!(
+                    assign.lhs,
+                    Expression::Variable(Variable::Direct(dv)) if dv.name == var_name
+                ) =>
+        {
+            true
+        }
+        Expression::Parenthesized(inner) => is_var_or_assignment_to(inner.expression, var_name),
+        _ => false,
     }
 }
 

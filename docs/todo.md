@@ -24,7 +24,6 @@ within the same impact tier.
 | #   | Item                                                                                                                                       | Impact | Effort     |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ---------- |
 | T18 | [Method-level template parameter resolution at call sites](todo/type-inference.md#t18-method-level-template-parameter-resolution-at-call-sites) | Medium | Medium     |
-| B18 | [Assignment inside `if` condition does not resolve variable in body](todo/bugs.md#b18-assignment-inside-if-condition-does-not-resolve-variable-in-body) | Medium | Medium     |
 | B19 | [Nullable return type `TValue\|null` drops `\|null`](todo/bugs.md#b19-nullable-return-type-tvaluenull-drops-null) | Low | Low |
 | B20 | [Loop-body assignments not visible to null narrowing](todo/bugs.md#b20-loop-body-assignments-not-visible-to-null-narrowing-for-null-initialized-variables) | Low | Medium |
 | B21 | [Builder `__call` return type drops chain type for dynamic `where{Column}` calls](todo/bugs.md#b21-builder-__call-return-type-drops-chain-type-for-dynamic-wherecolumn-calls) | Medium | Medium     |

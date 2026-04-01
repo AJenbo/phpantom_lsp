@@ -4828,4 +4828,85 @@ class Svc {
             "should not flag scalar_member_access on $c->val() inside ternary-wrapped &&, got: {scalar_diags:?}"
         );
     }
+
+    // ── B18: Assignment inside `if` condition ───────────────────────
+
+    /// B18: `if ($x = Foo::first())` should resolve `$x` inside the body.
+    #[test]
+    fn assignment_in_if_condition_resolves_in_body() {
+        let php = r#"<?php
+class AdminUser {
+    public function assignRole(string $role): void {}
+    /** @return ?static */
+    public static function first(): ?static { return new static(); }
+}
+function test(string $role): void {
+    if ($admin = AdminUser::first()) {
+        $admin->assignRole($role);
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let bad: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("assignRole") || d.message.contains("admin"))
+            .collect();
+        assert!(
+            bad.is_empty(),
+            "should resolve $admin from if-condition assignment, got: {bad:?}"
+        );
+    }
+
+    /// B18 variant: assignment inside comparison `if (($x = expr()) !== null)`.
+    #[test]
+    fn assignment_in_if_condition_with_comparison() {
+        let php = r#"<?php
+class Conn {
+    public function query(string $sql): void {}
+}
+function getConn(): ?Conn { return new Conn(); }
+function test(): void {
+    if (($conn = getConn()) !== null) {
+        $conn->query('SELECT 1');
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let bad: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("query") || d.message.contains("conn"))
+            .collect();
+        assert!(
+            bad.is_empty(),
+            "should resolve $conn from if-condition assignment with !== null, got: {bad:?}"
+        );
+    }
+
+    /// B18 variant: assignment in while condition `while ($line = fgets($fp))`.
+    #[test]
+    fn assignment_in_while_condition_resolves_in_body() {
+        let php = r#"<?php
+class Row {
+    public function toArray(): array { return []; }
+}
+function nextRow(): ?Row { return new Row(); }
+function test(): void {
+    while ($row = nextRow()) {
+        $row->toArray();
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        let bad: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("toArray") || d.message.contains("row"))
+            .collect();
+        assert!(
+            bad.is_empty(),
+            "should resolve $row from while-condition assignment, got: {bad:?}"
+        );
+    }
 }

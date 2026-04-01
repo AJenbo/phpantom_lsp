@@ -9126,3 +9126,38 @@ class Test {
         text
     );
 }
+
+// ── B18: Assignment inside if-condition ─────────────────────────────────────
+
+#[test]
+fn hover_variable_assigned_in_if_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+class AdminUser {
+    public function assignRole(string $role): void {}
+    /** @return ?static */
+    public static function first(): ?static { return new static(); }
+}
+function test(string $role): void {
+    if ($admin = AdminUser::first()) {
+        $admin->assignRole($role);
+    }
+}
+"#;
+    // Hover on `$admin` inside the if-body (line 8, the `$admin->assignRole` line)
+    let hover = hover_at(&backend, uri, php, 8, 9);
+    assert!(hover.is_some(), "should produce hover for $admin");
+    let text = hover_text(hover.as_ref().unwrap());
+    eprintln!("B18 hover text: {}", text);
+    assert!(
+        text.contains("AdminUser"),
+        "hover should resolve $admin to AdminUser inside if-body, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("null"),
+        "hover should not include null inside truthy if-body, got: {}",
+        text
+    );
+}

@@ -1338,6 +1338,11 @@ fn walk_if_statement<'b>(
     });
     narrowing::try_apply_inline_and_null_narrowing(if_stmt.condition, ctx, results);
 
+    // ── Assignment in condition ──
+    // `if ($x = expr())` — register the assignment so `$x` is typed
+    // inside the then-body and subsequent code.
+    check_condition_for_assignment(if_stmt.condition, ctx, results);
+
     match &if_stmt.body {
         IfBody::Statement(body) => {
             // ── instanceof narrowing for then-body ──
@@ -1369,6 +1374,8 @@ fn walk_if_statement<'b>(
                 );
             });
             // ── null narrowing for then-body ──
+            // Must run after check_condition_for_assignment so the
+            // type is registered before we try to strip null from it.
             narrowing::try_apply_if_body_null_narrowing(
                 if_stmt.condition,
                 body.statement.span(),
@@ -1383,6 +1390,15 @@ fn walk_if_statement<'b>(
                     narrowing::try_apply_inline_and_narrowing(else_if.condition, ctx, classes);
                 });
                 narrowing::try_apply_inline_and_null_narrowing(else_if.condition, ctx, results);
+                // ── Assignment in elseif condition ──
+                check_condition_for_assignment(else_if.condition, ctx, results);
+                // ── null narrowing for elseif-body ──
+                narrowing::try_apply_if_body_null_narrowing(
+                    else_if.condition,
+                    else_if.statement.span(),
+                    ctx,
+                    results,
+                );
                 // ── instanceof narrowing for elseif-body ──
                 ResolvedType::apply_narrowing(results, |classes| {
                     narrowing::try_apply_instanceof_narrowing(
@@ -1409,13 +1425,6 @@ fn walk_if_statement<'b>(
                         classes,
                     );
                 });
-                // ── null narrowing for elseif-body ──
-                narrowing::try_apply_if_body_null_narrowing(
-                    else_if.condition,
-                    else_if.statement.span(),
-                    ctx,
-                    results,
-                );
                 check_statement_for_assignments(else_if.statement, ctx, results, true);
             }
             if let Some(else_clause) = &body.else_clause {
@@ -1538,6 +1547,13 @@ fn walk_if_statement<'b>(
                     narrowing::try_apply_inline_and_narrowing(else_if.condition, ctx, classes);
                 });
                 narrowing::try_apply_inline_and_null_narrowing(else_if.condition, ctx, results);
+                // ── Assignment in elseif condition ──
+                check_condition_for_assignment(else_if.condition, ctx, results);
+                // ── null narrowing for elseif (must be after condition assignment) ──
+                // Note: we need the span for body narrowing, computed below,
+                // but truthiness narrowing from the condition itself can use
+                // the condition expression directly via try_extract_null_check
+                // which doesn't need body_span (it's checked inside the fn).
                 let ei_span = mago_span::Span::new(
                     else_if.colon.file_id,
                     else_if.colon.start,
@@ -1574,7 +1590,6 @@ fn walk_if_statement<'b>(
                         classes,
                     );
                 });
-                // ── null narrowing for elseif-body ──
                 narrowing::try_apply_if_body_null_narrowing(
                     else_if.condition,
                     ei_span,
@@ -1736,6 +1751,8 @@ fn walk_if_branch_aware<'b>(
                         classes,
                     );
                 });
+                // ── Assignment in condition ──
+                check_condition_for_assignment(if_stmt.condition, ctx, results);
                 narrowing::try_apply_if_body_null_narrowing(
                     if_stmt.condition,
                     then_span,
@@ -1777,6 +1794,14 @@ fn walk_if_branch_aware<'b>(
                             classes,
                         );
                     });
+                    narrowing::try_apply_if_body_null_narrowing(
+                        else_if.condition,
+                        ei_span,
+                        ctx,
+                        results,
+                    );
+                    // ── Assignment in elseif condition ──
+                    check_condition_for_assignment(else_if.condition, ctx, results);
                     narrowing::try_apply_if_body_null_narrowing(
                         else_if.condition,
                         ei_span,
@@ -1906,6 +1931,8 @@ fn walk_if_branch_aware<'b>(
                         classes,
                     );
                 });
+                // ── Assignment in condition ──
+                check_condition_for_assignment(if_stmt.condition, ctx, results);
                 narrowing::try_apply_if_body_null_narrowing(
                     if_stmt.condition,
                     then_span,
@@ -1961,6 +1988,14 @@ fn walk_if_branch_aware<'b>(
                             classes,
                         );
                     });
+                    narrowing::try_apply_if_body_null_narrowing(
+                        else_if.condition,
+                        ei_span,
+                        ctx,
+                        results,
+                    );
+                    // ── Assignment in elseif condition ──
+                    check_condition_for_assignment(else_if.condition, ctx, results);
                     narrowing::try_apply_if_body_null_narrowing(
                         else_if.condition,
                         ei_span,
@@ -2139,6 +2174,10 @@ fn walk_while_statement<'b>(
     });
     narrowing::try_apply_inline_and_null_narrowing(while_stmt.condition, ctx, results);
 
+    // ── Assignment in condition ──
+    // `while ($line = fgets($fp))` — register the assignment.
+    check_condition_for_assignment(while_stmt.condition, ctx, results);
+
     match &while_stmt.body {
         WhileBody::Statement(inner) => {
             ResolvedType::apply_narrowing(results, |classes| {
@@ -2167,6 +2206,9 @@ fn walk_while_statement<'b>(
                 );
             });
             // ── null narrowing for while-body ──
+            // Runs after check_condition_for_assignment so `$row`
+            // from `while ($row = nextRow())` is typed before we
+            // strip null.
             narrowing::try_apply_if_body_null_narrowing(
                 while_stmt.condition,
                 inner.span(),
@@ -2207,6 +2249,8 @@ fn walk_while_statement<'b>(
                 );
             });
             // ── null narrowing for while-body ──
+            // Must run after check_condition_for_assignment (called above
+            // before the match) so the type is registered first.
             narrowing::try_apply_if_body_null_narrowing(
                 while_stmt.condition,
                 body_span,
@@ -2466,6 +2510,62 @@ fn extract_native_type_from_rhs<'b>(
         | Expression::Closure(_)
         | Expression::ArrowFunction(_) => Some("\\Closure".to_string()),
         _ => None,
+    }
+}
+
+/// Extract and apply an assignment embedded in an `if` / `while`
+/// condition expression.
+///
+/// Handles:
+///   - `if ($x = expr())` — condition is a bare assignment
+///   - `if (($x = expr()) !== null)` — assignment inside a comparison
+///   - `if ($x = expr()) { … }` — truthiness check (truthy narrowing
+///     is handled separately by the null-narrowing pass)
+///
+/// The assignment is always treated as conditional (the variable
+/// *might* have this type), because the condition may be false.
+/// The caller is responsible for applying truthiness narrowing
+/// inside the then-body.
+pub(in crate::completion) fn check_condition_for_assignment<'b>(
+    condition: &'b Expression<'b>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    // Unwrap parentheses.
+    let inner = match condition {
+        Expression::Parenthesized(p) => p.expression,
+        other => other,
+    };
+
+    // Direct assignment: `if ($x = expr())`
+    if let Expression::Assignment(_) = inner {
+        check_expression_for_assignment(inner, ctx, results, true);
+        return;
+    }
+
+    // Assignment inside a comparison: `if (($x = expr()) !== null)`
+    // or `if (null !== ($x = expr()))`.
+    if let Expression::Binary(bin) = inner {
+        if let Expression::Assignment(_) = bin.lhs {
+            check_expression_for_assignment(bin.lhs, ctx, results, true);
+            return;
+        }
+        if let Expression::Assignment(_) = bin.rhs {
+            check_expression_for_assignment(bin.rhs, ctx, results, true);
+            return;
+        }
+        // Unwrap one layer of parens on each side.
+        if let Expression::Parenthesized(p) = bin.lhs
+            && let Expression::Assignment(_) = p.expression
+        {
+            check_expression_for_assignment(p.expression, ctx, results, true);
+            return;
+        }
+        if let Expression::Parenthesized(p) = bin.rhs
+            && let Expression::Assignment(_) = p.expression
+        {
+            check_expression_for_assignment(p.expression, ctx, results, true);
+        }
     }
 }
 

@@ -1,47 +1,5 @@
 # PHPantom — Bug Fixes
 
-#### B18. Assignment inside `if` condition does not resolve variable in body
-
-| | |
-|---|---|
-| **Impact** | Medium |
-| **Effort** | Medium |
-
-When a variable is assigned inside an `if` condition
-(`if ($x = expr())`), PHPantom does not resolve `$x` inside the
-`if` body at all. The variable shows as completely untyped.
-
-**Reproducer:**
-
-```php
-if ($admin = AdminUser::first()) {
-    $admin->assignRole($role);
-    // PHPantom reports: Cannot resolve type of '$admin'
-}
-```
-
-**Expected:** `$admin` should resolve to `AdminUser` (narrowed from
-`AdminUser|null` by the truthiness check).
-
-Splitting into two statements works fine:
-
-```php
-$admin = AdminUser::first();
-if ($admin) {
-    $admin->assignRole($role);  // resolves correctly
-}
-```
-
-**Where to fix:**
-- `src/completion/variable/resolution.rs` — `walk_if_statement` and
-  `check_expression_for_assignment` need to handle assignment
-  expressions used as `if` conditions, extracting the assignment
-  and treating the variable as defined from that point forward.
-
-**Discovered in:** analyze-triage iteration 9 (DatabaseSeeder.php:59).
-
----
-
 #### B19. Nullable return type `TValue|null` drops `|null`
 
 | | |
