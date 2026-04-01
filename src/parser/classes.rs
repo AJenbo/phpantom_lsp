@@ -359,6 +359,86 @@ fn extract_custom_collection_from_new_collection(methods: &[MethodInfo]) -> Opti
     Some(base.to_string())
 }
 
+/// Extract Eloquent dates from a `protected $dates = [...]` property.
+///
+/// Scans the class members for a `$dates` property with an array initializer and
+/// extracts the column names from it.
+///
+/// Returns a list of column names defined in the `$dates` array with an associated
+/// `Carbon\Carbon` cast type.
+fn extract_dates_definitions<'a>(
+    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    content: &str,
+) -> Vec<(String, String)> {
+    let mut property_text: Option<String> = None;
+
+    for member in members {
+        match member {
+            ClassLikeMember::Property(Property::Plain(plain)) => {
+                for item in plain.items.iter() {
+                    let var_name = item.variable().name.to_string();
+                    let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
+
+                    if stripped != "dates" {
+                        continue;
+                    }
+
+                    if let PropertyItem::Concrete(concrete) = item {
+                        let span = concrete.value.span();
+                        let start = span.start.offset as usize;
+                        let end = span.end.offset as usize;
+                        if let Some(text) = content.get(start..end) {
+                            property_text = Some(text.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut results: Vec<(String, String)> = Vec::new();
+
+    if let Some(ref text) = property_text {
+        results = parse_dates_array(text);
+    }
+
+    results
+}
+
+/// Parse column names from a `$dates` array literal and associate them with the `Carbon\Carbon` cast type.
+///
+/// Accepts text starting with `[` and extracts string values representing column names.  Each extracted
+/// column name is paired with the `Carbon\Carbon` cast type in the returned list.  For example, if the
+/// input text is `['created_at', 'updated_at']`, the output will be `[("created_at", "Carbon\\Carbon"), ("updated_at", "Carbon\\Carbon")]`.
+fn parse_dates_array(text: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let trimmed = text.trim();
+
+    let inner = if let Some(s) = trimmed.strip_prefix('[') {
+        s.strip_suffix(']').unwrap_or(s)
+    } else {
+        return results;
+    };
+
+    for segment in inner.split(',') {
+        let segment = segment.trim();
+
+        if segment.is_empty() {
+            continue;
+        }
+
+        let key = extract_string_literal(segment);
+        if let Some(k) = key
+            && !k.is_empty()
+        {
+            results.push((k, "Carbon\\Carbon".to_string()));
+        }
+    }
+
+    results
+}
+
 /// Extract Eloquent cast definitions from a class's members.
 ///
 /// Scans the class members for:
