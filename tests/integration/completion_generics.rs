@@ -6086,7 +6086,7 @@ async fn test_match_class_string_forwarded_to_static_method() {
 }
 
 /// Array shape bodies should have their template parameters substituted
-/// when a child class extends a generic parent.  Before B14, the bare `T`
+/// when a child class extends a generic parent.  Previously, the bare `T`
 /// inside `array{data: T, items: list<T>}` was left unsubstituted because
 /// `apply_substitution` did not recurse into `{…}` blocks.
 #[tokio::test]
@@ -6907,7 +6907,7 @@ async fn test_mixin_generic_substitution() {
     }
 }
 
-// ─── T19: Inherited property template substitution on $this-> ───────────────
+// ─── Inherited property template substitution on $this-> ───────────────
 
 /// When a class extends a generic parent with `@extends Parent<Concrete>`,
 /// inherited properties whose types use the parent's template parameters

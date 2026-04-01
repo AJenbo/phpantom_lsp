@@ -1371,7 +1371,7 @@ fn assignment_effective_from_excludes_rhs() {
 
 #[test]
 fn assignment_effective_from_excludes_rhs_in_constructor_args() {
-    // B13: In `$request = new Foo(arg: $request->uuid)`, the `$request`
+    // In `$request = new Foo(arg: $request->uuid)`, the `$request`
     // inside the constructor arguments should see the *previous* definition
     // (the parameter), not the assignment being written.  PHP evaluates
     // all RHS arguments before performing the assignment.

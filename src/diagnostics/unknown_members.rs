@@ -325,7 +325,7 @@ impl Backend {
         // ── Subject resolution cache for this diagnostic pass ───────────
         let mut subject_cache: SubjectCache = HashMap::new();
 
-        // ── Chain error propagation (D2) ────────────────────────────────
+        // ── Chain error propagation ─────────────────────────────────────
         // When a member access is flagged as broken, subsequent links
         // in the same fluent chain are suppressed because their failure
         // is a direct consequence of the first break.  We record
@@ -390,7 +390,7 @@ impl Backend {
             // ── Look up or populate the subject cache ───────────────────
             // For variable subjects (excluding $this), compute the
             // active definition offset so that accesses before and
-            // after a reassignment get separate cache entries (B4).
+            // after a reassignment get separate cache entries.
             let var_def_offset =
                 if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
                     // Extract the bare variable name (e.g. "$file" from
@@ -1392,11 +1392,11 @@ function test(): void {
         assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
     }
 
-    // ── Trait $this suppression (B2) ────────────────────────────────
+    // ── Trait $this suppression ─────────────────────────────────────
 
     #[test]
     fn no_diagnostic_for_this_member_access_inside_trait() {
-        // Regression test for B2: $this-> inside a trait method should
+        // $this-> inside a trait method should
         // not produce false positives for members that exist on the
         // host class but not on the trait itself.
         let php = r#"<?php
@@ -2316,11 +2316,11 @@ class Test {
         assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
     }
 
-    // ── Inline && narrowing (B3) ────────────────────────────────────
+    // ── Inline && narrowing ─────────────────────────────────────────
 
     #[test]
     fn no_diagnostic_for_instanceof_and_chain() {
-        // Regression test for B3: instanceof checks in the LHS of &&
+        // instanceof checks in the LHS of &&
         // should narrow the variable type for the RHS.
         let php = r#"<?php
 class QueryException extends \Exception {
@@ -2341,7 +2341,7 @@ function test(\Throwable $e): void {
 
     #[test]
     fn no_diagnostic_for_instanceof_and_chain_in_catch() {
-        // B3 variant: variable comes from a catch block.
+        // Variant: variable comes from a catch block.
         let php = r#"<?php
 class QueryException extends \Exception {
     public array $errorInfo = [];
@@ -2365,7 +2365,7 @@ function test(): void {
 
     #[test]
     fn no_diagnostic_for_instanceof_and_chain_method_call() {
-        // B3 variant: method call instead of property access on RHS.
+        // Variant: method call instead of property access on RHS.
         let php = r#"<?php
 class SpecialException extends \Exception {
     public function getDetail(): string { return ''; }
@@ -2385,7 +2385,7 @@ function test(\Throwable $e): void {
 
     #[test]
     fn no_diagnostic_for_instanceof_and_chain_in_if_condition() {
-        // B3 variant: the && is the condition of an if statement.
+        // Variant: the && is the condition of an if statement.
         let php = r#"<?php
 class QueryException extends \Exception {
     public array $errorInfo = [];
@@ -2455,7 +2455,7 @@ function test(\Throwable $e): string {
 
     #[test]
     fn no_diagnostic_for_chained_and_instanceof() {
-        // B3 variant: chained && with multiple instanceof checks.
+        // Variant: chained && with multiple instanceof checks.
         let php = r#"<?php
 class DetailedException extends \Exception {
     public string $detail = '';
@@ -3447,11 +3447,11 @@ class Test {
         );
     }
 
-    // ── Cross-method cache isolation (B1) ───────────────────────────
+    // ── Cross-method cache isolation ────────────────────────────────
 
     #[test]
     fn no_false_positive_when_same_var_has_different_type_in_different_methods() {
-        // Regression test for B1: the subject resolution cache was scoped
+        // The subject resolution cache was scoped
         // to the enclosing class, not the enclosing method.  Two methods
         // in the same class that both use `$order->` would share a cache
         // entry even when `$order` has a completely different type in each
@@ -3512,7 +3512,7 @@ function second(Beta $x): void {
 
     #[test]
     fn no_diagnostic_for_this_inside_closure_in_trait() {
-        // B3: $this-> and static:: inside a closure nested within a trait
+        // $this-> and static:: inside a closure nested within a trait
         // method should be suppressed, just like direct trait method bodies.
         let php = r#"<?php
 trait SalesInfoGlobalTrait {
@@ -3544,7 +3544,7 @@ class SalesReport {
 
     #[test]
     fn no_diagnostic_for_this_inside_arrow_fn_in_trait() {
-        // B3: $this-> inside an arrow function nested within a trait method.
+        // $this-> inside an arrow function nested within a trait method.
         let php = r#"<?php
 trait FilterTrait {
     public function applyFilter(): void {
@@ -3567,7 +3567,7 @@ class Report {
 
     #[test]
     fn no_diagnostic_for_chain_rooted_at_static_inside_trait() {
-        // B3: `static::where(...)->update(...)` inside a trait method.
+        // `static::where(...)->update(...)` inside a trait method.
         // The subject_text for `update` is `"static::where('x', 'y')"`,
         // which is a chain rooted at `static`.  The suppression must
         // recognise the root keyword, not require an exact match.
@@ -3592,7 +3592,7 @@ class SalesReport extends \Illuminate\Database\Eloquent\Model {
 
     #[test]
     fn no_diagnostic_for_chain_rooted_at_this_inside_trait() {
-        // B3: `$this->relation()->first()` inside a trait method.
+        // `$this->relation()->first()` inside a trait method.
         // The subject_text for `first` is `"$this->relation()"`.
         let php = r#"<?php
 trait HasRelation {
@@ -3617,7 +3617,7 @@ class Order {
 
     #[test]
     fn no_diagnostic_for_chain_rooted_at_static_inside_closure_in_trait() {
-        // B3: `static::where(...)` inside a closure within a trait method.
+        // `static::where(...)` inside a closure within a trait method.
         let php = r#"<?php
 trait SalesInfoGlobalTrait {
     public function updateSalesInfo(): void {
@@ -3641,7 +3641,7 @@ class SalesReport extends \Illuminate\Database\Eloquent\Model {
 
     #[test]
     fn no_diagnostic_for_self_chain_inside_trait() {
-        // B3: `self::create(...)` chain inside a trait.
+        // `self::create(...)` chain inside a trait.
         let php = r#"<?php
 trait Creatable {
     public function duplicate(): void {
@@ -3685,7 +3685,7 @@ trait BadTrait {
 
     #[test]
     fn flags_unknown_member_despite_valid_in_other_method() {
-        // The flip side of B1: make sure that a member that IS valid in
+        // The flip side: make sure that a member that IS valid in
         // one method is still flagged as unknown in another method where
         // the variable has a different type that lacks the member.
         let php = r#"<?php
@@ -3723,7 +3723,7 @@ class Service {
 
     #[test]
     fn no_false_positive_when_parameter_is_reassigned() {
-        // Regression test for B4: when a method parameter is reassigned
+        // When a method parameter is reassigned
         // mid-body, PHPantom should resolve subsequent accesses against
         // the new type, not the original parameter type.
         //
@@ -3763,7 +3763,7 @@ class FileUploadService {
 
     #[test]
     fn flags_unknown_member_after_reassignment() {
-        // The flip side of B4: after reassignment, members from the
+        // The flip side: after reassignment, members from the
         // NEW type that don't exist should still be flagged.
         let php = r#"<?php
 class TypeA {
@@ -3800,7 +3800,7 @@ class Service {
         );
     }
 
-    /// B11: `$found = null; foreach (...) { $found = $pen; } $found->write()`
+    /// `$found = null; foreach (...) { $found = $pen; } $found->write()`
     /// must not produce a scalar_member_access diagnostic when the foreach
     /// value variable has a known type.
     #[test]
@@ -3845,7 +3845,7 @@ class Svc {
         );
     }
 
-    /// B11: direct instantiation inside foreach body (no var-to-var).
+    /// Direct instantiation inside foreach body (no var-to-var).
     #[test]
     fn no_false_positive_null_init_foreach_direct_reassign() {
         let php = r#"<?php
@@ -3877,7 +3877,7 @@ class Svc {
         );
     }
 
-    // ── B10: Negative narrowing after early return ──────────────────
+    // ── Negative narrowing after early return ───────────────────────
 
     #[test]
     fn no_false_positive_after_guard_clause_excludes_type() {
@@ -4254,7 +4254,7 @@ class LoggedConnection extends BaseConnector {
         );
     }
 
-    // ── Chain error propagation (D2) ────────────────────────────────────
+    // ── Chain error propagation ─────────────────────────────────────────
 
     #[test]
     fn chain_propagation_flags_only_first_broken_method() {
@@ -4632,9 +4632,9 @@ function test(): void {
         );
     }
 
-    // ── B17: && short-circuit narrowing does not eliminate null ──────
+    // ── && short-circuit narrowing does not eliminate null ───────────
 
-    /// B17: `$lastPaidEnd !== null && $lastPaidEnd->diffInDays(…)` must
+    /// `$lastPaidEnd !== null && $lastPaidEnd->diffInDays(…)` must
     /// not produce a scalar_member_access diagnostic.  The `!== null`
     /// check on the left side of `&&` should narrow away `null` for
     /// the right side.
@@ -4674,7 +4674,7 @@ class Svc {
         );
     }
 
-    /// B17 variant: bare truthy check `$var && $var->method()`.
+    /// Variant: bare truthy check `$var && $var->method()`.
     #[test]
     fn no_false_positive_and_short_circuit_truthy_narrowing() {
         let php = r#"<?php
@@ -4703,7 +4703,7 @@ class Svc {
         );
     }
 
-    /// B17 variant: chained `&&` with null check as first operand.
+    /// Variant: chained `&&` with null check as first operand.
     /// `$a !== null && $b !== null && $a->method()` — the null check
     /// for `$a` is two levels up in the `&&` chain.
     #[test]
@@ -4736,7 +4736,7 @@ class Svc {
         );
     }
 
-    /// B17 variant: three null-init vars with compound && guard, cursor on
+    /// Variant: three null-init vars with compound && guard, cursor on
     /// third var inside the if-body (not inside the condition).
     #[test]
     fn no_false_positive_if_body_triple_null_narrowing() {
@@ -4771,7 +4771,7 @@ class Svc {
         );
     }
 
-    /// B17 variant: null check in if-condition narrows inside the then-body.
+    /// Variant: null check in if-condition narrows inside the then-body.
     #[test]
     fn no_false_positive_if_body_null_narrowing() {
         let php = r#"<?php
@@ -4802,7 +4802,7 @@ class Svc {
         );
     }
 
-    /// B17 variant: && inside a ternary condition in a return statement.
+    /// Variant: && inside a ternary condition in a return statement.
     #[test]
     fn no_false_positive_ternary_wrapped_and_null_narrowing() {
         let php = r#"<?php

@@ -1826,7 +1826,7 @@ class Consumer {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// B14: Assert narrowing boundary prevents stale diagnostic cache reuse
+// Assert narrowing boundary prevents stale diagnostic cache reuse
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// When a variable is used in a member access *before* an
@@ -1911,7 +1911,7 @@ class Test extends TestCase {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Static return type resolution to concrete subclass (T20)
+// Static return type resolution to concrete subclass
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// When a parent class declares `public static function first(): ?static`,

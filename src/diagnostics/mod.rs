@@ -1896,7 +1896,7 @@ mod tests {
         );
     }
 
-    // ── B16: scoped docblock checks ─────────────────────────────────
+    // ── Scoped docblock checks ──────────────────────────────────────
     //
     // The scoped docblock heuristics have been removed alongside the
     // per-identifier stale detection.  These tests verify the new

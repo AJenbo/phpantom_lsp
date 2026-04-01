@@ -10163,7 +10163,7 @@ class Setting extends Model {
     );
 }
 
-// ─── Mixin generic substitution through multi-level inheritance (T14) ───────
+// ─── Mixin generic substitution through multi-level inheritance ─────────────
 
 /// Full relationship hierarchy stubs with `@template` and `@mixin` tags
 /// that mirror the real Laravel class structure.

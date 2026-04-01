@@ -4,12 +4,12 @@
 //! collects every variable read and write with byte offsets across a
 //! function/method/closure body.  It is shared infrastructure used by:
 //!
-//! - A2 (Extract Function)
-//! - A4 (Inline Variable)
-//! - A5 (Extract Variable)
-//! - A6 (Inline Function/Method)
-//! - A7 (Extract Constant)
-//! - D8 (Undefined variable diagnostic)
+//! - Extract Function
+//! - Inline Variable
+//! - Extract Variable
+//! - Inline Function/Method
+//! - Extract Constant
+//! - Undefined variable diagnostic
 //! - Document highlights (all occurrences of a variable in scope)
 //!
 //! Unlike the existing backward-walk variable resolution in
@@ -94,8 +94,8 @@ pub(crate) struct Frame {
     /// Each entry is `(name_with_dollar, is_by_reference)`.
     ///
     /// Populated during collection; will be read by Extract Function
-    /// (A2) to detect closure captures that cross extraction boundaries.
-    #[allow(dead_code)] // infrastructure for A2 closure-aware extraction
+    /// to detect closure captures that cross extraction boundaries.
+    #[allow(dead_code)] // infrastructure for Extract Function closure-aware extraction
     pub captures: Vec<(String, bool)>,
 }
 

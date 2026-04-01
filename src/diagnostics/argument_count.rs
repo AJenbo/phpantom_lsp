@@ -990,7 +990,7 @@ class Demo {
         );
     }
 
-    // ── Overloaded built-in function tests (B7) ─────────────────────
+    // ── Overloaded built-in function tests ──────────────────────────
 
     #[test]
     fn no_diagnostic_for_array_keys_with_one_arg() {

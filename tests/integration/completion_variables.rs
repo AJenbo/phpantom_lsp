@@ -17372,7 +17372,7 @@ async fn test_completion_nullsafe_method_chain_cross_file() {
     }
 }
 
-// ─── Ternary / null-coalesce RHS resolution (B6) ────────────────────────────
+// ─── Ternary / null-coalesce RHS resolution ─────────────────────────────────
 
 /// Short ternary as RHS: `$p = $cond ?: new Printer()` should resolve `$p`.
 #[tokio::test]
@@ -17504,7 +17504,7 @@ async fn test_completion_full_ternary_rhs_instantiation() {
     }
 }
 
-// ─── Nullable type resolution (B1) ──────────────────────────────────────────
+// ─── Nullable type resolution ───────────────────────────────────────────────
 
 /// A parameter typed `?ClassName` should resolve to `ClassName` for completion.
 #[tokio::test]
@@ -17708,7 +17708,7 @@ async fn test_completion_nullable_return_type_chain() {
     }
 }
 
-// ─── Null-init + conditional reassign (B11) ─────────────────────────────────
+// ─── Null-init + conditional reassign ───────────────────────────────────────
 
 /// When a variable is initialized as `$x = null` and then conditionally
 /// reassigned inside a foreach loop, the type from the reassignment
@@ -17939,7 +17939,7 @@ async fn test_null_init_foreach_nested_if_reassign() {
     }
 }
 
-/// Pattern 2 from B11: `$x = $arr[$key] ?? null` inside a foreach,
+/// Pattern 2: `$x = $arr[$key] ?? null` inside a foreach,
 /// followed by a guard clause. The null-coalesce RHS (`null`) resolves
 /// to empty, so `$x` gets the type from the LHS array access.
 #[tokio::test]
@@ -18535,7 +18535,7 @@ async fn test_null_coalesce_clone_lhs_ignores_rhs() {
     }
 }
 
-// ─── B13: Variable inside constructor args of self-reassignment ─────────────
+// ─── Variable inside constructor args of self-reassignment ──────────────────
 
 /// When `$request = new Bar(arg: $request->…)`, the `$request` inside
 /// the constructor arguments should still resolve to the *previous* type
@@ -18620,7 +18620,7 @@ async fn test_completion_var_inside_reassignment_rhs_sees_old_type() {
     }
 }
 
-// ─── B15: Inline @var cast should not override variable type in RHS ─────────
+// ─── Inline @var cast should not override variable type in RHS ──────────────
 
 /// When `/** @var array<string, mixed> */ $data = $data->toArray()`, the
 /// `$data` on the RHS should still resolve to the *previous* type (Data),
@@ -18695,7 +18695,7 @@ async fn test_completion_inline_var_cast_does_not_override_rhs() {
     }
 }
 
-/// Variant of B15: ensure the `@var` cast still applies *after* the
+/// Ensure the `@var` cast still applies *after* the
 /// assignment (i.e. on the next line) so we don't break the normal
 /// inline `@var` override behaviour.
 #[tokio::test]
@@ -18776,7 +18776,7 @@ async fn test_completion_inline_var_cast_applies_after_assignment() {
     }
 }
 
-/// T15: `class-string<T>` parameter annotation should resolve static
+/// `class-string<T>` parameter annotation should resolve static
 /// member access (`$class::`) against the bound type `T`.
 #[tokio::test]
 async fn test_completion_class_string_param_static_access() {
@@ -18858,7 +18858,7 @@ async fn test_completion_class_string_param_static_access() {
     }
 }
 
-/// T15: `class-string<BackedEnum>` parameter — static call on a
+/// `class-string<BackedEnum>` parameter, static call on a
 /// concrete class (not a template) should also resolve.
 #[tokio::test]
 async fn test_completion_class_string_param_backed_enum_static_access() {
@@ -18932,7 +18932,7 @@ async fn test_completion_class_string_param_backed_enum_static_access() {
     }
 }
 
-/// T15: `class-string<T>` in a standalone function should also resolve
+/// `class-string<T>` in a standalone function should also resolve
 /// static member access against the template bound.
 #[tokio::test]
 async fn test_completion_class_string_param_standalone_function() {
@@ -19006,7 +19006,7 @@ async fn test_completion_class_string_param_standalone_function() {
     }
 }
 
-/// T15: `class-string<BackedEnum>` — foreach over `$class::cases()`
+/// `class-string<BackedEnum>`, foreach over `$class::cases()`
 /// should resolve `$item` to the bound type so that `$item->name`
 /// and `$item->value` are available.
 #[tokio::test]

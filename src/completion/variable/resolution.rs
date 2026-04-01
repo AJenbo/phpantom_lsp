@@ -608,7 +608,7 @@ fn try_resolve_in_function(
         &mut results,
     );
 
-    // ── T15: substitute method-level template params in
+    // ── Substitute method-level template params in
     // `class-string<T>` for standalone function parameters ──────
     // Same logic as in `resolve_variable_in_members`: when the
     // resolved parameter type is `class-string<T>` and `T` is a
@@ -889,7 +889,7 @@ fn resolve_variable_in_members<'b>(
                     if let Some(ts) = best_type_str {
                         let mut parsed = PhpType::parse(ts);
 
-                        // ── T15: substitute method-level template params
+                        // ── Substitute method-level template params
                         // in `class-string<T>` with their bounds ────────
                         // When the parameter type is `class-string<T>` and
                         // `T` is a method-level template with an upper bound
@@ -2113,7 +2113,7 @@ fn walk_foreach_statement<'b>(
     //
     // Without this, `$x = null; foreach (...) { $x = new Foo(); }
     // $x->method();` would lose the `Foo` assignment because the body
-    // was only walked when the cursor was inside the foreach (B11).
+    // was only walked when the cursor was inside the foreach.
     match &foreach.body {
         ForeachBody::Statement(inner) => {
             check_statement_for_assignments(inner, ctx, results, true);
@@ -2305,7 +2305,7 @@ pub(in crate::completion) fn try_inline_var_override<'b>(
         return false;
     }
 
-    // ── B15 / B13: Skip when cursor is inside the RHS ─────────
+    // ── Skip when cursor is inside the RHS ─────────
     // When the cursor falls within the RHS of this assignment
     // (e.g. `/** @var array<string, mixed> */ $data = $data->toArray()`),
     // the `@var` cast should only apply *after* the assignment
@@ -2533,7 +2533,7 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
             && let Expression::Variable(Variable::Direct(dv)) = array_access.array
             && dv.name == var_name
         {
-            // ── B13: Skip when cursor is inside the RHS ────────
+            // ── Skip when cursor is inside the RHS ────────
             // Same guard as the base-assignment path below.
             // Without this, `$var['key'] = $var['key']->method()`
             // would infinitely recurse: resolving the RHS triggers
@@ -2583,7 +2583,7 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
             && let Expression::Variable(Variable::Direct(dv)) = array_append.array
             && dv.name == var_name
         {
-            // ── B13: Skip when cursor is inside the RHS ────────
+            // ── Skip when cursor is inside the RHS ────────
             let rhs_start = assignment.rhs.span().start.offset;
             let assign_end = assignment.span().end.offset;
             if ctx.cursor_offset >= rhs_start && ctx.cursor_offset <= assign_end {
@@ -2626,7 +2626,7 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
             return;
         }
 
-        // ── B13: Skip when cursor is inside the RHS ────────────
+        // ── Skip when cursor is inside the RHS ────────────
         // When the cursor falls within the RHS of this assignment
         // (e.g. `$request = new Bar(arg: $request->…)`), the
         // variable reference on the RHS still sees the *previous*

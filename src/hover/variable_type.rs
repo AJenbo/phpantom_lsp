@@ -39,7 +39,7 @@ struct HoverClosureCtx<'a> {
 
 /// Check whether `cursor_offset` falls inside the RHS of an assignment
 /// like `$var = $var->…` on the same line.  Used by hover to avoid
-/// applying an inline `@var` cast to the RHS reference (B15).
+/// applying an inline `@var` cast to the RHS reference.
 fn is_cursor_in_self_assignment_rhs(content: &str, cursor_offset: usize, var_name: &str) -> bool {
     // Find the line containing the cursor.
     let line_start = content[..cursor_offset]
@@ -88,7 +88,7 @@ pub(crate) fn resolve_variable_type_string(
     // 1. Inline @var override: `/** @var Type $var */`
     //
     // Skip when the cursor is inside the RHS of an assignment whose
-    // LHS is the same variable (B15).  The `@var` cast applies only
+    // LHS is the same variable.  The `@var` cast applies only
     // *after* the assignment completes, so hovering over `$data` in
     // `/** @var T */ $data = $data->toArray()` should show the
     // previous type, not the cast.
@@ -189,7 +189,7 @@ pub(crate) fn resolve_variable_type_string(
             {
                 // Don't prefer the AST result when the only difference
                 // is a trailing `|null` — the unified pipeline may have
-                // stripped it via guard clause narrowing (B19).
+                // stripped it via guard clause narrowing.
                 let suffix = &ast[joined.len()..];
                 if suffix != "|null" {
                     return ast_result;

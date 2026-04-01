@@ -8262,7 +8262,7 @@ class Demo {
     );
 }
 
-// ─── Ternary / null-coalesce subject extraction (B6) ────────────────────────
+// ─── Ternary / null-coalesce subject extraction ─────────────────────────────
 
 #[test]
 fn hover_short_ternary_member_access() {
@@ -8822,7 +8822,7 @@ function test() {
     );
 }
 
-// ─── B19: Guard clause null narrowing in hover ──────────────────────────────
+// ─── Guard clause null narrowing in hover ───────────────────────────────────
 
 #[test]
 fn hover_guard_clause_falsy_continue_narrows_null() {
@@ -8917,7 +8917,7 @@ class Svc {
     );
 }
 
-// ─── B15: Inline @var cast should not override variable type in RHS ──────────
+// ─── Inline @var cast should not override variable type in RHS ──────────────
 
 #[test]
 fn hover_inline_var_cast_does_not_override_rhs_without_varname() {

@@ -1200,7 +1200,7 @@ fn evict_cast_class_chains_through_model_to_child() {
     );
 }
 
-// ── B12: interface-extends-interface transitive member merging ───────
+// ── Interface-extends-interface transitive member merging ────────────
 
 #[test]
 fn resolve_class_fully_merges_transitive_interface_constants() {

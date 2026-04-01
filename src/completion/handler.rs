@@ -943,7 +943,7 @@ impl Backend {
 
         match member_items {
             Some(all_items) if !all_items.is_empty() => {
-                // ── B15: suppress snippet parentheses when `(` already follows ──
+                // ── Suppress snippet parentheses when `(` already follows ──
                 let items = if paren_follows_cursor(content, position) {
                     strip_snippet_parens(all_items)
                 } else {

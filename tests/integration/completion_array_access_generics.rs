@@ -422,7 +422,7 @@ async fn test_method_return_list_array_access() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// T17: Array element type extraction from generic array property annotations
+// Array element type extraction from generic array property annotations
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ─── Property typed as array<string, SomeClass> with bracket access ─────

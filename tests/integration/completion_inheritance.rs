@@ -1787,7 +1787,7 @@ async fn test_interface_virtual_members_visible_through_parent_chain() {
     }
 }
 
-// ─── Deep inheritance chain through stubs (B8) ──────────────────────────────
+// ─── Deep inheritance chain through stubs ───────────────────────────────────
 
 /// Methods inherited from `Exception` (like `getCode()`, `getMessage()`) should
 /// be found on a class that extends through a multi-level chain where
@@ -1875,7 +1875,7 @@ async fn test_completion_deep_inheritance_through_stubs() {
     }
 }
 
-// ─── Static return type on static method called from subclass (T20) ─────────
+// ─── Static return type on static method called from subclass ───────────────
 
 /// When a parent class declares `public static function first(): ?static`,
 /// calling `ChildClass::first()` should resolve `static` to `ChildClass`,
@@ -2121,7 +2121,7 @@ async fn test_static_return_type_static_method_chained() {
     );
 }
 
-// ─── Inherited docblock type propagation (T1) ───────────────────────────────
+// ─── Inherited docblock type propagation ────────────────────────────────────
 
 #[tokio::test]
 async fn test_hover_shows_inherited_interface_return_type() {

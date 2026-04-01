@@ -1317,7 +1317,7 @@ async fn test_guard_clause_get_class_identity_check() {
     }
 }
 
-// ─── B19: Null / falsy guard clause narrowing ───────────────────────────────
+// ─── Null / falsy guard clause narrowing ────────────────────────────────────
 
 /// `if (!$var) { continue; }` should narrow `$var` to non-null after the guard.
 #[tokio::test]
@@ -1591,7 +1591,7 @@ async fn test_guard_clause_null_equality_return_narrows() {
 }
 
 /// Variable assigned via `?? null` then guarded with `!$var` + `continue`.
-/// Reproduces the exact pattern from the B19 bug report.
+/// Reproduces the exact pattern from the null/falsy guard clause narrowing bug.
 #[tokio::test]
 async fn test_guard_clause_null_coalesce_then_falsy_continue() {
     let backend = create_test_backend();

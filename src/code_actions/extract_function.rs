@@ -4,7 +4,7 @@
 //! function or method body, this action extracts them into a new
 //! function (or method, if `$this`/`self::`/`static::` is used).
 //!
-//! The implementation uses the `ScopeCollector` infrastructure (A11) to
+//! The implementation uses the `ScopeCollector` infrastructure to
 //! classify variables as parameters, return values, or locals relative
 //! to the selected range.  Type annotations are inferred via the hover
 //! variable-type resolution pipeline.

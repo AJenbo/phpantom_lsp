@@ -1070,7 +1070,7 @@ async fn test_self_and_static_show_non_static_methods_like_parent() {
     );
 }
 
-// ─── B17: Static property subject resolves to property type ─────────────────
+// ─── Static property subject resolves to property type ──────────────────────
 
 /// When `self::$prop->method()` is used, the subject `self::$prop` should
 /// resolve to the *type* of the static property, not to the class that

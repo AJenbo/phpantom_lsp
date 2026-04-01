@@ -496,7 +496,7 @@ fn test_inline_new_expression_method_chain() {
     );
 }
 
-// ── T17: Property chain with array bracket access ───────────────
+// ── Property chain with array bracket access ────────────────────
 
 #[test]
 fn test_property_chain_array_access_variable_key() {

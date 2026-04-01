@@ -803,7 +803,7 @@ async fn test_snippet_throw_new_context() {
     }
 }
 
-// ─── B15: suppress parentheses when `(` already follows cursor ──────────────
+// ─── Suppress parentheses when `(` already follows cursor ───────────────────
 
 /// When completing `$obj->|()`, the parentheses already exist after the
 /// cursor.  The completion item should insert just the method name (plain

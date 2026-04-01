@@ -192,7 +192,7 @@ mod tests {
 
     /// Build a [`TextEdit`] that removes a single semicolon-terminated
     /// statement starting on the given line.  Currently only used by
-    /// tests; can be extracted to `pub(crate)` when D6 needs it.
+    /// tests; can be extracted to `pub(crate)` when the unreachable-code diagnostic needs it.
     fn build_remove_statement_edit(content: &str, diag_line: usize) -> Option<TextEdit> {
         let lines: Vec<&str> = content.lines().collect();
         if diag_line >= lines.len() {
@@ -301,7 +301,7 @@ mod tests {
         assert!(build_remove_unreachable_block_edit(content, 2).is_none());
     }
 
-    // ── build_remove_statement_edit (still used by D6) ──────────────
+    // ── build_remove_statement_edit (still used by unreachable-code diagnostic) ──────────────
 
     #[test]
     fn removes_simple_statement() {

@@ -671,10 +671,10 @@ pub(in crate::completion) fn try_resolve_in_closure_stmt<'b>(
                             return true;
                         }
                     }
-                    if let Some(else_clause) = &body.else_clause {
-                        if try_resolve_in_closure_stmt(else_clause.statement, ctx, results) {
-                            return true;
-                        }
+                    if let Some(else_clause) = &body.else_clause
+                        && try_resolve_in_closure_stmt(else_clause.statement, ctx, results)
+                    {
+                        return true;
                     }
                     false
                 }
