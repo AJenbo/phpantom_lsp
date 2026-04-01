@@ -1009,15 +1009,6 @@ fn resolve_variable_in_members<'b>(
     vec![]
 }
 
-// Walk statements collecting variable assignment types.
-//
-// The `conditional` flag indicates whether we are inside a conditional
-// block (if/else, try/catch, loop).  When `conditional` is `false`,
-// a new assignment **replaces** all previous candidates (the variable
-// is being unconditionally reassigned).  When `conditional` is `true`,
-// a new assignment **adds** to the list (the variable *might* be this
-// type).
-
 /// Substitute method/function-level template parameter names with their
 /// upper bounds from `@template T of Bound` annotations.
 ///

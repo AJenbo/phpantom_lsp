@@ -727,21 +727,21 @@ fn extract_timestamp_config<'a>(
     (timestamps, created_at, updated_at)
 }
 
-/// Extract column names from `$fillable`, `$guarded`, and `$hidden` arrays.
+/// Extract column names from `$fillable`, `$guarded`, `$hidden`, and `$appends` arrays.
 ///
 /// These properties contain simple string lists of column names without
 /// type information.  The `LaravelModelProvider` uses them as a
 /// last-resort fallback, synthesizing `mixed`-typed virtual properties
 /// for columns not already covered by `$casts` or `$attributes`.
 ///
-/// All three arrays are merged; duplicates are removed (first occurrence
+/// All four arrays are merged; duplicates are removed (first occurrence
 /// wins).
 fn extract_column_names<'a>(
     members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
     content: &str,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    let targets = ["fillable", "guarded", "hidden", "visible"];
+    let targets = ["fillable", "guarded", "hidden", "visible", "appends"];
 
     for member in members {
         if let ClassLikeMember::Property(Property::Plain(plain)) = member {

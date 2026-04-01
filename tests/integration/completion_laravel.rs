@@ -6630,7 +6630,7 @@ class User extends Model {
     );
 }
 
-// ── Eloquent $fillable / $guarded / $hidden Column Names ────────────────────
+// ── Eloquent $fillable / $guarded / $hidden / $appends Column Names ─────────
 
 #[tokio::test]
 async fn test_fillable_produces_mixed_virtual_properties() {
@@ -7138,6 +7138,140 @@ class User extends Model {
         methods.contains(&"active"),
         "scope method, got: {:?}",
         methods
+    );
+}
+
+#[tokio::test]
+async fn test_appends_produces_mixed_virtual_properties() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    protected $appends = [
+        'full_name',
+        'is_verified',
+    ];
+    public function test() {
+        $user = new User();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"full_name"),
+        "$appends should produce full_name property, got: {:?}",
+        props
+    );
+    assert!(
+        props.contains(&"is_verified"),
+        "$appends should produce is_verified property, got: {:?}",
+        props
+    );
+
+    // Verify they have mixed type (no type info from $appends)
+    let prop = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "full_name");
+    assert!(
+        prop.unwrap()
+            .detail
+            .as_deref()
+            .unwrap_or("")
+            .contains("mixed"),
+        "full_name from $appends should show mixed in detail, got: {:?}",
+        prop.unwrap().detail
+    );
+}
+
+#[tokio::test]
+async fn test_appends_merges_with_fillable_without_duplicates() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    protected $fillable = ['name', 'email'];
+    protected $appends = ['full_name', 'email'];
+    public function test() {
+        $user = new User();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 8, 15).await;
+    let props = property_names(&items);
+
+    assert!(props.contains(&"name"), "from $fillable, got: {:?}", props);
+    assert!(
+        props.contains(&"full_name"),
+        "from $appends, got: {:?}",
+        props
+    );
+
+    // email appears in both $fillable and $appends — should appear only once.
+    let email_count = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "email")
+        .count();
+    assert_eq!(
+        email_count, 1,
+        "email should appear exactly once despite being in both $fillable and $appends"
+    );
+}
+
+#[tokio::test]
+async fn test_casts_take_priority_over_appends() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    protected $casts = [
+        'is_verified' => 'boolean',
+    ];
+    protected $appends = [
+        'is_verified',
+        'full_name',
+    ];
+    public function test() {
+        $user = new User();
+        $user->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 13, 15).await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"is_verified"),
+        "is_verified should appear, got: {:?}",
+        props
+    );
+    assert!(
+        props.contains(&"full_name"),
+        "full_name should appear from $appends, got: {:?}",
+        props
+    );
+
+    // is_verified should have bool type from casts, not mixed from appends.
+    let prop = items
+        .iter()
+        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_verified")
+        .unwrap();
+    assert!(
+        prop.detail.as_deref().unwrap_or("").contains("bool"),
+        "is_verified should be bool from casts, not mixed from appends, got: {:?}",
+        prop.detail
     );
 }
 

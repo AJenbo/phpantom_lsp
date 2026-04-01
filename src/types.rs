@@ -1286,8 +1286,8 @@ pub struct LaravelMetadata {
     /// The `LaravelModelProvider` uses these as a fallback when no
     /// `$casts` entry exists for the same column.
     pub attributes_definitions: Vec<(String, String)>,
-    /// Column names extracted from `$fillable`, `$guarded`, and
-    /// `$hidden` property arrays.
+    /// Column names extracted from `$fillable`, `$guarded`, `$hidden`,
+    /// and `$appends` property arrays.
     ///
     /// These are simple string lists (no type information), so the
     /// `LaravelModelProvider` synthesizes `mixed`-typed virtual

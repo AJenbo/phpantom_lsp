@@ -58,9 +58,9 @@
 //!   priority.
 //!
 //! - **Column name properties.** Column names from `$fillable`,
-//!   `$guarded`, and `$hidden` produce `mixed`-typed virtual
-//!   properties as a last-resort fallback.  Columns already covered
-//!   by `$casts` or `$attributes` are skipped.
+//!   `$guarded`, `$hidden`, and `$appends` produce `mixed`-typed
+//!   virtual properties as a last-resort fallback.  Columns already
+//!   covered by `$casts` or `$attributes` are skipped.
 
 mod accessors;
 mod builder;
@@ -531,7 +531,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
     /// Scan the class's methods for Eloquent relationship return types,
     /// scope methods, Builder-as-static forwarded methods, `$casts`
     /// definitions, `$attributes` defaults, and `$fillable`/`$guarded`/
-    /// `$hidden` column names.
+    /// `$hidden`/`$appends` column names.
     fn provide(
         &self,
         class: &ClassInfo,
@@ -574,8 +574,8 @@ impl VirtualMemberProvider for LaravelModelProvider {
             }
 
             // ── Column name properties (last-resort fallback) ───────
-            // $fillable, $guarded, and $hidden provide column names without
-            // type information.  Only add for columns not already covered.
+            // $fillable, $guarded, $hidden, and $appends provide column
+            // names without type info.  Only add those not already covered.
             for column in &laravel.column_names {
                 if !seen_props.insert(column.clone()) {
                     continue;

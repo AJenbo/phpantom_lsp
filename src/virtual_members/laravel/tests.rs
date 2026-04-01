@@ -1633,7 +1633,7 @@ fn attribute_default_array_type() {
     assert_eq!(prop.type_hint_str().as_deref(), Some("array"));
 }
 
-// ── Column name property synthesis tests ($fillable/$guarded/$hidden) ──
+// ── Column name property synthesis tests ($fillable/$guarded/$hidden/$appends) ──
 
 #[test]
 fn synthesizes_column_name_properties_as_mixed() {

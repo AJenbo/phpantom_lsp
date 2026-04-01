@@ -161,9 +161,10 @@ impl Backend {
     /// Find a string literal entry inside an Eloquent array property.
     ///
     /// Searches for `'member_name'` or `"member_name"` inside `$casts`,
-    /// `$attributes`, `$fillable`, `$guarded`, `$hidden`, and `$visible`
-    /// property declarations within the given class range.  Returns the
-    /// position of the string literal so go-to-definition can jump to it.
+    /// `$attributes`, `$fillable`, `$guarded`, `$hidden`, `$visible`,
+    /// and `$appends` property declarations within the given class range.
+    /// Returns the position of the string literal so go-to-definition
+    /// can jump to it.
     pub(in crate::definition) fn find_eloquent_array_entry(
         content: &str,
         member_name: &str,
@@ -178,6 +179,7 @@ impl Backend {
             "$guarded",
             "$hidden",
             "$visible",
+            "$appends",
         ];
 
         // Track whether we're inside one of the target property arrays.

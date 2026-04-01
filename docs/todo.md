@@ -21,23 +21,22 @@ within the same impact tier.
 
 ## Sprint 4 — Refactoring toolkit & type inference
 
-| #   | Item                                                                                                                                                                      | Impact  | Effort |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------ |
-| L11 | [`$appends` array](todo/laravel.md#l11-appends-array)                                                                                                                     | Low     | Low    |
-| L13 | [`where{PropertyName}()` dynamic methods on Builder](todo/laravel.md#l13-wherepropertyname-dynamic-methods-on-builder)                                                     | High    | Medium |
-| H17 | [`missingType.iterableValue` — add `@return` with inferred element type](todo/phpstan-actions.md#h17-missingtype-iterablevalue-return-type--add-return-with-iterable-type)  | Medium  | High   |
-| H10 | [`return.unusedType` — remove unused type from return union](todo/phpstan-actions.md#h10-returnunusedtype--remove-unused-type-from-return-union)                            | Medium  | Medium |
-| H6  | `return.type` — update return type to match actual returns                                                                                                                 | Medium  | Medium |
-|     | **Release 0.7.0**                                                                                                                                                          |         |        |
+| #   | Item                                                                                                                                                                       | Impact | Effort |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------ |
+| L13 | [`where{PropertyName}()` dynamic methods on Builder](todo/laravel.md#l13-wherepropertyname-dynamic-methods-on-builder)                                                     | High   | Medium |
+| H17 | [`missingType.iterableValue` — add `@return` with inferred element type](todo/phpstan-actions.md#h17-missingtype-iterablevalue-return-type--add-return-with-iterable-type) | Medium | High   |
+| H10 | [`return.unusedType` — remove unused type from return union](todo/phpstan-actions.md#h10-returnunusedtype--remove-unused-type-from-return-union)                           | Medium | Medium |
+| H6  | `return.type` — update return type to match actual returns                                                                                                                 | Medium | Medium |
+|     | **Release 0.7.0**                                                                                                                                                          |        |        |
 
 ## Sprint 5 — Polish for office adoption
 
-| #   | Item                                                                                                 | Impact | Effort |
-| --- | ---------------------------------------------------------------------------------------------------- | ------ | ------ |
-|     | Clear [refactoring gate](todo/refactor.md)                                                           | —      | —      |
-| D8  | [Undefined variable diagnostic](todo/diagnostics.md#d8-undefined-variable-diagnostic)                | High   | Medium |
-| D11 | [Invalid class-like kind in context](todo/diagnostics.md#d11-invalid-class-like-kind-in-context)     | Medium | Low    |
-|     | **Release 0.8.0**                                                                                    |        |        |
+| #   | Item                                                                                             | Impact | Effort |
+| --- | ------------------------------------------------------------------------------------------------ | ------ | ------ |
+|     | Clear [refactoring gate](todo/refactor.md)                                                       | —      | —      |
+| D8  | [Undefined variable diagnostic](todo/diagnostics.md#d8-undefined-variable-diagnostic)            | High   | Medium |
+| D11 | [Invalid class-like kind in context](todo/diagnostics.md#d11-invalid-class-like-kind-in-context) | Medium | Low    |
+|     | **Release 0.8.0**                                                                                |        |        |
 
 > **Note:** F1 (Workspace symbol search), F2 (Document symbols), A8
 > (Implement interface methods), A9 (Auto import), D1 (Unknown class
@@ -94,7 +93,7 @@ unlikely to move the needle for most users.
 |      | **[Type Inference](todo/type-inference.md)**                                                                                                                                |             |                |
 | T19  | [Structured type representation](todo/type-inference.md#t19-structured-type-representation) (replace string-based types with `PhpType` enum)                                | High        | Very High      |
 | T20  | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (sure/sureNot tracking, AND/OR algebra)                             | Medium-High | High           |
-| T21  | [Bidirectional template inference](todo/type-inference.md#t21-bidirectional-template-inference-upperlower-bounds) (upper/lower bounds, variance)                             | Medium      | Medium-High    |
+| T21  | [Bidirectional template inference](todo/type-inference.md#t21-bidirectional-template-inference-upperlower-bounds) (upper/lower bounds, variance)                            | Medium      | Medium-High    |
 | T6   | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Low-Medium     |
 | T12  | [Intersection types flattened to unions by `type_strings_joined`](todo/type-inference.md#t12-intersection-types-flattened-to-unions-by-type_strings_joined)                 | Low-Medium  | Low (after M4) |
 | T13  | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail)                                             | Low-Medium  | Medium         |
@@ -104,16 +103,15 @@ unlikely to move the needle for most users.
 | T10  | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium     |
 | T11  | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium     |
 |      | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |                |
-
 | D5   | Diagnostic suppression intelligence                                                                                                                                         | Medium      | Medium         |
-| D12  | [Mago linter integration](todo/diagnostics.md#d12-mago-linter-integration-optional-diagnostics) (optional, ~159 AST-only lint rules)                                       | Medium      | Medium         |
+| D12  | [Mago linter integration](todo/diagnostics.md#d12-mago-linter-integration-optional-diagnostics) (optional, ~159 AST-only lint rules)                                        | Medium      | Medium         |
 | D6   | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Low            |
 | D10  | PHPMD diagnostic proxy                                                                                                                                                      | Low         | Medium         |
 |      | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |                |
 |      | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |                |
 | A8   | [Update docblock to match signature](todo/actions.md#a8-update-docblock-to-match-signature)                                                                                 | Medium      | Medium         |
 | A16  | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Low-Medium     |
-| A25  | [`strpos` → `str_contains`](todo/actions.md#a25-strpos--str_contains-php-80) (PHP 8.0+)                                                                                    | Medium      | Low            |
+| A25  | [`strpos` → `str_contains`](todo/actions.md#a25-strpos--str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Low            |
 | A28  | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low            |
 | A10  | [Generate interface from class](todo/actions.md#a10-generate-interface-from-class)                                                                                          | Low-Medium  | Medium         |
 | A29  | [Simplify boolean return](todo/actions.md#a29-simplify-boolean-return) (`if (cond) return true; return false;` → `return cond;`)                                            | Low-Medium  | Medium         |
@@ -133,7 +131,7 @@ unlikely to move the needle for most users.
 |      | **[CLI Fix Rules](todo/fix-cli.md)**                                                                                                                                        |             |                |
 | FX1  | [`deprecated` — replace deprecated symbol usage](todo/fix-cli.md#fx1-deprecated--replace-deprecated-symbol-usage)                                                           | Medium      | Medium         |
 | FX2  | [`unused_variable` — remove unused variables](todo/fix-cli.md#fx2-unused_variable--remove-unused-variables)                                                                 | Medium      | Medium         |
-| FX3  | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype--remove-unused-type-from-return-union)                      | Medium      | Medium         |
+| FX3  | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype--remove-unused-type-from-return-union)                     | Medium      | Medium         |
 | FX4  | [`phpstan.missingType.iterableValue` — add `@return` with iterable type](todo/fix-cli.md#fx4-phpstanmissingtypeiterablevalue--add-return-with-iterable-type)                | Medium      | Medium         |
 | FX5  | [`phpstan.property.unused` / `phpstan.method.unused` — remove unused member](todo/fix-cli.md#fx5-phpstanpropertyunused--phpstanmethodunused--remove-unused-member)          | Low         | Low            |
 | FX6  | [`phpstan.generics.callSiteVarianceRedundant` — remove redundant variance](todo/fix-cli.md#fx6-phpstangenericscallsitevarianceredundant--remove-redundant-variance)         | Low         | Low            |
@@ -155,7 +153,6 @@ unlikely to move the needle for most users.
 | L8   | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | Medium-High    |
 | L9   | Higher-order collection proxies                                                                                                                                             | Low-Medium  | Medium-High    |
 | L10  | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Low            |
-| L11  | `$appends` array                                                                                                                                                            | Low         | Low            |
 |      | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |                |
 | E2   | Project-level stubs as type resolution source                                                                                                                               | Medium      | Medium         |
 | E3   | IDE-provided and `.phpantom.toml` stub paths                                                                                                                                | Low-Medium  | Low            |

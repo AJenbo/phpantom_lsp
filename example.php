@@ -1616,7 +1616,7 @@ class MatchClassStringDemo
 
 
 // ── Eloquent Virtual Properties ─────────────────────────────────────────────
-// Alphabetical — every property a through v should appear in order.
+// Alphabetical — every property a through w should appear in order.
 // Trigger completion on `$bakery->` and scan the list.
 
 class EloquentPropertyDemo
@@ -1653,6 +1653,7 @@ class EloquentPropertyDemo
         $bakery->unbaked();           // scope method               → Builder
         $bakery->vendor;              // body-inferred morphTo      → Model
         $bakery->vendor_count;        // relationship count         → int
+        $bakery->warmth;              // $appends (no cast/attr)    → mixed
         // MUST NOT appear: secret_ingredient (private $attributes field)
     }
 }
@@ -4674,6 +4675,8 @@ class Bakery extends \Illuminate\Database\Eloquent\Model
     protected $dates = ['defrosted_at'];
 
     protected $visible = ['rye_blend'];
+
+    protected $appends = ['warmth'];
 
     protected $casts = [
         'apricot'    => 'boolean',

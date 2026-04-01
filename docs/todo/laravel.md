@@ -468,17 +468,5 @@ hard-coding the two known classes.  A simpler approach: add
 `@method` tags to bundled stubs for the most common dynamic `with*`
 methods, or document this as a known limitation.
 
-#### L11. `$appends` array
 
-**Impact: Low · Effort: Low**
-
-The accessor method is the real source of truth; `$appends` only
-helps when the accessor is defined in an unloaded parent class.
-Similar to `$fillable`/`$hidden` extraction.
-
-The `$appends` property lists accessor names that should always be
-included in `toArray()` / `toJson()`. These reference existing
-accessors, so in most cases the accessor method itself already produces
-the virtual property. Parsing `$appends` would only help when the
-accessor is defined in an unloaded parent class.
 

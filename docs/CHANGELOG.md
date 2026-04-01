@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Remove always-true `assert()` code action.** When PHPStan reports `function.alreadyNarrowedType` for a call to `assert()` that will always evaluate to true, a quickfix offers to delete the no-op statement. Only `assert()` calls are matched — other functions sharing the same identifier (e.g. `is_string()` inside conditions) are excluded because removal would change control flow. The diagnostic is eagerly cleared once `assert(` no longer appears on the line.
 - **Fix void return mismatch code actions.** When PHPStan reports `return.void` (a void function returns an expression), a quickfix strips the expression to produce a bare `return;`. When PHPStan reports `return.empty` (a non-void function has a bare `return;`), a quickfix changes the native return type to `void` and removes any `@return` docblock tag. The two actions chain naturally: fixing `return.void` may trigger `return.empty`, which then fixes the signature.
 - **Remove unreachable statement code action.** When PHPStan reports `deadCode.unreachable`, a quickfix deletes the dead statement. The statement-removal helper is shared infrastructure that a future native dead-code diagnostic (D6) can reuse.
+- **Eloquent `$appends` array.** Entries in a model's `$appends` property now produce virtual properties, matching the existing treatment of `$fillable`, `$guarded`, `$hidden`, and `$visible`.
 
 ### Changed
 

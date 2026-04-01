@@ -348,9 +348,9 @@ impl Backend {
 
             // ── Eloquent array entry fallback ───────────────────────
             // Virtual properties from $casts, $attributes, $fillable,
-            // $guarded, $hidden, and $visible don't have a method or property
-            // declaration.  Jump to the string literal entry inside the
-            // array property instead.
+            // $guarded, $hidden, $visible, and $appends don't have a
+            // method or property declaration.  Jump to the string literal
+            // entry inside the array property instead.
             if extends_eloquent_model(lookup_class, &class_loader)
                 && let Some((class_uri, class_content)) =
                     self.find_class_file_content(&declaring_fqn, uri, content)
