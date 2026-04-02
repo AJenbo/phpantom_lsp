@@ -150,7 +150,7 @@ PHPantom supports an optional per-project configuration file for settings like P
 To generate a default config file with all options documented and commented out:
 
 ```bash
-phpantom_lsp init
+phpantom_lsp --init
 ```
 
 This creates a `.phpantom.toml` in the current directory. Currently supported settings:
