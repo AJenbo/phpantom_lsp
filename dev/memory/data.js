@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775097778783,
+  "lastUpdate": 1775145147021,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -135,6 +135,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "mail@matthias-gutjahr.de",
+            "name": "Matthias Gutjahr",
+            "username": "mattsches"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "732c34e506e568894bb9eb24a1e5cc60c1507ccb",
+          "message": "Update SETUP.md\n\n--init is an option, not a command.",
+          "timestamp": "2026-04-02T17:40:24+02:00",
+          "tree_id": "ec1c0f4a904102b0f33435c4c5a141ae3d089d06",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/732c34e506e568894bb9eb24a1e5cc60c1507ccb"
+        },
+        "date": 1775145146199,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.8,
             "unit": "MiB"
           }
         ]
