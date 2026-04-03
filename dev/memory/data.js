@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775145147021,
+  "lastUpdate": 1775213874942,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -169,6 +169,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "289af94a33f563c7f90e6886b6d8d5c8d9611eb4",
+          "message": "Add bug backlog for analyzer and Eloquent issues, docblock property\nwhere-methods",
+          "timestamp": "2026-04-03T12:45:44+02:00",
+          "tree_id": "bb4a43efb0e59dce043bd75bc4b5fb4baac75d6d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/289af94a33f563c7f90e6886b6d8d5c8d9611eb4"
+        },
+        "date": 1775213874197,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.7,
             "unit": "MiB"
           }
         ]
