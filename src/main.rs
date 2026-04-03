@@ -20,6 +20,12 @@ const STYLES: Styles = Styles::styled()
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    // this allows LSP wrapper programs to pass a --stdio flag.
+    // since this is the only supported communication at this time, this
+    // flag can be ignored
+    #[arg(long, global = true)]
+    stdio: bool,
 }
 
 #[derive(clap::Subcommand)]
