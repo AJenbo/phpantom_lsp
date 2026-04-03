@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775255449870,
+  "lastUpdate": 1775256249912,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -271,6 +271,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "46172a94bbb102f9424b7fed1b0da3ad92e37e10",
+          "message": "Fix relationship property and BelongsTo diagnostics for Laravel models",
+          "timestamp": "2026-04-04T00:32:17+02:00",
+          "tree_id": "82937b0c85adb7a2bb262d9e89cc1bdfeaaab6da",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/46172a94bbb102f9424b7fed1b0da3ad92e37e10"
+        },
+        "date": 1775256249558,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.2,
             "unit": "MiB"
           }
         ]
