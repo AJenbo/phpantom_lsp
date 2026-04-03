@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775213874942,
+  "lastUpdate": 1775240420549,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -203,6 +203,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "metrofindings@gmail.com",
+            "name": "Mark Kimsal",
+            "username": "markkimsal"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1ec76757e200a490e76db769b6ad51c2bc978535",
+          "message": "ft: add dummy stdio cli flag for compatibility with LSP wrappers",
+          "timestamp": "2026-04-03T20:08:09+02:00",
+          "tree_id": "3e6ed0796d3a690aba3cd6453cc680ecb7bbe332",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/1ec76757e200a490e76db769b6ad51c2bc978535"
+        },
+        "date": 1775240419570,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.8,
             "unit": "MiB"
           }
         ]
