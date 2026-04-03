@@ -479,15 +479,20 @@ fn resolve_rhs_instantiation(
                         // is not yet known.  Now that generic args are concrete,
                         // resolve those mixins and merge their members.
                         if cls.mixins.iter().any(|m| cls.template_params.contains(m)) {
-                            let generic_subs = crate::inheritance::build_generic_subs(cls, &type_args);
+                            let generic_subs =
+                                crate::inheritance::build_generic_subs(cls, &type_args);
                             if !generic_subs.is_empty() {
-                                let mixin_members = crate::virtual_members::phpdoc::resolve_template_param_mixins(
-                                    cls,
-                                    &generic_subs,
-                                    ctx.class_loader,
-                                );
+                                let mixin_members =
+                                    crate::virtual_members::phpdoc::resolve_template_param_mixins(
+                                        cls,
+                                        &generic_subs,
+                                        ctx.class_loader,
+                                    );
                                 if !mixin_members.is_empty() {
-                                    crate::virtual_members::merge_virtual_members(&mut substituted, mixin_members);
+                                    crate::virtual_members::merge_virtual_members(
+                                        &mut substituted,
+                                        mixin_members,
+                                    );
                                 }
                             }
                         }

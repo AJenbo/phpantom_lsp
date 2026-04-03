@@ -524,8 +524,8 @@ pub(crate) fn resolve_target_classes(
     // vec would poison the cache: a later top-level lookup (at
     // depth 0) would hit the cached empty entry and produce a
     // false "type could not be resolved" diagnostic.
-    let skip_cache = result.is_empty()
-        && super::variable::resolution::is_var_resolution_depth_limited();
+    let skip_cache =
+        result.is_empty() && super::variable::resolution::is_var_resolution_depth_limited();
     if !skip_cache {
         DIAG_SUBJECT_CACHE.with(|cell| {
             let mut borrow = cell.borrow_mut();

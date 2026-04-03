@@ -502,14 +502,15 @@ impl Backend {
             SymbolKind::Variable { name } => {
                 // Suppress hover when the cursor is on a variable at its
                 // definition site where the type is already visible in
-                // the signature (parameters, properties, static/global
-                // declarations).  For assignments, foreach bindings, and
-                // catch bindings the resolved type is not obvious from the
-                // source text, so hover is useful there.
+                // the signature (properties, static/global declarations).
+                // For parameters, assignments, foreach bindings, and catch
+                // bindings, hover is useful to show the resolved type and
+                // any docblock descriptions.
                 if let Some(def_kind) = self.lookup_var_def_kind_at(uri, name, cursor_offset)
                     && !matches!(
                         def_kind,
                         VarDefKind::Assignment
+                            | VarDefKind::Parameter
                             | VarDefKind::Foreach
                             | VarDefKind::Catch
                             | VarDefKind::ArrayDestructuring

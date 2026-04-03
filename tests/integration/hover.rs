@@ -398,29 +398,94 @@ class Consumer {
 }
 
 #[test]
-fn hover_suppressed_on_parameter_definition_site() {
+fn hover_active_on_parameter_definition_site() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
-class Builder {
-    public function scopeOfGenre(\Illuminate\Database\Eloquent\Builder $query, string $genre): void {
-        $query->where('genre', $genre);
+class Order { public string $id; }
+class Service {
+    public function process(Order $query, string $genre): void {
+        $query;
     }
 }
 "#;
 
-    // Hover on `$query` at the parameter definition site (line 2, col ~72)
-    let hover = hover_at(&backend, uri, content, 2, 73);
+    // Hover on `$query` at the parameter definition site (line 3, col on $query)
+    let hover = hover_at(&backend, uri, content, 3, 35)
+        .expect("hover should be active on parameter $query");
+    let text = hover_text(&hover);
     assert!(
-        hover.is_none(),
-        "hover should be suppressed on parameter $query"
+        text.contains("$query"),
+        "hover should show the parameter name: {}",
+        text
+    );
+    assert!(
+        text.contains("Order"),
+        "hover should show the resolved type Order: {}",
+        text
     );
 
-    // Hover on `$genre` at the parameter definition site (line 2, col ~87)
-    let hover = hover_at(&backend, uri, content, 2, 88);
+    // Hover on `$genre` at the parameter definition site (line 3, col on $genre)
+    let hover = hover_at(&backend, uri, content, 3, 50)
+        .expect("hover should be active on parameter $genre");
+    let text = hover_text(&hover);
     assert!(
-        hover.is_none(),
-        "hover should be suppressed on parameter $genre"
+        text.contains("$genre") && text.contains("string"),
+        "hover should show the parameter name and type: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_parameter_definition_shows_docblock_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Pen { public function write(): string { return ''; } }
+class Drawer {
+    /** @param list<Pen> $pens The pens to use. */
+    public function fill(array $pens): void {
+        $pens;
+    }
+}
+"#;
+
+    // Hover on `$pens` at the parameter definition site (line 4)
+    let hover = hover_at(&backend, uri, content, 4, 33)
+        .expect("hover should be active on parameter $pens with docblock type");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$pens"),
+        "hover should show the parameter name: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_parameter_definition_standalone_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Pen { public function write(): string { return ''; } }
+/** @param Pen $tool The writing instrument. */
+function draw(Pen $tool): void {
+    $tool;
+}
+"#;
+
+    // Hover on `$tool` at the parameter definition site (line 3)
+    let hover = hover_at(&backend, uri, content, 3, 19)
+        .expect("hover should be active on standalone function parameter $tool");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$tool"),
+        "hover should show the parameter name: {}",
+        text
+    );
+    assert!(
+        text.contains("Pen"),
+        "hover should show the type Pen: {}",
+        text
     );
 }
 

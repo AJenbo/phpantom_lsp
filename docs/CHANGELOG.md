@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Add iterable return type code action.** When PHPStan reports `missingType.iterableValue` for a return type (e.g. "return type has no value type specified in iterable type array"), a quickfix adds a `@return` docblock tag with the element type inferred from the function body. For example, a function returning `$array = ['hello']` produces `@return array<string>` rather than `array<mixed>`. Falls back to `<mixed>` only when the element type cannot be determined. Existing docblocks are updated in place; single-line docblocks are expanded to multi-line. The diagnostic is eagerly cleared once the `@return` tag contains a generic type.
 - **Remove unreachable statement code action.** When PHPStan reports `deadCode.unreachable`, a quickfix deletes the dead statement. The statement-removal helper is shared infrastructure that a future native dead-code diagnostic (D6) can reuse.
 - **Eloquent `$appends` array.** Entries in a model's `$appends` property now produce virtual properties, matching the existing treatment of `$fillable`, `$guarded`, `$hidden`, and `$visible`.
+- **Hover on parameter variables at their definition site.** Hovering on a function or method parameter now shows its resolved type instead of being suppressed. When a `@param` tag provides a richer type than the native hint (e.g. `list<Pen>` vs `array`), the docblock type is shown. Contributed by @RemcoSmitsDev in https://github.com/AJenbo/phpantom_lsp/pull/68.
 
 ### Changed
 

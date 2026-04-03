@@ -1007,7 +1007,10 @@ pub(crate) fn apply_substitution<'a>(
 ///
 /// Returns an empty map when no substitutions can be made (e.g. when
 /// `template_params` or `type_args` is empty).
-pub(crate) fn build_generic_subs(class: &ClassInfo, type_args: &[&str]) -> HashMap<String, PhpType> {
+pub(crate) fn build_generic_subs(
+    class: &ClassInfo,
+    type_args: &[&str],
+) -> HashMap<String, PhpType> {
     if class.template_params.is_empty() || type_args.is_empty() {
         return HashMap::new();
     }
