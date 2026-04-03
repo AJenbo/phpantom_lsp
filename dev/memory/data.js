@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775256249912,
+  "lastUpdate": 1775258235164,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -305,6 +305,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "004ef4feddcb8c11516bc6b64cf25e4f259b1435",
+          "message": "Fix closure param inference for function-level templates and property\nchains",
+          "timestamp": "2026-04-04T01:04:46+02:00",
+          "tree_id": "266b5364f604051910a4adbadfb34e2c171e2ee9",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/004ef4feddcb8c11516bc6b64cf25e4f259b1435"
+        },
+        "date": 1775258234255,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.7,
             "unit": "MiB"
           }
         ]
