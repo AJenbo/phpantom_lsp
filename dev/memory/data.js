@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775240420549,
+  "lastUpdate": 1775255449870,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -237,6 +237,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "eafb028c4ed9095b6b8ee89f313039e07e8bf151",
+          "message": "Track variable reassignment inside try/catch/finally blocks",
+          "timestamp": "2026-04-04T00:18:27+02:00",
+          "tree_id": "dbe72b1e2153852f80bedc97d8da29b6bdc51ac4",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/eafb028c4ed9095b6b8ee89f313039e07e8bf151"
+        },
+        "date": 1775255449550,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.4,
             "unit": "MiB"
           }
         ]
