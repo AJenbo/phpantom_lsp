@@ -1,34 +1,5 @@
 # PHPantom — Bug Fixes
 
-## B3: Variable reassignment inside `try` block not tracked by analyzer
-
-When a variable is assigned one type before a `try` block and then
-reassigned to a different type inside the `try`, the analyzer uses the
-original type instead of the reassigned type for subsequent accesses
-within the same block.
-
-Real-world example — `MollieGateway.php`:
-
-```php
-$customer = $request->getCustomerOrFail();   // type: Luxplus Customer
-// ...
-try {
-    $customer = $client->getOrCreateCustoemr($customer);  // reassigned to MollieCustomer
-    $molliePayment = $customer->createPayment($paymentData);  // ← analyzer uses original type
-}
-```
-
-Line 452 reassigns `$customer` from `Luxplus\...\Customer` to
-`Mollie\Api\Resources\Customer` (aliased as `MollieCustomer`). Line 453
-calls `->createPayment()` which exists on `MollieCustomer` but not on
-the Luxplus `Customer` model. The analyzer resolves `$customer` as the
-original type, producing an `unknown_member` diagnostic for
-`createPayment` and a cascading `unresolved_member_access` for
-`$molliePayment->getCheckoutUrl()`.
-
-**Impact:** 2 diagnostics in the shared project (`MollieGateway:453`,
-`MollieGateway:462`).
-
 ## B4: Relationship property access and BelongsTo return type not resolved by analyzer
 
 Eloquent relationship methods accessed as properties (without `()`) are

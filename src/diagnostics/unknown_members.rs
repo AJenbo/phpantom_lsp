@@ -4902,4 +4902,137 @@ class Svc {
             "Should flag 'unknown', got: {diags:?}"
         );
     }
+
+    #[test]
+    fn no_false_positive_when_variable_reassigned_inside_try_block() {
+        // When a variable is reassigned inside a `try` block, accesses
+        // after the reassignment (still inside the try) should resolve
+        // against the new type, not the original.
+        let php = r#"<?php
+class LuxplusCustomer {
+    public function getName(): string { return ''; }
+}
+class MollieCustomer {
+    public function createPayment(string $data): MolliePayment { return new MolliePayment(); }
+}
+class MolliePayment {
+    public function getCheckoutUrl(): string { return ''; }
+}
+class MollieClient {
+    public function getOrCreateCustomer(LuxplusCustomer $c): MollieCustomer { return new MollieCustomer(); }
+}
+class Gateway {
+    public function charge(LuxplusCustomer $customer): void {
+        $client = new MollieClient();
+        try {
+            $customer = $client->getOrCreateCustomer($customer);
+            $molliePayment = $customer->createPayment('data');
+            $url = $molliePayment->getCheckoutUrl();
+        } catch (\Exception $e) {
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics for reassigned variable inside try block, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn flags_unknown_member_after_reassignment_inside_try_block() {
+        // The flip side: after reassignment inside a try block, members
+        // from the OLD type that don't exist on the NEW type should be
+        // flagged.
+        let php = r#"<?php
+class OriginalType {
+    public function onlyOnOriginal(): void {}
+}
+class ReplacementType {
+    public function onlyOnReplacement(): void {}
+}
+class Service {
+    public function process(OriginalType $var): void {
+        try {
+            $var = new ReplacementType();
+            $var->onlyOnOriginal();
+        } catch (\Exception $e) {
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("onlyOnOriginal")
+                    && d.message.contains("ReplacementType")),
+            "expected diagnostic for onlyOnOriginal() on ReplacementType after reassignment in try, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn try_block_reassignment_is_conditional_after_try() {
+        // After the try/catch block, the variable could be either the
+        // original type (if the try threw before the reassignment) or
+        // the new type.  Both types' members should be accepted.
+        let php = r#"<?php
+class TypeA {
+    public function methodA(): void {}
+}
+class TypeB {
+    public function methodB(): void {}
+}
+class Svc {
+    public function run(TypeA $var): void {
+        try {
+            $var = new TypeB();
+        } catch (\Exception $e) {
+        }
+        $var->methodA();
+        $var->methodB();
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        assert!(
+            diags.is_empty(),
+            "after try/catch, both original and reassigned types should be accepted, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn catch_block_variable_reassignment_tracked() {
+        // Variable reassignment inside a catch block should also be
+        // tracked when the cursor is inside the catch block.
+        let php = r#"<?php
+class ErrorResult {
+    public function getErrorCode(): int { return 0; }
+}
+class SuccessResult {
+    public function getData(): string { return ''; }
+}
+class Handler {
+    public function handle(): void {
+        $result = new SuccessResult();
+        try {
+            $result->getData();
+        } catch (\Exception $e) {
+            $result = new ErrorResult();
+            $result->getErrorCode();
+        }
+    }
+}
+"#;
+        let backend = Backend::new_test();
+        let diags = collect(&backend, "file:///test.php", php);
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics for reassigned variable inside catch block, got: {diags:?}"
+        );
+    }
 }

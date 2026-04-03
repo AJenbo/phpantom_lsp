@@ -23,7 +23,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                                             | Impact | Effort |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ------ |
-| B3  | [Variable reassignment inside `try` block not tracked by analyzer](todo/bugs.md#b3-variable-reassignment-inside-try-block-not-tracked-by-analyzer) | Low | Low |
 | B4  | [Relationship property access and BelongsTo return type not resolved](todo/bugs.md#b4-relationship-property-access-and-belongsto-return-type-not-resolved-by-analyzer) | Medium | Medium |
 | B5  | [`$this->items` on custom Collection subclass not typed](todo/bugs.md#b5-thisitems-on-custom-collection-subclass-not-typed)                      | Low    | Medium |
 | B6  | [Scope methods not found on Builder in analyzer chains](todo/bugs.md#b6-scope-methods-not-found-on-builder-in-analyzer-chains)                   | High   | Medium |

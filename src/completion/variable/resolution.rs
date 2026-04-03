@@ -2509,7 +2509,22 @@ fn walk_try_statement<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ResolvedType>,
 ) {
-    walk_statements_for_assignments(try_stmt.block.statements.iter(), ctx, results, true);
+    // When the cursor is inside the try block body, assignments that
+    // precede the cursor have executed sequentially — use
+    // `conditional: false` so reassignments replace the previous type
+    // instead of forming a union with it.  When the cursor is outside
+    // (after the try statement), we don't know whether the try body
+    // ran to completion, so keep `conditional: true`.
+    let try_span = try_stmt.block.span();
+    let cursor_in_try =
+        ctx.cursor_offset >= try_span.start.offset && ctx.cursor_offset <= try_span.end.offset;
+    walk_statements_for_assignments(
+        try_stmt.block.statements.iter(),
+        ctx,
+        results,
+        !cursor_in_try,
+    );
+
     for catch in try_stmt.catch_clauses.iter() {
         // Seed the catch variable's type from the catch
         // clause's type hint(s) before recursing into the
@@ -2528,10 +2543,28 @@ fn walk_try_statement<'b>(
             );
             ResolvedType::extend_unique(results, ResolvedType::from_classes(resolved));
         }
-        walk_statements_for_assignments(catch.block.statements.iter(), ctx, results, true);
+        // Same logic: when the cursor is inside this catch block,
+        // treat preceding assignments as unconditional.
+        let catch_span = catch.block.span();
+        let cursor_in_catch = ctx.cursor_offset >= catch_span.start.offset
+            && ctx.cursor_offset <= catch_span.end.offset;
+        walk_statements_for_assignments(
+            catch.block.statements.iter(),
+            ctx,
+            results,
+            !cursor_in_catch,
+        );
     }
     if let Some(finally) = &try_stmt.finally_clause {
-        walk_statements_for_assignments(finally.block.statements.iter(), ctx, results, true);
+        let finally_span = finally.block.span();
+        let cursor_in_finally = ctx.cursor_offset >= finally_span.start.offset
+            && ctx.cursor_offset <= finally_span.end.offset;
+        walk_statements_for_assignments(
+            finally.block.statements.iter(),
+            ctx,
+            results,
+            !cursor_in_finally,
+        );
     }
 }
 

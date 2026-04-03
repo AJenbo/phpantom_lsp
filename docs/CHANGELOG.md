@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Variable reassignment inside `try` blocks now tracked by the analyzer.** When a variable was reassigned to a different type inside a `try` block, subsequent accesses within the same block still resolved against the original type, producing false-positive `unknown_member` diagnostics. The same applied to `catch` and `finally` blocks. Assignments preceding the cursor within the same block are now treated as sequential.
 - **Diagnostics now work for vendor files open in the editor.** Projects using `--prefer-source` or monorepo setups where libraries are edited from the `vendor/` directory no longer have diagnostics suppressed. Previously all vendor files were unconditionally skipped, hiding syntax errors, deprecation warnings, and all other diagnostics. The `analyze` command also accepts vendor paths as explicit overrides (e.g. `phpantom_lsp analyze vendor/some-package/src/`).
 - **Full-line diagnostic suppression no longer requires a code mapping.** Full-line diagnostics (from tools like PHPStan that only report line numbers) are now suppressed whenever any precise diagnostic exists on the same line, regardless of error codes. Previously suppression relied on a hand-maintained mapping between error codes from different tools, which was incomplete and allowed redundant full-line underlines to obscure the precise location of the issue.
 
