@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775315986745,
+  "lastUpdate": 1775320584749,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -543,6 +543,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 38.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "djsmits12@gmail.com",
+            "name": "Remco Smits",
+            "username": "RemcoSmitsDev"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "be5d7ebb5a29171baa9eaa354fbfa0e1d3b3d124",
+          "message": "Support hover information for parameter variable\ndefinitions.\n\nThis is mainly usefull when you are working in a project with large\ndocblocks that define some types that are hard to discover, so making\nthe hover work for them allow you to easier discover the actual type of\nthe variable.",
+          "timestamp": "2026-04-04T18:24:18+02:00",
+          "tree_id": "1c731893e9bbecdac27b78e6f36c27e57d1ee94c",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/be5d7ebb5a29171baa9eaa354fbfa0e1d3b3d124"
+        },
+        "date": 1775320583434,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.3,
             "unit": "MiB"
           }
         ]
