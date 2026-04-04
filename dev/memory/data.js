@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775338966094,
+  "lastUpdate": 1775340760775,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -815,6 +815,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c541bac63cfaed68afb9724c3385d562d882b4a5",
+          "message": "Suppress diagnostics for stdClass and object property access",
+          "timestamp": "2026-04-05T00:00:36+02:00",
+          "tree_id": "c39fc5e9256df165de58fe365a04fa270603a4de",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/c541bac63cfaed68afb9724c3385d562d882b4a5"
+        },
+        "date": 1775340760266,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.2,
             "unit": "MiB"
           }
         ]
