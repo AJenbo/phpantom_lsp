@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775273745537,
+  "lastUpdate": 1775307221502,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -441,6 +441,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "642cc626ce22dc5b4dd6c2a4200f6d87eb185286",
+          "message": "Resolve @mixin template parameters via property generic types",
+          "timestamp": "2026-04-04T14:41:39+02:00",
+          "tree_id": "eb2196c4ecdbd8de30a20e60c4c97b119e4c4bc0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/642cc626ce22dc5b4dd6c2a4200f6d87eb185286"
+        },
+        "date": 1775307221196,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 38.5,
             "unit": "MiB"
           }
         ]
