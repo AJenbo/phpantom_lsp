@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775258235164,
+  "lastUpdate": 1775266861938,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -339,6 +339,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "22db360d53d73a76feb712ca1bda5ffbff81d29d",
+          "message": "Add PHPStan `*` wildcard support in generic type positions",
+          "timestamp": "2026-04-04T03:28:56+02:00",
+          "tree_id": "5d7287fb0aa4d25606d11537dbcad1df525f669d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/22db360d53d73a76feb712ca1bda5ffbff81d29d"
+        },
+        "date": 1775266860896,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.7,
             "unit": "MiB"
           }
         ]
