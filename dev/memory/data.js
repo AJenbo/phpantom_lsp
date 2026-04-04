@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775321853477,
+  "lastUpdate": 1775332006119,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -645,6 +645,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2693b665ea6cac86398e4fdb10027e834a5f9be9",
+          "message": "Preserve generic arguments in callable param inference",
+          "timestamp": "2026-04-04T21:34:34+02:00",
+          "tree_id": "e4285dde6a02543983b56ab5b0009fe2c8ddd1ac",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/2693b665ea6cac86398e4fdb10027e834a5f9be9"
+        },
+        "date": 1775332005246,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.1,
             "unit": "MiB"
           }
         ]
