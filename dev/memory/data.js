@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775320584749,
+  "lastUpdate": 1775321718229,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -577,6 +577,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "717652bf35d7e1ef19fedd71ca64e4e58d399f42",
+          "message": "Suppress false positives for Laravel Eloquent scope methods on Builder",
+          "timestamp": "2026-04-04T18:39:27+02:00",
+          "tree_id": "3bd75e323d58cd62f67de9de1168ebecf100402b",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/717652bf35d7e1ef19fedd71ca64e4e58d399f42"
+        },
+        "date": 1775321717344,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 38.4,
             "unit": "MiB"
           }
         ]
