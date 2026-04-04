@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775266861938,
+  "lastUpdate": 1775268334329,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -373,6 +373,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "085b94cc4dffdedbc9637aa055c988e64cd85a9f",
+          "message": "Fix variadic parameter element type in foreach loops",
+          "timestamp": "2026-04-04T03:53:31+02:00",
+          "tree_id": "477bd246a172024881ba81cab40ecbdc2129ee0a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/085b94cc4dffdedbc9637aa055c988e64cd85a9f"
+        },
+        "date": 1775268333197,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.9,
             "unit": "MiB"
           }
         ]
