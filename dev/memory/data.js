@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775342570243,
+  "lastUpdate": 1775344137028,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -883,6 +883,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4329efea1360df71c9666c7cc2378eefea1c5fde",
+          "message": "Implement bidirectional template inference from closure param types",
+          "timestamp": "2026-04-05T00:56:31+02:00",
+          "tree_id": "5e27993eb1ee1a1d29da938f21fb6e4032e04b8b",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/4329efea1360df71c9666c7cc2378eefea1c5fde"
+        },
+        "date": 1775344136169,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.5,
             "unit": "MiB"
           }
         ]
