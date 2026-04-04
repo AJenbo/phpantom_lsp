@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775307221502,
+  "lastUpdate": 1775315185707,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -475,6 +475,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 38.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "53d7967e9121114d9f006398eea08c0d5295a0a1",
+          "message": "Fix diagnostic cache poisoning by depth-limited variable resolution",
+          "timestamp": "2026-04-04T16:53:49+02:00",
+          "tree_id": "e0dd9fd143b1cecd991e74864b2e3dbe040d5f2f",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/53d7967e9121114d9f006398eea08c0d5295a0a1"
+        },
+        "date": 1775315184473,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.7,
             "unit": "MiB"
           }
         ]
