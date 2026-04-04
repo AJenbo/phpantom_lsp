@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775321718229,
+  "lastUpdate": 1775321853477,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -611,6 +611,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 38.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "137226f38f0e9a3cc908cdfca7e11c3146afb602",
+          "message": "Add type-guard narrowing for is_array, is_object, and scalars",
+          "timestamp": "2026-04-04T18:44:43+02:00",
+          "tree_id": "6aeed1953700798750cc046b28175299204700b9",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/137226f38f0e9a3cc908cdfca7e11c3146afb602"
+        },
+        "date": 1775321852581,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.5,
             "unit": "MiB"
           }
         ]
