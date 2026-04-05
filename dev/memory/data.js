@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775407400482,
+  "lastUpdate": 1775414430551,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1155,6 +1155,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "31cf3e464612ca4716ab4954f7bfbbdfac0328e1",
+          "message": "Implement \"Remove unused return type\" code action for PHPStan, and\nupdate general docs",
+          "timestamp": "2026-04-05T20:28:21+02:00",
+          "tree_id": "88847ca4e5bfc01a48a600e6a61d2a3d99a5a651",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/31cf3e464612ca4716ab4954f7bfbbdfac0328e1"
+        },
+        "date": 1775414430054,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.2,
             "unit": "MiB"
           }
         ]
