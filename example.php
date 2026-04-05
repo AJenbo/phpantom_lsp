@@ -1389,6 +1389,25 @@ class IterationDemo
 }
 
 
+// ── Foreach Array Shape Elements ────────────────────────────────────────────
+
+class ForeachArrayShapeDemo
+{
+    /**
+     * @param array<int, array{tool: Pen, count: int}> $inventory
+     */
+    public function demo(array $inventory): void
+    {
+        // When iterating over an array whose value type is an array shape,
+        // the foreach variable carries the shape type so that bracket
+        // access resolves each key to its declared type.
+        foreach ($inventory as $entry) {
+            $entry['tool']->write();      // array{tool: Pen, count: int} → Pen
+        }
+    }
+}
+
+
 // ── Variadic Parameter Foreach ──────────────────────────────────────────────
 
 class VariadicForeachDemo
@@ -5918,6 +5937,13 @@ function runDemoAssertions(): void
     $tgMixed = $tgSingle;
     if (!is_array($tgMixed)) {
         assert($tgMixed instanceof Pen, 'Else branch of is_array() must be Pen');
+    }
+
+    // ── Foreach array shape elements ────────────────────────────────────
+    /** @var array<int, array{tool: Pen, count: int}> $fasInventory */
+    $fasInventory = [['tool' => new Pen('red'), 'count' => 3]];
+    foreach ($fasInventory as $fasEntry) {
+        assert($fasEntry['tool'] instanceof Pen, 'Foreach over array shape must resolve key type');
     }
 
     // ── Loop array build (variable-key assignment) ──────────────────────

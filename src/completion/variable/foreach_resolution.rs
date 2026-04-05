@@ -249,7 +249,13 @@ pub(in crate::completion) fn try_resolve_foreach_value_type<'b>(
     // Extract the generic element type (e.g. `list<User>` → `User`).
     if let Some(ref rt) = raw_type {
         let parsed = crate::php_type::PhpType::parse(rt);
-        if let Some(element_type) = parsed.extract_value_type(true) {
+        // Use `extract_value_type(false)` to include non-class element
+        // types such as array shapes (`array{key: Type}`), scalars, and
+        // generic arrays.  The foreach value variable may be used with
+        // bracket access (`$item['key']->`) or other operations where
+        // a non-class type is meaningful.  `push_foreach_resolved_types_typed`
+        // handles both class and non-class element types.
+        if let Some(element_type) = parsed.extract_value_type(false) {
             push_foreach_resolved_types_typed(element_type, ctx, results, conditional);
             return;
         }
@@ -475,11 +481,21 @@ fn push_foreach_resolved_types_typed(
         ctx.class_loader,
     );
 
-    if resolved.is_empty() {
-        return;
-    }
+    let resolved_types = if resolved.is_empty() {
+        // The element type is not a class (e.g. an array shape like
+        // `array{bundle: Product, count: int}`, a scalar, or a
+        // generic array).  Push a type-only ResolvedType so that
+        // downstream consumers (array bracket access, hover, etc.)
+        // can still see the structured type string and resolve
+        // through it.
+        if matches!(ty, PhpType::Named(n) if n == "mixed") {
+            return;
+        }
+        vec![ResolvedType::from_type_string(ty.clone())]
+    } else {
+        ResolvedType::from_classes_with_hint(resolved, ty.clone())
+    };
 
-    let resolved_types = ResolvedType::from_classes_with_hint(resolved, ty.clone());
     if !conditional {
         results.clear();
     }

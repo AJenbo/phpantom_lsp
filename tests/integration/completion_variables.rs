@@ -20722,3 +20722,78 @@ async fn test_completion_foreach_variadic_param_standalone_function() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Foreach variable type from @param array shape ──────────────────────────
+
+/// When a parameter is annotated with `@param array<int, array{bundle: Product, count: int}>`,
+/// iterating over it with foreach should propagate the value type so that
+/// `$entry['bundle']->` resolves to `Product`.
+#[tokio::test]
+async fn test_foreach_variable_type_from_param_array_shape() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///foreach_param_shape.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                                    // 0
+        "class Product {\n",                                                          // 1
+        "    public string $sku;\n",                                                  // 2
+        "    public function parentProduct(): Product { return new self(); }\n",      // 3
+        "}\n",                                                                        // 4
+        "\n",                                                                         // 5
+        "class Listener {\n",                                                         // 6
+        "    /** @param array<int, array{bundle: Product, count: int}> $counts */\n", // 7
+        "    public function handle(array $counts): void {\n",                        // 8
+        "        foreach ($counts as $entry) {\n",                                    // 9
+        "            $entry['bundle']->\n",                                           // 10
+        "        }\n",                                                                // 11
+        "    }\n",                                                                    // 12
+        "}\n",                                                                        // 13
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Cursor at line 10 after `$entry['bundle']->`
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 34,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Completion should return results for $entry['bundle']-> inside foreach over array shape param"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.iter().any(|l| l.starts_with("sku")),
+                "Should include 'sku' from Product via array shape foreach. Got: {:?}",
+                labels
+            );
+            assert!(
+                labels.iter().any(|l| l.starts_with("parentProduct")),
+                "Should include 'parentProduct' from Product via array shape foreach. Got: {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
