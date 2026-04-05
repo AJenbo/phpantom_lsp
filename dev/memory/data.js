@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775350494214,
+  "lastUpdate": 1775351916877,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1019,6 +1019,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9ede72e4d5b7148b5c02f34ce1f9ebbe10cb010c",
+          "message": "Patch DB select return types and Redis mixin for Laravel",
+          "timestamp": "2026-04-05T03:06:38+02:00",
+          "tree_id": "890399462da6b9e1f3f793ef5a5a9403783e02db",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/9ede72e4d5b7148b5c02f34ce1f9ebbe10cb010c"
+        },
+        "date": 1775351916544,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.9,
             "unit": "MiB"
           }
         ]
