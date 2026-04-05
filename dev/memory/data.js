@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775356391865,
+  "lastUpdate": 1775394931961,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1087,6 +1087,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "108c175384da3eadf05f7a0b81852d3a8eead9a5",
+          "message": "Fix `instanceof` narrowing with unresolvable target class",
+          "timestamp": "2026-04-05T15:03:40+02:00",
+          "tree_id": "1462922b33dfeee84d21adaaf2dc8632c1817af9",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/108c175384da3eadf05f7a0b81852d3a8eead9a5"
+        },
+        "date": 1775394931034,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.7,
             "unit": "MiB"
           }
         ]
