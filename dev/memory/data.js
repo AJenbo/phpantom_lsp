@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775351916877,
+  "lastUpdate": 1775356391865,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1053,6 +1053,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7230d35149bc1c23d3ae0a6b43781615e437fb28",
+          "message": "Fix in_array guard clause type narrowing and class-string<T> static\nreturn",
+          "timestamp": "2026-04-05T04:19:24+02:00",
+          "tree_id": "5f868a3d4e0ce5c954c3907e271df18260ef2974",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/7230d35149bc1c23d3ae0a6b43781615e437fb28"
+        },
+        "date": 1775356390990,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.6,
             "unit": "MiB"
           }
         ]
