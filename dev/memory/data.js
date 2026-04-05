@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775394931961,
+  "lastUpdate": 1775407400482,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1116,6 +1116,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 23.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dec5a3eaf0e69e0b39c20ed1bd105930767d6f96",
+          "message": "Fix array shape tracking from keyed assignments in conditional loops",
+          "timestamp": "2026-04-05T18:31:05+02:00",
+          "tree_id": "c030da89f008f12ab77be74487e32476fa0290a9",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/dec5a3eaf0e69e0b39c20ed1bd105930767d6f96"
+        },
+        "date": 1775407400167,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.7,
             "unit": "MiB"
           },
           {
