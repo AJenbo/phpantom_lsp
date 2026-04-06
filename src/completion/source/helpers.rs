@@ -539,7 +539,7 @@ fn walk_array_segments_and_resolve(
             all_classes,
             class_loader,
         ) {
-            PhpType::parse(&expanded)
+            expanded
         } else {
             base_type.clone()
         }
@@ -599,7 +599,7 @@ fn walk_array_segments_and_resolve(
             all_classes,
             class_loader,
         ) {
-            current = PhpType::parse(&expanded);
+            current = expanded;
         }
     }
 

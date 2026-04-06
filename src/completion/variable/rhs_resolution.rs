@@ -206,8 +206,7 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
         // the enclosing function's `@return Generator<K, V, TSend, R>`.
         Expression::Yield(_) => {
             if let Some(ref ret_type) = ctx.enclosing_return_type
-                && let Some(send_php_type) =
-                    crate::php_type::PhpType::parse(ret_type).generator_send_type(true)
+                && let Some(send_php_type) = ret_type.generator_send_type(true)
             {
                 return ResolvedType::from_classes_with_hint(
                     crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -880,7 +879,7 @@ fn resolve_rhs_array_access<'b>(
         ctx.all_classes,
         ctx.class_loader,
     ) {
-        current = PhpType::parse(&expanded);
+        current = expanded;
     }
 
     // Walk each bracket segment, narrowing the type at each step.
@@ -934,7 +933,7 @@ fn resolve_rhs_array_access<'b>(
             ctx.all_classes,
             ctx.class_loader,
         ) {
-            current = PhpType::parse(&expanded);
+            current = expanded;
         }
     }
 
@@ -1749,7 +1748,7 @@ fn resolve_rhs_method_call_inner<'b>(
                 ctx.class_loader,
             );
             let parsed_effective = match expanded {
-                Some(ref e) => PhpType::parse(e),
+                Some(e) => e,
                 None => hint.clone(),
             };
             if parsed_effective == PhpType::Named("void".into()) {

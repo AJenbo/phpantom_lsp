@@ -117,22 +117,21 @@ pub(super) fn namespace_line(namespace: &Option<String>) -> String {
 /// the native type.  Returns `None` when they are identical or when there
 /// is no effective type.
 pub(super) fn build_var_annotation(
-    effective: Option<&str>,
+    effective: Option<&PhpType>,
     native: Option<&PhpType>,
 ) -> Option<String> {
     let eff = effective?;
     // When there is no native type hint, `mixed` is the implicit type
     // in PHP — showing `@var mixed` would be noise.
-    if native.is_none() && eff == "mixed" {
+    if native.is_none() && matches!(eff, PhpType::Named(n) if n == "mixed") {
         return None;
     }
-    if let Some(n) = native {
-        let eff_parsed = PhpType::parse(eff);
-        if eff_parsed.equivalent(n) {
-            return None;
-        }
+    if let Some(n) = native
+        && eff.equivalent(n)
+    {
+        return None;
     }
-    Some(format!("@var {}", shorten_type_string(eff)))
+    Some(format!("@var {}", shorten_type_string(&eff.to_string())))
 }
 
 /// Build a readable markdown section showing parameter and return type
@@ -164,7 +163,7 @@ pub(super) fn build_var_annotation(
 /// Returns `None` when there is nothing to show.
 pub(super) fn build_param_return_section(
     params: &[ParameterInfo],
-    effective_return: Option<&str>,
+    effective_return: Option<&PhpType>,
     native_return: Option<&PhpType>,
     return_description: Option<&str>,
 ) -> Option<String> {
@@ -205,8 +204,8 @@ pub(super) fn build_param_return_section(
 
     // return entry
     let ret_type_differs = match (effective_return, native_return) {
-        (Some(eff), Some(nat)) => !PhpType::parse(eff).equivalent(nat),
-        (Some(eff), None) => eff != "mixed",
+        (Some(eff), Some(nat)) => !eff.equivalent(nat),
+        (Some(eff), None) => !matches!(eff, PhpType::Named(n) if n == "mixed"),
         _ => false,
     };
     let has_ret_desc = return_description.is_some_and(|d| !d.is_empty());
@@ -215,7 +214,7 @@ pub(super) fn build_param_return_section(
         let mut entry = String::from("**return**");
         if ret_type_differs {
             if let Some(eff) = effective_return {
-                entry.push_str(&format!(" `{}`", shorten_type_string(eff)));
+                entry.push_str(&format!(" `{}`", shorten_type_string(&eff.to_string())));
             }
             if has_ret_desc {
                 entry.push_str("  \n\u{00a0}\u{00a0}\u{00a0}\u{00a0}");
@@ -368,10 +367,9 @@ pub(crate) fn hover_for_function(
     }
 
     // Build the readable param/return section as markdown.
-    let effective_return = func.return_type_str();
     if let Some(section) = build_param_return_section(
         &func.parameters,
-        effective_return.as_deref(),
+        func.return_type.as_ref(),
         func.native_return_type.as_ref(),
         func.return_description.as_deref(),
     ) {

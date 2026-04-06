@@ -13,6 +13,7 @@ use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
 use crate::docblock;
 use crate::parser::extract_hint_string;
+use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
 use crate::completion::resolver::VarResolutionCtx;
@@ -328,11 +329,11 @@ fn extract_array_map_element_type(
 /// using a variable that is yielded but was not explicitly typed via
 /// an assignment or parameter.
 pub(in crate::completion) fn try_infer_from_generator_yield(
-    return_type: &str,
+    return_type: &PhpType,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ClassInfo> {
     // Only applies to Generator return types.
-    let value_type = match crate::php_type::PhpType::parse(return_type).extract_value_type(false) {
+    let value_type = match return_type.extract_value_type(false) {
         Some(vt) => vt.to_string(),
         None => return vec![],
     };

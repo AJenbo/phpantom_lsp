@@ -426,16 +426,12 @@ is already used as the primary representation in core data structures
 substitution, type narrowing, and inheritance merging all operate on
 `PhpType` values.
 
-The remaining work is eliminating `PhpType -> String -> PhpType`
-round-trips at internal API boundaries. Many functions still accept
-`&str` or return `Option<String>` for types, forcing callers to
-stringify and downstream consumers to re-parse. The concrete migration
-tasks are tracked as T29 and T30.
+The API boundary cleanup (T29, T30) is complete. All core internal
+APIs now accept and return `PhpType` values directly.
 
-Subtype checking (`is Cat a subtype of Animal?`), union simplification
-(`string|string`, `true|false -> bool`), and intersection distribution
-over unions remain unimplemented and are out of scope for the API
-boundary cleanup.
+The remaining work is subtype checking (`is Cat a subtype of Animal?`),
+union simplification (`string|string`, `true|false -> bool`), and
+intersection distribution over unions.
 
 ---
 
@@ -594,63 +590,4 @@ statement analyzers. Both converge on the same architecture: the
 scope is the single source of truth, populated eagerly as the walk
 progresses.
 
----
 
-## T30. Thread `PhpType` through remaining string-based API boundaries
-**Impact: Medium · Effort: Medium**
-
-Several internal APIs accept `&str` or `Option<String>` for types when
-their callers already have a `PhpType`. This creates parse-on-entry
-overhead and loses structural information. The items below can be done
-independently in any order.
-
-### `VarResolutionCtx.enclosing_return_type`
-
-In `resolver.rs` (~L128), `enclosing_return_type` is `Option<String>`.
-It is parsed with `PhpType::parse()` every time it is consumed (e.g.
-for `generator_send_type()` during yield inference). Change to
-`Option<PhpType>` and parse once at construction.
-
-### `resolve_type_alias()` return type
-
-In `completion/types/resolution.rs` (~L462-544), type alias
-definitions are stored as `PhpType` in `TypeAliasDef::Local(PhpType)`
-but immediately stringified to return `Option<String>`. Change to
-return `Option<PhpType>`.
-
-### `is_type_subclass_of()` base name extraction
-
-In `call_resolution.rs` (~L1054-1143), a `PhpType` is stringified
-then split on `<` and stripped of `\\` to get the base class name. Use
-`PhpType::base_name()` instead.
-
-### Shape/list builders in variable resolution
-
-In `resolution.rs`, `merge_shape_key()`, `merge_push_type()`, and
-`merge_keyed_type()` build type strings via `format!("array{{...}}")`
-and `format!("list<...>")` that are immediately re-parsed. Build
-`PhpType::ArrayShape(entries)` and `PhpType::Generic("list", ...)`
-directly.
-
-### Hover formatting entry points
-
-In `hover/formatting.rs`, `build_var_annotation()` and
-`build_param_return_section()` accept `Option<&str>` (produced by
-`type_hint_str()` which stringifies a `PhpType`), then immediately
-re-parse. Change to accept `Option<&PhpType>`.
-
-### `type_hint_to_classes_depth()` string preprocessing
-
-In `completion/types/resolution.rs` (~L88-128), `strip_nullable()`
-and parenthesis stripping are done via string manipulation before
-parsing. `PhpType::parse()` already handles `?Foo` and `(A&B)|C`
-natively, making this preprocessing redundant. Parse first, then
-handle alias resolution on the parsed result.
-
-**Files:** `src/completion/resolver.rs`,
-`src/completion/types/resolution.rs`,
-`src/completion/call_resolution.rs`,
-`src/completion/variable/resolution.rs`,
-`src/hover/formatting.rs`.
-
-**Part of:** T19.

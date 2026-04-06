@@ -38,7 +38,7 @@ use mago_syntax::ast::*;
 use crate::completion::types::narrowing;
 use crate::docblock;
 use crate::parser::{extract_hint_string, with_parsed_program};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, ShapeEntry};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
@@ -635,7 +635,8 @@ fn try_resolve_in_function(
     // own `{` and does NOT get confused by intermediate `{`/`}`
     // from nested control-flow.
     let enclosing_ret =
-        crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize);
+        crate::docblock::find_enclosing_return_type(ctx.content, (body_start + 1) as usize)
+            .map(|s| PhpType::parse(&s));
     let body_ctx = ctx.with_enclosing_return_type(enclosing_ret);
     // The cursor is inside this function body.  PHP function scopes
     // are isolated, so return the result directly (even if empty
@@ -1016,7 +1017,8 @@ fn resolve_variable_in_members<'b>(
                     let enclosing_ret = crate::docblock::find_enclosing_return_type(
                         ctx.content,
                         (blk_start + 1) as usize,
-                    );
+                    )
+                    .map(|s| PhpType::parse(&s));
                     let body_ctx = ctx.with_enclosing_return_type(enclosing_ret);
                     // Seed the result set with the parameter type hint
                     // (if any) so that instanceof narrowing and
@@ -3112,9 +3114,13 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
                 };
                 // Read the current base type from results (if any)
                 // and merge the new key into its shape.
-                let base_string = results.last().map(|rt| rt.type_string.to_string());
-                let base = base_string.as_deref().unwrap_or("array");
-                let merged = merge_shape_key(base, &key, &value_type);
+                let base = results
+                    .last()
+                    .map(|rt| &rt.type_string)
+                    .cloned()
+                    .unwrap_or_else(|| PhpType::Named("array".to_string()));
+                let value_php_type = PhpType::parse(&value_type);
+                let merged = merge_shape_key(&base, &key, &value_php_type);
                 // Replace results with the enriched shape type.
                 // Use extend_unique so this works in conditional
                 // branches (appends) as well as unconditional
@@ -3122,7 +3128,7 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
                 // base assignment that preceded this).
                 // We always push here without clearing — shape keys
                 // accumulate on top of the existing base.
-                let new_rt = ResolvedType::from_type_string(PhpType::parse(&merged));
+                let new_rt = ResolvedType::from_type_string(merged);
                 results.clear();
                 results.push(new_rt);
             } else {
@@ -3139,18 +3145,23 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
                 } else {
                     "mixed".to_string()
                 };
-                let base_string = results.last().map(|rt| rt.type_string.to_string());
-                let base = base_string.as_deref().unwrap_or("array");
+                let base_type = results
+                    .last()
+                    .map(|rt| &rt.type_string)
+                    .cloned()
+                    .unwrap_or_else(|| PhpType::Named("array".to_string()));
                 // When the base already has a shape type from prior
                 // string-keyed assignments, do not overwrite it with
                 // a generic element type — shapes take precedence.
-                if base.starts_with("array{") {
+                if base_type.is_array_shape() {
                     return;
                 }
                 // Infer the key type from the index expression.
-                let key_type = infer_array_key_type(array_access.index, &rhs_ctx);
-                let merged = merge_keyed_type(base, &key_type, &value_type);
-                let new_rt = ResolvedType::from_type_string(PhpType::parse(&merged));
+                let key_type_str = infer_array_key_type(array_access.index, &rhs_ctx);
+                let key_php_type = PhpType::parse(&key_type_str);
+                let value_php_type = PhpType::parse(&value_type);
+                let merged = merge_keyed_type(&base_type, &key_php_type, &value_php_type);
+                let new_rt = ResolvedType::from_type_string(merged);
                 results.clear();
                 results.push(new_rt);
             }
@@ -3187,13 +3198,17 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
             // String-keyed entries take precedence over positional
             // pushes, matching the old AssignmentAccumulator's
             // finalize() behaviour.
-            let base_string = results.last().map(|rt| rt.type_string.to_string());
-            let base = base_string.as_deref().unwrap_or("array");
-            if base.starts_with("array{") {
+            let base_type = results
+                .last()
+                .map(|rt| &rt.type_string)
+                .cloned()
+                .unwrap_or_else(|| PhpType::Named("array".to_string()));
+            if base_type.is_array_shape() {
                 return;
             }
-            let merged = merge_push_type(base, &value_type);
-            let new_rt = ResolvedType::from_type_string(PhpType::parse(&merged));
+            let value_php_type = PhpType::parse(&value_type);
+            let merged = merge_push_type(&base_type, &value_php_type);
+            let new_rt = ResolvedType::from_type_string(merged);
             results.clear();
             results.push(new_rt);
             return;
@@ -3261,88 +3276,81 @@ fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<String> {
     }
 }
 
-/// Merge a `(key, value_type)` pair into an existing type string to
-/// produce an array shape.
+/// Merge a `(key, value_type)` pair into an existing `PhpType` to
+/// produce an `ArrayShape`.
 ///
-/// If `base` is already an `array{…}` shape, the key is added or
-/// updated.  Otherwise a new shape is created with just the given key.
+/// If `base` is already an `ArrayShape`, the key is added or updated.
+/// Otherwise a new shape is created with just the given key.
 ///
-/// Examples:
-/// - `merge_shape_key("array", "name", "string")` → `"array{name: string}"`
-/// - `merge_shape_key("array{name: string}", "age", "int")` → `"array{name: string, age: int}"`
-/// - `merge_shape_key("array{name: string}", "name", "int")` → `"array{name: int}"`
-fn merge_shape_key(base: &str, key: &str, value_type: &str) -> String {
-    let mut entries: Vec<(String, String)> = Vec::new();
+/// Returns `PhpType::ArrayShape(entries)` with the merged entries.
+fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
+    let mut entries: Vec<ShapeEntry> = Vec::new();
 
-    // Parse existing shape entries from the base type.
-    let parsed = crate::php_type::PhpType::parse(base);
-    if let Some(shape_entries) = parsed.shape_entries() {
+    // Copy existing shape entries from the base type, skipping the
+    // key we are about to upsert.
+    if let Some(shape_entries) = base.shape_entries() {
         for entry in shape_entries {
-            if let Some(k) = entry.key.as_deref() {
-                entries.push((k.to_string(), entry.value_type.to_string()));
+            if entry.key.as_deref() != Some(key) {
+                entries.push(entry.clone());
             }
         }
     }
 
-    // Upsert the new key.
-    if let Some(existing) = entries.iter_mut().find(|(k, _)| k == key) {
-        existing.1 = value_type.to_string();
-    } else {
-        entries.push((key.to_string(), value_type.to_string()));
-    }
+    // Add/upsert the new key.
+    entries.push(ShapeEntry {
+        key: Some(key.to_string()),
+        value_type: value_type.clone(),
+        optional: false,
+    });
 
-    let parts: Vec<String> = entries
-        .iter()
-        .map(|(k, v)| format!("{}: {}", k, v))
-        .collect();
-    format!("array{{{}}}", parts.join(", "))
+    PhpType::ArrayShape(entries)
 }
 
-/// Merge a push element type into an existing type string to produce
-/// a `list<…>` type.
+/// Merge a push element type into an existing `PhpType` to produce
+/// a `Generic("list", …)` type.
 ///
 /// If `base` already has a generic value type (e.g. `list<User>`),
 /// the new type is unioned with it (e.g. `list<User|Admin>`).
 /// Otherwise, produces `list<value_type>`.
 ///
-/// Examples:
-/// - `merge_push_type("array", "User")` → `"list<User>"`
-/// - `merge_push_type("list<User>", "Admin")` → `"list<User|Admin>"`
-/// - `merge_push_type("list<User>", "User")` → `"list<User>"` (no duplicate)
-fn merge_push_type(base: &str, value_type: &str) -> String {
-    use crate::php_type::PhpType;
-
-    let mut elem_types: Vec<String> = Vec::new();
+/// Returns `PhpType::Generic("list", vec![elem_type])` or
+/// `PhpType::Named("array")` when no element types are available.
+fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
+    let mut elem_types: Vec<PhpType> = Vec::new();
 
     // Extract existing element types from the base.
-    if let Some(existing_elem) = PhpType::parse(base).extract_element_type() {
+    if let Some(existing_elem) = base.extract_element_type() {
         for member in existing_elem.union_members() {
-            let s = member.to_string();
-            if !s.is_empty() {
-                elem_types.push(s);
+            if !matches!(member, PhpType::Named(n) if n.is_empty()) {
+                elem_types.push(member.clone());
             }
         }
     }
 
-    // Add the new value type (use union_members to correctly handle
-    // nesting — `split('|')` would break on `Collection<A|B>`).
-    let new_parsed = PhpType::parse(value_type);
-    for member in new_parsed.union_members() {
-        let s = member.to_string();
-        if !s.is_empty() && !elem_types.contains(&s) {
-            elem_types.push(s);
+    // Add new value type members (union-aware).
+    for member in value_type.union_members() {
+        if !matches!(member, PhpType::Named(n) if n.is_empty())
+            && !elem_types.iter().any(|e| e.equivalent(member))
+        {
+            elem_types.push(member.clone());
         }
     }
 
     if elem_types.is_empty() {
-        return "array".to_string();
+        return PhpType::Named("array".to_string());
     }
 
-    format!("list<{}>", elem_types.join("|"))
+    let elem_type = if elem_types.len() == 1 {
+        elem_types.into_iter().next().unwrap()
+    } else {
+        PhpType::Union(elem_types)
+    };
+
+    PhpType::Generic("list".to_string(), vec![elem_type])
 }
 
-/// Merge a keyed element type into an existing type string to produce
-/// an `array<KeyType, ValueType>` type.
+/// Merge a keyed element type into an existing `PhpType` to produce
+/// a `Generic("array", …)` type.
 ///
 /// Similar to [`merge_push_type`] but preserves the key type from the
 /// index expression instead of assuming sequential integer keys.
@@ -3351,63 +3359,65 @@ fn merge_push_type(base: &str, value_type: &str) -> String {
 /// `array<string, User>`), the new value type is unioned with it and
 /// key types are unioned as well.
 ///
-/// Examples:
-/// - `merge_keyed_type("array", "string", "User")` → `"array<string, User>"`
-/// - `merge_keyed_type("array<string, User>", "string", "Admin")`
-///   → `"array<string, User|Admin>"`
-/// - `merge_keyed_type("array<string, User>", "int", "Admin")`
-///   → `"array<string|int, User|Admin>"`
-fn merge_keyed_type(base: &str, key_type: &str, value_type: &str) -> String {
-    use crate::php_type::PhpType;
-
-    let parsed_base = PhpType::parse(base);
-
+/// Returns `PhpType::Generic("array", vec![key, val])`,
+/// `PhpType::Generic("array", vec![val])` when no key types are
+/// available, or `PhpType::Named("array")` when no element types
+/// are available.
+fn merge_keyed_type(base: &PhpType, key_type: &PhpType, value_type: &PhpType) -> PhpType {
     // Collect existing key types from the base.
-    let mut key_types: Vec<String> = Vec::new();
-    if let Some(existing_key) = parsed_base.extract_key_type(false) {
-        let s = existing_key.to_string();
-        if !s.is_empty() {
-            key_types.push(s);
-        }
+    let mut key_types: Vec<PhpType> = Vec::new();
+    if let Some(existing_key) = base.extract_key_type(false)
+        && !matches!(existing_key, PhpType::Named(n) if n.is_empty())
+    {
+        key_types.push(existing_key.clone());
     }
-    // Add the new key type.
-    let new_key_parsed = PhpType::parse(key_type);
-    for member in new_key_parsed.union_members() {
-        let s = member.to_string();
-        if !s.is_empty() && !key_types.contains(&s) {
-            key_types.push(s);
+    // Add new key type members.
+    for member in key_type.union_members() {
+        if !matches!(member, PhpType::Named(n) if n.is_empty())
+            && !key_types.iter().any(|e| e.equivalent(member))
+        {
+            key_types.push(member.clone());
         }
     }
 
     // Collect existing value types from the base.
-    let mut elem_types: Vec<String> = Vec::new();
-    if let Some(existing_elem) = parsed_base.extract_element_type() {
+    let mut elem_types: Vec<PhpType> = Vec::new();
+    if let Some(existing_elem) = base.extract_element_type() {
         for member in existing_elem.union_members() {
-            let s = member.to_string();
-            if !s.is_empty() {
-                elem_types.push(s);
+            if !matches!(member, PhpType::Named(n) if n.is_empty()) {
+                elem_types.push(member.clone());
             }
         }
     }
-    // Add the new value type.
-    let new_val_parsed = PhpType::parse(value_type);
-    for member in new_val_parsed.union_members() {
-        let s = member.to_string();
-        if !s.is_empty() && !elem_types.contains(&s) {
-            elem_types.push(s);
+    // Add new value type members.
+    for member in value_type.union_members() {
+        if !matches!(member, PhpType::Named(n) if n.is_empty())
+            && !elem_types.iter().any(|e| e.equivalent(member))
+        {
+            elem_types.push(member.clone());
         }
     }
 
     if elem_types.is_empty() {
-        return "array".to_string();
+        return PhpType::Named("array".to_string());
     }
 
-    let val_str = elem_types.join("|");
+    let val_type = if elem_types.len() == 1 {
+        elem_types.into_iter().next().unwrap()
+    } else {
+        PhpType::Union(elem_types)
+    };
+
     if key_types.is_empty() {
         // No key type information — use a single-param generic.
-        format!("array<{}>", val_str)
+        PhpType::Generic("array".to_string(), vec![val_type])
     } else {
-        format!("array<{}, {}>", key_types.join("|"), val_str)
+        let k_type = if key_types.len() == 1 {
+            key_types.into_iter().next().unwrap()
+        } else {
+            PhpType::Union(key_types)
+        };
+        PhpType::Generic("array".to_string(), vec![k_type, val_type])
     }
 }
 

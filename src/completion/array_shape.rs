@@ -339,6 +339,7 @@ impl Backend {
             effective_classes,
             &class_loader,
         )
+        .map(|t| t.to_string())
         .unwrap_or(effective_type);
 
         // Parse the array shape entries via PhpType.

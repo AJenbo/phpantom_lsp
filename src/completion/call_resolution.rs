@@ -1057,15 +1057,11 @@ fn is_type_subclass_of(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    let candidate_str = candidate_type.to_string();
-
-    // Strip leading backslash and generic parameters for name comparison.
-    let candidate_base = candidate_str
-        .strip_prefix('\\')
-        .unwrap_or(&candidate_str)
-        .split('<')
-        .next()
-        .unwrap_or(&candidate_str);
+    // Extract the base class name directly from the type without stringifying.
+    let candidate_base = match candidate_type.base_name() {
+        Some(name) => name.strip_prefix('\\').unwrap_or(name),
+        None => return false, // Not a class type
+    };
     let ancestor_base = ancestor_name
         .strip_prefix('\\')
         .unwrap_or(ancestor_name)

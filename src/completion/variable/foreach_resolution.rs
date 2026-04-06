@@ -243,6 +243,7 @@ pub(in crate::completion) fn try_resolve_foreach_value_type<'b>(
             ctx.all_classes,
             ctx.class_loader,
         )
+        .map(|t| t.to_string())
         .unwrap_or(rt)
     });
 
@@ -411,6 +412,7 @@ pub(in crate::completion) fn try_resolve_foreach_key_type<'b>(
             ctx.all_classes,
             ctx.class_loader,
         )
+        .map(|t| t.to_string())
         .unwrap_or(rt)
     });
 
@@ -826,6 +828,7 @@ pub(in crate::completion) fn try_resolve_destructured_type<'b>(
             all_classes,
             class_loader,
         )
+        .map(|t| t.to_string())
         .unwrap_or(rt)
     });
 

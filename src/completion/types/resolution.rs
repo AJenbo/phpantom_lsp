@@ -96,34 +96,11 @@ fn type_hint_to_classes_depth(
         return vec![];
     }
 
-    let hint = crate::util::strip_nullable(type_hint);
-
-    // Strip surrounding parentheses that appear in DNF types like `(A&B)|C`.
-    let hint = hint
-        .strip_prefix('(')
-        .and_then(|h| h.strip_suffix(')'))
-        .unwrap_or(hint);
-
-    // ── Type alias resolution ──────────────────────────────────────
-    // Check if `hint` is a type alias defined on the owning class
-    // (via `@phpstan-type` / `@psalm-type` / `@phpstan-import-type`).
-    // If so, expand the alias and resolve the underlying definition.
-    //
-    // This runs before union/intersection splitting because the alias
-    // itself may expand to a union or intersection type.
-    if let Some(alias_def) = resolve_type_alias(hint, owning_class_name, all_classes, class_loader)
-    {
-        return type_hint_to_classes_depth(
-            &alias_def,
-            owning_class_name,
-            all_classes,
-            class_loader,
-            depth + 1,
-        );
-    }
-
-    // Parse and delegate to the typed implementation.
-    let parsed = PhpType::parse(hint);
+    // Parse first — PhpType::parse handles `?Foo`, `(A&B)|C`, and all
+    // other syntax natively, making manual string preprocessing redundant.
+    // Alias resolution is handled by `resolve_named_type` when the parsed
+    // type turns out to be a `Named` variant.
+    let parsed = PhpType::parse(type_hint);
     type_hint_to_classes_typed_depth(&parsed, owning_class_name, all_classes, class_loader, depth)
 }
 
@@ -264,10 +241,10 @@ fn resolve_named_type(
     depth: u8,
 ) -> Vec<ClassInfo> {
     // ── Type alias resolution ──────────────────────────────────────
-    if let Some(alias_def) = resolve_type_alias(name, owning_class_name, all_classes, class_loader)
+    if let Some(alias_type) = resolve_type_alias(name, owning_class_name, all_classes, class_loader)
     {
-        return type_hint_to_classes_depth(
-            &alias_def,
+        return type_hint_to_classes_typed_depth(
+            &alias_type,
             owning_class_name,
             all_classes,
             class_loader,
@@ -467,7 +444,7 @@ pub(crate) fn resolve_type_alias(
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<String> {
+) -> Option<PhpType> {
     let mut current = hint.to_string();
     let mut resolved_any = false;
 
@@ -490,7 +467,11 @@ pub(crate) fn resolve_type_alias(
         }
     }
 
-    if resolved_any { Some(current) } else { None }
+    if resolved_any {
+        Some(PhpType::parse(&current))
+    } else {
+        None
+    }
 }
 
 /// Single-level alias lookup (no chaining).

@@ -1157,10 +1157,9 @@ impl Backend {
         format_see_refs(&resolved_see, &method.links, &mut lines);
 
         // Build the readable param/return section as markdown.
-        let effective_return = method.return_type_str();
         if let Some(section) = build_param_return_section(
             &method.parameters,
-            effective_return.as_deref(),
+            method.return_type.as_ref(),
             method.native_return_type.as_ref(),
             method.return_description.as_deref(),
         ) {
@@ -1203,9 +1202,10 @@ impl Backend {
 
         // Build the docblock annotation showing the effective type
         // when it differs from the native one.
-        let eff_type_str = property.type_hint_str();
-        let var_annotation =
-            build_var_annotation(eff_type_str.as_deref(), property.native_type_hint.as_ref());
+        let var_annotation = build_var_annotation(
+            property.type_hint.as_ref(),
+            property.native_type_hint.as_ref(),
+        );
 
         let mut lines = Vec::new();
 

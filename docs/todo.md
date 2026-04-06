@@ -23,7 +23,7 @@ within the same impact tier.
 
 | #   | Item                                                                                                                                                      | Impact | Effort     |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
-| T30 | [Thread `PhpType` through remaining string-based API boundaries](todo/type-inference.md#t30-thread-phptype-through-remaining-string-based-api-boundaries) | Medium | Medium     |
+
 |     | **Release 0.7.0**                                                                                                                                         |        |            |
 
 ## Sprint 5 — Polish for office adoption
@@ -96,7 +96,7 @@ unlikely to move the needle for most users.
 | C10  | [Deprecation markers on class-name completions from all sources](todo/completion.md#c10-deprecation-markers-on-class-name-completions-from-all-sources)                     | Low         | Low            |
 |      | **[Type Inference](todo/type-inference.md)**                                                                                                                                |             |                |
 | T25  | [Forward-walking scope model](todo/type-inference.md#t25-forward-walking-scope-model-for-variable-type-resolution) (eliminate backward-scanning depth limit)                | High        | Very High      |
-| T19  | [Structured type representation](todo/type-inference.md#t19-structured-type-representation) (partially complete; remaining API boundary cleanup tracked as T30)               | High        | Very High      |
+| T19  | [Structured type representation](todo/type-inference.md#t19-structured-type-representation) (partially complete; subtype checking and union simplification remain)             | High        | Very High      |
 | T20  | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (sure/sureNot tracking, AND/OR algebra)                             | Medium-High | High           |
 | T6   | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Low-Medium     |
 | T12  | [Intersection types flattened to unions during resolution](todo/type-inference.md#t12-intersection-types-flattened-to-unions-by-type_strings_joined)                          | Low-Medium  | Low            |

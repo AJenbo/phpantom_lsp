@@ -125,7 +125,7 @@ pub(super) struct VarResolutionCtx<'a> {
     /// The `@return` type annotation of the enclosing function/method,
     /// if known.  Used inside generator bodies to reverse-infer variable
     /// types from `Generator<TKey, TValue, TSend, TReturn>`.
-    pub enclosing_return_type: Option<String>,
+    pub enclosing_return_type: Option<PhpType>,
     /// When `true`, if/else/elseif walking only considers the branch
     /// that contains the cursor instead of unioning all branches.
     /// This produces the single type visible at the cursor position,
@@ -168,7 +168,7 @@ impl<'a> VarResolutionCtx<'a> {
     /// annotation differs from the outer scope.
     pub(super) fn with_enclosing_return_type(
         &self,
-        enclosing_return_type: Option<String>,
+        enclosing_return_type: Option<PhpType>,
     ) -> VarResolutionCtx<'a> {
         VarResolutionCtx {
             var_name: self.var_name,
