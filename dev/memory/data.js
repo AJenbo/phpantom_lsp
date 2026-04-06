@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775433752231,
+  "lastUpdate": 1775435181147,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1291,6 +1291,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "173d25219dab4b4cc7891c43e3b6b056d54584c4",
+          "message": "Fix false unused import diagnostic for aliased namespace used in\nattributes",
+          "timestamp": "2026-04-06T02:14:26+02:00",
+          "tree_id": "d98d9a40ff22669d4c344c40ce469dad42cf1e0c",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/173d25219dab4b4cc7891c43e3b6b056d54584c4"
+        },
+        "date": 1775435180539,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.4,
             "unit": "MiB"
           }
         ]
