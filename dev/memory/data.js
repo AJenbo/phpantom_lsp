@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775442424886,
+  "lastUpdate": 1775442863268,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1767,6 +1767,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dd53547e246738f2aca6df7ddd03ae53a9a7aa87",
+          "message": "Migrate enrichment functions to accept PhpType and update all call sites",
+          "timestamp": "2026-04-06T04:21:55+02:00",
+          "tree_id": "92be153cd5e63ede00fa1344e0e05692827567d2",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/dd53547e246738f2aca6df7ddd03ae53a9a7aa87"
+        },
+        "date": 1775442862393,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.4,
             "unit": "MiB"
           }
         ]
