@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775439204603,
+  "lastUpdate": 1775439546610,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1529,6 +1529,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "481ac8b299bc9e8afccde1ecbb2c662b350a881e",
+          "message": "Refactor type alias expansion to return PhpType instead of String",
+          "timestamp": "2026-04-06T03:27:21+02:00",
+          "tree_id": "3b7051a79040b263e5af9b99be3ec797e64bbbc0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/481ac8b299bc9e8afccde1ecbb2c662b350a881e"
+        },
+        "date": 1775439546274,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.4,
             "unit": "MiB"
           }
         ]
