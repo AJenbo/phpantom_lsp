@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775460561162,
+  "lastUpdate": 1775486437979,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2039,6 +2039,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a4b8226f5f0c21638ddc2c2ee4a77b81946c691c",
+          "message": "Refactor variable type resolution to use PhpType throughout relationship\nhelpers",
+          "timestamp": "2026-04-06T16:28:40+02:00",
+          "tree_id": "b394fab23f23e5d96549eff3c7b7b7f005740791",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/a4b8226f5f0c21638ddc2c2ee4a77b81946c691c"
+        },
+        "date": 1775486437625,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.3,
             "unit": "MiB"
           }
         ]
