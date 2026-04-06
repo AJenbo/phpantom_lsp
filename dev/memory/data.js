@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775443164400,
+  "lastUpdate": 1775449411405,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1835,6 +1835,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a084610fac917e6c9eca0db29ebd2f9282406e47",
+          "message": "Switch MethodInfo and FunctionInfo throws fields to Vec<PhpType>",
+          "timestamp": "2026-04-06T04:29:48+02:00",
+          "tree_id": "f06eefb5850634ed7754ddea7a0a3027d0647e65",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/a084610fac917e6c9eca0db29ebd2f9282406e47"
+        },
+        "date": 1775449410510,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.9,
             "unit": "MiB"
           }
         ]
