@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775513216662,
+  "lastUpdate": 1775515070027,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2175,6 +2175,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c85d53071a99662df105f520c2de99bdee89df1b",
+          "message": "Fix docblock completion for multibyte characters in UTF-16",
+          "timestamp": "2026-04-07T00:25:26+02:00",
+          "tree_id": "19b39f67012f989e57a028584cdeb628cbc47a6b",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/c85d53071a99662df105f520c2de99bdee89df1b"
+        },
+        "date": 1775515068668,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 38.5,
             "unit": "MiB"
           }
         ]
