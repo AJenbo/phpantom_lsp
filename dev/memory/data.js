@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775452084898,
+  "lastUpdate": 1775454876923,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1937,6 +1937,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7a3f8b16c0b6da005b3d43aa872c1e6d4e926a9d",
+          "message": "Integrate PhpType directly for native hints and conditional types",
+          "timestamp": "2026-04-06T07:42:49+02:00",
+          "tree_id": "e25548666d8f0cdddcf96063ffd2a6c95d7fb97c",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/7a3f8b16c0b6da005b3d43aa872c1e6d4e926a9d"
+        },
+        "date": 1775454876569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.5,
             "unit": "MiB"
           }
         ]
