@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775437498942,
+  "lastUpdate": 1775438095064,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1393,6 +1393,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dd2265d1b854ef2cd258e0760a20e9fb0471d2d3",
+          "message": "Migrate bracket-access segment walks to use PhpType throughout",
+          "timestamp": "2026-04-06T03:03:01+02:00",
+          "tree_id": "ff4471dd5fb283f9288e1ce42d3e2b517b56c3eb",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/dd2265d1b854ef2cd258e0760a20e9fb0471d2d3"
+        },
+        "date": 1775438094736,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.8,
             "unit": "MiB"
           }
         ]
