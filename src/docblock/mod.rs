@@ -59,7 +59,8 @@ pub use tags::{
     extract_var_type_with_name_from_info, find_enclosing_return_type, find_inline_var_docblock,
     find_iterable_raw_type_in_source, find_var_raw_type_in_source, get_docblock_info_for_node,
     get_docblock_text_for_node, has_deprecated_tag, has_deprecated_tag_from_info,
-    resolve_effective_type, should_override_type,
+    resolve_effective_type, resolve_effective_type_typed, sanitise_and_parse_docblock_type,
+    should_override_type, should_override_type_typed,
 };
 
 // Template / generics / type alias tags

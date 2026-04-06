@@ -1893,11 +1893,12 @@ impl Backend {
                     ) = if let Some(ref info) = method_docblock_info {
                         let doc_type = docblock::extract_return_type_from_info(info);
 
-                        let native_return_type_str =
-                            native_return_type.as_ref().map(|t| t.to_string());
-                        let effective = docblock::resolve_effective_type(
-                            native_return_type_str.as_deref(),
-                            doc_type.as_deref(),
+                        let parsed_doc_type = doc_type
+                            .as_ref()
+                            .and_then(|s| docblock::sanitise_and_parse_docblock_type(s));
+                        let effective = docblock::resolve_effective_type_typed(
+                            native_return_type.as_ref(),
+                            parsed_doc_type.as_ref(),
                         );
 
                         let conditional = docblock::extract_conditional_return_type_from_info(info);
@@ -2035,16 +2036,21 @@ impl Backend {
                                 });
 
                                 let type_hint = if let Some(var_type) = inline_var_type {
-                                    docblock::resolve_effective_type(
-                                        native_hint_str.as_deref(),
-                                        Some(&var_type),
+                                    let parsed =
+                                        docblock::sanitise_and_parse_docblock_type(&var_type);
+                                    docblock::resolve_effective_type_typed(
+                                        saved_native_hint.as_ref(),
+                                        parsed.as_ref(),
                                     )
                                 } else if let Some(ref info) = method_docblock_info {
                                     let param_doc_type =
                                         docblock::extract_param_raw_type_from_info(info, &raw_name);
-                                    docblock::resolve_effective_type(
-                                        native_hint_str.as_deref(),
-                                        param_doc_type.as_deref(),
+                                    let parsed = param_doc_type.as_ref().and_then(|s| {
+                                        docblock::sanitise_and_parse_docblock_type(s)
+                                    });
+                                    docblock::resolve_effective_type_typed(
+                                        saved_native_hint.as_ref(),
+                                        parsed.as_ref(),
                                     )
                                 } else {
                                     saved_native_hint.clone()
@@ -2089,9 +2095,11 @@ impl Backend {
                             let param_doc_type =
                                 docblock::extract_param_raw_type_from_info(info, &param.name);
                             if let Some(ref doc_type) = param_doc_type {
-                                let effective = docblock::resolve_effective_type(
-                                    param.type_hint.as_ref().map(|t| t.to_string()).as_deref(),
-                                    Some(doc_type),
+                                let parsed_doc =
+                                    docblock::sanitise_and_parse_docblock_type(doc_type);
+                                let effective = docblock::resolve_effective_type_typed(
+                                    param.type_hint.as_ref(),
+                                    parsed_doc.as_ref(),
                                 );
                                 if effective.is_some() {
                                     param.type_hint = effective;
@@ -2277,11 +2285,13 @@ impl Backend {
                         }
                         if let Some(doc_type) =
                             info.as_ref().and_then(docblock::extract_var_type_from_info)
+                            && let Some(parsed_doc) =
+                                docblock::sanitise_and_parse_docblock_type(&doc_type)
                         {
                             for prop in &mut prop_infos {
-                                let effective = docblock::resolve_effective_type(
-                                    prop.type_hint.as_ref().map(|t| t.to_string()).as_deref(),
-                                    Some(&doc_type),
+                                let effective = docblock::resolve_effective_type_typed(
+                                    prop.type_hint.as_ref(),
+                                    Some(&parsed_doc),
                                 );
                                 prop.type_hint = effective;
                             }

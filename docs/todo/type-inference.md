@@ -447,29 +447,6 @@ pipeline to produce cleaner hover/completion output.
 
 ---
 
-## T26. Typed `resolve_effective_type` and `should_override_type`
-**Impact: Medium · Effort: Medium**
-
-`resolve_effective_type()` and `should_override_type()` in
-`docblock/tags.rs` accept raw `&str` parameters, parse them into
-`PhpType` on every call, and (in the case of `resolve_effective_type`)
-return a `PhpType`. Many callers already have parsed types, stringify
-them just to satisfy the signature, then work with the returned
-`PhpType`. This creates a stringify-parse-stringify round-trip on the
-parser hot path (called for every method and property in every file).
-
-**Task:** Add `_typed` variants that accept `&PhpType` / `Option<&PhpType>`
-directly, then migrate callers in `parser/classes.rs`,
-`completion/variable/resolution.rs`, `hover/variable_type.rs`, and
-`code_actions/update_docblock.rs`. The string-based versions can
-delegate to the typed variants for backward compatibility.
-
-**Files:** `src/docblock/tags.rs`, `src/parser/classes.rs`,
-`src/completion/variable/resolution.rs`, `src/hover/variable_type.rs`,
-`src/code_actions/update_docblock.rs`
-
----
-
 ## T28. Migrate enrichment functions to accept `PhpType`
 **Impact: Low · Effort: Low**
 

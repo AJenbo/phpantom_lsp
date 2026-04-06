@@ -429,8 +429,10 @@ fn find_type_in_params(
                         .and_then(|doc| docblock::extract_param_raw_type(&doc, &pname))
                 });
 
+        let native_parsed = native_type.as_ref().map(|s| PhpType::parse(s));
+        let doc_parsed = docblock_type.as_ref().map(|s| PhpType::parse(s));
         let effective =
-            docblock::resolve_effective_type(native_type.as_deref(), docblock_type.as_deref())
+            docblock::resolve_effective_type_typed(native_parsed.as_ref(), doc_parsed.as_ref())
                 .map(|t| t.to_string());
 
         if effective.is_some() {

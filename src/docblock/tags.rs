@@ -1175,19 +1175,25 @@ pub fn find_enclosing_return_type(content: &str, cursor_offset: usize) -> Option
 pub fn should_override_type(docblock_type: &str, native_type: &str) -> bool {
     let doc_parsed = PhpType::parse(docblock_type);
     let native_parsed = PhpType::parse(native_type);
+    should_override_type_typed(&doc_parsed, &native_parsed)
+}
 
+/// Typed variant of [`should_override_type`] that accepts pre-parsed
+/// [`PhpType`] values, avoiding redundant parse round-trips when callers
+/// already hold parsed types.
+pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType) -> bool {
     // If the docblock type is semantically equivalent to the native type
     // (handles `?X` ↔ `X|null`, reordered unions, FQN vs short names),
     // there is no value in overriding — the docblock doesn't carry any
     // extra information.
-    if doc_parsed.equivalent(&native_parsed) {
+    if docblock_type.equivalent(native_type) {
         return false;
     }
 
     // Unwrap nullable wrappers for further analysis.  `?Foo` → `Foo`,
     // `Foo|null` → `Foo`.  For non-nullable types, use as-is.
-    let doc_inner = unwrap_nullable(&doc_parsed);
-    let native_inner = unwrap_nullable(&native_parsed);
+    let doc_inner = unwrap_nullable(docblock_type);
+    let native_inner = unwrap_nullable(native_type);
 
     // If the docblock type is a bare, unparameterised primitive scalar
     // (`int`, `string`, `bool`, etc.), there's no value in overriding.
@@ -1465,26 +1471,64 @@ pub fn resolve_effective_type(
             if base.is_empty() {
                 None
             } else {
-                Some(base.to_string())
+                Some(PhpType::parse(base))
             }
         } else {
-            Some(doc.to_string())
+            Some(PhpType::parse(doc))
         }
     });
 
-    match (native_type, sanitised_doc.as_deref()) {
+    let native_parsed = native_type.map(PhpType::parse);
+    resolve_effective_type_typed(native_parsed.as_ref(), sanitised_doc.as_ref())
+}
+
+/// Parse a raw docblock type string into a [`PhpType`], applying
+/// unclosed-bracket recovery when necessary.
+///
+/// Raw docblock strings from `extract_return_type`, `extract_var_type`,
+/// `extract_param_raw_type`, etc. may contain malformed type expressions
+/// (e.g. `"static<"`, `"Collection<int"`) when multi-line annotations
+/// couldn't be fully joined.  This helper recovers the base type in such
+/// cases, matching the sanitisation logic in [`resolve_effective_type`].
+///
+/// Returns `None` when the string is completely unrecoverable (e.g.
+/// `"<garbage"` with no base type).
+pub fn sanitise_and_parse_docblock_type(raw: &str) -> Option<PhpType> {
+    if crate::util::has_unclosed_delimiters(raw) {
+        let base = recover_base_type(raw);
+        if base.is_empty() {
+            None
+        } else {
+            Some(PhpType::parse(base))
+        }
+    } else {
+        Some(PhpType::parse(raw))
+    }
+}
+
+/// Typed variant of [`resolve_effective_type`] that accepts pre-parsed
+/// [`PhpType`] values, avoiding redundant parse-stringify round-trips when
+/// callers already hold parsed types.
+///
+/// Unlike the string-based version, this does not perform unclosed-bracket
+/// recovery since pre-parsed types are already well-formed.
+pub fn resolve_effective_type_typed(
+    native_type: Option<&PhpType>,
+    docblock_type: Option<&PhpType>,
+) -> Option<PhpType> {
+    match (native_type, docblock_type) {
         // Docblock provided, no native hint → use docblock.
-        (None, Some(doc)) => Some(PhpType::parse(doc)),
+        (None, Some(doc)) => Some(doc.clone()),
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
-            if should_override_type(doc, native) {
-                Some(PhpType::parse(doc))
+            if should_override_type_typed(doc, native) {
+                Some(doc.clone())
             } else {
-                Some(PhpType::parse(native))
+                Some(native.clone())
             }
         }
         // Native only → keep it.
-        (Some(native), None) => Some(PhpType::parse(native)),
+        (Some(native), None) => Some(native.clone()),
         // Neither → nothing.
         (None, None) => None,
     }

@@ -1038,8 +1038,7 @@ fn is_valid_virtual_narrowing(
     // existing `should_override_type` check which handles compatible
     // refinements (e.g. `string` → `class-string<T>`).
     if native_type.is_scalar() {
-        let virtual_str = virtual_type.to_string();
-        return crate::docblock::should_override_type(&virtual_str, &native_str);
+        return crate::docblock::should_override_type_typed(virtual_type, native_type);
     }
 
     // Native is a class type — the virtual type must be the same class

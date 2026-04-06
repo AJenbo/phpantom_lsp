@@ -832,9 +832,11 @@ fn resolve_variable_in_members<'b>(
 
                     // Pick the effective type: docblock overrides native
                     // when it is a compatible refinement.
-                    let effective_type = crate::docblock::resolve_effective_type(
-                        type_str_for_resolution,
-                        raw_docblock_type.as_deref(),
+                    let native_parsed = type_str_for_resolution.map(PhpType::parse);
+                    let doc_parsed = raw_docblock_type.as_ref().map(|s| PhpType::parse(s));
+                    let effective_type = crate::docblock::resolve_effective_type_typed(
+                        native_parsed.as_ref(),
+                        doc_parsed.as_ref(),
                     );
 
                     // ── Substitute method-level template params with
@@ -2833,7 +2835,10 @@ pub(in crate::completion) fn try_inline_var_override<'b>(
     // Determine the "native" return-type string from the RHS so we can
     // apply the same override check used for `@return` annotations.
     let native_type = extract_native_type_from_rhs(assignment.rhs, ctx);
-    let effective = docblock::resolve_effective_type(native_type.as_deref(), Some(&var_type));
+    let native_parsed = native_type.as_ref().map(|s| PhpType::parse(s));
+    let doc_parsed = PhpType::parse(&var_type);
+    let effective =
+        docblock::resolve_effective_type_typed(native_parsed.as_ref(), Some(&doc_parsed));
 
     let eff_type = match effective {
         Some(t) => t,

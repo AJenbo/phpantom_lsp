@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Faster file parsing.** Type override resolution (`resolve_effective_type`, `should_override_type`) now accepts pre-parsed types directly, eliminating redundant stringify-parse round-trips on every method and property during indexing.
 - **Fewer false-positive diagnostics.** Variable resolution now produces the same result across completions, hover, and diagnostics, eliminating cases where diagnostics disagreed about a variable's type.
 - **`@phpstan-ignore` is never the preferred quickfix.** The "Ignore PHPStan error" code action is explicitly non-preferred, so editor keyboard shortcuts no longer accidentally apply it when another fix is available.
 - **Generate PHPDoc infers `@return` from the function body.** Typing `/**` above a function that returns `array` now produces a specific element type (e.g. `@return list<string>`) instead of `@return array<mixed>`.
