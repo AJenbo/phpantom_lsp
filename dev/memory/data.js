@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775441561261,
+  "lastUpdate": 1775442042548,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1699,6 +1699,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6f3919e8abf1bba3132f7e1f4a8de523c577e3a9",
+          "message": "Remove clean_type utility and update docblock parsing to preserve type\nstrings",
+          "timestamp": "2026-04-06T04:08:47+02:00",
+          "tree_id": "1f136da63ffaf2d20bf924e94945334a6f5900a0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6f3919e8abf1bba3132f7e1f4a8de523c577e3a9"
+        },
+        "date": 1775442042213,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.5,
             "unit": "MiB"
           }
         ]
