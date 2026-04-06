@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775515070027,
+  "lastUpdate": 1775519531728,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2209,6 +2209,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 38.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d7626f2c5fd5ca086f1300829abf21b78c958a62",
+          "message": "Migrate all type-string manipulation to structured PhpType",
+          "timestamp": "2026-04-07T01:40:19+02:00",
+          "tree_id": "0e2eca7ab331cd6a3cb4f079056fc01c2fe88b3a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/d7626f2c5fd5ca086f1300829abf21b78c958a62"
+        },
+        "date": 1775519531366,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.5,
             "unit": "MiB"
           }
         ]
