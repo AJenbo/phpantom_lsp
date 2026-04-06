@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775486437979,
+  "lastUpdate": 1775498326791,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2073,6 +2073,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "37a901ed4864f113b53d5013b36ad18ca056780d",
+          "message": "Fix class-string<T> static method dispatch and return type resolution",
+          "timestamp": "2026-04-06T19:46:38+02:00",
+          "tree_id": "963c5b8bcc188dcede2f4bfcf53013119f6afe52",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/37a901ed4864f113b53d5013b36ad18ca056780d"
+        },
+        "date": 1775498325827,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 38.7,
             "unit": "MiB"
           }
         ]
