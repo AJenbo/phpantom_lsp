@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775454876923,
+  "lastUpdate": 1775456223427,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1971,6 +1971,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 41.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6e45044d3d2b03a79f45291d7cd5c2882555ebe2",
+          "message": "Fix cross-file property type resolution for promoted and self types",
+          "timestamp": "2026-04-06T08:04:59+02:00",
+          "tree_id": "c64195d7d66b1a9f89ec60c9d0946eeeed949066",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6e45044d3d2b03a79f45291d7cd5c2882555ebe2"
+        },
+        "date": 1775456222896,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.3,
             "unit": "MiB"
           }
         ]
