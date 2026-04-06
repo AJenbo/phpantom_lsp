@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775432197249,
+  "lastUpdate": 1775433752231,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1257,6 +1257,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c3638ce70e321df3a184015f7af6c2f8a1b6f5bc",
+          "message": "Support go-to-definition for @see tags in floating docblocks",
+          "timestamp": "2026-04-06T01:50:39+02:00",
+          "tree_id": "6e277120d39743a684cd83d1d12a552c12b53e17",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/c3638ce70e321df3a184015f7af6c2f8a1b6f5bc"
+        },
+        "date": 1775433751375,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.3,
             "unit": "MiB"
           }
         ]
