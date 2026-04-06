@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775439967983,
+  "lastUpdate": 1775441209433,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1597,6 +1597,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7e30105f6490f5d779e8c5b9515f3c6b692a8e40",
+          "message": "Add structural subtype and type simplification methods to PhpType",
+          "timestamp": "2026-04-06T03:55:08+02:00",
+          "tree_id": "75cb5029e282800d276247e23b0251dd808a5623",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/7e30105f6490f5d779e8c5b9515f3c6b692a8e40"
+        },
+        "date": 1775441208875,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41,
             "unit": "MiB"
           }
         ]
