@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775441238851,
+  "lastUpdate": 1775441561261,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -1665,6 +1665,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4b04d527b826b17994efb645db0f1aa7e119d6ea",
+          "message": "Refactor array/object shape entry types to use ShapeEntry",
+          "timestamp": "2026-04-06T03:58:20+02:00",
+          "tree_id": "4df64fee507269d8f04a07ed5af4e0d90efe8634",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/4b04d527b826b17994efb645db0f1aa7e119d6ea"
+        },
+        "date": 1775441560928,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.3,
             "unit": "MiB"
           }
         ]
