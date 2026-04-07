@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775519531728,
+  "lastUpdate": 1775522200999,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2243,6 +2243,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b9af98ed9ff6fac879629445b17638a28ca5d5e5",
+          "message": "Recognize FQN \\assert() as narrowing for instanceof checks",
+          "timestamp": "2026-04-07T02:24:49+02:00",
+          "tree_id": "63ce813ea7dd93fc34af911bc6abcd0cb417743a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b9af98ed9ff6fac879629445b17638a28ca5d5e5"
+        },
+        "date": 1775522200512,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 36.5,
             "unit": "MiB"
           }
         ]
