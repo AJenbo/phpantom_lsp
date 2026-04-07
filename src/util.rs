@@ -857,6 +857,41 @@ pub(crate) fn is_subtype_of(
 /// Returns `true` when the structural check succeeds, or when both
 /// types are named (class/interface) types and the class hierarchy
 /// confirms the relationship.
+/// Convenience wrapper around [`is_subtype_of_typed`] that accepts bare
+/// class names instead of pre-constructed [`PhpType`] values.
+///
+/// This avoids the boilerplate of wrapping each name in
+/// `PhpType::Named(name.to_string())` at call sites that already have
+/// `&str` class names.
+pub(crate) fn is_subtype_of_names(
+    subtype_name: &str,
+    supertype_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> bool {
+    use crate::php_type::PhpType;
+    is_subtype_of_typed(
+        &PhpType::Named(subtype_name.to_string()),
+        &PhpType::Named(supertype_name.to_string()),
+        class_loader,
+    )
+}
+
+/// Like [`is_subtype_of_typed`] but accepts a `&str` for the supertype,
+/// avoiding `PhpType::Named` wrapping at call sites that already have a
+/// `&PhpType` subtype and a bare class name as supertype.
+pub(crate) fn is_subtype_of_named(
+    subtype: &crate::php_type::PhpType,
+    supertype_name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> bool {
+    use crate::php_type::PhpType;
+    is_subtype_of_typed(
+        subtype,
+        &PhpType::Named(supertype_name.to_string()),
+        class_loader,
+    )
+}
+
 pub(crate) fn is_subtype_of_typed(
     subtype: &crate::php_type::PhpType,
     supertype: &crate::php_type::PhpType,

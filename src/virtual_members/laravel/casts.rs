@@ -83,7 +83,7 @@ pub(super) fn cast_type_to_php_type(
 
     // 2. Handle `decimal:N` variants (e.g. `decimal:2`, `decimal:8`).
     if lower.starts_with("decimal:") || lower == "decimal" {
-        return PhpType::Named("float".to_string());
+        return PhpType::float();
     }
 
     // 3. Handle `datetime:format` variants (e.g. `datetime:Y-m-d`).
@@ -164,7 +164,7 @@ fn extract_tget_from_implements_generics(class: &ClassInfo) -> Option<PhpType> {
             && let Some(tget) = args.first()
         {
             // Skip empty/blank type arguments (e.g. from malformed docblocks).
-            if tget.to_string().is_empty() {
+            if matches!(tget, PhpType::Named(s) | PhpType::Raw(s) if s.is_empty()) {
                 continue;
             }
             return Some(tget.clone());

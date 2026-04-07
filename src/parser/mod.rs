@@ -837,15 +837,15 @@ pub(crate) fn extract_hint_type(hint: &Hint) -> PhpType {
         Hint::Static(_) => PhpType::static_(),
         Hint::Self_(_) => PhpType::self_(),
         Hint::Parent(_) => PhpType::parent_(),
-        Hint::Void(i)
-        | Hint::Never(i)
-        | Hint::Float(i)
-        | Hint::Bool(i)
-        | Hint::Integer(i)
-        | Hint::String(i)
-        | Hint::Object(i)
-        | Hint::Mixed(i)
-        | Hint::Iterable(i) => PhpType::Named(i.value.to_string()),
+        Hint::Void(_) => PhpType::void(),
+        Hint::Never(_) => PhpType::never(),
+        Hint::Float(_) => PhpType::float(),
+        Hint::Bool(_) => PhpType::bool(),
+        Hint::Integer(_) => PhpType::int(),
+        Hint::String(_) => PhpType::string(),
+        Hint::Object(_) => PhpType::object(),
+        Hint::Mixed(_) => PhpType::mixed(),
+        Hint::Iterable(_) => PhpType::iterable(),
         Hint::Parenthesized(paren) => extract_hint_type(paren.hint),
     }
 }

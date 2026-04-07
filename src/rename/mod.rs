@@ -33,9 +33,6 @@ use crate::Backend;
 use crate::symbol_map::SymbolKind;
 use crate::util::{build_fqn, offset_to_position, ranges_overlap, strip_fqn_prefix};
 
-/// Symbols that cannot be renamed.
-const NON_RENAMEABLE_KEYWORDS: &[&str] = &["self", "static", "parent"];
-
 impl Backend {
     /// Handle `textDocument/prepareRename`.
     ///
@@ -52,12 +49,9 @@ impl Backend {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
         // Reject non-renameable symbols.
-        if let SymbolKind::SelfStaticParent { keyword } = &span.kind {
-            // `$this` is recorded as SelfStaticParent { keyword: "static" }.
-            let source_text = content.get(span.start as usize..span.end as usize)?;
-            if source_text == "$this" || NON_RENAMEABLE_KEYWORDS.contains(&keyword.as_str()) {
-                return None;
-            }
+        if let SymbolKind::SelfStaticParent(_) = &span.kind {
+            // self, static, parent, and $this are never renameable.
+            return None;
         }
 
         // Extract the symbol name and validate it's something we can rename.
@@ -90,11 +84,9 @@ impl Backend {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
         // Reject non-renameable symbols (same logic as prepare_rename).
-        if let SymbolKind::SelfStaticParent { keyword } = &span.kind {
-            let source_text = content.get(span.start as usize..span.end as usize)?;
-            if source_text == "$this" || NON_RENAMEABLE_KEYWORDS.contains(&keyword.as_str()) {
-                return None;
-            }
+        if let SymbolKind::SelfStaticParent(_) = &span.kind {
+            // self, static, parent, and $this are never renameable.
+            return None;
         }
 
         // Reject vendor symbols.

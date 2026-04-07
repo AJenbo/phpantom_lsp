@@ -14,7 +14,8 @@ use super::docblock::{
     get_docblock_text_with_offset, is_navigable_type,
 };
 use super::{
-    CallSite, SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef, VarDefKind, VarDefSite,
+    CallSite, SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef,
+    VarDefKind, VarDefSite,
 };
 use crate::php_type::PhpType;
 use crate::util::strip_fqn_prefix;
@@ -1408,27 +1409,21 @@ fn extract_from_hint(hint: &Hint<'_>, spans: &mut Vec<SymbolSpan>) {
             spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "self".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
             });
         }
         Hint::Static(kw) => {
             spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "static".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
             });
         }
         Hint::Parent(kw) => {
             spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "parent".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
             });
         }
         // Scalar / built-in type hints are not navigable.
@@ -1453,9 +1448,7 @@ fn extract_from_expression<'a>(
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
                     end: dv.span.end.offset,
-                    kind: SymbolKind::SelfStaticParent {
-                        keyword: "static".to_string(),
-                    },
+                    kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
                 });
             } else {
                 let name = raw.strip_prefix('$').unwrap_or(raw).to_string();
@@ -1472,27 +1465,21 @@ fn extract_from_expression<'a>(
             ctx.spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "self".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
             });
         }
         Expression::Static(kw) => {
             ctx.spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "static".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
             });
         }
         Expression::Parent(kw) => {
             ctx.spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "parent".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
             });
         }
 
@@ -1524,27 +1511,21 @@ fn extract_from_expression<'a>(
                     ctx.spans.push(SymbolSpan {
                         start: kw.span.start.offset,
                         end: kw.span.end.offset,
-                        kind: SymbolKind::SelfStaticParent {
-                            keyword: "self".to_string(),
-                        },
+                        kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
                     });
                 }
                 Expression::Static(kw) => {
                     ctx.spans.push(SymbolSpan {
                         start: kw.span.start.offset,
                         end: kw.span.end.offset,
-                        kind: SymbolKind::SelfStaticParent {
-                            keyword: "static".to_string(),
-                        },
+                        kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
                     });
                 }
                 Expression::Parent(kw) => {
                     ctx.spans.push(SymbolSpan {
                         start: kw.span.start.offset,
                         end: kw.span.end.offset,
-                        kind: SymbolKind::SelfStaticParent {
-                            keyword: "parent".to_string(),
-                        },
+                        kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
                     });
                 }
                 _ => {
@@ -2316,27 +2297,21 @@ fn emit_class_expr_span<'a>(
             ctx.spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "self".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Self_),
             });
         }
         Expression::Static(kw) => {
             ctx.spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "static".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Static),
             });
         }
         Expression::Parent(kw) => {
             ctx.spans.push(SymbolSpan {
                 start: kw.span.start.offset,
                 end: kw.span.end.offset,
-                kind: SymbolKind::SelfStaticParent {
-                    keyword: "parent".to_string(),
-                },
+                kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::Parent),
             });
         }
         _ => {

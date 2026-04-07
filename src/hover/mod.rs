@@ -18,7 +18,7 @@ use crate::Backend;
 use crate::completion::resolver::ResolutionCtx;
 use crate::docblock::extract_template_params_full;
 use crate::php_type::PhpType;
-use crate::symbol_map::{SymbolKind, SymbolSpan, VarDefKind};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
 use crate::types::*;
 use crate::util::{find_class_at_offset, short_name, strip_fqn_prefix};
 
@@ -702,26 +702,18 @@ impl Backend {
                 self.hover_function_call(name, uri, content, &ctx, &function_loader)
             }
 
-            SymbolKind::SelfStaticParent { keyword } => {
-                // `$this` is represented as SelfStaticParent { keyword: "static" }
-                // in the symbol map.  Detect it by checking the source text.
-                // The cursor may land anywhere inside the `$this` token (5 bytes),
-                // so look up to 4 bytes back for the `$` and check for `$this`.
-                let is_this = keyword == "static" && {
-                    let off = cursor_offset as usize;
-                    let search_start = off.saturating_sub(4);
-                    let window = content.get(search_start..off + 5).unwrap_or("");
-                    window.contains("$this")
-                };
+            SymbolKind::SelfStaticParent(ssp_kind) => {
+                let is_this = *ssp_kind == SelfStaticParentKind::This;
 
-                let resolved = match keyword.as_str() {
-                    "self" | "static" => current_class.cloned(),
-                    "parent" => current_class
+                let resolved = match ssp_kind {
+                    SelfStaticParentKind::Self_
+                    | SelfStaticParentKind::Static
+                    | SelfStaticParentKind::This => current_class.cloned(),
+                    SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
                         .and_then(|parent_name| {
                             class_loader(parent_name).map(Arc::unwrap_or_clone)
                         }),
-                    _ => None,
                 };
                 if let Some(cls) = resolved {
                     let mut lines = Vec::new();
@@ -742,9 +734,15 @@ impl Backend {
                             ns_line, cls.name
                         ));
                     } else {
+                        let keyword_str = match ssp_kind {
+                            SelfStaticParentKind::Self_ => "self",
+                            SelfStaticParentKind::Static => "static",
+                            SelfStaticParentKind::Parent => "parent",
+                            SelfStaticParentKind::This => unreachable!(),
+                        };
                         lines.push(format!(
                             "```php\n<?php\n{}{} = {}\n```",
-                            ns_line, keyword, cls.name
+                            ns_line, keyword_str, cls.name
                         ));
                     }
 

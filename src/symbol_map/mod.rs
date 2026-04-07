@@ -49,6 +49,20 @@ pub(crate) struct SymbolSpan {
     pub kind: SymbolKind,
 }
 
+/// Which flavour of class-self-reference keyword a `SelfStaticParent`
+/// span represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SelfStaticParentKind {
+    /// The `self` keyword.
+    Self_,
+    /// The `static` keyword (late static binding).
+    Static,
+    /// The `parent` keyword.
+    Parent,
+    /// The `$this` pseudo-variable.
+    This,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum SymbolKind {
     /// Class/interface/trait/enum name in a type context:
@@ -97,8 +111,8 @@ pub(crate) enum SymbolKind {
     /// both).
     FunctionCall { name: String, is_definition: bool },
 
-    /// `self`, `static`, or `parent` keyword in a navigable context.
-    SelfStaticParent { keyword: String },
+    /// `self`, `static`, `parent`, or `$this` in a navigable context.
+    SelfStaticParent(SelfStaticParentKind),
 
     /// A constant name in a navigable context (`define()` name,
     /// class constant access, standalone constant reference).

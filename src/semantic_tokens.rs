@@ -18,7 +18,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::{SymbolKind, SymbolMap, VarDefKind};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::ClassLikeKind;
 
 // ─── Token type indices ─────────────────────────────────────────────────────
@@ -237,25 +237,19 @@ impl Backend {
                     (TT_FUNCTION, mods)
                 }
 
-                SymbolKind::SelfStaticParent { keyword } => {
-                    // `$this` is recorded as SelfStaticParent with keyword "static".
-                    let source_text = content
-                        .get(span.start as usize..span.end as usize)
-                        .unwrap_or("");
-                    if source_text == "$this" {
-                        (TT_VARIABLE, TM_READONLY | TM_DEFAULT_LIBRARY)
-                    } else if keyword == "parent" {
-                        // Resolve to the parent class kind when possible.
+                SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
+                    SelfStaticParentKind::This => (TT_VARIABLE, TM_READONLY | TM_DEFAULT_LIBRARY),
+                    SelfStaticParentKind::Parent => {
                         let tt = self
-                            .resolve_self_static_parent_token_type(keyword, uri, ctx, span.start);
-                        (tt, TM_DEFAULT_LIBRARY)
-                    } else {
-                        // self, static — resolve to enclosing class kind.
-                        let tt = self
-                            .resolve_self_static_parent_token_type(keyword, uri, ctx, span.start);
+                            .resolve_self_static_parent_token_type(ssp_kind, uri, ctx, span.start);
                         (tt, TM_DEFAULT_LIBRARY)
                     }
-                }
+                    SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => {
+                        let tt = self
+                            .resolve_self_static_parent_token_type(ssp_kind, uri, ctx, span.start);
+                        (tt, TM_DEFAULT_LIBRARY)
+                    }
+                },
 
                 SymbolKind::ConstantReference { name: _ } => {
                     // Check if this is a PHP attribute name (starts after `#[`).
@@ -491,12 +485,12 @@ impl Backend {
     /// resolving to the enclosing class.
     fn resolve_self_static_parent_token_type(
         &self,
-        keyword: &str,
+        ssp_kind: &crate::symbol_map::SelfStaticParentKind,
         _uri: &str,
         ctx: &crate::types::FileContext,
         offset: u32,
     ) -> u32 {
-        if keyword == "parent" {
+        if *ssp_kind == crate::symbol_map::SelfStaticParentKind::Parent {
             // Try to resolve the parent class kind.
             if let Some(class) = ctx.classes.first()
                 && let Some(ref parent_name) = class.parent_class

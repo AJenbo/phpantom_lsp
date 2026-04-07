@@ -1044,8 +1044,7 @@ fn is_type_subclass_of(
         return true;
     }
 
-    let ancestor = PhpType::Named(ancestor_name.to_string());
-    crate::util::is_subtype_of_typed(candidate_type, &ancestor, &combined_loader)
+    crate::util::is_subtype_of_named(candidate_type, ancestor_name, &combined_loader)
 }
 
 impl Backend {

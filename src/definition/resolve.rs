@@ -21,7 +21,7 @@ use super::member::{MemberAccessHint, MemberDefinitionCtx};
 use super::point_location;
 use crate::Backend;
 use crate::composer;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::{AccessKind, ClassInfo};
 use crate::util::{find_class_at_offset, position_to_offset, short_name};
 
@@ -267,8 +267,8 @@ impl Backend {
                 self.resolve_member_definition_with(uri, content, position, &mctx)
             }
 
-            SymbolKind::SelfStaticParent { keyword } => {
-                self.resolve_self_static_parent(uri, content, position, keyword)
+            SymbolKind::SelfStaticParent(ssp_kind) => {
+                self.resolve_self_static_parent(uri, content, position, *ssp_kind)
             }
 
             SymbolKind::ClassReference { name, is_fqn } => {
@@ -762,7 +762,7 @@ impl Backend {
         uri: &str,
         content: &str,
         position: Position,
-        keyword: &str,
+        ssp_kind: SelfStaticParentKind,
     ) -> Option<Location> {
         let cursor_offset = position_to_offset(content, position);
 
@@ -771,7 +771,10 @@ impl Backend {
 
         let current_class = find_class_at_offset(&classes, cursor_offset)?;
 
-        if keyword == "self" || keyword == "static" {
+        if matches!(
+            ssp_kind,
+            SelfStaticParentKind::Self_ | SelfStaticParentKind::Static | SelfStaticParentKind::This
+        ) {
             // Jump to the enclosing class definition in the current file.
             if current_class.keyword_offset == 0 {
                 return None;
@@ -782,7 +785,7 @@ impl Backend {
             return Some(point_location(parsed_uri, target_position));
         }
 
-        // keyword == "parent"
+        // SelfStaticParentKind::Parent
         let parent_name = current_class.parent_class.as_ref()?;
 
         // Try to find the parent class in the current file first.

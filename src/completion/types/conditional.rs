@@ -103,7 +103,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
     calling_class_name: Option<&str>,
-    template_defaults: Option<&HashMap<String, String>>,
+    template_defaults: Option<&HashMap<String, PhpType>>,
 ) -> Option<PhpType> {
     match conditional {
         PhpType::Conditional {
@@ -422,7 +422,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
     argument_list: &ArgumentList<'b>,
     var_resolver: VarClassStringResolver<'_>,
     calling_class_name: Option<&str>,
-    template_defaults: Option<&HashMap<String, String>>,
+    template_defaults: Option<&HashMap<String, PhpType>>,
 ) -> Option<PhpType> {
     match conditional {
         PhpType::Conditional {
@@ -623,7 +623,7 @@ pub(crate) fn resolve_conditional_without_args(
 pub fn resolve_conditional_without_args_and_defaults(
     conditional: &PhpType,
     params: &[ParameterInfo],
-    template_defaults: Option<&HashMap<String, String>>,
+    template_defaults: Option<&HashMap<String, PhpType>>,
 ) -> Option<PhpType> {
     match conditional {
         PhpType::Conditional {
@@ -690,30 +690,44 @@ fn try_resolve_with_template_default(
     condition: &PhpType,
     then_type: &PhpType,
     else_type: &PhpType,
-    template_defaults: Option<&HashMap<String, String>>,
+    template_defaults: Option<&HashMap<String, PhpType>>,
 ) -> Option<PhpType> {
     let defaults = template_defaults?;
     let default_value = defaults.get(template_name)?;
 
     // Determine whether the default value matches the condition.
     let condition_matches = if condition.is_false() {
-        default_value == "false"
+        default_value.is_false()
     } else if condition.is_true() {
-        default_value == "true"
+        default_value.is_true()
     } else if condition.is_null() {
-        default_value == "null"
+        default_value.is_null()
     } else if condition.is_bool() {
-        default_value == "true" || default_value == "false"
+        default_value.is_true() || default_value.is_false()
     } else if condition.is_string_type() {
-        (default_value.starts_with('\'') && default_value.ends_with('\''))
-            || (default_value.starts_with('"') && default_value.ends_with('"'))
+        matches!(default_value, PhpType::Literal(s) if
+            (s.starts_with('\'') && s.ends_with('\''))
+            || (s.starts_with('"') && s.ends_with('"')))
     } else if condition.is_int() {
-        default_value.parse::<i64>().is_ok()
+        matches!(default_value, PhpType::Literal(s) if s.parse::<i64>().is_ok())
     } else if let PhpType::Literal(s) = condition {
         let expected = crate::util::unquote_php_string(s).unwrap_or(s);
-        default_value == expected
+        match default_value {
+            PhpType::Literal(dv) => dv == expected,
+            PhpType::Named(dv) => dv == expected,
+            _ => {
+                let dv_str = default_value.to_string();
+                dv_str == *expected
+            }
+        }
     } else if let PhpType::Named(s) = condition {
-        default_value == s.as_str()
+        match default_value {
+            PhpType::Named(dv) => dv == s,
+            _ => {
+                let dv_str = default_value.to_string();
+                dv_str == *s
+            }
+        }
     } else {
         return None;
     };

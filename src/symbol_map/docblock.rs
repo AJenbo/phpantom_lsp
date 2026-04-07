@@ -22,7 +22,7 @@ use crate::docblock::parser::parse_docblock;
 use crate::docblock::types::split_type_token;
 use crate::types::TemplateVariance;
 
-use super::{SymbolKind, SymbolSpan};
+use super::{SelfStaticParentKind, SymbolKind, SymbolSpan};
 use crate::util::strip_fqn_prefix;
 
 // ─── Navigability filter ────────────────────────────────────────────────────
@@ -810,9 +810,7 @@ fn emit_type_spans_from_ast(
                 spans.push(SymbolSpan {
                     start,
                     end,
-                    kind: SymbolKind::SelfStaticParent {
-                        keyword: "static".to_string(),
-                    },
+                    kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
                 });
             }
             // Other variables (parameter names leaked from @param) are skipped.
@@ -866,12 +864,16 @@ fn emit_type_spans_from_ast(
             if name == "static" || name == "self" || name == "parent" {
                 let start = base_offset + k.span.start.offset;
                 let end = base_offset + k.span.end.offset;
+                let ssp_kind = match name {
+                    "self" => SelfStaticParentKind::Self_,
+                    "static" => SelfStaticParentKind::Static,
+                    "parent" => SelfStaticParentKind::Parent,
+                    _ => unreachable!(),
+                };
                 spans.push(SymbolSpan {
                     start,
                     end,
-                    kind: SymbolKind::SelfStaticParent {
-                        keyword: name.to_string(),
-                    },
+                    kind: SymbolKind::SelfStaticParent(ssp_kind),
                 });
             }
             // All other keywords (int, string, void, etc.) are non-navigable.
@@ -902,12 +904,16 @@ fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<Symbol
     // Handle `self`, `static`, `parent` — they're class-like but get
     // a special span kind.
     if name == "static" || name == "self" || name == "parent" {
+        let ssp_kind = match name {
+            "self" => SelfStaticParentKind::Self_,
+            "static" => SelfStaticParentKind::Static,
+            "parent" => SelfStaticParentKind::Parent,
+            _ => unreachable!(),
+        };
         spans.push(SymbolSpan {
             start,
             end,
-            kind: SymbolKind::SelfStaticParent {
-                keyword: name.to_string(),
-            },
+            kind: SymbolKind::SelfStaticParent(ssp_kind),
         });
         return;
     }

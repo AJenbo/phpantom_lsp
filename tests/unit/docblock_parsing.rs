@@ -1802,7 +1802,7 @@ fn conditional_resolves_with_template_default_false() {
     };
 
     let mut defaults = HashMap::new();
-    defaults.insert("TAsync".to_string(), "false".to_string());
+    defaults.insert("TAsync".to_string(), PhpType::false_());
 
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
     assert_eq!(result, Some(PhpType::Named("Response".to_string())));
@@ -1824,7 +1824,7 @@ fn conditional_resolves_with_template_default_true() {
     };
 
     let mut defaults = HashMap::new();
-    defaults.insert("TAsync".to_string(), "true".to_string());
+    defaults.insert("TAsync".to_string(), PhpType::true_());
 
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
     assert_eq!(result, Some(PhpType::Named("PromiseInterface".to_string())));
@@ -1869,7 +1869,7 @@ fn conditional_negated_with_template_default() {
     };
 
     let mut defaults = HashMap::new();
-    defaults.insert("TAsync".to_string(), "false".to_string());
+    defaults.insert("TAsync".to_string(), PhpType::false_());
 
     // negated: TAsync is not false → false (since default IS false) → else branch → Response
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));

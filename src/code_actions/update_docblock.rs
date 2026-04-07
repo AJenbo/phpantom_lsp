@@ -720,7 +720,7 @@ fn is_type_contradiction(doc_type: &str, native_type: &str) -> bool {
     let doc_core = doc_parsed
         .non_null_type()
         .unwrap_or_else(|| doc_parsed.clone());
-    if is_compatible_refinement_typed(&doc_core, &native_core.to_string().to_ascii_lowercase()) {
+    if is_compatible_refinement_typed(&doc_core, &native_core) {
         return false;
     }
 
@@ -733,10 +733,7 @@ fn is_type_contradiction(doc_type: &str, native_type: &str) -> bool {
     if doc_bases.len() == 1
         && native_bases.len() == 1
         && !doc_bases[0].equivalent(native_bases[0])
-        && !is_compatible_refinement_typed(
-            doc_bases[0],
-            &native_bases[0].to_string().to_ascii_lowercase(),
-        )
+        && !is_compatible_refinement_typed(doc_bases[0], native_bases[0])
     {
         return true;
     }

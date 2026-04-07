@@ -387,20 +387,24 @@ fn resolve_class_with_inheritance(
 }
 
 /// Extract the related type from a relationship return type string,
-/// resolving `$this` to the declaring class.
+/// resolving `$this` / `static` to the declaring class.
 fn extract_related_type_for_chain(
     return_type: &PhpType,
     declaring_class: &ClassInfo,
 ) -> Option<String> {
     classify_relationship_typed(return_type)?;
-    let related = extract_related_type_typed(return_type)?;
 
-    // `$this` in generic args means the declaring class itself.
-    if related == "$this" || related == "static" {
-        return Some(declaring_class.fqn());
+    // Check the first generic arg directly as a PhpType before
+    // stringifying, so we can use the `is_self_ref()` predicate
+    // instead of comparing raw strings.
+    if let PhpType::Generic(_, args) = return_type {
+        let first = args.first()?;
+        if first.is_self_ref() {
+            return Some(declaring_class.fqn());
+        }
     }
 
-    Some(related)
+    extract_related_type_typed(return_type)
 }
 
 /// Resolve a short or FQN related type to a loadable FQN.

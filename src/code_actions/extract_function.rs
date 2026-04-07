@@ -546,7 +546,7 @@ fn derive_base_name(ctx: &NamingContext) -> String {
             // 4. Generic trailing return
             if !enc.is_empty() {
                 // If there's a return type, use it for a more descriptive name
-                if !ctx.trailing_return_type.to_string().is_empty() {
+                if !ctx.trailing_return_type.is_empty() {
                     // Only use the return type if it's a class name (starts uppercase)
                     if let Some(name) = ctx.trailing_return_type.base_name() {
                         return format!("get{}", name);
@@ -2492,9 +2492,9 @@ fn build_return_type_hint_for_docblock(
 ) -> PhpType {
     match strategy {
         ReturnStrategy::TrailingReturn => trailing_return_type.clone(),
-        ReturnStrategy::VoidGuards | ReturnStrategy::UniformGuards(_) => PhpType::parse("bool"),
+        ReturnStrategy::VoidGuards | ReturnStrategy::UniformGuards(_) => PhpType::bool(),
         ReturnStrategy::SentinelNull => {
-            if !trailing_return_type.to_string().is_empty() {
+            if !trailing_return_type.is_empty() {
                 trailing_return_type.clone()
             } else {
                 PhpType::parse("")
@@ -2512,14 +2512,14 @@ fn build_return_type_hint_for_docblock(
         }
         ReturnStrategy::None | ReturnStrategy::Unsafe => {
             if returns.is_empty() {
-                PhpType::parse("void")
+                PhpType::void()
             } else if returns.len() == 1 {
                 if let Some(hint) = returns[0].1.to_native_hint_typed() {
                     return hint;
                 }
                 PhpType::parse("")
             } else {
-                PhpType::parse("array")
+                PhpType::array()
             }
         }
     }
@@ -2538,21 +2538,23 @@ fn build_raw_return_type_for_docblock(
             // Prefer the docblock @return type when it carries concrete
             // generics (e.g. `Collection<User>`) over the native hint
             // (e.g. `Collection`).
-            if !enclosing_docblock_return.is_empty()
-                && PhpType::parse(enclosing_docblock_return).has_type_parameters()
-            {
-                PhpType::parse(enclosing_docblock_return)
-            } else {
-                trailing_return_type.clone()
+            if !enclosing_docblock_return.is_empty() {
+                let parsed = PhpType::parse(enclosing_docblock_return);
+                if parsed.has_type_parameters() {
+                    return parsed;
+                }
             }
+            trailing_return_type.clone()
         }
-        ReturnStrategy::VoidGuards | ReturnStrategy::UniformGuards(_) => PhpType::parse("bool"),
+        ReturnStrategy::VoidGuards | ReturnStrategy::UniformGuards(_) => PhpType::bool(),
         ReturnStrategy::SentinelNull => {
-            if !enclosing_docblock_return.is_empty()
-                && PhpType::parse(enclosing_docblock_return).has_type_parameters()
-            {
-                PhpType::parse(enclosing_docblock_return)
-            } else if !trailing_return_type.to_string().is_empty() {
+            if !enclosing_docblock_return.is_empty() {
+                let parsed = PhpType::parse(enclosing_docblock_return);
+                if parsed.has_type_parameters() {
+                    return parsed;
+                }
+            }
+            if !trailing_return_type.is_empty() {
                 trailing_return_type.clone()
             } else {
                 PhpType::parse("")
@@ -2568,12 +2570,12 @@ fn build_raw_return_type_for_docblock(
         }
         ReturnStrategy::None | ReturnStrategy::Unsafe => {
             if returns.is_empty() {
-                PhpType::parse("void")
+                PhpType::void()
             } else if returns.len() == 1 {
                 // Use raw type (index 2) which preserves generics.
                 PhpType::parse(&returns[0].2)
             } else {
-                PhpType::parse("array")
+                PhpType::array()
             }
         }
     }

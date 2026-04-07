@@ -38,7 +38,7 @@ use super::member::MemberKind;
 use super::point_location;
 use crate::Backend;
 use crate::completion::resolver::ResolutionCtx;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, find_class_at_offset, position_to_offset, short_name};
 
@@ -79,12 +79,12 @@ impl Backend {
                 }
                 // self/static/parent — resolve the keyword to the current
                 // class and check whether it is an interface/abstract.
-                SymbolKind::SelfStaticParent { keyword } => {
+                SymbolKind::SelfStaticParent(ssp_kind) => {
                     let ctx = self.file_context(uri);
                     let class_loader = self.class_loader(&ctx);
                     let current_class = find_class_at_offset(&ctx.classes, sym.start);
-                    let target = match keyword.as_str() {
-                        "parent" => current_class
+                    let target = match ssp_kind {
+                        SelfStaticParentKind::Parent => current_class
                             .and_then(|cc| cc.parent_class.as_ref())
                             .and_then(|p| class_loader(p).map(Arc::unwrap_or_clone)),
                         _ => current_class.cloned(),

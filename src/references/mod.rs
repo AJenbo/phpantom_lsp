@@ -1,4 +1,4 @@
-//! Find References (`textDocument/references`) support.
+//! Find References (`textDocument/references`).
 //!
 //! When the user invokes "Find All References" on a symbol, the LSP
 //! collects every occurrence of that symbol across the project.
@@ -31,7 +31,7 @@ use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
 use crate::completion::resolver::Loaders;
-use crate::symbol_map::{SymbolKind, SymbolMap};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{
     build_fqn, collect_php_files_gitignore, find_class_at_offset, offset_to_position,
@@ -62,7 +62,6 @@ impl Backend {
                 uri,
                 content,
                 sym.start,
-                sym.end,
                 include_declaration,
             );
             return if locations.is_empty() {
@@ -82,7 +81,6 @@ impl Backend {
         uri: &str,
         content: &str,
         span_start: u32,
-        span_end: u32,
         include_declaration: bool,
     ) -> Vec<Location> {
         match kind {
@@ -169,18 +167,9 @@ impl Backend {
                     hierarchy.as_ref(),
                 )
             }
-            SymbolKind::SelfStaticParent { keyword } => {
-                // `$this` is recorded as SelfStaticParent { keyword: "static" }.
-                // Treat it as a file-local variable, not a cross-file class search.
-                //
-                // We detect `$this` by checking the actual span source text
-                // (not the cursor offset, which may land in the middle of
-                // the token).
-                if keyword == "static"
-                    && content
-                        .get(span_start as usize..span_end as usize)
-                        .is_some_and(|s| s == "$this")
-                {
+            SymbolKind::SelfStaticParent(ssp_kind) => {
+                // `$this` is a file-local variable, not a cross-file class search.
+                if *ssp_kind == SelfStaticParentKind::This {
                     return self.find_this_references(
                         uri,
                         content,
@@ -192,8 +181,8 @@ impl Backend {
                 // For real self/static/parent keywords, resolve to the class FQN.
                 let ctx = self.file_context(uri);
                 let current_class = crate::util::find_class_at_offset(&ctx.classes, span_start);
-                let fqn = match keyword.as_str() {
-                    "parent" => current_class
+                let fqn = match ssp_kind {
+                    SelfStaticParentKind::Parent => current_class
                         .and_then(|cc| cc.parent_class.as_ref())
                         .cloned(),
                     _ => current_class.map(|cc| build_fqn(&cc.name, &ctx.namespace)),
@@ -349,16 +338,10 @@ impl Backend {
                 continue;
             }
 
-            let is_this = match &span.kind {
-                SymbolKind::SelfStaticParent { keyword } if keyword == "static" => {
-                    // Check the actual source text to distinguish
-                    // `$this` from the `static` keyword.
-                    content
-                        .get(span.start as usize..span.end as usize)
-                        .is_some_and(|s| s == "$this")
-                }
-                _ => false,
-            };
+            let is_this = matches!(
+                &span.kind,
+                SymbolKind::SelfStaticParent(SelfStaticParentKind::This)
+            );
 
             if is_this {
                 let start = offset_to_position(content, span.start as usize);
@@ -481,21 +464,17 @@ impl Backend {
                             range: Range { start, end },
                         });
                     }
-                    SymbolKind::SelfStaticParent { keyword } => {
+                    SymbolKind::SelfStaticParent(ssp_kind) => {
                         // self/static/parent resolve to the current class —
                         // include them if they resolve to the target FQN.
                         //
                         // Skip `$this` — it is handled as a variable, not a
                         // class reference.
-                        if keyword == "static"
-                            && content
-                                .get(span.start as usize..span.end as usize)
-                                .is_some_and(|s| s == "$this")
-                        {
+                        if *ssp_kind == SelfStaticParentKind::This {
                             continue;
                         }
                         if let Some(fqn) = self.resolve_keyword_to_fqn(
-                            keyword,
+                            ssp_kind,
                             file_uri,
                             &file_namespace,
                             span.start,
@@ -819,7 +798,7 @@ impl Backend {
 
     fn resolve_keyword_to_fqn(
         &self,
-        keyword: &str,
+        ssp_kind: &SelfStaticParentKind,
         uri: &str,
         namespace: &Option<String>,
         offset: u32,
@@ -829,8 +808,8 @@ impl Backend {
 
         let current_class = crate::util::find_class_at_offset(&classes, offset)?;
 
-        match keyword {
-            "parent" => current_class.parent_class.clone(),
+        match ssp_kind {
+            SelfStaticParentKind::Parent => current_class.parent_class.clone(),
             _ => {
                 // self / static → current class FQN
                 Some(build_fqn(&current_class.name, namespace))

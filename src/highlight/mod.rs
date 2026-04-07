@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::{SymbolKind, SymbolMap, VarDefKind};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::util::{build_fqn, byte_range_to_lsp_range};
 
 impl Backend {
@@ -76,13 +76,11 @@ impl Backend {
             SymbolKind::ConstantReference { name } => {
                 self.highlight_constant(symbol_map, content, name)
             }
-            SymbolKind::SelfStaticParent { keyword } => {
-                // `$this` is recorded as SelfStaticParent { keyword: "static" }.
-                let source_text = content.get(span.start as usize..span.end as usize);
-                if keyword == "static" && source_text.is_some_and(|s| s == "$this") {
+            SymbolKind::SelfStaticParent(ssp_kind) => {
+                if *ssp_kind == SelfStaticParentKind::This {
                     self.highlight_this(symbol_map, content, span.start, uri)
                 } else {
-                    self.highlight_keyword(symbol_map, content, keyword, span.start, uri)
+                    self.highlight_keyword(symbol_map, content, *ssp_kind, span.start, uri)
                 }
             }
         };
@@ -176,22 +174,11 @@ impl Backend {
             if span.start < class_start || span.start > class_end {
                 continue;
             }
-            if let SymbolKind::SelfStaticParent { keyword } = &span.kind
-                && keyword == "static"
-            {
-                let is_this = content
-                    .get(span.start as usize..span.end as usize)
-                    .is_some_and(|s| s == "$this");
-                if is_this {
-                    highlights.push(DocumentHighlight {
-                        range: byte_range_to_lsp_range(
-                            content,
-                            span.start as usize,
-                            span.end as usize,
-                        ),
-                        kind: Some(DocumentHighlightKind::READ),
-                    });
-                }
+            if let SymbolKind::SelfStaticParent(SelfStaticParentKind::This) = &span.kind {
+                highlights.push(DocumentHighlight {
+                    range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
+                    kind: Some(DocumentHighlightKind::READ),
+                });
             }
         }
 
@@ -349,7 +336,7 @@ impl Backend {
         &self,
         symbol_map: &SymbolMap,
         content: &str,
-        target_keyword: &str,
+        target_kind: SelfStaticParentKind,
         cursor_offset: u32,
         uri: &str,
     ) -> Vec<DocumentHighlight> {
@@ -367,19 +354,9 @@ impl Backend {
             if span.start < class_start || span.start > class_end {
                 continue;
             }
-            if let SymbolKind::SelfStaticParent { keyword } = &span.kind
-                && keyword == target_keyword
+            if let SymbolKind::SelfStaticParent(ssp_kind) = &span.kind
+                && *ssp_kind == target_kind
             {
-                // Make sure we're not matching `$this` tokens when
-                // the target is the `static` keyword.
-                if target_keyword == "static" {
-                    let is_this = content
-                        .get(span.start as usize..span.end as usize)
-                        .is_some_and(|s| s == "$this");
-                    if is_this {
-                        continue;
-                    }
-                }
                 highlights.push(DocumentHighlight {
                     range: byte_range_to_lsp_range(content, span.start as usize, span.end as usize),
                     kind: Some(DocumentHighlightKind::READ),

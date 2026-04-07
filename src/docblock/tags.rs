@@ -1253,7 +1253,7 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     // *compatible refinement*.  For example `string` → `class-string<Foo>`
     // is valid, but `string` → `array<int>` is not.
     if native_inner.is_scalar() {
-        return is_compatible_refinement_typed(doc_inner, &native_lower);
+        return is_compatible_refinement_typed(doc_inner, native_inner);
     }
 
     // If the docblock type carries generic parameters or shape braces,
@@ -1306,12 +1306,12 @@ fn has_parameterisation(ty: &PhpType) -> bool {
 /// - Shapes, callables with signatures, slices (`Foo[]`)
 /// - Class names, unions, intersections, etc.
 fn is_bare_primitive_scalar(ty: &PhpType) -> bool {
-    matches!(ty, PhpType::Named(s) if crate::php_type::is_primitive_scalar_name(s))
+    ty.is_bare_primitive_scalar()
 }
 
 /// Check whether a docblock type is a compatible refinement of a native
 /// type.  Both parameters should be stripped of nullable wrappers before
-/// calling.  `native_lower` must already be lowercased.
+/// calling.
 ///
 /// A refinement is compatible when the docblock's base type narrows the
 /// native type without changing its fundamental kind.  For example:
@@ -1332,51 +1332,51 @@ fn is_bare_primitive_scalar(ty: &PhpType) -> bool {
 /// stripping generic parameters, shape braces, and callable signatures.
 /// Unlike `base_name()` this includes scalar names (`array`, `int`, ...)
 /// which are needed for the refinement checks.
-pub(crate) fn is_compatible_refinement_typed(doc_type: &PhpType, native_lower: &str) -> bool {
+pub(crate) fn is_compatible_refinement_typed(doc_type: &PhpType, native_type: &PhpType) -> bool {
     let doc_base = extract_base_name_lower(doc_type);
 
-    match native_lower {
-        // `string` is refined by `class-string`, `non-empty-string`,
-        // `literal-string`, `numeric-string`, `callable-string`,
-        // `lowercase-string`, `truthy-string` etc.
-        "string" => doc_base.contains("string"),
-        // `int` / `integer` is refined by `positive-int`, `negative-int`,
-        // `non-negative-int`, `non-positive-int`, `int-mask`, `int-mask-of`,
-        // `int` (with range syntax like `int<0, max>`).
-        "int" | "integer" => doc_base.contains("int"),
-        // `float` / `double` can be refined by `non-negative-float` etc.
-        "float" | "double" => doc_base.contains("float") || doc_base.contains("double"),
-        // `bool` / `boolean` can be refined by `true` or `false` (already
-        // handled as scalars earlier, but include for completeness).
-        "bool" | "boolean" => {
-            doc_base == "true" || doc_base == "false" || doc_base.contains("bool")
-        }
-        // `array` is refined by `list`, `non-empty-array`, `non-empty-list`,
-        // `associative-array`, `callable-array`, `array<…>`, `array{…}`.
-        "array" => {
-            doc_base.contains("array") || doc_base.contains("list") || doc_base == "iterable"
-        }
-        // `iterable` is refined by `array`, `list`, or any Collection-like.
-        // Since any class implementing Traversable/Iterator could be a valid
-        // refinement, allow all non-scalar docblock types.
+    if native_type.is_string_type() {
+        return doc_base.contains("string");
+    }
+    if native_type.is_int() {
+        return doc_base.contains("int");
+    }
+    if native_type.is_float() {
+        return doc_base.contains("float") || doc_base.contains("double");
+    }
+    if native_type.is_bool() {
+        return doc_base == "true" || doc_base == "false" || doc_base.contains("bool");
+    }
+    if native_type.is_bare_array() {
+        return doc_base.contains("array") || doc_base.contains("list") || doc_base == "iterable";
+    }
+    if native_type.is_mixed() {
+        return true;
+    }
+    if native_type.is_object() {
+        return !doc_type.is_scalar() || matches!(doc_type, PhpType::ObjectShape(_));
+    }
+    if native_type.is_self_like() {
+        return !doc_type.is_scalar();
+    }
+    if native_type.is_void()
+        || native_type.is_never()
+        || native_type.is_null()
+        || native_type.is_true()
+        || native_type.is_false()
+    {
+        return false;
+    }
+    if native_type.is_callable() {
+        return true;
+    }
+
+    // Check for iterable and resource via name matching (no dedicated predicates)
+    let native_lower = native_type.to_string().to_ascii_lowercase();
+    match native_lower.as_str() {
         "iterable" => true,
-        // `callable` / `Closure` are broad — any callable signature refines them.
-        "callable" => true,
         "closure" => true,
-        // `object` is refined by any class name, `callable-object`,
-        // or an object shape like `object{name: string, age: int}`.
-        "object" => !doc_type.is_scalar() || matches!(doc_type, PhpType::ObjectShape(_)),
-        // `mixed` can be refined by anything.
-        "mixed" => true,
-        // `resource` is refined by `closed-resource`, `open-resource`.
         "resource" => doc_base.contains("resource"),
-        // `self`, `static`, `parent`, `$this` — these are late-bound
-        // type references that any concrete class name refines.
-        "self" | "static" | "parent" | "$this" => !doc_type.is_scalar(),
-        // `void`, `never`, `null`, `true`, `false` — these are so narrow
-        // that docblock refinement is never meaningful.
-        "void" | "never" | "null" | "true" | "false" => false,
-        // For any other type, be conservative — don't override.
         _ => false,
     }
 }

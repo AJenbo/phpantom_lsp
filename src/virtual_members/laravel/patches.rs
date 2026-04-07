@@ -242,7 +242,7 @@ fn patch_db_select_return_types(class: &mut ClassInfo) {
                 if method
                     .return_type
                     .as_ref()
-                    .is_some_and(|rt| matches!(rt, PhpType::Named(s) if s == "array"))
+                    .is_some_and(|rt| rt.is_bare_array())
                 {
                     method.return_type = Some(array_of_std.clone());
                 }

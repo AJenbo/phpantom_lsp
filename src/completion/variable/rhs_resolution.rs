@@ -63,19 +63,19 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
     match expr {
         // ── Scalar literals ─────────────────────────────────────────
         Expression::Literal(Literal::Integer(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::parse("int"))]
+            vec![ResolvedType::from_type_string(PhpType::int())]
         }
         Expression::Literal(Literal::Float(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::parse("float"))]
+            vec![ResolvedType::from_type_string(PhpType::float())]
         }
         Expression::Literal(Literal::String(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::parse("string"))]
+            vec![ResolvedType::from_type_string(PhpType::string())]
         }
         Expression::Literal(Literal::True(_) | Literal::False(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::parse("bool"))]
+            vec![ResolvedType::from_type_string(PhpType::bool())]
         }
         Expression::Literal(Literal::Null(_)) => {
-            vec![ResolvedType::from_type_string(PhpType::parse("null"))]
+            vec![ResolvedType::from_type_string(PhpType::null())]
         }
         // ── Array literals ──────────────────────────────────────────
         Expression::Array(arr) => {
@@ -245,7 +245,7 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
         }
         // ── Concatenation: `"prefix" . $var` → string ───────────────
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
-            vec![ResolvedType::from_type_string(PhpType::parse("string"))]
+            vec![ResolvedType::from_type_string(PhpType::string())]
         }
         // ── Global constant access: `PHP_EOL`, `SORT_ASC`, etc. ────
         Expression::ConstantAccess(ca) => {
@@ -255,10 +255,10 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
             // some AST variants — handle them the same as literals.
             match name_clean.to_lowercase().as_str() {
                 "true" | "false" => {
-                    return vec![ResolvedType::from_type_string(PhpType::parse("bool"))];
+                    return vec![ResolvedType::from_type_string(PhpType::bool())];
                 }
                 "null" => {
-                    return vec![ResolvedType::from_type_string(PhpType::parse("null"))];
+                    return vec![ResolvedType::from_type_string(PhpType::null())];
                 }
                 _ => {}
             }
@@ -298,22 +298,22 @@ fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
 
     // String literals: single or double quoted.
     if (v.starts_with('\'') && v.ends_with('\'')) || (v.starts_with('"') && v.ends_with('"')) {
-        return Some(PhpType::Named("string".to_string()));
+        return Some(PhpType::string());
     }
 
     // Array literals.
     if v.starts_with('[') || v.starts_with("array(") || v.starts_with("array (") {
-        return Some(PhpType::Named("array".to_string()));
+        return Some(PhpType::array());
     }
 
     let lower = v.to_lowercase();
 
     // Boolean / null keywords.
     if lower == "true" || lower == "false" {
-        return Some(PhpType::Named("bool".to_string()));
+        return Some(PhpType::bool());
     }
     if lower == "null" {
-        return Some(PhpType::Named("null".to_string()));
+        return Some(PhpType::null());
     }
 
     // Numeric literals — try integer first, then float.
@@ -328,7 +328,7 @@ fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
             .chars()
             .all(|c| c.is_ascii_hexdigit() || c == '_')
         {
-            return Some(PhpType::Named("int".to_string()));
+            return Some(PhpType::int());
         }
     }
     if numeric.starts_with("0b") || numeric.starts_with("0B") {
@@ -337,7 +337,7 @@ fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
             .chars()
             .all(|c| c == '0' || c == '1' || c == '_')
         {
-            return Some(PhpType::Named("int".to_string()));
+            return Some(PhpType::int());
         }
     }
     if numeric.starts_with("0o") || numeric.starts_with("0O") {
@@ -346,7 +346,7 @@ fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
             .chars()
             .all(|c| ('0'..='7').contains(&c) || c == '_')
         {
-            return Some(PhpType::Named("int".to_string()));
+            return Some(PhpType::int());
         }
     }
     // Decimal integer (may contain underscores: 1_000_000).
@@ -354,7 +354,7 @@ fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
         && numeric.chars().all(|c| c.is_ascii_digit() || c == '_')
         && numeric.chars().next().is_some_and(|c| c.is_ascii_digit())
     {
-        return Some(PhpType::Named("int".to_string()));
+        return Some(PhpType::int());
     }
     // Float: contains `.` or `e`/`E` among digits.
     if !numeric.is_empty() {
@@ -371,7 +371,7 @@ fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
                     || c == '_'
             })
         {
-            return Some(PhpType::Named("float".to_string()));
+            return Some(PhpType::float());
         }
     }
 
@@ -2011,10 +2011,10 @@ fn resolve_rhs_property_access(
         };
         if let Some(class_name) = class_name {
             let class_parsed = PhpType::parse(&class_name);
-            let resolved_name = class_parsed.base_name().unwrap_or(&class_name).to_string();
-            let resolved_parsed = PhpType::parse(&resolved_name);
+            let resolved_name = class_parsed.base_name().unwrap_or(&class_name);
+            let resolved_typed = PhpType::Named(resolved_name.to_string());
             let target_classes = crate::completion::type_resolution::type_hint_to_classes_typed(
-                &resolved_parsed,
+                &resolved_typed,
                 current_class_name,
                 all_classes,
                 class_loader,

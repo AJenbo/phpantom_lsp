@@ -550,7 +550,7 @@ impl Backend {
 
         // If the inferred type is just `array`, `mixed`, or the bare
         // iterable type, we can't determine element types.
-        if matches!(&parsed, PhpType::Named(n) if n.eq_ignore_ascii_case("array"))
+        if parsed.is_bare_array()
             || parsed.is_mixed()
             || matches!(&parsed, PhpType::Named(n) if n.eq_ignore_ascii_case(iterable_type))
         {

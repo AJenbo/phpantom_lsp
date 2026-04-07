@@ -68,6 +68,13 @@ impl Backend {
             class_name
         };
 
+        self.find_or_load_class_inner(class_name)
+    }
+
+    /// Shared implementation used by [`find_or_load_class`].
+    /// `class_name` must already be normalised (no `?` prefix, no
+    /// generic parameters).
+    fn find_or_load_class_inner(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
         // The class name stored in ClassInfo is just the short name (e.g. "Customer"),
         // so we match against the last segment of the namespace-qualified name.
         let last_segment = short_name(class_name);

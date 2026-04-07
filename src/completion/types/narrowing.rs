@@ -252,13 +252,9 @@ pub(in crate::completion) fn apply_instanceof_inclusion_typed(
         let already_subtypes: Vec<ClassInfo> = results
             .iter()
             .filter(|r| {
-                narrowed.iter().any(|n| {
-                    crate::util::is_subtype_of_typed(
-                        &PhpType::Named(r.fqn().to_string()),
-                        &PhpType::Named(n.fqn().to_string()),
-                        ctx.class_loader,
-                    )
-                })
+                narrowed
+                    .iter()
+                    .any(|n| crate::util::is_subtype_of_names(&r.fqn(), &n.fqn(), ctx.class_loader))
             })
             .cloned()
             .collect();
@@ -277,13 +273,9 @@ pub(in crate::completion) fn apply_instanceof_inclusion_typed(
     // results = [Animal] narrowed to Dog (Dog extends Animal) → [Dog].
     if !exact {
         let narrowed_is_more_specific = narrowed.iter().any(|n| {
-            results.iter().any(|r| {
-                crate::util::is_subtype_of_typed(
-                    &PhpType::Named(n.fqn().to_string()),
-                    &PhpType::Named(r.fqn().to_string()),
-                    ctx.class_loader,
-                )
-            })
+            results
+                .iter()
+                .any(|r| crate::util::is_subtype_of_names(&n.fqn(), &r.fqn(), ctx.class_loader))
         });
 
         if !narrowed_is_more_specific && results.len() == 1 {

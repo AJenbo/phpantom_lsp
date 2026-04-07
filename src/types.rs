@@ -1435,7 +1435,7 @@ pub struct ClassInfo {
     /// When a conditional return type references a template parameter that
     /// has no explicit binding at the call site, the resolver uses the
     /// default value to evaluate the condition.
-    pub template_param_defaults: HashMap<String, String>,
+    pub template_param_defaults: HashMap<String, PhpType>,
     /// Generic type arguments from `@extends` / `@phpstan-extends` tags.
     ///
     /// Each entry is `(ClassName, [TypeArg1, TypeArg2, …])`.

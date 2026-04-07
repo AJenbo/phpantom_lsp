@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **PhpType migration complete.** All internal type manipulation now uses structured type operations end-to-end, from docblock extraction through completion, hover, code actions, and diagnostics. Types are parsed once at extraction time and flow through the entire pipeline without redundant re-parsing. Type-guard narrowing and subtype checking use shared predicates instead of ad-hoc string matching, improving consistency and reducing the surface area for type-comparison bugs.
+- **PhpType migration.** Nearly all internal type manipulation now uses structured type operations end-to-end, from docblock extraction through completion, hover, code actions, and diagnostics. Types are parsed once at extraction time and flow through the entire pipeline without redundant re-parsing. Type-guard narrowing and subtype checking use shared predicates instead of ad-hoc string matching, improving consistency and reducing the surface area for type-comparison bugs.
 
 ### Added
 

@@ -169,7 +169,7 @@ struct ClassDocblockInfo {
     /// Upper bounds for template parameters (`@template T of Bound`).
     template_param_bounds: HashMap<String, PhpType>,
     /// Default values for template parameters (`@template T of bool = false`).
-    template_param_defaults: HashMap<String, String>,
+    template_param_defaults: HashMap<String, PhpType>,
     /// Generic arguments from `@extends` / `@phpstan-extends`.
     extends_generics: Vec<(String, Vec<PhpType>)>,
     /// Generic arguments from `@implements` / `@phpstan-implements`.
@@ -219,9 +219,9 @@ fn extract_class_docblock<'a>(
         .iter()
         .filter_map(|(name, bound, _, _)| bound.as_ref().map(|b| (name.clone(), b.clone())))
         .collect();
-    let template_param_defaults: HashMap<String, String> = params_full
+    let template_param_defaults: HashMap<String, PhpType> = params_full
         .into_iter()
-        .filter_map(|(name, _, _, default)| default.map(|d| (name, d)))
+        .filter_map(|(name, _, _, default)| default.map(|d| (name, PhpType::parse(&d))))
         .collect();
 
     let mixin_data = docblock::extract_mixin_tags_from_info(&info);
@@ -1227,14 +1227,13 @@ impl Backend {
                         class_docblock: doc_info.raw_docblock,
                         file_namespace: None,
                         backed_type: enum_def.backing_type_hint.as_ref().and_then(|h| {
-                            match crate::parser::extract_hint_type(&h.hint) {
-                                crate::php_type::PhpType::Named(ref s) if s == "string" => {
-                                    Some(crate::types::BackedEnumType::String)
-                                }
-                                crate::php_type::PhpType::Named(ref s) if s == "int" => {
-                                    Some(crate::types::BackedEnumType::Int)
-                                }
-                                _ => None,
+                            let ty = crate::parser::extract_hint_type(&h.hint);
+                            if ty.is_string_type() {
+                                Some(crate::types::BackedEnumType::String)
+                            } else if ty.is_int() {
+                                Some(crate::types::BackedEnumType::Int)
+                            } else {
+                                None
                             }
                         }),
                         attribute_targets: 0,

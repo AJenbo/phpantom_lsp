@@ -1343,9 +1343,9 @@ fn resolve_closure_params_with_inferred(
                         if !inferred_resolved.is_empty()
                             && inferred_resolved.iter().all(|inferred_cls| {
                                 resolved_classes.iter().any(|explicit_cls| {
-                                    crate::util::is_subtype_of_typed(
-                                        &PhpType::Named(inferred_cls.fqn().to_string()),
-                                        &PhpType::Named(explicit_cls.name.clone()),
+                                    crate::util::is_subtype_of_names(
+                                        &inferred_cls.fqn(),
+                                        &explicit_cls.name,
                                         ctx.class_loader,
                                     )
                                 })

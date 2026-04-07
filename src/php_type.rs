@@ -514,6 +514,15 @@ impl PhpType {
         }
     }
 
+    /// Whether this type represents "no type" (an empty `Raw` or `Named`
+    /// variant whose display string would be empty).
+    ///
+    /// This avoids the `.to_string().is_empty()` round-trip when callers
+    /// only need to know whether a `PhpType` carries meaningful content.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, PhpType::Raw(s) | PhpType::Named(s) if s.is_empty())
+    }
+
     /// Whether this type is a primitive scalar / built-in type that
     /// cannot have members accessed on it at runtime.
     ///
@@ -538,6 +547,25 @@ impl PhpType {
             PhpType::Raw(_) => false,
             _ => false,
         }
+    }
+
+    /// Whether this type is a bare, unparameterised primitive scalar name.
+    ///
+    /// Returns `true` only for simple `PhpType::Named` values whose name
+    /// is a primitive scalar keyword: `int`, `string`, `bool`, `void`,
+    /// `null`, `array`, `callable`, `iterable`, `resource` (and aliases
+    /// like `integer`, `double`, `boolean`).
+    ///
+    /// Returns `false` for:
+    /// - PHPDoc pseudo-types (`non-empty-string`, `class-string`, `positive-int`)
+    /// - Parameterised types (`array<int>`, `int<0, max>`, `list<User>`)
+    /// - Shapes, callables with signatures, slices (`Foo[]`)
+    /// - Class names, unions, intersections, nullable wrappers, etc.
+    ///
+    /// Use this when you need to detect that a docblock type is just a
+    /// bare keyword that carries no extra information over a native hint.
+    pub fn is_bare_primitive_scalar(&self) -> bool {
+        matches!(self, PhpType::Named(s) if is_primitive_scalar_name(s))
     }
 
     /// Whether this type is a scalar/built-in type that does not refer
@@ -642,6 +670,27 @@ impl PhpType {
         }
     }
 
+    /// Whether this type is a top-level `self`, `static`, or `$this`
+    /// reference (case-insensitive) — the subset of self-like keywords
+    /// that resolve to the *declaring* class, excluding `parent`.
+    ///
+    /// Unlike [`is_self_like`], this does **not** match `parent` and
+    /// does **not** recurse into `Nullable` or `Union` wrappers.  It
+    /// returns `true` only for a bare `PhpType::Named("self")` (and
+    /// the other two variants).  Use this when you need to detect
+    /// exactly the names that [`replace_self`] would rewrite, without
+    /// unwrapping nullable/union layers.
+    pub fn is_self_ref(&self) -> bool {
+        matches!(
+            self,
+            PhpType::Named(s)
+                if matches!(
+                    s.to_ascii_lowercase().as_str(),
+                    "self" | "static" | "$this"
+                )
+        )
+    }
+
     /// Whether this type is one of the self-referencing keywords:
     /// `self`, `static`, `$this`, or `parent` (case-insensitive).
     ///
@@ -669,6 +718,19 @@ impl PhpType {
             }
             _ => false,
         }
+    }
+
+    /// Returns `true` when this type is exactly the bare, unparameterised
+    /// `array` keyword — i.e. `PhpType::Named("array")`.
+    ///
+    /// Returns `false` for parameterised arrays (`array<int, string>`),
+    /// array shapes (`array{key: string}`), slice syntax (`T[]`), `list`,
+    /// `non-empty-array`, `iterable`, and any other array-like type.
+    ///
+    /// Use this when you need to distinguish a plain `array` return type
+    /// (which carries no element-type information) from richer array types.
+    pub fn is_bare_array(&self) -> bool {
+        matches!(self, PhpType::Named(s) if s.eq_ignore_ascii_case("array"))
     }
 
     /// Returns `true` when this type represents an array-like PHP type.
@@ -6210,6 +6272,42 @@ mod tests {
         #[test]
         fn is_self_like_false_for_int() {
             assert!(!PhpType::int().is_self_like());
+        }
+
+        #[test]
+        fn is_self_ref_true_for_self() {
+            assert!(PhpType::self_().is_self_ref());
+        }
+
+        #[test]
+        fn is_self_ref_true_for_static() {
+            assert!(PhpType::static_().is_self_ref());
+        }
+
+        #[test]
+        fn is_self_ref_true_for_this() {
+            assert!(PhpType::Named("$this".to_string()).is_self_ref());
+        }
+
+        #[test]
+        fn is_self_ref_false_for_parent() {
+            assert!(!PhpType::parent_().is_self_ref());
+        }
+
+        #[test]
+        fn is_self_ref_case_insensitive() {
+            assert!(PhpType::Named("SELF".to_string()).is_self_ref());
+            assert!(PhpType::Named("Static".to_string()).is_self_ref());
+        }
+
+        #[test]
+        fn is_self_ref_not_nullable() {
+            assert!(!PhpType::Nullable(Box::new(PhpType::static_())).is_self_ref());
+        }
+
+        #[test]
+        fn is_self_ref_false_for_class() {
+            assert!(!PhpType::Named("Foo".to_string()).is_self_ref());
         }
 
         // ── is_bool/is_true/is_false for non-matching types ────────

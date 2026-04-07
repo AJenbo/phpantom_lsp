@@ -926,16 +926,12 @@ fn extract_property_type(decl: &str) -> Option<PhpType> {
 
 /// Check whether a `PhpType` is a bare callable/Closure keyword (no signature).
 fn is_callable_keyword(pt: &PhpType) -> bool {
-    matches!(pt, PhpType::Named(s) if {
-        s.eq_ignore_ascii_case("callable") || s.eq_ignore_ascii_case("Closure")
-    })
+    pt.is_callable()
 }
 
 /// Check whether a `PhpType` is a bare `array` keyword (no generic params).
 fn is_bare_array(pt: &PhpType) -> bool {
-    matches!(pt, PhpType::Named(s) if {
-        s.eq_ignore_ascii_case("array")
-    })
+    pt.is_bare_array()
 }
 
 /// Extract the callable display name from a `PhpType` that satisfies
@@ -1694,25 +1690,25 @@ fn property_var_type_snippet(
             *tab_stop += 1;
             s
         }
-        Some(th) if th.to_string() == "array" => {
+        Some(PhpType::Named(s)) if s.eq_ignore_ascii_case("array") => {
             let s = format!("${{{}:array}}", *tab_stop);
             *tab_stop += 1;
             s
         }
         Some(th) => {
-            let display = th.to_string();
-            let clean = display.trim_start_matches('\\');
+            let shortened = th.shorten();
+            let clean = shortened.to_string();
             // Callable types get a signature placeholder.
             if th.is_callable() {
-                let s = format!("(${{{}:{}()}})", *tab_stop, clean);
+                let s = format!("(${{{}:{}()}})", *tab_stop, &clean);
                 *tab_stop += 1;
                 return s;
             }
             if !matches!(
                 th,
                 PhpType::Union(_) | PhpType::Intersection(_) | PhpType::Nullable(_)
-            ) && !is_keyword_type(clean)
-                && let Some(cls) = class_loader(clean)
+            ) && !is_keyword_type(&clean)
+                && let Some(cls) = class_loader(&clean)
                 && !cls.template_params.is_empty()
             {
                 let mut parts = Vec::new();
@@ -1720,9 +1716,9 @@ fn property_var_type_snippet(
                     parts.push(format!("${{{}:{}}}", *tab_stop, tp));
                     *tab_stop += 1;
                 }
-                return format!("{}<{}>", clean, parts.join(", "));
+                return format!("{}<{}>", &clean, parts.join(", "));
             }
-            display
+            clean
         }
     }
 }
@@ -1734,24 +1730,24 @@ fn property_var_type_plain(
 ) -> String {
     match type_hint {
         None => "mixed".to_string(),
-        Some(th) if th.to_string() == "array" => "array".to_string(),
+        Some(PhpType::Named(s)) if s.eq_ignore_ascii_case("array") => "array".to_string(),
         Some(th) => {
-            let display = th.to_string();
-            let clean = display.trim_start_matches('\\');
+            let shortened = th.shorten();
+            let clean = shortened.to_string();
             if th.is_callable() {
-                return format!("({}())", clean);
+                return format!("({}())", &clean);
             }
             if !matches!(
                 th,
                 PhpType::Union(_) | PhpType::Intersection(_) | PhpType::Nullable(_)
-            ) && !is_keyword_type(clean)
-                && let Some(cls) = class_loader(clean)
+            ) && !is_keyword_type(&clean)
+                && let Some(cls) = class_loader(&clean)
                 && !cls.template_params.is_empty()
             {
                 let parts: Vec<&str> = cls.template_params.iter().map(|s| s.as_str()).collect();
-                return format!("{}<{}>", clean, parts.join(", "));
+                return format!("{}<{}>", &clean, parts.join(", "));
             }
-            display
+            clean
         }
     }
 }

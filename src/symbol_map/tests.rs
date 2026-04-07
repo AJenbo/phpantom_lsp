@@ -374,8 +374,8 @@ fn self_keyword_produces_self_static_parent() {
     let offset = php.find("self").unwrap() as u32;
     let hit = map.lookup(offset);
     assert!(hit.is_some());
-    if let SymbolKind::SelfStaticParent { ref keyword } = hit.unwrap().kind {
-        assert_eq!(keyword, "self");
+    if let SymbolKind::SelfStaticParent(kind) = &hit.unwrap().kind {
+        assert_eq!(*kind, SelfStaticParentKind::Self_);
     } else {
         panic!("Expected SelfStaticParent");
     }
@@ -728,8 +728,8 @@ fn docblock_this_produces_self_static_parent() {
     let this_offset = php.find("$this").unwrap() as u32;
     let hit = map.lookup(this_offset);
     assert!(hit.is_some(), "Should find $this in docblock generic arg");
-    if let SymbolKind::SelfStaticParent { ref keyword } = hit.unwrap().kind {
-        assert_eq!(keyword, "static");
+    if let SymbolKind::SelfStaticParent(kind) = &hit.unwrap().kind {
+        assert_eq!(*kind, SelfStaticParentKind::This);
     } else {
         panic!(
             "Expected SelfStaticParent for $this, got {:?}",
@@ -947,8 +947,8 @@ fn fqn_lookup_at_middle_of_name() {
     let this_in_doc = php[docblock_start..].find("$this").unwrap() + docblock_start;
     let hit = map.lookup(this_in_doc as u32);
     assert!(hit.is_some(), "Should find $this in docblock generic arg");
-    if let SymbolKind::SelfStaticParent { ref keyword } = hit.unwrap().kind {
-        assert_eq!(keyword, "static");
+    if let SymbolKind::SelfStaticParent(kind) = &hit.unwrap().kind {
+        assert_eq!(*kind, SelfStaticParentKind::This);
     } else {
         panic!(
             "Expected SelfStaticParent for $this, got {:?}",
@@ -1698,8 +1698,12 @@ fn this_variable_emits_self_static_parent() {
     let hit = map.lookup(this_offset);
     assert!(hit.is_some(), "Should find a span at $this");
     match &hit.unwrap().kind {
-        SymbolKind::SelfStaticParent { keyword } => {
-            assert_eq!(keyword, "static", "$this should map to 'static' keyword");
+        SymbolKind::SelfStaticParent(kind) => {
+            assert_eq!(
+                *kind,
+                SelfStaticParentKind::This,
+                "$this should map to This variant"
+            );
         }
         other => panic!("Expected SelfStaticParent for $this, got {:?}", other),
     }
@@ -1722,8 +1726,8 @@ fn this_variable_standalone_emits_self_static_parent() {
     let hit = map.lookup(this_offset);
     assert!(hit.is_some(), "Should find a span at standalone $this");
     match &hit.unwrap().kind {
-        SymbolKind::SelfStaticParent { keyword } => {
-            assert_eq!(keyword, "static");
+        SymbolKind::SelfStaticParent(kind) => {
+            assert_eq!(*kind, SelfStaticParentKind::This);
         }
         other => panic!(
             "Expected SelfStaticParent for standalone $this, got {:?}",
@@ -2145,8 +2149,8 @@ fn static_keyword_in_generic_arg_produces_span() {
         "Should find `static` in generic arg in symbol map"
     );
     match &hit.unwrap().kind {
-        SymbolKind::SelfStaticParent { keyword } => {
-            assert_eq!(keyword, "static");
+        SymbolKind::SelfStaticParent(kind) => {
+            assert_eq!(*kind, SelfStaticParentKind::Static);
         }
         SymbolKind::ClassReference { name, .. } => {
             // `static` is in NON_NAVIGABLE, so it should NOT be a ClassReference.

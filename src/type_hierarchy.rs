@@ -10,7 +10,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::SymbolKind as MapSymbolKind;
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind as MapSymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::{find_class_at_offset, offset_to_position, position_to_offset, short_name};
 
@@ -42,17 +42,17 @@ impl Backend {
                 let ctx = self.file_context(uri);
                 ctx.resolve_name_at(name, span.start)
             }
-            MapSymbolKind::SelfStaticParent { keyword } => {
+            MapSymbolKind::SelfStaticParent(ssp_kind) => {
                 let classes: Vec<std::sync::Arc<ClassInfo>> =
                     self.ast_map.read().get(uri).cloned().unwrap_or_default();
                 let current_class = find_class_at_offset(&classes, offset)?;
 
-                if keyword == "parent" {
+                if *ssp_kind == SelfStaticParentKind::Parent {
                     let parent_name = current_class.parent_class.as_ref()?;
                     let ctx = self.file_context(uri);
                     ctx.resolve_name_at(parent_name, span.start)
                 } else {
-                    // self or static
+                    // self, static, or $this
                     crate::util::build_fqn(&current_class.name, &current_class.file_namespace)
                 }
             }

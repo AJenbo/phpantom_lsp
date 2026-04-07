@@ -224,7 +224,12 @@ fn resolve_named_type(
     }
 
     // ── self / static / $this ──────────────────────────────────────
-    if matches!(name, "self" | "static" | "$this") {
+    // These names come from pre-parsed PhpType values; PHP treats them
+    // case-insensitively (e.g. `Self::`, `STATIC::` are valid).
+    if matches!(
+        name.to_ascii_lowercase().as_str(),
+        "self" | "static" | "$this"
+    ) {
         if !generic_args.is_empty() {
             // `self<RuleError>` → rewrite to `OwningClass<RuleError>`.
             let rewritten = PhpType::Generic(owning_class_name.to_string(), generic_args.to_vec());
@@ -244,7 +249,8 @@ fn resolve_named_type(
     }
 
     // ── parent ─────────────────────────────────────────────────────
-    if name == "parent" {
+    // Case-insensitive to match PHP behaviour (`Parent::`, `PARENT::` are valid).
+    if name.eq_ignore_ascii_case("parent") {
         let parent_name = find_class_by_name(all_classes, owning_class_name)
             .and_then(|c| c.parent_class.clone())
             .or_else(|| class_loader(owning_class_name).and_then(|c| c.parent_class.clone()));
@@ -260,15 +266,11 @@ fn resolve_named_type(
 
     // ── Resolve static/self/$this inside generic arguments ────────
     let resolved_generic_args: Vec<PhpType>;
-    let generic_args: &[PhpType] = if generic_args.iter().any(
-        |a| matches!(a, PhpType::Named(n) if matches!(n.as_str(), "static" | "self" | "$this")),
-    ) {
+    let generic_args: &[PhpType] = if generic_args.iter().any(|a| a.is_self_ref()) {
         resolved_generic_args = generic_args
             .iter()
             .map(|arg| {
-                if let PhpType::Named(n) = arg
-                    && matches!(n.as_str(), "static" | "self" | "$this")
-                {
+                if arg.is_self_ref() {
                     PhpType::Named(owning_class_name.to_string())
                 } else {
                     arg.clone()

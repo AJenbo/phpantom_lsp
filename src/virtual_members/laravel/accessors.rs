@@ -76,7 +76,7 @@ pub(super) fn extract_modern_accessor_type(method: &MethodInfo) -> PhpType {
     if let Some(rt) = method.return_type.as_ref()
         && let PhpType::Generic(_, args) = rt
         && let Some(first) = args.first()
-        && !first.to_string().is_empty()
+        && !matches!(first, PhpType::Named(s) | PhpType::Raw(s) if s.is_empty())
     {
         return first.clone();
     }

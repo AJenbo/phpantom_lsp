@@ -19,7 +19,7 @@ use crate::Backend;
 use crate::completion::resolver::{Loaders, ResolutionCtx};
 use crate::hover::variable_type;
 use crate::php_type::PhpType;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::*;
 use crate::util::find_class_at_offset;
 
@@ -100,15 +100,16 @@ impl Backend {
                 )
             }
 
-            SymbolKind::SelfStaticParent { keyword } => match keyword.as_str() {
-                "self" | "static" => current_class
+            SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
+                SelfStaticParentKind::Self_
+                | SelfStaticParentKind::Static
+                | SelfStaticParentKind::This => current_class
                     .map(|cc| vec![cc.name.clone()])
                     .unwrap_or_default(),
-                "parent" => current_class
+                SelfStaticParentKind::Parent => current_class
                     .and_then(|cc| cc.parent_class.as_ref())
                     .map(|p| vec![p.clone()])
                     .unwrap_or_default(),
-                _ => Vec::new(),
             },
 
             SymbolKind::ClassReference { name, .. } => {

@@ -38,7 +38,7 @@ use mago_syntax::ast::*;
 use crate::completion::types::narrowing;
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
-use crate::php_type::{PhpType, ShapeEntry};
+use crate::php_type::{PhpType, ShapeEntry, is_keyword_type};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
@@ -1166,29 +1166,7 @@ fn type_may_contain_template_param(ty: &PhpType) -> bool {
     match ty {
         PhpType::Named(name) => {
             // Well-known scalars/pseudo-types are never template params.
-            !matches!(
-                name.as_str(),
-                "int"
-                    | "float"
-                    | "string"
-                    | "bool"
-                    | "null"
-                    | "void"
-                    | "never"
-                    | "mixed"
-                    | "object"
-                    | "array"
-                    | "iterable"
-                    | "callable"
-                    | "resource"
-                    | "true"
-                    | "false"
-                    | "self"
-                    | "static"
-                    | "$this"
-                    | "parent"
-                    | "class-string"
-            )
+            !is_keyword_type(name)
         }
         PhpType::Union(members) | PhpType::Intersection(members) => {
             members.iter().any(type_may_contain_template_param)
@@ -3486,7 +3464,9 @@ fn is_int_like_key_typed(ty: &PhpType) -> bool {
 /// array key type.
 fn is_string_like_key(ty: &PhpType) -> bool {
     match ty {
-        PhpType::Named(s) => matches!(s.as_str(), "string" | "non-empty-string" | "class-string"),
+        PhpType::Named(s) => {
+            matches!(s.as_str(), "non-empty-string" | "class-string") || ty.is_string_type()
+        }
         PhpType::ClassString(_) => true,
         _ => false,
     }
@@ -3498,12 +3478,8 @@ fn is_array_key_type(ty: &PhpType) -> bool {
     match ty {
         PhpType::Named(s) if s == "array-key" => true,
         PhpType::Union(members) if members.len() == 2 => {
-            let has_int = members
-                .iter()
-                .any(|m| matches!(m, PhpType::Named(s) if s == "int"));
-            let has_string = members
-                .iter()
-                .any(|m| matches!(m, PhpType::Named(s) if s == "string"));
+            let has_int = members.iter().any(|m| m.is_int());
+            let has_string = members.iter().any(|m| m.is_string_type());
             has_int && has_string
         }
         _ => false,
