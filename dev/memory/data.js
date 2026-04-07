@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775535672297,
+  "lastUpdate": 1775538024752,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2379,6 +2379,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9f539f9238782772a2b5c51e37499305eb885e2d",
+          "message": "Document LSP client/editor integration, update todo, and improve type\nhandling",
+          "timestamp": "2026-04-07T06:48:28+02:00",
+          "tree_id": "09804016c6499f427a1787d91cf2259a2ef85f00",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/9f539f9238782772a2b5c51e37499305eb885e2d"
+        },
+        "date": 1775538023945,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.9,
             "unit": "MiB"
           }
         ]
