@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775523637032,
+  "lastUpdate": 1775524627466,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2311,6 +2311,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 38.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e3fa35b3b4411791114ed66cf0cbeef27b18f07a",
+          "message": "Refactor PhpType handling and template defaults to use typed values",
+          "timestamp": "2026-04-07T03:05:20+02:00",
+          "tree_id": "6c20e38c6f5790aee7bc82f4ef5e9ebf637c4bd4",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/e3fa35b3b4411791114ed66cf0cbeef27b18f07a"
+        },
+        "date": 1775524627161,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.2,
             "unit": "MiB"
           }
         ]
