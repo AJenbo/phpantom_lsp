@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775661276586,
+  "lastUpdate": 1775662335276,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2821,6 +2821,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 42.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3b15e5c20e317e21c373d86542c37f5a62a47574",
+          "message": "Support nested array shape assignments in variable resolution",
+          "timestamp": "2026-04-08T17:17:28+02:00",
+          "tree_id": "88acb382247184dcc031febf2bed946dd0be8e85",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3b15e5c20e317e21c373d86542c37f5a62a47574"
+        },
+        "date": 1775662334931,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41,
             "unit": "MiB"
           }
         ]
