@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775616872987,
+  "lastUpdate": 1775620169978,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2651,6 +2651,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lucasalvcoutinho@gmail.com",
+            "name": "Lucas Coutinho",
+            "username": "lucasacoutinho"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "79a50251b866a2e0325450a5f63ca13ed8a116e4",
+          "message": "feat: Return self-location at definition sites so editors can fall back\nto Find References",
+          "timestamp": "2026-04-08T05:37:32+02:00",
+          "tree_id": "97d8965c7c179498d420697d3aa31d70cf09c753",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/79a50251b866a2e0325450a5f63ca13ed8a116e4"
+        },
+        "date": 1775620169652,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.2,
             "unit": "MiB"
           }
         ]
