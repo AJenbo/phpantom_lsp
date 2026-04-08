@@ -573,6 +573,120 @@ class Foo {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Static property access
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_diagnostic_for_self_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    private static ?self $instance = null;
+
+    public static function getInstance(): self {
+        return self::$instance ?? throw new \RuntimeException;
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn no_diagnostic_for_static_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    protected static array $items = [];
+
+    public static function add(string $item): void {
+        static::$items[] = $item;
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn no_diagnostic_for_classname_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Config {
+    public static bool $debug = false;
+}
+
+class App {
+    public function boot(): void {
+        if (Config::$debug) {
+            echo "debug mode";
+        }
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn flags_undefined_in_dynamic_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    public static function get(): mixed {
+        return self::$$prop;
+    }
+}
+"#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(diags[0].message.contains("$prop"));
+}
+
+#[test]
+fn no_diagnostic_for_defined_dynamic_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    public static function get(string $prop): mixed {
+        return self::$$prop;
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn flags_undefined_in_indirect_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    public static function get(): mixed {
+        return self::${'prop_' . $suffix};
+    }
+}
+"#,
+    );
+    assert_eq!(diags.len(), 1);
+    assert!(diags[0].message.contains("$suffix"));
+}
+
+#[test]
+fn no_diagnostic_for_defined_indirect_static_property() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Foo {
+    public static function get(string $suffix): mixed {
+        return self::${'prop_' . $suffix};
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Traits and enums
 // ═══════════════════════════════════════════════════════════════════════════
 

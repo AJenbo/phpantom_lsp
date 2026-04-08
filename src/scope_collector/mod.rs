@@ -898,9 +898,14 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
             }
             Access::StaticProperty(spa) => {
                 walk_expression(spa.class, collector);
-                // Static property names are NOT local variables — do not
-                // record them as reads.  The class expression (self, static,
-                // etc.) is already walked above.
+                // Direct is a member name (self::$prop), not a local variable.
+                // Indirect/Nested contain expressions that may reference local vars
+                // (e.g. self::$$prop, self::${expr}).
+                match &spa.property {
+                    Variable::Direct(_) => {}
+                    Variable::Indirect(iv) => walk_expression(iv.expression, collector),
+                    Variable::Nested(nv) => walk_variable_read(nv.variable, collector),
+                }
             }
             Access::ClassConstant(cca) => {
                 walk_expression(cca.class, collector);
@@ -1198,6 +1203,11 @@ fn walk_expression_as_write(expr: &Expression<'_>, collector: &mut Collector<'_>
         }
         Expression::Access(Access::StaticProperty(spa)) => {
             walk_expression(spa.class, collector);
+            match &spa.property {
+                Variable::Direct(_) => {}
+                Variable::Indirect(iv) => walk_expression(iv.expression, collector),
+                Variable::Nested(nv) => walk_variable_read(nv.variable, collector),
+            }
         }
         _ => {
             // For anything else, walk as read.
