@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775687278343,
+  "lastUpdate": 1775689879003,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2923,6 +2923,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "775146a65e7c0b59256b0078b2dae597593aad56",
+          "message": "Add linked editing ranges for variables within definition regions",
+          "timestamp": "2026-04-09T00:58:38+02:00",
+          "tree_id": "1b04e7e7e7eaaa17dda7bd09444c42e3564024e0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/775146a65e7c0b59256b0078b2dae597593aad56"
+        },
+        "date": 1775689878086,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.9,
             "unit": "MiB"
           }
         ]
