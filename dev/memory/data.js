@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775611774958,
+  "lastUpdate": 1775612281157,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2549,6 +2549,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lucasalvcoutinho@gmail.com",
+            "name": "Lucas Coutinho",
+            "username": "lucasacoutinho"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c0ba452a5455e95b624b599e1d2444d6d4c0e6b5",
+          "message": "Fix false-positive undefined variable on static property access",
+          "timestamp": "2026-04-08T03:25:54+02:00",
+          "tree_id": "0ed904489274f76008c217aca0530b0f6347ebaa",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/c0ba452a5455e95b624b599e1d2444d6d4c0e6b5"
+        },
+        "date": 1775612280795,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.7,
             "unit": "MiB"
           }
         ]
