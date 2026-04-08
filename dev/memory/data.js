@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775612281157,
+  "lastUpdate": 1775613607085,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2583,6 +2583,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8559c6e887fb51572b4f1a49ab97373303aa5e50",
+          "message": "Add --tcp flag to run LSP server over TCP socket",
+          "timestamp": "2026-04-08T03:47:45+02:00",
+          "tree_id": "4ed858f6e9b4f699307d95af64dcba4573c30129",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/8559c6e887fb51572b4f1a49ab97373303aa5e50"
+        },
+        "date": 1775613606107,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 38.4,
             "unit": "MiB"
           }
         ]
