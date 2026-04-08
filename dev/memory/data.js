@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775613607085,
+  "lastUpdate": 1775616872987,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2617,6 +2617,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 38.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1f48613a68e53186bf2438ab8a3936a8ca0b1f44",
+          "message": "Fix completion on `<?php` open tag and chained static call parent\nhandling",
+          "timestamp": "2026-04-08T04:42:12+02:00",
+          "tree_id": "be226cb84fe628191063360240464b2bdfbfc147",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/1f48613a68e53186bf2438ab8a3936a8ca0b1f44"
+        },
+        "date": 1775616872487,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 39.7,
             "unit": "MiB"
           }
         ]
