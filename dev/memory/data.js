@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775684138800,
+  "lastUpdate": 1775687278343,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2889,6 +2889,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5774950dc656e9bb3b0ce9be26e8b0565d0cd0a3",
+          "message": "Add invalid class-like kind diagnostics and fix bulk unused import\naction in braced namespaces",
+          "timestamp": "2026-04-09T00:15:52+02:00",
+          "tree_id": "b65a0c36454efc005933bb8ce5e3a51f1248c0ec",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/5774950dc656e9bb3b0ce9be26e8b0565d0cd0a3"
+        },
+        "date": 1775687277408,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.3,
             "unit": "MiB"
           }
         ]
