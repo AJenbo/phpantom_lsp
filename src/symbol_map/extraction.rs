@@ -1763,10 +1763,15 @@ fn extract_from_expression<'a>(
             match assign.lhs {
                 Expression::Variable(Variable::Direct(dv)) => {
                     let name = dv.name.strip_prefix('$').unwrap_or(dv.name).to_string();
+                    let kind = if assign.operator.is_assign() {
+                        VarDefKind::Assignment
+                    } else {
+                        VarDefKind::CompoundAssignment
+                    };
                     ctx.var_defs.push(VarDefSite {
                         offset: dv.span.start.offset,
                         name,
-                        kind: VarDefKind::Assignment,
+                        kind,
                         scope_start,
                         effective_from: effective,
                     });

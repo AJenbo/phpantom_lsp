@@ -20,7 +20,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Common LSP features<sup>1</sup>      | ✅       | ✅           | ✅         | ✅          | ✅          |
 | Workspace symbols                    | 🚧       | ✅           | ✅         | ✅          | ✅          |
 | Semantic tokens                      | ✅       | ❌           | ✅         | ❌          | ✅          |
-| Linked editing                       | ❌       | ❌           | ✅         | ❌          | ✅          |
+| Linked editing                       | ✅       | ❌           | ✅         | ❌          | ✅          |
 | Extras<sup>2</sup>                   | ✅       | 💰           | 🚧         | 🚧          | ✅          |
 | **Diagnostics**                      |          |              |            |             |             |
 | PHPStan integration                  | ✅       | ❌           | ❌         | 🚧          | 🚧          |

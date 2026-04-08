@@ -128,7 +128,10 @@ impl Backend {
         let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
         let def = map.var_def_at(var_name, cursor_offset)?;
-        if matches!(def.kind, VarDefKind::Assignment) {
+        if matches!(
+            def.kind,
+            VarDefKind::Assignment | VarDefKind::CompoundAssignment
+        ) {
             Some(def.effective_from)
         } else {
             None

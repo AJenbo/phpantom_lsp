@@ -507,6 +507,7 @@ impl Backend {
                     && !matches!(
                         def_kind,
                         VarDefKind::Assignment
+                            | VarDefKind::CompoundAssignment
                             | VarDefKind::Parameter
                             | VarDefKind::Foreach
                             | VarDefKind::Catch

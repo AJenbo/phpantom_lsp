@@ -114,6 +114,7 @@ mod highlight;
 mod hover;
 pub(crate) mod inheritance;
 mod inlay_hints;
+mod linked_editing;
 pub(crate) mod names;
 mod parser;
 pub(crate) mod phar;

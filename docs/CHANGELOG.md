@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Linked editing ranges.** Place the cursor on a variable and all occurrences within its definition region (from one assignment to the next) enter linked editing mode. Typing a new name updates every occurrence simultaneously without affecting reassigned uses of the same variable name. Ranges exclude the leading `$` sigil so that typing before a variable (e.g. wrapping it in a function call) does not propagate to other occurrences.
 - **Invalid class-like kind diagnostics.** Flags class-like names used in positions where their kind is guaranteed to fail at runtime: `new` on abstract classes, interfaces, traits, or enums; `extends` on a final class, interface, or trait; `implements` with a non-interface; trait `use` with a non-trait; `instanceof` with a trait (always false); `catch` with a non-Throwable type or trait; and traits in native type-hint positions. Severity follows PHP semantics: unconditional fatal errors are Error, runtime-conditional failures are Warning.
 - **Nested array shape inference from multi-level key assignments.** Assignments like `$b['a']['b'] = 'x'` now produce a nested array shape type (`array{a: array{b: string}}`), enabling array key completion and hover for arrays built incrementally with nested keys. Previously only single-level key assignments were tracked.
 

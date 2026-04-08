@@ -21,19 +21,10 @@ within the same impact tier.
 
 # Scheduled Sprints
 
-## Sprint 4 — Refactoring toolkit & type inference
-
-| #    | Item                                                                                                                                                            | Impact     | Effort |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-
-
-|      | **Release 0.7.0**                                                                                                                                               |            |        |
-
 ## Sprint 5 — Polish for office adoption
 
 | #   | Item                                                                                                                         | Impact      | Effort |
 | --- | ---------------------------------------------------------------------------------------------------------------------------- | ----------- | ------ |
-| F10 | [Linked editing ranges](todo/lsp-features.md#f10-linked-editing-ranges)                                                      | Medium      | Low    |
 | A36 | [Import all missing classes](todo/actions.md#a36-import-all-missing-classes) (bulk import)                                    | Medium      | Low    |
 | F6  | [Machine-readable CLI output formats](todo/lsp-features.md#f6-machine-readable-cli-output-formats) (`--format github\|json`) | Medium      | Low    |
 | D4  | [Unused variable diagnostic](todo/diagnostics.md#d4-unused-variable-diagnostic)                                              | Medium      | Medium |

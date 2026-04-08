@@ -297,6 +297,11 @@ pub(crate) struct VarDefSite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum VarDefKind {
     Assignment,
+    /// Compound assignment (`+=`, `-=`, `.=`, `??=`, etc.).  Semantically
+    /// the variable is modified in place rather than rebound to a
+    /// completely different value.  Linked editing treats this the same
+    /// as a read (it does not start a new definition region).
+    CompoundAssignment,
     Parameter,
     Property,
     Foreach,

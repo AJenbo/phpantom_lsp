@@ -92,6 +92,7 @@ mod folding_ranges;
 mod hover;
 mod implementation;
 mod inlay_hints;
+mod linked_editing;
 mod parser;
 mod php_version;
 mod references;

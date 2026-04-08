@@ -134,6 +134,9 @@ impl LanguageServer for Backend {
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
+                linked_editing_range_provider: Some(LinkedEditingRangeServerCapabilities::Simple(
+                    true,
+                )),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
@@ -588,6 +591,22 @@ impl LanguageServer for Backend {
 
         self.handle_with_position("document_highlight", &uri, position, |content| {
             self.handle_document_highlight(&uri, content, position)
+        })
+    }
+
+    async fn linked_editing_range(
+        &self,
+        params: LinkedEditingRangeParams,
+    ) -> Result<Option<LinkedEditingRanges>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        self.handle_with_position("linked_editing_range", &uri, position, |content| {
+            self.handle_linked_editing_range(&uri, content, position)
         })
     }
 
