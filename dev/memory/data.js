@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775608986478,
+  "lastUpdate": 1775610032731,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2481,6 +2481,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 41.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7a2c0f2df28d09dae3fe64c4627fa82d20c99a83",
+          "message": "Fix docblock return enrichment to detect existing type structure",
+          "timestamp": "2026-04-08T02:47:32+02:00",
+          "tree_id": "c8bf7f204bb512e216cba532118592736610f1df",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/7a2c0f2df28d09dae3fe64c4627fa82d20c99a83"
+        },
+        "date": 1775610032350,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.7,
             "unit": "MiB"
           }
         ]
