@@ -214,23 +214,6 @@ Each item must include:
 
 ## Outstanding items
 
-### Split `unknown_members.rs` (5,755 lines)
-
-- **What to do:** `src/diagnostics/unknown_members.rs` is the second
-  largest file in the project. Sprint 5 adds four new diagnostic
-  modules (D4, D10, D11, D12, D14) and one large diagnostic feature
-  (D15) that will use `unknown_members` as a reference. Identify
-  natural seams — the file likely contains resolution helpers, display
-  formatting, and per-member-kind logic that can be split into
-  submodules (e.g. `diagnostics/unknown_members/resolution.rs`,
-  `diagnostics/unknown_members/helpers.rs`). The goal is to get the
-  main file under 3,000 lines so new diagnostic work has a clean
-  model to follow.
-- **Which files to change:** `src/diagnostics/unknown_members.rs`
-  (split into submodules under `src/diagnostics/unknown_members/`).
-- **Why it matters for the sprint:** Sprint 5 is diagnostics-heavy
-  (D4, D10, D11, D12, D14, D15). A 5,700-line diagnostic file sets a
-  bad precedent for new diagnostic modules and makes it harder to
-  extract shared helpers that the new modules will need.
+No outstanding items.
 
 

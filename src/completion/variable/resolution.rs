@@ -3080,8 +3080,7 @@ pub(in crate::completion) fn check_expression_for_assignment<'b>(
         if let Expression::ArrayAccess(array_access) = assignment.lhs {
             // Extract the base variable name and chain of keys from
             // potentially nested array accesses like `$var['a']['b']['c']`.
-            if let Some((base_name, key_chain)) =
-                extract_nested_array_access_chain(array_access)
+            if let Some((base_name, key_chain)) = extract_nested_array_access_chain(array_access)
                 && base_name == var_name
             {
                 // ── Skip when cursor is inside the RHS ────────

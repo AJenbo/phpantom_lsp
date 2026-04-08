@@ -1081,60 +1081,62 @@ pub(crate) fn find_uncaught_throw_types_with_context(
 
     // 1. Direct `throw new Type(…)` statements
     for throw in &throws {
-        if let Some(exc_type) = normalize_throw_type(&throw.type_name) {
-            if !is_caught_by(&catches, throw.offset, &exc_type) && seen.insert(exc_type.to_string())
-            {
-                uncaught.push(exc_type);
-            }
+        if let Some(exc_type) = normalize_throw_type(&throw.type_name)
+            && !is_caught_by(&catches, throw.offset, &exc_type)
+            && seen.insert(exc_type.to_string())
+        {
+            uncaught.push(exc_type);
         }
     }
 
     // 2. `throw $this->method()` -- return type of method is the thrown type
     for te in &throw_expr_types {
-        if let Some(exc_type) = normalize_throw_type(&te.type_name) {
-            if !is_caught_by(&catches, te.offset, &exc_type) && seen.insert(exc_type.to_string()) {
-                uncaught.push(exc_type);
-            }
+        if let Some(exc_type) = normalize_throw_type(&te.type_name)
+            && !is_caught_by(&catches, te.offset, &exc_type)
+            && seen.insert(exc_type.to_string())
+        {
+            uncaught.push(exc_type);
         }
     }
 
     // 3. Propagated @throws from called methods (same-file text search)
     for prop in &propagated {
-        if let Some(exc_type) = normalize_throw_type(&prop.type_name) {
-            if !is_caught_by(&catches, prop.offset, &exc_type) && seen.insert(exc_type.to_string())
-            {
-                uncaught.push(exc_type);
-            }
+        if let Some(exc_type) = normalize_throw_type(&prop.type_name)
+            && !is_caught_by(&catches, prop.offset, &exc_type)
+            && seen.insert(exc_type.to_string())
+        {
+            uncaught.push(exc_type);
         }
     }
 
     // 4. Inline `/** @throws ExceptionType */` annotations in the body
     let inline = find_inline_throws_annotations(&body);
     for info in &inline {
-        if let Some(exc_type) = normalize_throw_type(&info.type_name) {
-            if !is_caught_by(&catches, info.offset, &exc_type) && seen.insert(exc_type.to_string())
-            {
-                uncaught.push(exc_type);
-            }
+        if let Some(exc_type) = normalize_throw_type(&info.type_name)
+            && !is_caught_by(&catches, info.offset, &exc_type)
+            && seen.insert(exc_type.to_string())
+        {
+            uncaught.push(exc_type);
         }
     }
 
     // 5. `throw $variable` — resolved from catch clause variable type
     for tv in &throw_vars {
-        if let Some(exc_type) = normalize_throw_type(&tv.type_name) {
-            if !is_caught_by(&catches, tv.offset, &exc_type) && seen.insert(exc_type.to_string()) {
-                uncaught.push(exc_type);
-            }
+        if let Some(exc_type) = normalize_throw_type(&tv.type_name)
+            && !is_caught_by(&catches, tv.offset, &exc_type)
+            && seen.insert(exc_type.to_string())
+        {
+            uncaught.push(exc_type);
         }
     }
 
     // 6. Cross-file propagated @throws from all call patterns
     for prop in &cross_file_propagated {
-        if let Some(exc_type) = normalize_throw_type(&prop.type_name) {
-            if !is_caught_by(&catches, prop.offset, &exc_type) && seen.insert(exc_type.to_string())
-            {
-                uncaught.push(exc_type);
-            }
+        if let Some(exc_type) = normalize_throw_type(&prop.type_name)
+            && !is_caught_by(&catches, prop.offset, &exc_type)
+            && seen.insert(exc_type.to_string())
+        {
+            uncaught.push(exc_type);
         }
     }
 
