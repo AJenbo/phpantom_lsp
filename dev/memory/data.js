@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775539726158,
+  "lastUpdate": 1775608986478,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2447,6 +2447,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 36.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "533efc5042fe95f57ee7869229538d0931e69d32",
+          "message": "Fix undefined variable false positives in nested scopes",
+          "timestamp": "2026-04-08T02:31:09+02:00",
+          "tree_id": "3c8f62bc7bdb56a66a86fbc4e02e3cb136f91196",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/533efc5042fe95f57ee7869229538d0931e69d32"
+        },
+        "date": 1775608986162,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.8,
             "unit": "MiB"
           }
         ]
