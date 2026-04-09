@@ -120,9 +120,6 @@ vim.lsp.enable('phpantom')
 <details>
 <summary><b>Sublime Text</b></summary>
 
-> [!NOTE]
-> This configuration is untested. If you get it working (or run into issues), please [open an issue](../../issues).
-
 With [LSP for Sublime Text](https://github.com/sublimelsp/LSP):
 
 ```json
@@ -131,7 +128,8 @@ With [LSP for Sublime Text](https://github.com/sublimelsp/LSP):
     "phpantom": {
       "enabled": true,
       "command": ["/path/to/phpantom_lsp"],
-      "selector": "source.php"
+      "selector": "embedding.php",
+      "priority_selector": "source.php"
     }
   }
 }
