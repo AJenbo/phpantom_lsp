@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775689879003,
+  "lastUpdate": 1775699712300,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2947,6 +2947,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/AJenbo/phpantom_lsp/commit/775146a65e7c0b59256b0078b2dae597593aad56"
         },
         "date": 1775689878086,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 23.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bba3cc3dfc480e4446723512f2b846af4c14f03c",
+          "message": "Add machine-readable CLI output formats for analyze and fix",
+          "timestamp": "2026-04-09T03:42:40+02:00",
+          "tree_id": "fb7ef75e3a7aec4f942dc98e03318c45de2424fa",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/bba3cc3dfc480e4446723512f2b846af4c14f03c"
+        },
+        "date": 1775699711318,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
