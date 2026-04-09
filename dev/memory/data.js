@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775699712300,
+  "lastUpdate": 1775701622242,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -2991,6 +2991,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 41.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "092c292f5631655c8216d5ed8f8eec5e6b78a88e",
+          "message": "Add PHPCS diagnostic proxy and update docs",
+          "timestamp": "2026-04-09T04:14:43+02:00",
+          "tree_id": "a9a8b0919953d0f15c766ad520c5f29b20e53b38",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/092c292f5631655c8216d5ed8f8eec5e6b78a88e"
+        },
+        "date": 1775701621717,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 24.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 37.8,
             "unit": "MiB"
           }
         ]
