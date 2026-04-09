@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775701622242,
+  "lastUpdate": 1775703038800,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3025,6 +3025,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 37.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a1beb6d33f39b356250b3b847229dc343a12ce73",
+          "message": "Add bulk \"Import all missing classes\" code action",
+          "timestamp": "2026-04-09T04:38:22+02:00",
+          "tree_id": "66fe45d8c178853fea9fa402d434398818aa4336",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/a1beb6d33f39b356250b3b847229dc343a12ce73"
+        },
+        "date": 1775703038435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 24.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.3,
             "unit": "MiB"
           }
         ]
