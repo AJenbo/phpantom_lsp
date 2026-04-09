@@ -1936,3 +1936,196 @@ async fn no_generation_inside_nested_scope_variable() {
         "Should NOT produce a docblock for nested variable inside function body"
     );
 }
+
+// ─── Constructor-inferred type in @var ──────────────────────────────────────
+
+/// Typing `/**` above an untyped property whose type is inferred from a
+/// constructor assignment (`$this->repo = new Repository()`) should use
+/// the inferred class name instead of `mixed`.
+#[tokio::test]
+async fn generates_var_with_constructor_inferred_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_prop_inferred.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Repository {\n",                             // 1
+        "    public function findById(int $id): void {}\n", // 2
+        "}\n",                                              // 3
+        "\n",                                               // 4
+        "class Service {\n",                                // 5
+        "    /** */\n",                                     // 6
+        "    private $repository;\n",                       // 7
+        "\n",                                               // 8
+        "    public function __construct() {\n",            // 9
+        "        $this->repository = new Repository();\n",  // 10
+        "    }\n",                                          // 11
+        "}\n",                                              // 12
+    );
+    let items = complete_at(&backend, &uri, text, 6, 7).await;
+    let item = find_docblock_item(&items);
+    assert!(
+        item.is_some(),
+        "Should produce a docblock generation item for constructor-inferred property"
+    );
+
+    let snippet = snippet_text(item.unwrap());
+    assert!(
+        snippet.contains("@var"),
+        "Should include @var tag, got:\n{}",
+        snippet
+    );
+    assert!(
+        snippet.contains("Repository"),
+        "Should use inferred type Repository instead of mixed, got:\n{}",
+        snippet
+    );
+    assert!(
+        !snippet.contains("mixed"),
+        "Should NOT fall back to mixed when constructor-inferred type is available, got:\n{}",
+        snippet
+    );
+}
+
+/// Same as above but for a promoted constructor parameter with a
+/// `new ClassName()` default value.
+#[tokio::test]
+async fn generates_var_with_promoted_param_new_default_inferred_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_prop_promoted_inferred.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                           // 0
+        "class Repository {\n",                              // 1
+        "    public function findById(int $id): void {}\n",  // 2
+        "}\n",                                               // 3
+        "\n",                                                // 4
+        "class Service {\n",                                 // 5
+        "    public function __construct(\n",                // 6
+        "        /** */\n",                                  // 7
+        "        private $repository = new Repository(),\n", // 8
+        "    ) {}\n",                                        // 9
+        "}\n",                                               // 10
+    );
+    let items = complete_at(&backend, &uri, text, 7, 11).await;
+    let item = find_docblock_item(&items);
+    assert!(
+        item.is_some(),
+        "Should produce a docblock generation item for promoted param with new default"
+    );
+
+    let snippet = snippet_text(item.unwrap());
+    assert!(
+        snippet.contains("@var"),
+        "Should include @var tag, got:\n{}",
+        snippet
+    );
+    assert!(
+        snippet.contains("Repository"),
+        "Should use inferred type Repository instead of mixed, got:\n{}",
+        snippet
+    );
+}
+
+/// When a property has an explicit native type, the generated @var should
+/// use that type even if the constructor assigns a different class.
+#[tokio::test]
+async fn generates_var_with_native_type_ignores_constructor_assignment() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_prop_native_wins.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                         // 0
+        "class Dog { public function bark(): void {} }\n", // 1
+        "class Cat { public function meow(): void {} }\n", // 2
+        "\n",                                              // 3
+        "class Shelter {\n",                               // 4
+        "    /** */\n",                                    // 5
+        "    private Dog $pet;\n",                         // 6
+        "\n",                                              // 7
+        "    public function __construct() {\n",           // 8
+        "        $this->pet = new Cat();\n",               // 9
+        "    }\n",                                         // 10
+        "}\n",                                             // 11
+    );
+    let items = complete_at(&backend, &uri, text, 5, 7).await;
+    let item = find_docblock_item(&items);
+    assert!(
+        item.is_some(),
+        "Should produce a docblock generation item for typed property"
+    );
+
+    let snippet = snippet_text(item.unwrap());
+    assert!(
+        snippet.contains("Dog"),
+        "Should use native type Dog, got:\n{}",
+        snippet
+    );
+    assert!(
+        !snippet.contains("Cat"),
+        "Should NOT use constructor-assigned Cat when native type exists, got:\n{}",
+        snippet
+    );
+}
+
+/// On-enter formatting for an untyped property with constructor-inferred type.
+#[tokio::test]
+async fn on_enter_generates_var_with_constructor_inferred_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///ot_prop_inferred.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Repository {\n",                             // 1
+        "    public function findById(int $id): void {}\n", // 2
+        "}\n",                                              // 3
+        "\n",                                               // 4
+        "class Service {\n",                                // 5
+        "    /** */\n",                                     // 6
+        "    private $repository;\n",                       // 7
+        "\n",                                               // 8
+        "    public function __construct() {\n",            // 9
+        "        $this->repository = new Repository();\n",  // 10
+        "    }\n",                                          // 11
+        "}\n",                                              // 12
+    );
+    let edits = format_on_enter(&backend, &uri, text, 6, 9).await;
+    assert!(!edits.is_empty(), "Should produce edits");
+
+    let new_text = &edits[0].new_text;
+    assert!(
+        new_text.contains("@var"),
+        "Should have @var tag, got:\n{}",
+        new_text
+    );
+    assert!(
+        new_text.contains("Repository"),
+        "Should use inferred type Repository instead of mixed, got:\n{}",
+        new_text
+    );
+    assert!(
+        !new_text.contains("mixed"),
+        "Should NOT fall back to mixed, got:\n{}",
+        new_text
+    );
+}
+
+/// Untyped property with NO constructor assignment should still get `mixed`.
+#[tokio::test]
+async fn generates_var_mixed_when_no_constructor_inference() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///gen_prop_no_infer.php").unwrap();
+    let text = concat!(
+        "<?php\n",              // 0
+        "class Service {\n",    // 1
+        "    /** */\n",         // 2
+        "    private $data;\n", // 3
+        "}\n",                  // 4
+    );
+    let items = complete_at(&backend, &uri, text, 2, 7).await;
+    let item = find_docblock_item(&items);
+    assert!(item.is_some(), "Should produce a docblock generation item");
+
+    let snippet = snippet_text(item.unwrap());
+    assert!(
+        snippet.contains("mixed"),
+        "Untyped property without inference should fall back to mixed, got:\n{}",
+        snippet
+    );
+}

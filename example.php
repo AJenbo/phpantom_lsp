@@ -3369,6 +3369,38 @@ class InvalidClassKindDemo
 }
 
 
+// ── Untyped Property Inference ──────────────────────────────────────────────
+// Properties without type declarations have their types inferred from
+// constructor assignments (`$this->prop = new Foo()`) and promoted
+// parameter defaults (`private $prop = new Foo()`). Trigger completion
+// after `->` on the property to see methods from the inferred type.
+
+class UntypedPropertyInferenceDemo
+{
+    private $repository;
+    private $logger;
+
+    public function __construct(
+        private $defaultRepo = new ScaffoldingUntypedRepo(),
+    ) {
+        $this->repository = new ScaffoldingUntypedRepo();
+        $this->logger = new ScaffoldingUntypedLogger();
+    }
+
+    public function demo(): void
+    {
+        // Constructor body assignment: $this->repository = new ScaffoldingUntypedRepo()
+        $this->repository->findById(1);       // resolves ScaffoldingUntypedRepo::findById()
+
+        // Constructor body assignment: $this->logger = new ScaffoldingUntypedLogger()
+        $this->logger->info('hello');         // resolves ScaffoldingUntypedLogger::info()
+
+        // Promoted parameter default: private $defaultRepo = new ScaffoldingUntypedRepo()
+        $this->defaultRepo->findById(42);     // resolves ScaffoldingUntypedRepo::findById()
+    }
+}
+
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
@@ -3436,6 +3468,20 @@ class TreeMapperImpl
 // known PHP limitation (php-src#7873), not a bug that will be fixed.
 // The same applies to `interface Foo extends \Stringable`.
 
+
+// ── Untyped Property Inference Scaffolding ──────────────────────────────────
+
+class ScaffoldingUntypedRepo
+{
+    public function findById(int $id): Pen { return new Pen('found'); }
+    public function save(Pen $pen): void {}
+}
+
+class ScaffoldingUntypedLogger
+{
+    public function info(string $msg): void {}
+    public function error(string $msg): void {}
+}
 
 // ── Demo-Specific Scaffolding ───────────────────────────────────────────────
 
@@ -6090,6 +6136,14 @@ function runDemoAssertions(): void
     foreach ($shapeGrouped as $shapeEntry) {
         assert($shapeEntry['tool'] instanceof Pen, 'Shape key from conditional loop must resolve to Pen');
     }
+
+    // ── Untyped property inference from constructor ─────────────────────
+    $untypedDemo = new UntypedPropertyInferenceDemo();
+    // The scaffolding repo's findById() returns Pen, so we can verify
+    // that the inferred type propagates through the property chain.
+    $repoRef = new ScaffoldingUntypedRepo();
+    $found = $repoRef->findById(1);
+    assert($found instanceof Pen, 'ScaffoldingUntypedRepo::findById() must return Pen');
 
     echo "All assertions passed.\n";
 }

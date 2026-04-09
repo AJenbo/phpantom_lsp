@@ -1735,6 +1735,35 @@ impl Backend {
         doc_ctx: Option<&DocblockCtx<'a>>,
         class_template_params: &[String],
     ) -> ExtractedMembers {
+        /// Resolve a short class name to its FQN using the file's use-map
+        /// and namespace from [`DocblockCtx`].  When no context is
+        /// available the name is returned as-is.
+        fn resolve_name_via_ctx(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
+            // Already fully-qualified — strip the leading `\`.
+            if let Some(stripped) = name.strip_prefix('\\') {
+                return stripped.to_string();
+            }
+            let Some(ctx) = doc_ctx else {
+                return name.to_string();
+            };
+            // Check use-map (handles both unqualified and qualified names).
+            if let Some(pos) = name.find('\\') {
+                let first = &name[..pos];
+                let rest = &name[pos..];
+                if let Some(fqn) = ctx.use_map.get(first) {
+                    return format!("{fqn}{rest}");
+                }
+            } else if let Some(fqn) = ctx.use_map.get(name) {
+                return fqn.clone();
+            }
+            // Prepend current namespace if available.
+            if let Some(ref ns) = ctx.namespace {
+                format!("{ns}\\{name}")
+            } else {
+                name.to_string()
+            }
+        }
+
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -1742,6 +1771,7 @@ impl Backend {
         let mut trait_precedences = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut inline_use_generics: Vec<(String, Vec<PhpType>)> = Vec::new();
+        let mut constructor_body: Option<&MethodBody<'_>> = None;
 
         for member in members {
             match member {
@@ -1930,6 +1960,7 @@ impl Backend {
                     // (e.g. `@param list<User> $users` vs native `array $users`).
                     // We apply `resolve_effective_type()` to pick the winner.
                     if name == "__construct" {
+                        constructor_body = Some(&method.body);
                         for param in method.parameter_list.parameters.iter() {
                             if param.is_promoted_property() {
                                 let raw_name = param.variable.name.to_string();
@@ -1969,6 +2000,22 @@ impl Backend {
                                 } else {
                                     saved_native_hint.clone()
                                 };
+
+                                // When no type hint is available, infer from `new ClassName()`
+                                // default values (PHP 8.1+: `private $repo = new Repo()`).
+                                // Resolve to FQN eagerly so downstream code does not
+                                // need short-name resolution logic.
+                                let type_hint = type_hint.or_else(|| {
+                                    let dv = param.default_value.as_ref()?;
+                                    if let Expression::Instantiation(inst) = dv.value
+                                        && let Expression::Identifier(ident) = inst.class
+                                    {
+                                        let raw = ident.value().to_string();
+                                        let fqn = resolve_name_via_ctx(&raw, doc_ctx);
+                                        return Some(PhpType::Named(fqn));
+                                    }
+                                    None
+                                });
 
                                 let prop_name_offset = param.variable.span.start.offset;
                                 properties.push(PropertyInfo {
@@ -2391,6 +2438,35 @@ impl Backend {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Infer types for untyped properties from constructor assignments.
+        // Scans the constructor body for `$this->prop = new ClassName()`
+        // and fills in the type_hint when not set by declaration or docblock.
+        // Only applies when neither native type hint nor docblock type is present.
+        // Resolves to FQN eagerly so downstream code does not need
+        // short-name resolution logic.
+        if let Some(MethodBody::Concrete(concrete)) = constructor_body {
+            for stmt in concrete.statements.iter() {
+                if let Statement::Expression(expr_stmt) = stmt
+                    && let Expression::Assignment(assign) = expr_stmt.expression
+                    && let Expression::Access(Access::Property(pa)) = assign.lhs
+                    && let Expression::Variable(Variable::Direct(dv)) = pa.object
+                    && dv.name == "$this"
+                    && let ClassLikeMemberSelector::Identifier(ident) = &pa.property
+                    && let Expression::Instantiation(inst) = assign.rhs
+                    && let Expression::Identifier(class_ident) = inst.class
+                {
+                    let prop_name = ident.value.to_string();
+                    if let Some(prop) = properties.iter_mut().find(|p| {
+                        p.name == prop_name && p.type_hint.is_none() && p.native_type_hint.is_none()
+                    }) {
+                        let raw = class_ident.value().to_string();
+                        let fqn = resolve_name_via_ctx(&raw, doc_ctx);
+                        prop.type_hint = Some(PhpType::Named(fqn));
                     }
                 }
             }

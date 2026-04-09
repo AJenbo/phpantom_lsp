@@ -82,7 +82,13 @@ pub fn try_generate_docblock(
         return None;
     }
 
-    let sym = parse_declaration_info(&remaining);
+    let mut sym = parse_declaration_info(&remaining);
+
+    // For untyped properties, try to fill in the type from the parsed
+    // class data (e.g. constructor-inferred `$this->prop = new Foo()`).
+    if matches!(context, DocblockContext::Property) && sym.type_hint.is_none() {
+        enrich_property_type_from_class(&mut sym, content, position, local_classes);
+    }
 
     let snippet = build_docblock_snippet(
         &context,
@@ -176,7 +182,13 @@ pub fn try_generate_docblock_on_enter(
         return None;
     }
 
-    let sym = parse_declaration_info(&after_block);
+    let mut sym = parse_declaration_info(&after_block);
+
+    // For untyped properties, try to fill in the type from the parsed
+    // class data (e.g. constructor-inferred `$this->prop = new Foo()`).
+    if matches!(context, DocblockContext::Property) && sym.type_hint.is_none() {
+        enrich_property_type_from_class(&mut sym, content, position, local_classes);
+    }
 
     // Build the docblock as plain text (no snippet tab stops).
     let plain = build_docblock_plain(
@@ -846,6 +858,54 @@ fn extract_return_type_from_decl(after_close: &str) -> Option<PhpType> {
 }
 
 /// Extract the type hint from a property or constant declaration.
+/// Enrich an untyped property's [`SymbolInfo::type_hint`] by looking up
+/// the property in the file's parsed class data.
+///
+/// When a property has no native type hint or docblock, the constructor-
+/// inference pass in `extract_class_like_members` may have filled in a
+/// type from `$this->prop = new ClassName()` or a promoted parameter
+/// default.  This function finds that inferred type and copies it into
+/// `sym` so that the generated `@var` tag uses the concrete class name
+/// instead of `mixed`.
+///
+/// The type is shortened (leading namespace segments stripped) for
+/// readability in the generated docblock.
+fn enrich_property_type_from_class(
+    sym: &mut SymbolInfo,
+    content: &str,
+    position: Position,
+    local_classes: &[Arc<ClassInfo>],
+) {
+    // Extract the bare property name (strip the `$` prefix).
+    let prop_name = sym
+        .variable_name
+        .as_ref()
+        .and_then(|v| v.strip_prefix('$'))
+        .unwrap_or("");
+    if prop_name.is_empty() {
+        return;
+    }
+
+    // Find the enclosing class by byte offset.
+    let cursor_offset = position_to_byte_offset(content, position) as u32;
+    let enclosing = local_classes
+        .iter()
+        .find(|cls| cls.start_offset <= cursor_offset && cursor_offset <= cls.end_offset);
+    let Some(cls) = enclosing else {
+        return;
+    };
+
+    // Look up the property.  Only use the type when it was inferred
+    // (the native_type_hint is None — if it were set, the source-text
+    // parser would already have extracted it).
+    if let Some(prop) = cls.properties.iter().find(|p| p.name == prop_name)
+        && prop.native_type_hint.is_none()
+        && let Some(ref inferred) = prop.type_hint
+    {
+        sym.type_hint = Some(inferred.shorten());
+    }
+}
+
 fn extract_property_type(decl: &str) -> Option<PhpType> {
     // Strip modifiers.
     let modifiers = [

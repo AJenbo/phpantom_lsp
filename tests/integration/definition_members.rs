@@ -4056,3 +4056,744 @@ async fn test_goto_definition_see_tag_cross_file_no_namespace() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+#[tokio::test]
+async fn test_goto_definition_chained_property_cross_file() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/UserRepository.php",
+                "<?php\nnamespace App;\n\nclass UserRepository {\n    public function getById(int $id): void {}\n}\n",
+            ),
+            (
+                "src/UserService.php",
+                "<?php\nnamespace App;\n\nuse App\\UserRepository;\n\nclass UserService {\n    private UserRepository $userRepository;\n\n    public function find(int $id): void {\n        $this->userRepository->getById($id);\n    }\n}\n",
+            ),
+        ],
+    );
+
+    // Open UserService.php
+    let svc_path = dir.path().join("src/UserService.php");
+    let svc_uri = Url::from_file_path(&svc_path).unwrap();
+    let svc_content = std::fs::read_to_string(&svc_path).unwrap();
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: svc_uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: svc_content,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getById" in `$this->userRepository->getById($id)` on line 9
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: svc_uri.clone(),
+            },
+            position: Position {
+                line: 9,
+                character: 35,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->userRepository->getById() cross-file via PSR-4"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert!(
+                location.uri.path().ends_with("UserRepository.php"),
+                "Should jump to UserRepository.php, got: {}",
+                location.uri
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "getById is declared on line 4 in UserRepository.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chained_property_cross_file_docblock() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/UserRepository.php",
+                "<?php\nnamespace App;\n\nclass UserRepository {\n    public function getById(int $id): void {}\n}\n",
+            ),
+            (
+                "src/UserService.php",
+                "<?php\nnamespace App;\n\nuse App\\UserRepository;\n\nclass UserService {\n    /** @var UserRepository */\n    private $userRepository;\n\n    public function find(int $id): void {\n        $this->userRepository->getById($id);\n    }\n}\n",
+            ),
+        ],
+    );
+
+    let svc_path = dir.path().join("src/UserService.php");
+    let svc_uri = Url::from_file_path(&svc_path).unwrap();
+    let svc_content = std::fs::read_to_string(&svc_path).unwrap();
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: svc_uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: svc_content,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "getById" on line 10
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: svc_uri.clone(),
+            },
+            position: Position {
+                line: 10,
+                character: 35,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->userRepository->getById() cross-file via @var docblock"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert!(
+                location.uri.path().ends_with("UserRepository.php"),
+                "Should jump to UserRepository.php, got: {}",
+                location.uri
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chained_property_docblock_type() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                         // 0
+        "class UserRepository {\n",                        // 1
+        "    public function getById(int $id): void {}\n", // 2
+        "}\n",                                             // 3
+        "\n",                                              // 4
+        "class UserService {\n",                           // 5
+        "    /** @var UserRepository */\n",                // 6
+        "    private $userRepository;\n",                  // 7
+        "\n",                                              // 8
+        "    public function find(int $id): void {\n",     // 9
+        "        $this->userRepository->getById($id);\n",  // 10
+        "    }\n",                                         // 11
+        "}\n",                                             // 12
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 10,
+                character: 35,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->userRepository->getById() via @var docblock type"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "getById is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chain_with_trait_and_promoted_props() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/SomeTrait.php",
+                "<?php\nnamespace App;\n\ntrait SomeTrait {\n    private function helper(): bool { return true; }\n}\n",
+            ),
+            (
+                "src/Repository.php",
+                "<?php\nnamespace App;\n\nclass Repository {\n    public function findById(int $id): void {}\n}\n",
+            ),
+            (
+                "src/Service.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "\n",
+                    "use App\\SomeTrait;\n",
+                    "use App\\Repository;\n",
+                    "\n",
+                    "class Service {\n",
+                    "    use SomeTrait;\n",
+                    "\n",
+                    "    private Repository $repository;\n",
+                    "\n",
+                    "    public function __construct(\n",
+                    "        private Repository $otherRepo,\n",
+                    "    ) {\n",
+                    "        $this->repository = new Repository();\n",
+                    "    }\n",
+                    "\n",
+                    "    public function handle(int $id): void {\n",
+                    "        $this->repository->findById($id);\n",
+                    "        $this->otherRepo->findById($id);\n",
+                    "    }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    // Only open Service.php — Repository.php and SomeTrait.php stay closed.
+    let svc_path = dir.path().join("src/Service.php");
+    let svc_uri = Url::from_file_path(&svc_path).unwrap();
+    let svc_content = std::fs::read_to_string(&svc_path).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: svc_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: svc_content.clone(),
+            },
+        })
+        .await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: svc_uri.clone(),
+            },
+            position: Position {
+                line: 18,
+                character: 34,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->repository->findById() cross-file (regular property)"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert!(
+                location.uri.path().ends_with("Repository.php"),
+                "Should jump to Repository.php, got: {}",
+                location.uri
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+
+    let params2 = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: svc_uri.clone(),
+            },
+            position: Position {
+                line: 19,
+                character: 32,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result2 = backend.goto_definition(params2).await.unwrap();
+    assert!(
+        result2.is_some(),
+        "Should resolve $this->otherRepo->findById() cross-file (promoted property)"
+    );
+    match result2.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert!(
+                location.uri.path().ends_with("Repository.php"),
+                "Should jump to Repository.php, got: {}",
+                location.uri
+            );
+        }
+        other => panic!("Expected Scalar, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chain_untyped_property_constructor_assigned() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                          // 0
+        "class Repository {\n",                             // 1
+        "    public function findById(int $id): void {}\n", // 2
+        "}\n",                                              // 3
+        "\n",                                               // 4
+        "class Service {\n",                                // 5
+        "    private $repository;\n",                       // 6
+        "\n",                                               // 7
+        "    public function __construct() {\n",            // 8
+        "        $this->repository = new Repository();\n",  // 9
+        "    }\n",                                          // 10
+        "\n",                                               // 11
+        "    public function handle(int $id): void {\n",    // 12
+        "        $this->repository->findById($id);\n",      // 13
+        "    }\n",                                          // 14
+        "}\n",                                              // 15
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 13,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap().expect(
+        "Should resolve $this->repository->findById() via constructor assignment type inference",
+    );
+
+    match result {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "findById is declared on line 2 (untyped constructor-assigned)"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chain_promoted_property_new_default() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                           // 0
+        "class Repository {\n",                              // 1
+        "    public function findById(int $id): void {}\n",  // 2
+        "}\n",                                               // 3
+        "\n",                                                // 4
+        "class Service {\n",                                 // 5
+        "    public function __construct(\n",                // 6
+        "        private $repository = new Repository(),\n", // 7
+        "    ) {}\n",                                        // 8
+        "\n",                                                // 9
+        "    public function handle(int $id): void {\n",     // 10
+        "        $this->repository->findById($id);\n",       // 11
+        "    }\n",                                           // 12
+        "}\n",                                               // 13
+    );
+
+    let open_params: DidOpenTextDocumentParams = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 11,
+                character: 33,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    let result = result.expect(
+        "Should resolve $this->repository->findById() via promoted property new-default type inference",
+    );
+
+    match result {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 2,
+                "findById is declared on line 2 (promoted new-default)"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chain_untyped_constructor_assigned_cross_file_fqn() {
+    // The class name in `new Repository()` is a short name imported via `use`.
+    // Verify that constructor-inferred types resolve to FQN so that
+    // cross-file go-to-definition works without short-name fallback logic.
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Repository.php",
+                "<?php\nnamespace App;\n\nclass Repository {\n    public function findById(int $id): void {}\n}\n",
+            ),
+            (
+                "src/Service.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "\n",
+                    "use App\\Repository;\n",
+                    "\n",
+                    "class Service {\n",
+                    "    private $repository;\n",
+                    "\n",
+                    "    public function __construct() {\n",
+                    "        $this->repository = new Repository();\n",
+                    "    }\n",
+                    "\n",
+                    "    public function handle(int $id): void {\n",
+                    "        $this->repository->findById($id);\n",
+                    "    }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let svc_path = dir.path().join("src/Service.php");
+    let svc_uri = Url::from_file_path(&svc_path).unwrap();
+    let svc_content = std::fs::read_to_string(&svc_path).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: svc_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: svc_content,
+            },
+        })
+        .await;
+
+    // Click on "findById" in `$this->repository->findById($id)` on line 13
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: svc_uri.clone(),
+            },
+            position: Position {
+                line: 13,
+                character: 34,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->repository->findById() cross-file via constructor-inferred FQN"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert!(
+                location.uri.path().ends_with("Repository.php"),
+                "Should jump to Repository.php, got: {}",
+                location.uri
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "findById is declared on line 4 in Repository.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_chain_promoted_new_default_cross_file_fqn() {
+    // Promoted parameter with `new ClassName()` default where the class
+    // name is a short name imported via `use`. Verify FQN resolution.
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Repository.php",
+                "<?php\nnamespace App;\n\nclass Repository {\n    public function findById(int $id): void {}\n}\n",
+            ),
+            (
+                "src/Service.php",
+                concat!(
+                    "<?php\n",
+                    "namespace App;\n",
+                    "\n",
+                    "use App\\Repository;\n",
+                    "\n",
+                    "class Service {\n",
+                    "    public function __construct(\n",
+                    "        private $repository = new Repository(),\n",
+                    "    ) {}\n",
+                    "\n",
+                    "    public function handle(int $id): void {\n",
+                    "        $this->repository->findById($id);\n",
+                    "    }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+
+    let svc_path = dir.path().join("src/Service.php");
+    let svc_uri = Url::from_file_path(&svc_path).unwrap();
+    let svc_content = std::fs::read_to_string(&svc_path).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: svc_uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: svc_content,
+            },
+        })
+        .await;
+
+    // Click on "findById" in `$this->repository->findById($id)` on line 11
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: svc_uri.clone(),
+            },
+            position: Position {
+                line: 11,
+                character: 34,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->repository->findById() cross-file via promoted-param new-default FQN"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert!(
+                location.uri.path().ends_with("Repository.php"),
+                "Should jump to Repository.php, got: {}",
+                location.uri
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "findById is declared on line 4 in Repository.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_untyped_inference_skipped_when_native_type_exists() {
+    // A property with a native type hint should not be overridden by
+    // constructor assignment inference, even if the constructor assigns
+    // a different class.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                               // 0
+        "class Dog {\n",                         // 1
+        "    public function bark(): void {}\n", // 2
+        "}\n",                                   // 3
+        "class Cat {\n",                         // 4
+        "    public function meow(): void {}\n", // 5
+        "}\n",                                   // 6
+        "\n",                                    // 7
+        "class Shelter {\n",                     // 8
+        "    private Dog $pet;\n",               // 9
+        "\n",                                    // 10
+        "    public function __construct() {\n", // 11
+        "        $this->pet = new Cat();\n",     // 12
+        "    }\n",                               // 13
+        "\n",                                    // 14
+        "    public function demo(): void {\n",  // 15
+        "        $this->pet->bark();\n",         // 16
+        "    }\n",                               // 17
+        "}\n",                                   // 18
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Click on "bark" — should resolve to Dog::bark(), not Cat
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 16,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->pet->bark() via native Dog type, not constructor-inferred Cat"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "bark() is on Dog (line 2), not Cat"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_untyped_inference_skipped_when_docblock_type_exists() {
+    // A property with a @var docblock type should not be overridden by
+    // constructor assignment inference.
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                               // 0
+        "class Dog {\n",                         // 1
+        "    public function bark(): void {}\n", // 2
+        "}\n",                                   // 3
+        "class Cat {\n",                         // 4
+        "    public function meow(): void {}\n", // 5
+        "}\n",                                   // 6
+        "\n",                                    // 7
+        "class Shelter {\n",                     // 8
+        "    /** @var Dog */\n",                 // 9
+        "    private $pet;\n",                   // 10
+        "\n",                                    // 11
+        "    public function __construct() {\n", // 12
+        "        $this->pet = new Cat();\n",     // 13
+        "    }\n",                               // 14
+        "\n",                                    // 15
+        "    public function demo(): void {\n",  // 16
+        "        $this->pet->bark();\n",         // 17
+        "    }\n",                               // 18
+        "}\n",                                   // 19
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // Click on "bark" — should resolve to Dog::bark() via @var, not Cat
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 17,
+                character: 22,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve $this->pet->bark() via @var Dog, not constructor-inferred Cat"
+    );
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "bark() is on Dog (line 2), not Cat"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
