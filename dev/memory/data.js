@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775859307222,
+  "lastUpdate": 1775859899675,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3195,6 +3195,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 40.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "58b4b65d3ff4e72faeb21c6a40c389192bd5fe6f",
+          "message": "Fix template substitution for nested class-string<T> arguments",
+          "timestamp": "2026-04-11T00:12:44+02:00",
+          "tree_id": "433bcb835d143dbde7a2dcba53e5f0c15de60828",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/58b4b65d3ff4e72faeb21c6a40c389192bd5fe6f"
+        },
+        "date": 1775859899111,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 24.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 42.6,
             "unit": "MiB"
           }
         ]
