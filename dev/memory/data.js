@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775745325330,
+  "lastUpdate": 1775852486760,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3127,6 +3127,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 39,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "lucasalvcoutinho@gmail.com",
+            "name": "Lucas Coutinho",
+            "username": "lucasacoutinho"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e567582eb0bf8695aae84c61b878e94f198edc02",
+          "message": "feat: infer property types from constructor  assignments",
+          "timestamp": "2026-04-10T22:09:21+02:00",
+          "tree_id": "2f78e4785335d2bbc1c2804abd6d5f403d94c8a6",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/e567582eb0bf8695aae84c61b878e94f198edc02"
+        },
+        "date": 1775852485859,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 24.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 41.4,
             "unit": "MiB"
           }
         ]
