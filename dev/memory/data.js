@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775852486760,
+  "lastUpdate": 1775859307222,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3161,6 +3161,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 41.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f0a41f07cfa7baab800d97487137e524066a84bb",
+          "message": "Refactor argument splitting for template substitution",
+          "timestamp": "2026-04-11T00:02:47+02:00",
+          "tree_id": "60f3b847d96749feb87e3d3b08de26059f48d0a7",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/f0a41f07cfa7baab800d97487137e524066a84bb"
+        },
+        "date": 1775859305748,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 24.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 40.9,
             "unit": "MiB"
           }
         ]
