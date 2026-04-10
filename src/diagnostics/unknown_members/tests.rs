@@ -4388,16 +4388,15 @@ public function capture(Order $order, array $payments): void {
 
 #[test]
 fn no_false_positive_when_variable_reassigned_inside_nested_foreach() {
-    // Regression test for cache poisoning by depth-limited variable
-    // resolution.  When `$orderCostPrice` is reassigned inside a
-    // nested foreach via `$orderCostPrice = $orderCostPrice->add(…)`,
-    // the self-referential RHS triggers recursive calls to
+    // Regression test for depth-limited variable resolution.  When
+    // `$orderCostPrice` is reassigned inside a nested foreach via
+    // `$orderCostPrice = $orderCostPrice->add(…)`, the
+    // self-referential RHS triggers recursive calls to
     // resolve_variable_types.  With two levels of foreach nesting
     // the recursion reaches MAX_VAR_RESOLUTION_DEPTH, producing an
-    // empty result.  If that empty result is cached in
-    // DIAG_SUBJECT_CACHE, the later top-level resolution (at
-    // depth 0) for the *outer* foreach access hits the poisoned
-    // cache entry and reports "type could not be resolved".
+    // empty result.  The outer foreach access must still resolve
+    // correctly (at depth 0) without a false "type could not be
+    // resolved" diagnostic.
     //
     // Real-world pattern from OrderService:618:
     //   $zero = new Decimal('0');
@@ -4861,5 +4860,90 @@ $results[0]->week;
     assert!(
         diags.is_empty(),
         "expected no diagnostics for interleaved array-access property chain, got: {diags:?}",
+    );
+}
+
+// ── Property narrowing via guard clauses ────────────────────────
+
+#[test]
+fn no_false_positive_after_negated_instanceof_guard_on_property() {
+    let php = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    private Dog|Cat $pet;
+    public function test(): void {
+        if ($this->pet instanceof Dog) {
+            $this->pet->bark();
+        }
+        if (!$this->pet instanceof Cat) {
+            return;
+        }
+        $this->pet->purr();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after negated instanceof guard on property, got: {diags:?}",
+    );
+}
+
+#[test]
+fn no_false_positive_after_positive_instanceof_guard_on_property() {
+    let php = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    private Dog|Cat $pet;
+    public function test(): void {
+        if ($this->pet instanceof Cat) {
+            return;
+        }
+        $this->pet->bark();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after positive instanceof guard excludes Cat on property, got: {diags:?}",
+    );
+}
+
+#[test]
+fn no_false_positive_after_assert_instanceof_on_property() {
+    let php = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    /** @var Dog|Cat|null */
+    public $pet;
+    public function test(): void {
+        assert($this->pet instanceof Dog);
+        $this->pet->bark();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after assert instanceof on property, got: {diags:?}",
     );
 }

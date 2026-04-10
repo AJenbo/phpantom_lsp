@@ -39,6 +39,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use tower_lsp::lsp_types::*;
 
@@ -236,12 +237,14 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // Call individual collectors directly (instead of the grouped
     // collect_slow_diagnostics) so we can time each one independently.
     let next_idx = AtomicUsize::new(0);
+    let done_count = AtomicUsize::new(0);
 
     let mut all_file_diagnostics: Vec<(String, Vec<FileDiagnostic>)> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..n_threads)
             .map(|_| {
                 let backend = &backend;
                 let next_idx = &next_idx;
+                let done_count = &done_count;
                 let files = &files;
                 let file_data = &file_data;
                 s.spawn(move || {
@@ -250,12 +253,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         let i = next_idx.fetch_add(1, Ordering::Relaxed);
                         if i >= file_count {
                             break;
-                        }
-                        if use_colour
-                            && output_format == OutputFormat::Table
-                            && i.is_multiple_of(20)
-                        {
-                            eprint!("\r\x1b[2K {}", progress_bar(i + 1, file_count));
                         }
 
                         let (uri, content) = match &file_data[i] {
@@ -270,21 +267,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         let _parse_guard = with_parse_cache(content);
                         let _cache_guard =
                             with_active_resolved_class_cache(&backend.resolved_class_cache);
-                        let _subj_guard =
-                            crate::completion::resolver::with_diagnostic_subject_cache();
-
-                        // Provide scope boundaries so the diagnostic subject
-                        // cache can distinguish variables in different methods
-                        // of the same class (prevents cross-method cache
-                        // pollution).
-                        if let Some(sm) = backend.symbol_maps.read().get(uri.as_str()) {
-                            crate::completion::resolver::set_diagnostic_subject_cache_scopes(
-                                sm.scopes.clone(),
-                                sm.var_defs.clone(),
-                                sm.narrowing_blocks.clone(),
-                                sm.assert_narrowing_offsets.clone(),
-                            );
-                        }
 
                         let mut raw = Vec::new();
 
@@ -293,61 +275,80 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // the collectors directly.
                         #[cfg(debug_assertions)]
                         {
-                            macro_rules! timed_collect {
-                                ($name:expr, $call:expr) => {{
-                                    let t0 = std::time::Instant::now();
-                                    $call;
-                                    (t0.elapsed(), $name)
-                                }};
-                            }
+                            const FILE_TIMEOUT: Duration = Duration::from_secs(60);
+                            type CollectFn = dyn Fn(&Backend, &str, &str, &mut Vec<Diagnostic>);
+                            let file_start = Instant::now();
+                            let deadline = file_start + FILE_TIMEOUT;
+                            let mut timings = Vec::new();
+                            let mut timed_out = false;
 
-                            let file_start = std::time::Instant::now();
-                            let timings = [
-                                timed_collect!(
-                                    "fast",
-                                    backend.collect_fast_diagnostics(uri, content, &mut raw)
-                                ),
-                                timed_collect!(
+                            // Fast diagnostics always run (cheap).
+                            timings.push({
+                                let t0 = Instant::now();
+                                backend.collect_fast_diagnostics(uri, content, &mut raw);
+                                (t0.elapsed(), "fast")
+                            });
+
+                            // Slow collectors: each checks the deadline.
+                            let collectors: &[(&str, &CollectFn)] = &[
+                                (
                                     "unknown_class",
-                                    backend
-                                        .collect_unknown_class_diagnostics(uri, content, &mut raw)
+                                    &|b: &Backend, u: &str, c: &str, o: &mut Vec<Diagnostic>| {
+                                        b.collect_unknown_class_diagnostics(u, c, o)
+                                    },
                                 ),
-                                timed_collect!(
-                                    "unknown_member",
-                                    backend
-                                        .collect_unknown_member_diagnostics(uri, content, &mut raw)
-                                ),
-                                timed_collect!(
-                                    "unknown_function",
-                                    backend.collect_unknown_function_diagnostics(
-                                        uri, content, &mut raw,
-                                    )
-                                ),
-                                timed_collect!(
-                                    "argument_count",
-                                    backend
-                                        .collect_argument_count_diagnostics(uri, content, &mut raw)
-                                ),
-                                timed_collect!(
-                                    "implementation",
-                                    backend.collect_implementation_error_diagnostics(
-                                        uri, content, &mut raw,
-                                    )
-                                ),
-                                timed_collect!(
-                                    "deprecated",
-                                    backend.collect_deprecated_diagnostics(uri, content, &mut raw)
-                                ),
-                                timed_collect!(
-                                    "undefined_variable",
-                                    backend.collect_undefined_variable_diagnostics(
-                                        uri, content, &mut raw,
-                                    )
-                                ),
+                                ("unknown_member", &|b, u, c, o| {
+                                    b.collect_unknown_member_diagnostics(u, c, o)
+                                }),
+                                ("unknown_function", &|b, u, c, o| {
+                                    b.collect_unknown_function_diagnostics(u, c, o)
+                                }),
+                                ("argument_count", &|b, u, c, o| {
+                                    b.collect_argument_count_diagnostics(u, c, o)
+                                }),
+                                ("type_error", &|b, u, c, o| {
+                                    b.collect_type_error_diagnostics(u, c, o)
+                                }),
+                                ("implementation", &|b, u, c, o| {
+                                    b.collect_implementation_error_diagnostics(u, c, o)
+                                }),
+                                ("deprecated", &|b, u, c, o| {
+                                    b.collect_deprecated_diagnostics(u, c, o)
+                                }),
+                                ("undefined_variable", &|b, u, c, o| {
+                                    b.collect_undefined_variable_diagnostics(u, c, o)
+                                }),
+                                ("invalid_class_kind", &|b, u, c, o| {
+                                    b.collect_invalid_class_kind_diagnostics(u, c, o)
+                                }),
                             ];
 
+                            for (name, collect_fn) in collectors {
+                                if Instant::now() >= deadline {
+                                    timed_out = true;
+                                    break;
+                                }
+                                let t0 = Instant::now();
+                                collect_fn(backend, uri, content, &mut raw);
+                                timings.push((t0.elapsed(), name));
+                            }
+
                             let file_elapsed = file_start.elapsed();
-                            if file_elapsed.as_secs() >= 5 {
+                            if timed_out {
+                                let display =
+                                    files[i].strip_prefix(root).unwrap_or(&files[i]).display();
+                                let breakdown: Vec<String> = timings
+                                    .iter()
+                                    .filter(|(d, _)| d.as_millis() > 0)
+                                    .map(|(d, name)| format!("{}={:.1}s", name, d.as_secs_f64()))
+                                    .collect();
+                                eprintln!(
+                                    "\n  \u{23f1} timed out after {:.0}s: {}\n    {}",
+                                    file_elapsed.as_secs_f64(),
+                                    display,
+                                    breakdown.join(", "),
+                                );
+                            } else if file_elapsed.as_secs() >= 5 {
                                 let display =
                                     files[i].strip_prefix(root).unwrap_or(&files[i]).display();
                                 let breakdown: Vec<String> = timings
@@ -371,10 +372,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             backend.collect_unknown_member_diagnostics(uri, content, &mut raw);
                             backend.collect_unknown_function_diagnostics(uri, content, &mut raw);
                             backend.collect_argument_count_diagnostics(uri, content, &mut raw);
+                            backend.collect_type_error_diagnostics(uri, content, &mut raw);
                             backend
                                 .collect_implementation_error_diagnostics(uri, content, &mut raw);
                             backend.collect_deprecated_diagnostics(uri, content, &mut raw);
                             backend.collect_undefined_variable_diagnostics(uri, content, &mut raw);
+                            backend.collect_invalid_class_kind_diagnostics(uri, content, &mut raw);
                         }
 
                         let mut filtered: Vec<FileDiagnostic> = raw
@@ -396,6 +399,14 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 })
                             })
                             .collect();
+
+                        // Update progress bar after the file is fully
+                        // processed so the count reflects completed work,
+                        // not work that has merely been started.
+                        let completed = done_count.fetch_add(1, Ordering::Relaxed) + 1;
+                        if use_colour && output_format == OutputFormat::Table {
+                            eprint!("\r\x1b[2K {}", progress_bar(completed, file_count));
+                        }
 
                         if !filtered.is_empty() {
                             filtered.sort_by_key(|d| d.line);

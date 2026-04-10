@@ -1316,8 +1316,8 @@ fn build_function_snippet(
     _indent: &str,
     content: &str,
     position: Position,
-    _use_map: &HashMap<String, String>,
-    _file_namespace: &Option<String>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
@@ -1325,6 +1325,8 @@ fn build_function_snippet(
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
+        use_map,
+        file_namespace,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -1412,7 +1414,9 @@ fn build_function_snippet(
             lines.push(" *".to_string());
         }
         for exc in &uncaught {
-            lines.push(format!(" * @throws {}", exc));
+            let exc_str = exc.to_string();
+            let display = crate::util::short_name(&exc_str);
+            lines.push(format!(" * @throws {}", display));
         }
     }
 
@@ -1437,8 +1441,8 @@ fn build_function_plain(
     indent: &str,
     content: &str,
     position: Position,
-    _use_map: &HashMap<String, String>,
-    _file_namespace: &Option<String>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
@@ -1446,6 +1450,8 @@ fn build_function_plain(
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
+        use_map,
+        file_namespace,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -1520,7 +1526,9 @@ fn build_function_plain(
             lines.push(format!("{} *", indent));
         }
         for exc in &uncaught {
-            lines.push(format!("{} * @throws {}", indent, exc));
+            let exc_str = exc.to_string();
+            let display = crate::util::short_name(&exc_str).to_string();
+            lines.push(format!("{} * @throws {}", indent, display));
         }
     }
 
@@ -1866,6 +1874,8 @@ fn build_throws_import_edits(
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
+        use_map,
+        file_namespace,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -1880,9 +1890,10 @@ fn build_throws_import_edits(
     let mut edits = Vec::new();
 
     for exc in &uncaught {
-        let exc_str = exc.to_string();
-        if let Some(fqn) = throws_analysis::resolve_exception_fqn(&exc_str, use_map, file_namespace)
-            && !throws_analysis::has_use_import(content, &fqn)
+        // Exception types are already resolved to FQNs by
+        // `find_uncaught_throw_types_with_context` — do not re-resolve.
+        let fqn = exc.to_string();
+        if !throws_analysis::has_use_import(content, &fqn)
             && let Some(edit) = build_use_edit(&fqn, &use_block, file_namespace)
         {
             edits.extend(edit);

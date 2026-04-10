@@ -25,7 +25,6 @@
 ///   parent chain).
 /// - [`super::conditional_resolution`]: PHPStan conditional return type
 ///   resolution at call sites.
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -109,7 +108,7 @@ pub(crate) struct ResolutionCtx<'a> {
 /// Introducing this struct avoids passing 7–10 individual arguments to
 /// every helper in the resolution chain, which keeps clippy happy and
 /// makes call-sites much easier to read.
-pub(super) struct VarResolutionCtx<'a> {
+pub(crate) struct VarResolutionCtx<'a> {
     pub var_name: &'a str,
     pub current_class: &'a ClassInfo,
     pub all_classes: &'a [Arc<ClassInfo>],
@@ -133,6 +132,9 @@ pub(super) struct VarResolutionCtx<'a> {
     /// not `Lamp|Faucet`).  Completion leaves this `false` so that all
     /// possible types are offered.
     pub branch_aware: bool,
+    /// Match-arm instanceof narrowings: var name → narrowed types.
+    /// Empty outside of match(true) arm bodies.
+    pub match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
 }
 
 impl<'a> VarResolutionCtx<'a> {
@@ -181,6 +183,7 @@ impl<'a> VarResolutionCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type,
             branch_aware: self.branch_aware,
+            match_arm_narrowing: self.match_arm_narrowing.clone(),
         }
     }
 
@@ -190,7 +193,7 @@ impl<'a> VarResolutionCtx<'a> {
     /// This is useful when resolving a right-hand-side expression at a
     /// position earlier than the original cursor to avoid infinite
     /// recursion on self-referential assignments.
-    pub(super) fn with_cursor_offset(&self, cursor_offset: u32) -> VarResolutionCtx<'a> {
+    pub(crate) fn with_cursor_offset(&self, cursor_offset: u32) -> VarResolutionCtx<'a> {
         VarResolutionCtx {
             var_name: self.var_name,
             current_class: self.current_class,
@@ -202,59 +205,33 @@ impl<'a> VarResolutionCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
             branch_aware: self.branch_aware,
+            match_arm_narrowing: self.match_arm_narrowing.clone(),
         }
     }
-}
 
-/// Thread-local cache for `resolve_target_classes` results.
-/// Active during a diagnostic pass so that multiple collectors
-/// (unknown_member, argument_count) share results instead of
-/// re-resolving the same subjects independently.
-///
-/// The cache key is `(subject_text, access_kind, scope_start,
-/// var_def_offset, narrowing_offset, assert_offset)` where
-/// `scope_start` is the byte offset of the innermost enclosing
-/// function/method/closure body and `var_def_offset` is the
-/// `effective_from` of the active variable definition (or `0` for
-/// non-variable subjects).
-///
-/// Bare variable subjects are NOT cached here — they bypass the cache
-/// in [`resolve_subject_outcome`] by calling
-/// [`resolve_target_classes_expr`] directly.  This ensures that
-/// expression-level narrowing (ternary, `&&`) resolves fresh at each
-/// cursor position.  The per-access discrimination is handled by
-/// `SubjectCacheKey.access_offset` in `unknown_members.rs`.
-///
-/// Scope boundaries and variable definitions are stored alongside the
-/// cache and set by [`set_diagnostic_subject_cache_scopes`].
-type DiagSubjectCache =
-    HashMap<(String, AccessKind, u32, u32, u32, u32), Vec<crate::types::ResolvedType>>;
-
-/// File-level data stored alongside the diagnostic subject cache so
-/// that [`resolve_target_classes`] can compute the enclosing scope and
-/// active variable definition from the `cursor_offset` without needing
-/// a reference to the [`SymbolMap`].
-struct DiagSubjectCacheFileData {
-    /// Scope boundaries `(start_offset, end_offset)`.
-    scopes: Vec<(u32, u32)>,
-    /// Variable definition sites, cloned from the [`SymbolMap`].
-    var_defs: Vec<crate::symbol_map::VarDefSite>,
-    /// Narrowing block boundaries `(start_offset, end_offset)` for
-    /// if-body, elseif-body, else-body, match-arm, and switch-case
-    /// blocks.  Used to compute the innermost narrowing context for
-    /// a given cursor offset so that accesses in the same block share
-    /// a cache entry while accesses in different branches do not.
-    narrowing_blocks: Vec<(u32, u32)>,
-    /// Sorted offsets of `assert($var instanceof …)` statements.
-    /// Used as sequential narrowing boundaries so that accesses
-    /// before and after an assert get separate cache entries.
-    assert_narrowing_offsets: Vec<u32>,
-}
-
-type DiagSubjectCacheState = (DiagSubjectCache, DiagSubjectCacheFileData);
-
-thread_local! {
-    static DIAG_SUBJECT_CACHE: RefCell<Option<DiagSubjectCacheState>> = const { RefCell::new(None) };
+    /// Clone this context with match-arm instanceof narrowings applied.
+    ///
+    /// All other fields are preserved.  This is used when descending
+    /// into a `match(true)` arm body whose conditions narrow one or
+    /// more variables via `instanceof`.
+    pub(crate) fn with_match_arm_narrowing(
+        &self,
+        match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
+    ) -> VarResolutionCtx<'a> {
+        VarResolutionCtx {
+            var_name: self.var_name,
+            current_class: self.current_class,
+            all_classes: self.all_classes,
+            content: self.content,
+            cursor_offset: self.cursor_offset,
+            class_loader: self.class_loader,
+            loaders: self.loaders,
+            resolved_class_cache: self.resolved_class_cache,
+            enclosing_return_type: self.enclosing_return_type.clone(),
+            branch_aware: self.branch_aware,
+            match_arm_narrowing,
+        }
+    }
 }
 
 // ── Helpers to convert between ResolvedType and Arc<ClassInfo> ──────
@@ -269,214 +246,6 @@ fn resolved_to_arcs(resolved: Vec<ResolvedType>) -> Vec<Arc<ClassInfo>> {
     ResolvedType::into_arced_classes(resolved)
 }
 
-/// Guard that owns the diagnostic subject cache lifetime.
-/// Created by [`with_diagnostic_subject_cache`].
-pub(crate) struct DiagSubjectCacheGuard {
-    owns_cache: bool,
-}
-
-impl Drop for DiagSubjectCacheGuard {
-    fn drop(&mut self) {
-        if self.owns_cache {
-            DIAG_SUBJECT_CACHE.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
-/// Activate the diagnostic subject cache for the current thread.
-///
-/// While the returned guard is alive, `resolve_target_classes` will
-/// check and populate the cache.  Nested calls return a no-op guard.
-///
-/// After calling this, use [`set_diagnostic_subject_cache_scopes`] to
-/// provide the scope boundaries for the file being diagnosed so that
-/// the cache can distinguish variables in different methods.
-pub(crate) fn with_diagnostic_subject_cache() -> DiagSubjectCacheGuard {
-    let already_active = DIAG_SUBJECT_CACHE.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return DiagSubjectCacheGuard { owns_cache: false };
-    }
-    DIAG_SUBJECT_CACHE.with(|cell| {
-        *cell.borrow_mut() = Some((
-            HashMap::new(),
-            DiagSubjectCacheFileData {
-                scopes: Vec::new(),
-                var_defs: Vec::new(),
-                narrowing_blocks: Vec::new(),
-                assert_narrowing_offsets: Vec::new(),
-            },
-        ));
-    });
-    DiagSubjectCacheGuard { owns_cache: true }
-}
-
-/// Provide scope boundaries and variable definitions for the active
-/// diagnostic subject cache.
-///
-/// Must be called while a [`DiagSubjectCacheGuard`] is alive.  The
-/// scopes are `(start_offset, end_offset)` pairs for every
-/// function, method, closure, and arrow function body in the file.
-/// They are used to compute the enclosing scope for each
-/// `cursor_offset`, ensuring that same-named variables in different
-/// methods resolve independently.
-///
-/// The `var_defs` are cloned from the [`SymbolMap`] and used to
-/// compute the active variable definition at each cursor offset,
-/// ensuring that accesses before and after a variable reassignment
-/// within the same method get independent cache entries.
-///
-/// The `narrowing_blocks` are `(start, end)` pairs for every
-/// if-body, elseif-body, else-body, match-arm, and switch-case block
-/// in the file.  They determine the innermost narrowing context for
-/// each cursor offset so that accesses in the same block share a
-/// cache entry while accesses in different instanceof-narrowing
-/// branches get independent entries.
-pub(crate) fn set_diagnostic_subject_cache_scopes(
-    scopes: Vec<(u32, u32)>,
-    var_defs: Vec<crate::symbol_map::VarDefSite>,
-    narrowing_blocks: Vec<(u32, u32)>,
-    assert_narrowing_offsets: Vec<u32>,
-) {
-    DIAG_SUBJECT_CACHE.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        if let Some((_map, file_data)) = borrow.as_mut() {
-            file_data.scopes = scopes;
-            file_data.var_defs = var_defs;
-            file_data.narrowing_blocks = narrowing_blocks;
-            file_data.assert_narrowing_offsets = assert_narrowing_offsets;
-        }
-    });
-}
-
-/// Find the enclosing scope start offset for a given cursor position
-/// using the scope boundaries stored in the diagnostic subject cache.
-///
-/// Returns `0` when no scope contains the offset (top-level code) or
-/// when the cache is not active.
-fn diag_cache_enclosing_scope(cursor_offset: u32) -> u32 {
-    DIAG_SUBJECT_CACHE.with(|cell| {
-        let borrow = cell.borrow();
-        match borrow.as_ref() {
-            Some((_map, file_data)) => {
-                let mut best: u32 = 0;
-                for &(start, end) in &file_data.scopes {
-                    if start <= cursor_offset && cursor_offset <= end && start > best {
-                        best = start;
-                    }
-                }
-                best
-            }
-            None => 0,
-        }
-    })
-}
-
-/// Find the innermost narrowing block (if/elseif/else body, match arm,
-/// switch case) that contains the cursor offset, using the narrowing
-/// block boundaries stored in the diagnostic subject cache.
-///
-/// Returns the block's start offset, or `0` when the offset is not
-/// inside any narrowing block or when the cache is not active.  Two
-/// variable accesses that return the same value will have identical
-/// instanceof narrowing applied and can safely share a cache entry.
-fn diag_cache_narrowing_block(cursor_offset: u32) -> u32 {
-    DIAG_SUBJECT_CACHE.with(|cell| {
-        let borrow = cell.borrow();
-        match borrow.as_ref() {
-            Some((_map, file_data)) => {
-                let mut best: u32 = 0;
-                for &(start, end) in &file_data.narrowing_blocks {
-                    if start <= cursor_offset && cursor_offset <= end && start > best {
-                        best = start;
-                    }
-                }
-                best
-            }
-            None => 0,
-        }
-    })
-}
-
-/// Find the offset of the most recent `assert($var instanceof …)`
-/// statement preceding `cursor_offset`, or `0` if there is none.
-///
-/// Used as a cache discriminator so that accesses before and after an
-/// assert-instanceof in the same flat statement list get separate
-/// cache entries.
-fn diag_cache_assert_offset(cursor_offset: u32) -> u32 {
-    DIAG_SUBJECT_CACHE.with(|cell| {
-        let borrow = cell.borrow();
-        match borrow.as_ref() {
-            Some((_map, file_data)) => {
-                match file_data
-                    .assert_narrowing_offsets
-                    .partition_point(|&o| o < cursor_offset)
-                {
-                    0 => 0,
-                    i => file_data.assert_narrowing_offsets[i - 1],
-                }
-            }
-            None => 0,
-        }
-    })
-}
-
-/// Compute the `var_def_offset` discriminator for a subject at a given
-/// cursor offset.
-///
-/// For variable-based subjects (starting with `$`, excluding `$this`),
-/// returns the `effective_from` offset of the most recent variable
-/// definition visible at `cursor_offset`.  For non-variable subjects,
-/// returns `0`.
-///
-/// This ensures that the diagnostic subject cache distinguishes
-/// accesses to the same variable before and after a reassignment.
-fn diag_cache_var_def_offset(subject: &str, cursor_offset: u32) -> u32 {
-    if !subject.starts_with('$') || subject.starts_with("$this") {
-        return 0;
-    }
-    // Extract the bare variable name without '$' (e.g. "file" from
-    // "$file" or "$file->foo()").
-    let after_dollar = &subject[1..];
-    let var_name = after_dollar
-        .find("->")
-        .map(|i| &after_dollar[..i])
-        .unwrap_or(after_dollar);
-
-    DIAG_SUBJECT_CACHE.with(|cell| {
-        let borrow = cell.borrow();
-        match borrow.as_ref() {
-            Some((_map, file_data)) => {
-                let scope_start = {
-                    let mut best: u32 = 0;
-                    for &(start, end) in &file_data.scopes {
-                        if start <= cursor_offset && cursor_offset <= end && start > best {
-                            best = start;
-                        }
-                    }
-                    best
-                };
-                file_data
-                    .var_defs
-                    .iter()
-                    .rev()
-                    .find(|d| {
-                        d.name == var_name
-                            && d.scope_start == scope_start
-                            && d.effective_from <= cursor_offset
-                    })
-                    .map(|d| d.effective_from)
-                    .unwrap_or(0)
-            }
-            None => 0,
-        }
-    })
-}
-
-/// Resolve a completion subject to all candidate class types.
-///
 /// Resolve a completion subject to all candidate types, preserving
 /// both class info and type strings.
 ///
@@ -485,98 +254,13 @@ fn diag_cache_var_def_offset(subject: &str, cursor_offset: u32) -> u32 {
 /// (e.g. `PhpType::Named("Collection")`) and the optional `ClassInfo`.
 /// Callers that only need classes can call
 /// `ResolvedType::into_arced_classes()` on the result.
-///
-/// When a [`DiagSubjectCacheGuard`] is active on the current thread,
-/// results are cached by `(subject_text, access_kind, scope_start,
-/// var_def_offset, narrowing_offset, assert_offset)` so that multiple
-/// diagnostic collectors sharing the same file avoid redundant
-/// resolution work while keeping different method scopes independent.
 pub(crate) fn resolve_target_classes(
     subject: &str,
     access_kind: AccessKind,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    resolve_target_classes_inner(subject, access_kind, ctx, false)
-}
-
-/// Resolve a completion subject, optionally skipping the
-/// `DIAG_SUBJECT_CACHE` lookup while still populating it.
-///
-/// When `skip_cache_lookup` is `true`, the cache is not checked but
-/// the result IS stored.  This replicates the old
-/// `SKIP_DIAG_CACHE_FOR_VARIABLES` behavior: the top-level diagnostic
-/// resolver (`resolve_subject_outcome`) resolves bare variables fresh
-/// at each cursor position (essential for ternary narrowing), while
-/// the cached result remains available for internal chain resolution
-/// calls that reference the same variable as a base expression.
-fn resolve_target_classes_inner(
-    subject: &str,
-    access_kind: AccessKind,
-    ctx: &ResolutionCtx<'_>,
-    skip_cache_lookup: bool,
-) -> Vec<ResolvedType> {
-    // ── Fast path: check the thread-local diagnostic cache ──────
-    let scope_start = diag_cache_enclosing_scope(ctx.cursor_offset);
-    let var_def_offset = diag_cache_var_def_offset(subject, ctx.cursor_offset);
-    // For variable subjects (excluding $this), use the innermost
-    // narrowing block (if/elseif/else body) as a cache discriminator
-    // so that accesses inside different instanceof-narrowing contexts
-    // get independent cache entries.  Accesses in the same block
-    // share a cache entry because they receive identical narrowing.
-    let narrowing_offset = if subject.starts_with('$') && !subject.starts_with("$this") {
-        diag_cache_narrowing_block(ctx.cursor_offset)
-    } else {
-        0
-    };
-    let assert_offset = if subject.starts_with('$') && !subject.starts_with("$this") {
-        diag_cache_assert_offset(ctx.cursor_offset)
-    } else {
-        0
-    };
-    let cache_key = (
-        subject.to_string(),
-        access_kind,
-        scope_start,
-        var_def_offset,
-        narrowing_offset,
-        assert_offset,
-    );
-
-    if !skip_cache_lookup {
-        let cached = DIAG_SUBJECT_CACHE.with(|cell| {
-            let borrow = cell.borrow();
-            borrow
-                .as_ref()
-                .and_then(|(map, _)| map.get(&cache_key).cloned())
-        });
-        if let Some(result) = cached {
-            return result;
-        }
-    }
-
     let expr = SubjectExpr::parse(subject);
-    let result = resolve_target_classes_expr(&expr, access_kind, ctx);
-
-    // ── Populate the cache if active ────────────────────────────
-    // Skip caching empty results when the variable resolution depth
-    // guard has fired.  A depth-limited empty result does not mean
-    // the variable is genuinely unresolvable — it only means the
-    // recursion was too deep *this time*.  Caching such an empty
-    // vec would poison the cache: a later top-level lookup (at
-    // depth 0) would hit the cached empty entry and produce a
-    // false "type could not be resolved" diagnostic.
-    let skip_cache =
-        result.is_empty() && super::variable::resolution::is_var_resolution_depth_limited();
-    if !skip_cache {
-        DIAG_SUBJECT_CACHE.with(|cell| {
-            let mut borrow = cell.borrow_mut();
-            if let Some((map, _)) = borrow.as_mut() {
-                map.insert(cache_key, result.clone());
-            }
-        });
-    }
-
-    result
+    resolve_target_classes_expr(&expr, access_kind, ctx)
 }
 
 /// Core dispatch for [`resolve_target_classes`], operating on a
@@ -1064,39 +748,12 @@ pub(crate) enum SubjectOutcome {
 ///   - If a type string refers to an unloadable class, return
 ///     `UnresolvableClass`.
 ///   - If the result is empty, return `Untyped`.
-///
-/// For bare variable subjects, the `DIAG_SUBJECT_CACHE` lookup is
-/// skipped (but the result is still stored) so that
-/// `resolve_variable_types` runs fresh at `ctx.cursor_offset`.
-/// This is essential for expression-level narrowing: inside a
-/// ternary like `$x instanceof Foo ? $x->bar() : …`, the same
-/// variable `$x` must resolve differently at the `bar()` cursor
-/// position (narrowed) vs a prior access outside the ternary
-/// (un-narrowed).  The `DIAG_SUBJECT_CACHE` key doesn't
-/// distinguish these positions (and shouldn't — internal chain
-/// resolution calls reuse the outer cursor offset, and must share
-/// cache entries).  The per-access discrimination is handled by
-/// `SubjectCacheKey.access_offset` in `unknown_members.rs`, which
-/// ensures each member-access span gets its own `SubjectOutcome`.
-///
-/// The result is still cached so that subsequent internal calls
-/// (e.g. chain resolution that references the same variable as a
-/// base expression) benefit from the cache.
 pub(crate) fn resolve_subject_outcome(
     subject: &str,
     access_kind: AccessKind,
     ctx: &ResolutionCtx<'_>,
 ) -> SubjectOutcome {
-    let expr = SubjectExpr::parse(subject);
-
-    // For bare variable subjects, skip the DIAG_SUBJECT_CACHE lookup
-    // so that resolve_variable_types runs fresh at ctx.cursor_offset.
-    // The result is still stored in the cache so that internal chain
-    // resolution calls (resolve_call_return_types_expr etc.) that
-    // reference the same variable as a base expression benefit from
-    // the cache.
-    let skip_cache = matches!(expr, SubjectExpr::Variable(_));
-    let resolved = resolve_target_classes_inner(subject, access_kind, ctx, skip_cache);
+    let resolved = resolve_target_classes(subject, access_kind, ctx);
 
     if !resolved.is_empty() {
         // ── Check for class-bearing entries ──────────────────────
@@ -1134,7 +791,7 @@ pub(crate) fn resolve_subject_outcome(
     }
 
     // ── Result is empty — classify why ──────────────────────────
-    // `expr` was already parsed above for the bare-variable check.
+    let expr = SubjectExpr::parse(subject);
 
     // For call expressions, check the raw return type hint.
     if let SubjectExpr::CallExpr {
@@ -1480,6 +1137,7 @@ fn apply_property_narrowing(
                 resolved_class_cache: None,
                 enclosing_return_type: None,
                 branch_aware: false,
+                match_arm_narrowing: HashMap::new(),
             };
             walk_property_narrowing_in_statements(program.statements.iter(), &ctx, &mut plain);
         },

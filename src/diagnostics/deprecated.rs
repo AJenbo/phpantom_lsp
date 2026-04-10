@@ -98,9 +98,10 @@ impl Backend {
                             span.end as usize,
                         )
                     {
+                        let class_fqn = cls.fqn();
                         out.push(deprecated_diagnostic(
                             range,
-                            &cls.name,
+                            &class_fqn,
                             None,
                             msg,
                             &cls.see_refs,
@@ -192,10 +193,11 @@ impl Backend {
                                 span.end as usize,
                             )
                         {
+                            let class_fqn = resolved.fqn();
                             out.push(deprecated_diagnostic(
                                 range,
                                 member_name,
-                                Some(&resolved.name),
+                                Some(&class_fqn),
                                 msg,
                                 &method.see_refs,
                             ));
@@ -216,10 +218,11 @@ impl Backend {
                                 span.end as usize,
                             )
                         {
+                            let class_fqn = resolved.fqn();
                             out.push(deprecated_diagnostic(
                                 range,
                                 member_name,
-                                Some(&resolved.name),
+                                Some(&class_fqn),
                                 msg,
                                 &prop.see_refs,
                             ));
@@ -237,10 +240,11 @@ impl Backend {
                                 span.end as usize,
                             )
                         {
+                            let class_fqn = resolved.fqn();
                             out.push(deprecated_diagnostic(
                                 range,
                                 member_name,
-                                Some(&resolved.name),
+                                Some(&class_fqn),
                                 msg,
                                 &constant.see_refs,
                             ));

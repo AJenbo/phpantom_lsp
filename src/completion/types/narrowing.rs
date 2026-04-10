@@ -32,6 +32,25 @@ use mago_syntax::ast::*;
 use super::conditional::extract_class_string_from_expr;
 use crate::completion::resolver::VarResolutionCtx;
 
+/// Resolve the `class_type` inside an `InstanceofExtraction` to its FQN.
+///
+/// When the extractor returns a short class name (e.g. `Foo`), the
+/// `class_loader` may know the fully-qualified name (`App\Foo`).
+/// Resolving early ensures that downstream comparisons (e.g.
+/// `out.contains(&cls_type)`) and `ResolvedType` hints carry the FQN
+/// rather than the short name.
+fn resolve_extraction_to_fqn(
+    extraction: &mut InstanceofExtraction,
+    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
+) {
+    if let PhpType::Named(ref name) = extraction.class_type {
+        let resolved = crate::util::resolve_name_via_loader(name, class_loader);
+        if resolved != *name {
+            extraction.class_type = PhpType::Named(resolved);
+        }
+    }
+}
+
 /// Resolve a list of `PhpType` values into a deduplicated `Vec<ClassInfo>`.
 ///
 /// This is a shared helper for the compound instanceof/assert narrowing
@@ -137,7 +156,8 @@ pub(in crate::completion) fn try_apply_instanceof_narrowing(
         return;
     }
 
-    if let Some(extraction) = try_extract_instanceof_with_negation(condition, ctx.var_name) {
+    if let Some(mut extraction) = try_extract_instanceof_with_negation(condition, ctx.var_name) {
+        resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
         if extraction.negated {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results);
         } else {
@@ -177,7 +197,8 @@ pub(in crate::completion) fn try_apply_instanceof_narrowing_inverse(
     // In the else branch, at least one doesn't hold.  Since we can't
     // precisely model "not (A and B)", we don't narrow.  Fall through.
 
-    if let Some(extraction) = try_extract_instanceof_with_negation(condition, ctx.var_name) {
+    if let Some(mut extraction) = try_extract_instanceof_with_negation(condition, ctx.var_name) {
+        resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
         // Flip the polarity: positive condition → exclude in else,
         // negated condition → include in else.
         if extraction.negated {
@@ -754,7 +775,8 @@ fn resolve_assertion_template_type(
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
-        return PhpType::Named(class_name);
+        let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
+        return PhpType::Named(fqn);
     }
 
     // Try to resolve a variable argument's class-string type.
@@ -1000,7 +1022,8 @@ pub(in crate::completion) fn try_apply_assert_instanceof_narrowing(
         return;
     }
 
-    if let Some(extraction) = try_extract_assert_instanceof(expr, ctx.var_name) {
+    if let Some(mut extraction) = try_extract_assert_instanceof(expr, ctx.var_name) {
+        resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
         if extraction.negated {
             apply_instanceof_exclusion(&extraction.class_type, ctx, results);
         } else {
@@ -1125,9 +1148,10 @@ pub(in crate::completion) fn try_apply_match_true_narrowing(
             }
             // Check each condition in this arm (comma-separated)
             for condition in expr_arm.conditions.iter() {
-                if let Some(extraction) =
+                if let Some(mut extraction) =
                     try_extract_instanceof_with_negation(condition, ctx.var_name)
                 {
+                    resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
                     if extraction.negated {
                         apply_instanceof_exclusion(&extraction.class_type, ctx, results);
                     } else {
@@ -1175,9 +1199,10 @@ pub(in crate::completion) fn try_apply_ternary_instanceof_narrowing(
             };
 
             if in_then {
-                if let Some(extraction) =
+                if let Some(mut extraction) =
                     try_extract_instanceof_with_negation(cond_expr.condition, ctx.var_name)
                 {
+                    resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
                     if extraction.negated {
                         apply_instanceof_exclusion(&extraction.class_type, ctx, results);
                     } else {
@@ -1190,9 +1215,10 @@ pub(in crate::completion) fn try_apply_ternary_instanceof_narrowing(
                     }
                 }
             } else if in_else
-                && let Some(extraction) =
+                && let Some(mut extraction) =
                     try_extract_instanceof_with_negation(cond_expr.condition, ctx.var_name)
             {
+                resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
                 // Flip polarity for the else branch.
                 if extraction.negated {
                     apply_instanceof_inclusion(
@@ -1381,7 +1407,8 @@ fn apply_and_lhs_narrowing(
         }
         _ => {
             // Try to extract a single instanceof / is_a / class-identity check.
-            if let Some(extraction) = try_extract_instanceof_with_negation(expr, ctx.var_name) {
+            if let Some(mut extraction) = try_extract_instanceof_with_negation(expr, ctx.var_name) {
+                resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
                 if extraction.negated {
                     apply_instanceof_exclusion(&extraction.class_type, ctx, results);
                 } else {
@@ -1694,8 +1721,10 @@ pub(in crate::completion) fn apply_guard_clause_narrowing(
     // ── instanceof / is_a / get_class / ::class narrowing ──
     // The then-body exits, so subsequent code is the "else" — apply
     // the inverse of the condition.
-    if let Some(extraction) = try_extract_instanceof_with_negation(if_stmt.condition, ctx.var_name)
+    if let Some(mut extraction) =
+        try_extract_instanceof_with_negation(if_stmt.condition, ctx.var_name)
     {
+        resolve_extraction_to_fqn(&mut extraction, ctx.class_loader);
         // Positive instanceof + exit → exclude after (var is NOT that class)
         // Negated instanceof + exit → include after (var IS that class)
         if extraction.negated {

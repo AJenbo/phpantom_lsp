@@ -240,30 +240,6 @@ impl Backend {
         // entire file from scratch.
         let _parse_guard = with_parse_cache(content);
 
-        // ── Inner resolution cache for chain bases ──────────────────────
-        // When resolving chain subjects like `$class->methods()` and
-        // `$class->properties()`, each one independently calls
-        // `resolve_target_classes("$class", …)` to resolve the base.
-        // The DIAG_SUBJECT_CACHE deduplicates these inner lookups.
-        //
-        // In production this cache is already active (activated by
-        // `publish_diagnostics_for_file` or `analyse::run`), so the
-        // guard here is a no-op.  For standalone calls (benchmarks,
-        // tests) it ensures chain bases are resolved once rather than
-        // once per unique chain expression.
-        let _subj_guard = crate::completion::resolver::with_diagnostic_subject_cache();
-
-        // Provide scope boundaries so the diagnostic subject cache can
-        // distinguish variables in different methods of the same class.
-        // In production this is already set by the outer caller; for
-        // standalone calls (tests, benchmarks) set it here.
-        crate::completion::resolver::set_diagnostic_subject_cache_scopes(
-            symbol_map.scopes.clone(),
-            symbol_map.var_defs.clone(),
-            symbol_map.narrowing_blocks.clone(),
-            symbol_map.assert_narrowing_offsets.clone(),
-        );
-
         // ── Subject resolution cache for this diagnostic pass ───────────
         let mut subject_cache: SubjectCache = HashMap::new();
 
@@ -333,63 +309,76 @@ impl Backend {
             // For variable subjects (excluding $this), compute the
             // active definition offset so that accesses before and
             // after a reassignment get separate cache entries.
-            let var_def_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    // Extract the bare variable name (e.g. "$file" from
-                    // "$file" or from a chain like "$file->foo()").
-                    let var_name = subject_text
-                        .find("->")
-                        .map(|i| &subject_text[..i])
-                        .unwrap_or(subject_text);
-                    symbol_map.active_var_def_offset(
-                        &var_name[1..], // strip leading '$'
-                        span.start,
-                    )
-                } else {
-                    0
-                };
+            let var_def_offset = if subject_text.starts_with('$')
+                && subject_text != "$this"
+                && !subject_text.starts_with("$this->")
+            {
+                // Extract the bare variable name (e.g. "$file" from
+                // "$file" or from a chain like "$file->foo()").
+                let var_name = subject_text
+                    .find("->")
+                    .map(|i| &subject_text[..i])
+                    .unwrap_or(subject_text);
+                symbol_map.active_var_def_offset(
+                    &var_name[1..], // strip leading '$'
+                    span.start,
+                )
+            } else {
+                0
+            };
 
-            // For variable subjects (excluding $this), use the
-            // innermost narrowing block (if/elseif/else body) as a
-            // cache discriminator so that accesses in different
+            // Use the innermost narrowing block (if/elseif/else body)
+            // as a cache discriminator so that accesses in different
             // instanceof-narrowing contexts get independent entries.
             // Accesses in the same block share a cache entry because
             // they receive identical narrowing.
-            let narrowing_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    symbol_map.find_narrowing_block(span.start)
-                } else {
-                    0
-                };
+            //
+            // This applies to regular variables ($var) AND property
+            // chains on $this ($this->prop), because instanceof
+            // checks and assert() calls can narrow property types
+            // just like local variables.  Bare $this is excluded
+            // because its type never changes within a method.
+            let needs_narrowing_discriminator =
+                subject_text.starts_with('$') && subject_text != "$this";
+            let narrowing_offset = if needs_narrowing_discriminator {
+                symbol_map.find_narrowing_block(span.start)
+            } else {
+                0
+            };
 
-            // For variable subjects, also check whether an
-            // `assert($var instanceof …)` precedes this access.
-            // Assert-instanceof does not create a block scope, so
-            // without this discriminator accesses before and after
-            // the assert would share the same (stale) cache entry.
-            let assert_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    symbol_map.find_preceding_assert_offset(span.start)
-                } else {
-                    0
-                };
+            // Also check whether an `assert($var instanceof …)`
+            // precedes this access.  Assert-instanceof does not
+            // create a block scope, so without this discriminator
+            // accesses before and after the assert would share the
+            // same (stale) cache entry.
+            let assert_offset = if needs_narrowing_discriminator {
+                symbol_map.find_preceding_assert_offset(span.start)
+            } else {
+                0
+            };
 
-            // For variable subjects, use the access span offset as a
-            // cache discriminator so that expression-level narrowing
-            // (ternary branches, inline && chains) produces
-            // independent entries.  Block-level narrowing (if/else)
-            // is already covered by `narrowing_offset`, but ternary
-            // expressions are standalone statements — they don't
-            // create a narrowing block.  Using the access offset
-            // ensures each member access is resolved at its own
-            // cursor position, which is what the unified resolution
-            // pipeline expects.
-            let access_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    span.start
-                } else {
-                    0
-                };
+            // Use the access span offset as a cache discriminator so
+            // that expression-level narrowing (ternary branches,
+            // inline && chains) produces independent entries.
+            // Block-level narrowing (if/else) is already covered by
+            // `narrowing_offset`, but ternary expressions are
+            // standalone statements — they don't create a narrowing
+            // block.  Using the access offset ensures each member
+            // access is resolved at its own cursor position, which is
+            // what the unified resolution pipeline expects.
+            //
+            // This only applies to local variables ($var), NOT to
+            // $this->prop chains.  Property accesses on $this are
+            // already discriminated by narrowing_offset and
+            // assert_offset (which cover if/else and assert()
+            // narrowing).  Adding per-access offsets for $this->prop
+            // would bust the cache on every distinct source location,
+            // turning O(1) cached lookups into O(N) full resolutions
+            // and causing pathological slowdowns on large files.
+            let needs_access_offset = subject_text.starts_with('$')
+                && subject_text != "$this"
+                && !subject_text.starts_with("$this->");
+            let access_offset = if needs_access_offset { span.start } else { 0 };
 
             let cache_key = SubjectCacheKey {
                 subject_text: subject_text.clone(),

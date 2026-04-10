@@ -178,37 +178,6 @@ pub(crate) fn detect_catch_context(content: &str, position: Position) -> Option<
 ///
 /// Smart exception suggestions sort before any fallback items.
 /// `\Throwable` is always offered but sorted last among the suggestions.
-/// Resolve a short exception name to a FQN using the file's use-map
-/// and namespace.
-///
-/// Resolution order (matching PHP semantics):
-///   1. If the name starts with `\`, it is already fully-qualified.
-///   2. If the use-map contains an import for the short name, use the
-///      imported FQN.
-///   3. If the file has a namespace, prepend it.
-///   4. Otherwise the name is global (returned as-is).
-fn resolve_exception_fqn(
-    name: &str,
-    use_map: &HashMap<String, String>,
-    file_namespace: &Option<String>,
-) -> String {
-    let trimmed = name.trim_start_matches('\\');
-    // 1. Already FQN (leading backslash).
-    if name.starts_with('\\') {
-        return trimmed.to_string();
-    }
-    // 2. Use-map lookup (by short name / first segment).
-    if let Some(fqn) = use_map.get(trimmed) {
-        return fqn.clone();
-    }
-    // 3. Prepend file namespace.
-    if let Some(ns) = file_namespace {
-        return format!("{}\\{}", ns, trimmed);
-    }
-    // 4. Global.
-    trimmed.to_string()
-}
-
 pub(crate) fn build_catch_completions(
     ctx: &CatchContext,
     use_map: &HashMap<String, String>,
@@ -218,7 +187,7 @@ pub(crate) fn build_catch_completions(
     let partial_lower = ctx.partial.to_lowercase();
 
     for (idx, exc_type) in ctx.suggested_types.iter().enumerate() {
-        let fqn = resolve_exception_fqn(exc_type, use_map, file_namespace);
+        let fqn = crate::util::resolve_to_fqn(exc_type, use_map, file_namespace);
         let sn = short_name(&fqn);
 
         // Filter by the partial text the user has typed
@@ -421,10 +390,10 @@ impl Backend {
             return false; // prevent infinite loops
         }
 
-        let short = short_name(class_name);
+        let normalized = class_name.strip_prefix('\\').unwrap_or(class_name);
 
         // These three types form the root of PHP's exception hierarchy.
-        if matches!(short, "Throwable" | "Exception" | "Error") {
+        if matches!(normalized, "Throwable" | "Exception" | "Error") {
             return true;
         }
 

@@ -185,8 +185,23 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
         existing.type_assertions = ancestor.type_assertions.clone();
     }
 
-    // ── Parameters (by position) ────────────────────────────────
-    enrich_parameters_from_ancestor(&mut existing.parameters, &ancestor.parameters);
+    // ── Parameters ──────────────────────────────────────────────
+    // For constructors, use **name-based** matching instead of
+    // positional.  PHP constructors don't follow Liskov substitution
+    // — a child constructor can have a completely different signature
+    // (different parameter count, order, types).  Positional
+    // enrichment would incorrectly map ancestor param types onto
+    // unrelated child params (e.g. Exception's `$code` type `int`
+    // onto a child's `$message` param at position 1).
+    //
+    // This follows PHPStan's `PhpDocInheritanceResolver`: for
+    // `__construct` the positional parameter name list falls back to
+    // the child's own names, so only same-named parameters inherit.
+    if existing.name == "__construct" {
+        enrich_constructor_parameters_by_name(&mut existing.parameters, &ancestor.parameters);
+    } else {
+        enrich_parameters_from_ancestor(&mut existing.parameters, &ancestor.parameters);
+    }
 
     // ── Descriptions ────────────────────────────────────────────
     if existing.description.is_none() && ancestor.description.is_some() {
@@ -208,16 +223,66 @@ fn enrich_parameters_from_ancestor(
     ancestor_params: &[ParameterInfo],
 ) {
     for (existing_param, ancestor_param) in existing_params.iter_mut().zip(ancestor_params) {
-        // Type hint enrichment
-        if lacks_docblock_override(&existing_param.type_hint, &existing_param.native_type_hint)
-            && ancestor_param.type_hint.is_some()
+        enrich_single_parameter(existing_param, ancestor_param);
+    }
+}
+
+/// Enrich constructor parameters from ancestor parameters, matched by name.
+///
+/// Unlike regular methods (which follow Liskov substitution and can
+/// safely use positional matching), constructors can have completely
+/// different signatures.  Only parameters with the **same name** in
+/// both the child and ancestor are enriched.
+fn enrich_constructor_parameters_by_name(
+    existing_params: &mut [ParameterInfo],
+    ancestor_params: &[ParameterInfo],
+) {
+    for existing_param in existing_params.iter_mut() {
+        if let Some(ancestor_param) = ancestor_params
+            .iter()
+            .find(|ap| ap.name == existing_param.name)
         {
-            existing_param.type_hint = ancestor_param.type_hint.clone();
+            enrich_single_parameter(existing_param, ancestor_param);
         }
-        // Description enrichment
-        if existing_param.description.is_none() && ancestor_param.description.is_some() {
-            existing_param.description = ancestor_param.description.clone();
-        }
+    }
+}
+
+/// Enrich a single child parameter from an ancestor parameter.
+///
+/// Copies the ancestor's `type_hint` when the child lacks a docblock
+/// override, the ancestor has a richer type, **and** the child's
+/// native type is not a specific concrete type.
+///
+/// PHP allows contravariant parameter types: a concrete class may
+/// declare `?int` where the interface says `int`, or Carbon's
+/// `setTimezone(DateTimeZone|string|int)` may widen DateTime's
+/// `setTimezone(DateTimeZone)`.  In those cases the child's native
+/// type is an intentional widening and must not be narrowed.
+///
+/// However, when the child's native type is a placeholder like
+/// `object` or `mixed` (common in `@implements`/`@extends` generic
+/// patterns where the interface declares `object $entity` and the
+/// `@implements` tag substitutes the template to a concrete type),
+/// the ancestor's enriched type should flow through.
+fn enrich_single_parameter(existing_param: &mut ParameterInfo, ancestor_param: &ParameterInfo) {
+    // Type hint enrichment — the child must lack a docblock override
+    // AND the ancestor must have a richer type (docblock that goes
+    // beyond its native hint).  Additionally, skip enrichment when
+    // the child has a specific native type (not `object`/`mixed`)
+    // because the child's declaration is intentional and may be
+    // wider than the ancestor's (contravariant parameters).
+    let child_has_specific_native = existing_param.native_type_hint.as_ref().is_some_and(|nt| {
+        !nt.is_object() && !nt.is_mixed() && !nt.is_array_like() && !nt.is_iterable()
+    });
+    if !child_has_specific_native
+        && lacks_docblock_override(&existing_param.type_hint, &existing_param.native_type_hint)
+        && ancestor_has_richer_type(&ancestor_param.type_hint, &ancestor_param.native_type_hint)
+    {
+        existing_param.type_hint = ancestor_param.type_hint.clone();
+    }
+    // Description enrichment
+    if existing_param.description.is_none() && ancestor_param.description.is_some() {
+        existing_param.description = ancestor_param.description.clone();
     }
 }
 
@@ -671,10 +736,9 @@ fn merge_traits_into(
             // TraitB's methods, `method` should be skipped.
             let excluded = ctx.precedences.iter().any(|p| {
                 p.method_name == method.name
-                    && p.insteadof.iter().any(|excluded_trait| {
-                        excluded_trait == trait_name
-                            || short_name(excluded_trait) == short_name(trait_name)
-                    })
+                    && p.insteadof
+                        .iter()
+                        .any(|excluded_trait| excluded_trait == trait_name)
             });
             if excluded {
                 continue;
@@ -694,10 +758,7 @@ fn merge_traits_into(
                     && let Some(vis) = alias.visibility
                 {
                     // Check trait name matches (if specified)
-                    let name_matches = alias
-                        .trait_name
-                        .as_ref()
-                        .is_none_or(|t| t == trait_name || short_name(t) == short_name(trait_name));
+                    let name_matches = alias.trait_name.as_ref().is_none_or(|t| t == trait_name);
                     if name_matches {
                         method.visibility = vis;
                     }
@@ -741,10 +802,7 @@ fn merge_traits_into(
             };
 
             // Check trait name matches (if specified).
-            let name_matches = alias
-                .trait_name
-                .as_ref()
-                .is_none_or(|t| t == trait_name || short_name(t) == short_name(trait_name));
+            let name_matches = alias.trait_name.as_ref().is_none_or(|t| t == trait_name);
             if !name_matches {
                 continue;
             }

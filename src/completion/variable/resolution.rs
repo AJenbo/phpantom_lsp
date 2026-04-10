@@ -30,6 +30,7 @@
 /// to the [`crate::completion::type_narrowing`] module.  Closure/arrow-function scope
 /// handling is delegated to [`super::closure_resolution`].
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -58,41 +59,29 @@ use crate::completion::resolver::{Loaders, VarResolutionCtx};
 // directly (diagnostics, hover, foreach resolution).
 thread_local! {
     static VAR_RESOLUTION_DEPTH: Cell<u8> = const { Cell::new(0) };
-    /// Sticky flag set when `resolve_variable_types` returns empty
-    /// because the depth guard fired.  The flag stays set until the
-    /// outermost `resolve_variable_types` call returns, so callers
-    /// up the stack (e.g. `resolve_target_classes`) can detect that
-    /// an empty result was caused by the depth limit — not because
-    /// the variable is genuinely unresolvable — and skip caching it.
-    static VAR_RESOLUTION_DEPTH_LIMITED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Maximum nesting depth for `resolve_variable_types` calls.
 ///
-/// Four levels covers legitimate nested resolution such as:
-///   depth 0: resolve `$arr` built via `$arr[$key] = ['k' => $var]`
-///   depth 1: resolve `$var` (array element variable in the shape literal)
-///   depth 2: resolve `$item->prop` (RHS of `$var = $item->prop`)
-///   depth 3: resolve `$item` (foreach value binding → iterable param)
+/// Six levels covers legitimate nested resolution chains where each
+/// variable assignment depends on the previous variable's type:
+///
+///   depth 0: resolve `$debt`       (from `$order->getDebtCollection()`)
+///   depth 1: resolve `$order`      (from `$period->getOrder()`)
+///   depth 2: resolve `$period`     (from `$agreement->getPeriods()->…->lastPeriod()`)
+///   depth 3: resolve `$agreement`  (from `$customer->getLatestAgreement()`)
+///   depth 4: resolve `$customer`   (from `$event->token->getCustomer()`)
+///   depth 5: resolve `$event`      (method parameter — no further recursion)
+///
+/// This pattern is common in Laravel code where each step guards
+/// against null and then chains to the next model accessor.
 ///
 /// Cycles like `foreach ($x->method() as $x)` are caught by a
 /// targeted check in `try_resolve_foreach_value_type` (which skips
 /// resolution when the value variable shadows the iterator receiver)
 /// rather than by this depth limit alone.  The depth limit is a
 /// safety net for any remaining recursive patterns.
-const MAX_VAR_RESOLUTION_DEPTH: u8 = 4;
-
-/// Returns `true` when any `resolve_variable_types` call on the
-/// current stack has returned empty because the depth guard fired.
-///
-/// The flag is sticky: once set, it stays `true` until the outermost
-/// `resolve_variable_types` call returns and clears it.  This lets
-/// callers further up the stack (e.g. `resolve_target_classes`) detect
-/// that an empty result was caused by the depth limit — not because
-/// the variable is genuinely unresolvable — and skip caching it.
-pub(crate) fn is_var_resolution_depth_limited() -> bool {
-    VAR_RESOLUTION_DEPTH_LIMITED.with(|f| f.get())
-}
+const MAX_VAR_RESOLUTION_DEPTH: u8 = 6;
 
 /// Build a [`VarClassStringResolver`] closure from a [`VarResolutionCtx`].
 ///
@@ -201,7 +190,6 @@ pub(crate) fn resolve_variable_types(
     });
     if depth >= MAX_VAR_RESOLUTION_DEPTH {
         VAR_RESOLUTION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-        VAR_RESOLUTION_DEPTH_LIMITED.with(|f| f.set(true));
         return vec![];
     }
 
@@ -217,22 +205,13 @@ pub(crate) fn resolve_variable_types(
             resolved_class_cache: None,
             enclosing_return_type: None,
             branch_aware: false,
+            match_arm_narrowing: HashMap::new(),
         };
 
         resolve_variable_in_statements(program.statements.iter(), &ctx)
     });
 
-    let new_depth = VAR_RESOLUTION_DEPTH.with(|d| {
-        let v = d.get().saturating_sub(1);
-        d.set(v);
-        v
-    });
-    // Clear the depth-limited flag when the outermost call returns.
-    // Inner calls leave it set so that every caller in the stack
-    // can observe it.
-    if new_depth == 0 {
-        VAR_RESOLUTION_DEPTH_LIMITED.with(|f| f.set(false));
-    }
+    VAR_RESOLUTION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
     result
 }
 
@@ -260,7 +239,6 @@ pub(crate) fn resolve_variable_types_branch_aware(
     });
     if depth >= MAX_VAR_RESOLUTION_DEPTH {
         VAR_RESOLUTION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-        VAR_RESOLUTION_DEPTH_LIMITED.with(|f| f.set(true));
         return vec![];
     }
 
@@ -279,20 +257,14 @@ pub(crate) fn resolve_variable_types_branch_aware(
                 resolved_class_cache: None,
                 enclosing_return_type: None,
                 branch_aware: true,
+                match_arm_narrowing: HashMap::new(),
             };
 
             resolve_variable_in_statements(program.statements.iter(), &ctx)
         },
     );
 
-    let new_depth = VAR_RESOLUTION_DEPTH.with(|d| {
-        let v = d.get().saturating_sub(1);
-        d.set(v);
-        v
-    });
-    if new_depth == 0 {
-        VAR_RESOLUTION_DEPTH_LIMITED.with(|f| f.set(false));
-    }
+    VAR_RESOLUTION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
     result
 }
 
@@ -2884,7 +2856,11 @@ fn extract_native_type_from_rhs<'b>(
     match rhs {
         // `new ClassName(…)` → the class name.
         Expression::Instantiation(inst) => match inst.class {
-            Expression::Identifier(ident) => Some(PhpType::Named(ident.value().to_string())),
+            Expression::Identifier(ident) => {
+                let name = ident.value().to_string();
+                let fqn = crate::util::resolve_name_via_loader(&name, ctx.class_loader);
+                Some(PhpType::Named(fqn))
+            }
             Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.clone())),
             Expression::Static(_) => Some(PhpType::Named(ctx.current_class.name.clone())),
             _ => None,

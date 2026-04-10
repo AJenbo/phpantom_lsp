@@ -94,6 +94,36 @@ struct FunctionWithDocblock {
     docblock_position: Position,
 }
 
+/// Resolve a type name to its FQN, using the class loader as the
+/// source of truth.
+///
+/// Resolution order:
+/// 1. Try `resolve_to_fqn` (use-map → namespace prefix → bare name).
+/// 2. If the result can be loaded by the class loader, use the loaded FQN.
+/// 3. Otherwise, try loading the original name directly (handles root-
+///    namespace classes like `RuntimeException` that have no `use` import).
+/// 4. Fall back to the `resolve_to_fqn` result.
+fn resolve_type_name_to_fqn(
+    name: &str,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> String {
+    let resolved = crate::util::resolve_to_fqn(name, use_map, file_namespace);
+    // If the class loader recognises the resolved name, use its canonical FQN.
+    if let Some(cls) = class_loader(&resolved) {
+        return cls.fqn();
+    }
+    // The resolved name wasn't found — try the original name directly.
+    // This handles root-namespace classes (e.g. `RuntimeException`) when
+    // the file has a namespace but no explicit `use` import.
+    if let Some(cls) = class_loader(name) {
+        return cls.fqn();
+    }
+    // Neither worked — return the best guess.
+    resolved
+}
+
 impl Backend {
     /// Collect "Update docblock" code actions for the function/method
     /// under the cursor.
@@ -141,6 +171,8 @@ impl Backend {
             &ctx.classes,
             &class_loader,
             Some(&function_loader),
+            &ctx.use_map,
+            &ctx.namespace,
         );
         if !needs_update {
             return;
@@ -153,6 +185,8 @@ impl Backend {
             &ctx.classes,
             &class_loader,
             Some(&function_loader),
+            &ctx.use_map,
+            &ctx.namespace,
         );
         if new_docblock == info.docblock_text {
             return;
@@ -540,6 +574,8 @@ fn check_needs_update(
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> bool {
     // Build a map of existing doc param names.
     let doc_param_names: Vec<&str> = info
@@ -667,17 +703,20 @@ fn check_needs_update(
         Some(&ThrowsContext {
             class_loader,
             function_loader,
+            use_map,
+            file_namespace,
         }),
     );
-    let existing_lower: Vec<String> = info
+    let existing_fqns: Vec<String> = info
         .doc_throws
         .iter()
-        .map(|t| short_name(t).to_lowercase())
+        .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
         .collect();
     for exc in &uncaught {
         let exc_str = exc.to_string();
-        let short = short_name(&exc_str);
-        if !existing_lower.contains(&short.to_lowercase()) {
+        let exc_fqn = resolve_type_name_to_fqn(&exc_str, use_map, file_namespace, class_loader)
+            .to_lowercase();
+        if !existing_fqns.contains(&exc_fqn) {
             return true;
         }
     }
@@ -737,6 +776,8 @@ fn build_updated_docblock(
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> String {
     let indent = &info.indent;
 
@@ -874,20 +915,25 @@ fn build_updated_docblock(
         Some(&ThrowsContext {
             class_loader,
             function_loader,
+            use_map,
+            file_namespace,
         }),
     );
-    let existing_throws_lower: Vec<String> = info
+    let existing_fqns: Vec<String> = info
         .doc_throws
         .iter()
-        .map(|t| short_name(t).to_lowercase())
+        .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
         .collect();
 
     let mut new_throws: Vec<String> = Vec::new();
     for exc in &uncaught {
         let exc_str = exc.to_string();
-        let short = short_name(&exc_str);
-        if !existing_throws_lower.contains(&short.to_lowercase()) {
-            new_throws.push(short.to_string());
+        let exc_fqn = resolve_type_name_to_fqn(&exc_str, use_map, file_namespace, class_loader)
+            .to_lowercase();
+        if !existing_fqns.contains(&exc_fqn) {
+            // Use the short name in the generated @throws tag for readability
+            let display_name = short_name(&exc_str);
+            new_throws.push(display_name.to_string());
         }
     }
 
@@ -1370,7 +1416,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1393,7 +1441,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1416,7 +1466,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1439,7 +1491,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1461,7 +1515,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1483,7 +1539,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1505,7 +1563,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1527,7 +1587,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1561,7 +1623,9 @@ function bar(string $a, int $b, bool $c): void {}
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1580,7 +1644,15 @@ class Foo {
         let pos = php.find("@param string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             updated.contains("The first param"),
             "Should preserve description: {}",
@@ -1612,7 +1684,15 @@ class Foo {
         let pos = php.find("@param string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             !updated.contains("$old"),
             "Should remove old param: {}",
@@ -1635,7 +1715,15 @@ class Foo {
         let pos = php.find("@return string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             updated.contains("@return int Some description"),
             "Should update return type: {}",
@@ -1658,7 +1746,15 @@ class Foo {
         let pos = php.find("@return void").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             !updated.contains("@return"),
             "Should remove @return void: {}",
@@ -1685,7 +1781,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1708,7 +1806,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1729,7 +1829,15 @@ class Foo {
         let pos = php.find("@template T").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             updated.contains("@template T"),
             "Should preserve @template: {}",
@@ -1799,7 +1907,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -1816,7 +1926,15 @@ class Foo {
         let pos = php.find("@param string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         // All $names should be aligned at the same column.
         assert!(
             updated.contains("@param string       $a"),
@@ -1851,7 +1969,15 @@ class Foo {
         let pos = php.find("@param string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         // Should NOT have a blank line between /** and the first @param.
         let lines: Vec<&str> = updated.lines().collect();
         assert_eq!(
@@ -1880,7 +2006,15 @@ class Foo {
         let pos = php.find("@param string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             updated.contains("(Closure(): mixed)"),
             "Should enrich Closure: {}",
@@ -1910,7 +2044,15 @@ class Foo {
         let pos = php.find("@param string").unwrap() as u32;
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
-        let updated = build_updated_docblock(&info, php, &[], &cl, no_function_loader());
+        let updated = build_updated_docblock(
+            &info,
+            php,
+            &[],
+            &cl,
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
+        );
         assert!(
             updated.contains("@throws RuntimeException"),
             "Should add missing @throws: {}",
@@ -1938,7 +2080,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            !check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            !check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "Should not need update when throws already documented"
         );
     }
@@ -1966,7 +2116,9 @@ class Foo {
             php,
             &[],
             &cl,
-            no_function_loader()
+            no_function_loader(),
+            &HashMap::new(),
+            &None,
         ));
     }
 
@@ -2089,7 +2241,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "should need update to add `mixed` type to @param $name"
         );
         // The param must still be recognised (not duplicated).
@@ -2113,7 +2273,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "should need update because $b is missing"
         );
         assert_eq!(info.doc_params.len(), 1);
@@ -2138,7 +2306,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            !check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            !check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "should not suggest adding @param for a fully-typed non-templated class param"
         );
     }
@@ -2157,7 +2333,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            !check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            !check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "should not suggest adding @param for scalar-typed params"
         );
     }
@@ -2178,7 +2362,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "should suggest adding @param for an untyped param"
         );
     }
@@ -2199,7 +2391,15 @@ class Foo {
         let info = find_info(php, pos).unwrap();
         let cl = no_class_loader();
         assert!(
-            check_needs_update(&info, php, &[], &cl, no_function_loader()),
+            check_needs_update(
+                &info,
+                php,
+                &[],
+                &cl,
+                no_function_loader(),
+                &HashMap::new(),
+                &None
+            ),
             "should suggest adding @param for an array param"
         );
     }

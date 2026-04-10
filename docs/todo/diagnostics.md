@@ -294,82 +294,54 @@ resolution. This eliminates the secondary resolvers entirely.
 
 ---
 
-## D15. Type error diagnostics
+## D14. Tighten argument type mismatch diagnostic (Phase 2)
 
-**Impact: Medium-High · Effort: High**
+**Impact: High · Effort: Medium**
 
-Report type mismatches that would cause runtime errors or indicate
-logical bugs: passing a value of the wrong type to a function,
-returning the wrong type from a function, or assigning an incompatible
-type to a typed property.
+`is_type_compatible` in `src/diagnostics/type_errors.rs` silences
+several cases that are genuine bugs at runtime. Phase 1 was
+intentionally permissive to avoid false positives while the engine
+matured; Phase 2 tightens the five most impactful gaps. PHPStan and
+Psalm already flag most of these.
 
-This is the bread-and-butter of static analysis tools like PHPStan
-(levels 5-9) and Psalm. PHPantom already resolves types for
-completion, hover, and variable inference. Surfacing type errors
-reuses that infrastructure to catch bugs without requiring an external
-tool.
+### 1. Nullable arg → non-nullable param (lines 264–271)
 
-### Severity
+Currently silenced with a MAYBE comment ("developer may have guarded
+against null"). This is the #1 source of runtime `TypeError` in
+PHP 8+. Both PHPStan and Psalm flag it. Should be reported at least
+as **Warning** severity, since the null path may be unguarded.
 
-- **Error** for mismatches that would cause a `TypeError` at runtime
-  (e.g. passing `string` to a parameter typed `int` with strict
-  types enabled, or returning `null` from a non-nullable return type).
-- **Warning** for mismatches that PHP would coerce silently in weak
-  mode but that are almost certainly bugs (e.g. passing an `array`
-  where `string` is expected).
+### 2. `void` as argument (lines 94–96)
 
-### Scope (phased rollout)
+Currently silenced conservatively. Passing the return value of a
+`void` function is always a bug — PHP 8 returns `null` but the call
+site clearly misunderstands the API. Should be **Error** severity.
 
-**Phase 1 — Argument type mismatches.** When calling a function or
-method whose parameter types are known (native hints or `@param`
-docblock), check each argument's resolved type against the declared
-parameter type. Flag clear mismatches (e.g. `string` passed to `int`,
-`null` passed to non-nullable). Skip `mixed`, unresolved types, and
-union types where any branch matches (to avoid false positives).
+### 3. Backed enum → backing type (lines 547–565)
 
-**Phase 2 — Return type mismatches.** When a function or method has a
-declared return type (native or `@return`), check the types of values
-in `return` statements against the declared type. Flag clear
-mismatches. This catches the common "forgot to return early" pattern
-where `null` falls through a non-nullable return type.
+Currently silenced because the pattern is "pervasive". PHP does not
+auto-coerce `Status::Active` to `1`; the developer must use
+`->value`. Under `declare(strict_types=1)` this crashes. Should be
+at least **Warning**, with a quick-fix suggestion to append `->value`.
 
-**Phase 3 — Property type mismatches.** When assigning to a typed
-property (`public int $count`), check the RHS type against the
-declared property type. This catches assignment bugs that PHP would
-reject at runtime with a `TypeError`.
+### 4. `int` → `string` type juggling (lines 313–322)
 
-### Design constraints
+Currently unconditionally accepted because we can't know the
+`strict_types` setting. Under `declare(strict_types=1)` this is a
+`TypeError`. Consider detecting the `declare` statement in the file
+and flagging when strict types are enabled. When the declare is
+absent or set to `0`, keep the current permissive behaviour.
 
-- **Conservative.** Only flag mismatches where we are confident the
-  types are incompatible. When in doubt (unresolved types, `mixed`,
-  complex generics), do not flag. False positives are worse than
-  missed true positives for a feature that competes with PHPStan.
-- **Respect `strict_types`.** In files with `declare(strict_types=1)`,
-  coercions like `int` to `string` are errors. In files without it,
-  PHP's type juggling rules apply and only truly incompatible types
-  (e.g. `array` to `string`) should be flagged.
-- **Diagnostic code:** `type_error` with subcodes like
-  `type_error.argument`, `type_error.return`, `type_error.property`
-  for filtering and suppression.
+### 5. Union any-member-compatible threshold (lines 189–213)
 
-### Dependencies
+Currently: if ANY single member of an arg union is compatible with
+the param, the entire union passes. Combined with the other
+permissive rules above, this creates cascading permissiveness (e.g.
+`null|BadType` passes a `string` param because `null` is not
+checked, then `BadType` is the "any" member that gets skipped).
+Consider requiring all non-null members to be compatible, or at
+least flagging when a majority of members are incompatible.
 
-- Accurate type resolution for function/method parameters (already
-  available via completion and hover infrastructure).
-- `declare(strict_types=1)` detection (need to check file-level
-  declare statements).
-- Subtype checking utility (is type A assignable to type B?) — a
-  shared helper that would also benefit other diagnostics. The
-  existing `is_subtype_of` in the type hierarchy module covers class
-  hierarchies; scalar and union type compatibility needs to be added.
 
-### Quick-fix integration
 
-When a type mismatch is detected, offer code actions:
 
-- **Add type cast** (e.g. `(int)$value` when passing `string` to
-  `int` parameter).
-- **Add null check** when passing a nullable type to a non-nullable
-  parameter.
-- **Update docblock** when the declared `@param` or `@return` type is
-  too narrow for the actual usage.

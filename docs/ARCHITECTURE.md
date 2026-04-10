@@ -976,11 +976,16 @@ Files that are not open (vendor files loaded via PSR-4 on demand) do not get a s
 
 ## Diagnostic Philosophy
 
-PHPantom's diagnostics assert **type coverage**, not bug detection. The question they answer is: "can the LSP resolve every class, member, and function call in this project?" When the answer is yes, completion works everywhere with no dead spots, and downstream tools like PHPStan get the type information they need to find real bugs at every strictness level.
+PHPantom earns trust through two promises:
 
-This is a deliberate division of labour. PHPStan only complains about missing types at levels 6, 9, and 10. PHPantom fills those gaps cheaply and immediately so PHPStan can focus on logic errors rather than fighting incomplete type information. The two tools complement each other at any PHPStan level: PHPantom rejects structural problems fast (unknown class, unknown member, wrong argument count, unimplemented interface method), and PHPStan hunts for semantic bugs (type mismatches, unreachable code, null safety violations) with full type context available.
+1. **Provide suggestions for everything the developer expects.** Completion, hover, go-to-definition, and every other LSP feature should work on every symbol in the project with no dead spots.
+2. **Stay silent on everything the developer knows works.** Every diagnostic PHPantom reports must be something that is genuinely wrong, not something that is merely imprecise or unconventional. If the code runs without errors, PHPantom should not complain about it.
 
-The native diagnostic categories reflect this philosophy:
+Most PHP developers have learned to ignore IDE errors. They have seen tools produce walls of false positives from bugs in the inference engine, mistakes in stubs, or overly strict rules applied to code that works perfectly well in production. The result is that developers treat red squiggles as noise and test in production to see if a problem is real. PHPantom exists to break that cycle. When a diagnostic appears, it must mean something. A single false positive costs more trust than ten missed true positives, because it teaches the developer to stop reading.
+
+### Type Coverage Diagnostics
+
+The core diagnostic categories assert **type coverage**: can the LSP resolve every class, member, and function call in the project?
 
 | Diagnostic | What it asserts |
 |---|---|
@@ -990,11 +995,35 @@ The native diagnostic categories reflect this philosophy:
 | Unknown members | Every member access resolves to a declared member. |
 | Unknown functions | Every function call resolves to a declared function. |
 | Argument count | Call sites match the target's parameter count. |
+| Argument type mismatch | Every argument's type is definitely compatible with the parameter's declared type. |
 | Implementation errors | Concrete classes satisfy their interface/abstract contracts. |
 | Undefined variables | Every variable read has a prior definition in scope. |
 | Deprecated usage | The developer is aware of deprecation. |
 
-None of these are type-compatibility checks, dead-code analysis, or control-flow reasoning. That is by design. A project that passes all of PHPantom's diagnostics has 100% type coverage from the LSP's perspective: every symbol is resolvable, every completion trigger produces results, and every hover shows a type.
+A project that passes all of these has 100% type coverage from the LSP's perspective: every symbol is resolvable, every completion trigger produces results, and every hover shows a type.
+
+This also serves as a deliberate division of labour with PHPStan. PHPStan only complains about missing types at levels 6, 9, and 10. PHPantom fills those gaps cheaply and immediately so PHPStan can focus on logic errors rather than fighting incomplete type information. PHPantom rejects structural problems fast (unknown class, unknown member, wrong argument count, unimplemented interface method), and PHPStan hunts for semantic bugs with full type context available.
+
+### Type Compatibility Diagnostics: Yes / No / Maybe
+
+Argument type mismatch diagnostics (`type_error.argument`) go beyond coverage into type-compatibility territory. Here the risk of false positives is highest, because PHP is a dynamically typed language with pervasive implicit coercion, and real-world codebases are full of patterns that are technically imprecise but functionally correct.
+
+Every type check is classified into one of three buckets:
+
+- **Yes** (definitely compatible). `Cat` passed to `Animal` where `Cat extends Animal`. No diagnostic.
+- **No** (definitely incompatible). `array` passed to `int`. Diagnostic reported.
+- **Maybe** (might work, might not). `?Carbon` passed to `Carbon`, bare `array` passed to `array<string>`, `HtmlString` passed to `string`. No diagnostic.
+
+**Only "no" produces a diagnostic.** The "maybe" bucket is deliberately wide. If there is any reasonable interpretation under which the code could work at runtime, PHPantom stays silent. Examples of "maybe":
+
+- **Nullable to non-nullable** (`?Carbon` to `Carbon`). The developer may have null-checked before the call. We cannot see the guard clause from the call site alone.
+- **Bare array to typed array** (`array` to `array<string>`). A bare `array` is untyped. It might contain strings. We cannot prove otherwise.
+- **Stringable objects to string** (`HtmlString` to `string`). PHP calls `__toString()` at runtime. We follow PHP's runtime behaviour.
+- **Int to string**. PHP coerces integers to strings in many contexts and we cannot know the `strict_types` setting.
+- **`list<X>` and `array<int, X>`**. Used interchangeably in practice. array<int, X> might have sequential-keys in actuality.
+- **Interface to concrete subtype** (`CarbonInterface` to `Carbon`). The interface is broader, but in practice the value is almost always the expected concrete type.
+
+This conservatism is the foundation for trust. Once developers learn that PHPantom's red squiggles are never false alarms, they start paying attention to them. At that point, a stricter mode can be offered as an opt-in for teams that want more help. But the default must be: if we are not certain, we stay silent.
 
 ## Analyze Command
 

@@ -121,6 +121,7 @@ pub(crate) mod helpers;
 mod implementation_errors;
 mod invalid_class_kind;
 mod syntax_errors;
+mod type_errors;
 pub(crate) mod undefined_variables;
 pub(crate) mod unknown_classes;
 pub(crate) mod unknown_functions;
@@ -178,6 +179,7 @@ impl Backend {
         // inside collect_unknown_member_diagnostics (in the Untyped arm)
         // to avoid a second full walk with duplicate type resolution.
         self.collect_argument_count_diagnostics(uri_str, content, out);
+        self.collect_type_error_diagnostics(uri_str, content, out);
         self.collect_implementation_error_diagnostics(uri_str, content, out);
         self.collect_deprecated_diagnostics(uri_str, content, out);
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
@@ -651,23 +653,6 @@ impl Backend {
             let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
                 &self.resolved_class_cache,
             );
-            // Activate the diagnostic subject cache so that
-            // collect_unknown_member_diagnostics and
-            // collect_argument_count_diagnostics share resolved
-            // subjects instead of re-resolving them independently.
-            let _subj_guard = crate::completion::resolver::with_diagnostic_subject_cache();
-
-            // Provide scope boundaries so the diagnostic subject cache
-            // can distinguish variables in different methods of the same
-            // class (prevents cross-method cache pollution).
-            if let Some(sm) = self.symbol_maps.read().get(uri_str) {
-                crate::completion::resolver::set_diagnostic_subject_cache_scopes(
-                    sm.scopes.clone(),
-                    sm.var_defs.clone(),
-                    sm.narrowing_blocks.clone(),
-                    sm.assert_narrowing_offsets.clone(),
-                );
-            }
 
             self.collect_slow_diagnostics(uri_str, content, &mut slow_diagnostics);
         }

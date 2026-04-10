@@ -402,10 +402,15 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
     }
 
     // ── `new ClassName` ─────────────────────────────────────────
-    if let Some(class_name) = call_body
-        .strip_prefix("new ")
-        .map(|s| s.trim().trim_start_matches('\\'))
-        .filter(|s| !s.is_empty())
+    // Only match when there is no `->` chain after the constructor
+    // args (e.g. `new Decimal($x)->toFixed(2)` should be parsed as
+    // a method call, not a bare `new` expression).
+    if call_body.starts_with("new ")
+        && !call_body.contains("->")
+        && let Some(class_name) = call_body
+            .strip_prefix("new ")
+            .map(|s| s.trim().trim_start_matches('\\'))
+            .filter(|s| !s.is_empty())
     {
         // Strip trailing parens content if any (e.g. from `(new Foo(…))`)
         let clean = class_name
@@ -532,6 +537,26 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     let end = rest
         .find(|c: char| c == '(' || c.is_whitespace())
         .unwrap_or(rest.len());
+
+    // If there is a `->` chain after the constructor call (e.g.
+    // `new Decimal($x)->toFixed(2)`), bail out so that the call
+    // expression / property chain parsers handle the full expression.
+    if let Some(paren_start) = rest[end..].find('(') {
+        let after_class = &rest[end + paren_start..];
+        if let Some(close) = find_matching_paren(after_class) {
+            let remainder = after_class[close + 1..].trim_start();
+            if remainder.starts_with("->") {
+                return None;
+            }
+        }
+    } else {
+        // No opening paren found — check for `->` after the class name.
+        let after_name = rest[end..].trim_start();
+        if after_name.starts_with("->") {
+            return None;
+        }
+    }
+
     let class_name = rest[..end].trim_start_matches('\\');
     if class_name.is_empty()
         || class_name == "class"
@@ -542,6 +567,39 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
         return None;
     }
     Some(class_name.to_string())
+}
+
+/// Find the index of the closing `)` that matches the opening `(` at the
+/// start of `s`.  Returns `None` if `s` doesn't start with `(` or the
+/// parens are unbalanced.
+fn find_matching_paren(s: &str) -> Option<usize> {
+    if !s.starts_with('(') {
+        return None;
+    }
+    let mut depth = 0u32;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut prev_backslash = false;
+    for (i, ch) in s.char_indices() {
+        if prev_backslash {
+            prev_backslash = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double => prev_backslash = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '(' if !in_single && !in_double => depth += 1,
+            ')' if !in_single && !in_double => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse a variable with bracket access like `$var['key'][0]`.

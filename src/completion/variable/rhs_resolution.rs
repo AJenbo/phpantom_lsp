@@ -39,7 +39,124 @@ use super::resolution::build_var_resolver_from_ctx;
 use crate::completion::call_resolution::MethodReturnCtx;
 use crate::completion::conditional_resolution::resolve_conditional_with_args;
 use crate::completion::resolver::{Loaders, VarResolutionCtx};
+use crate::completion::type_resolution;
 use crate::util::strip_fqn_prefix;
+
+/// Dispatch to [`resolve_variable_types`] or
+/// [`resolve_variable_types_branch_aware`] depending on
+/// `ctx.branch_aware`.  This keeps callers from duplicating the
+/// if/else dispatch at every call site.
+fn resolve_var_types(
+    var_name: &str,
+    ctx: &VarResolutionCtx<'_>,
+    cursor_offset: u32,
+) -> Vec<ResolvedType> {
+    if ctx.branch_aware {
+        super::resolution::resolve_variable_types_branch_aware(
+            var_name,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            cursor_offset,
+            ctx.class_loader,
+            Loaders::with_function(ctx.function_loader()),
+        )
+    } else {
+        super::resolution::resolve_variable_types(
+            var_name,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            cursor_offset,
+            ctx.class_loader,
+            Loaders::with_function(ctx.function_loader()),
+        )
+    }
+}
+
+// ── Match-arm narrowing override ────────────────────────────────────
+//
+// When resolving the RHS of a `match(true)` arm like:
+//
+//   match (true) {
+//       $model instanceof Customer => $model->country,
+//       …
+//   }
+//
+// the arm expression `$model->country` must resolve `$model` as
+// `Customer`, not its declared parameter type `?Model`.  The normal
+// variable resolution pipeline doesn't know about the match-arm
+// condition, so we propagate narrowings via the `match_arm_narrowing`
+// field on `VarResolutionCtx`.  When entering a `match(true)` arm
+// body, a new context is created with the narrowed types; callers in
+// `resolve_rhs_method_call_inner` and `resolve_rhs_property_access`
+// consult `ctx.match_arm_narrowing` when the object is a bare variable.
+
+/// Extract instanceof narrowings from a `match(true)` arm's conditions.
+///
+/// For each condition like `$var instanceof ClassName`, adds an entry
+/// mapping `"$var"` → the resolved `ClassInfo` for `ClassName`.
+/// Multiple conditions on the same arm are OR-merged (each condition
+/// narrows a potentially different variable).
+fn extract_match_arm_narrowings(
+    expr_arm: &MatchExpressionArm<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> HashMap<String, Vec<ResolvedType>> {
+    let mut overrides: HashMap<String, Vec<ResolvedType>> = HashMap::new();
+    for condition in expr_arm.conditions.iter() {
+        if let Some((var_name, mut class_type)) = extract_instanceof_pair(condition) {
+            // Resolve the short class name to FQN so that downstream
+            // comparisons and ResolvedType hints carry the fully-qualified name.
+            if let PhpType::Named(ref name) = class_type
+                && let Some(cls) = (ctx.class_loader)(name)
+            {
+                class_type = PhpType::Named(cls.fqn());
+            }
+            let resolved = type_resolution::type_hint_to_classes_typed(
+                &class_type,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            if !resolved.is_empty() {
+                let results = ResolvedType::from_classes_with_hint(resolved, class_type);
+                overrides
+                    .entry(var_name)
+                    .and_modify(|existing| ResolvedType::extend_unique(existing, results.clone()))
+                    .or_insert(results);
+            }
+        }
+    }
+    overrides
+}
+
+/// Extract `($var_name, ClassName)` from `$var instanceof ClassName`.
+fn extract_instanceof_pair(expr: &Expression<'_>) -> Option<(String, PhpType)> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    if let Expression::Binary(bin) = expr
+        && bin.operator.is_instanceof()
+    {
+        // LHS: the variable
+        let var_name = match bin.lhs {
+            Expression::Variable(Variable::Direct(dv)) => dv.name.to_string(),
+            _ => return None,
+        };
+        // RHS: the class name
+        let class_type = match bin.rhs {
+            Expression::Identifier(ident) => PhpType::Named(ident.value().to_string()),
+            Expression::Self_(_) => PhpType::Named("self".to_string()),
+            Expression::Static(_) => PhpType::Named("static".to_string()),
+            Expression::Parent(_) => PhpType::Named("parent".to_string()),
+            _ => return None,
+        };
+        Some((var_name, class_type))
+    } else {
+        None
+    }
+}
 
 /// Create a `ResolvedType` from a `PhpType`, looking up class info when the type names a class.
 ///
@@ -135,9 +252,29 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
         Expression::Access(access) => resolve_rhs_property_access(access, ctx),
         Expression::Parenthesized(p) => resolve_rhs_expression(p.expression, ctx),
         Expression::Match(match_expr) => {
+            let is_match_true = match_expr.expression.is_true();
             let mut combined = Vec::new();
             for arm in match_expr.arms.iter() {
-                let arm_results = resolve_rhs_expression(arm.expression(), ctx);
+                // For match(true) arms with instanceof conditions,
+                // create a new context with narrowed variable types so
+                // that property and method accesses in the arm expression
+                // resolve against the narrowed class.
+                let arm_ctx = if is_match_true {
+                    if let MatchArm::Expression(expr_arm) = arm {
+                        let overrides = extract_match_arm_narrowings(expr_arm, ctx);
+                        if !overrides.is_empty() {
+                            Some(ctx.with_match_arm_narrowing(overrides))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let effective_ctx = arm_ctx.as_ref().unwrap_or(ctx);
+                let arm_results = resolve_rhs_expression(arm.expression(), effective_ctx);
                 ResolvedType::extend_unique(&mut combined, arm_results);
             }
             combined
@@ -195,7 +332,14 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
                 ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(binary.rhs, ctx));
                 combined
             } else {
-                let mut combined = lhs_results;
+                // The LHS resolved to nothing — the expression is
+                // something we can't type (e.g. array access on a bare
+                // `array`).  At runtime it could be any value, so
+                // include `mixed` to represent the unknown LHS.
+                // Without this, `$x = $params['key'] ?? null` would
+                // resolve to just `null`, causing false type_error
+                // diagnostics on the guarded usage of `$x`.
+                let mut combined = vec![ResolvedType::from_type_string(PhpType::mixed())];
                 ResolvedType::extend_unique(&mut combined, resolve_rhs_expression(binary.rhs, ctx));
                 combined
             }
@@ -259,15 +403,7 @@ pub(in crate::completion) fn resolve_rhs_expression<'b>(
             if rhs_var == ctx.var_name {
                 return vec![];
             }
-            super::resolution::resolve_variable_types(
-                &rhs_var,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
-                ctx.cursor_offset,
-                ctx.class_loader,
-                Loaders::with_function(ctx.function_loader()),
-            )
+            resolve_var_types(&rhs_var, ctx, ctx.cursor_offset)
         }
         // ── Concatenation: `"prefix" . $var` → string ───────────────
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
@@ -647,6 +783,17 @@ fn build_constructor_template_subs(
                     subs.insert(tpl_name.clone(), resolved_type);
                 }
             }
+            TemplateBindingMode::ClassStringInner => {
+                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+                    // Unwrap `class-string<X>` → `X` so that the
+                    // substitution doesn't double-wrap.
+                    let unwrapped = match resolved_type {
+                        PhpType::ClassString(Some(inner)) => *inner,
+                        _ => resolved_type,
+                    };
+                    subs.insert(tpl_name.clone(), unwrapped);
+                }
+            }
             TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
                 // `@param Wrapper<T> $a` — resolve the wrapper's constructor
                 // template params to find the concrete type for T.
@@ -685,6 +832,10 @@ pub(crate) enum TemplateBindingMode {
     /// binding is resolved by extracting the closure's parameter type
     /// annotation at that index from the argument text.
     CallableParamType(usize),
+    /// `@param class-string<T> $class` — the template param appears inside
+    /// `class-string<>`.  The binding is resolved by unwrapping the
+    /// `class-string<>` layer from the resolved argument type.
+    ClassStringInner,
 }
 
 /// Classify how a template parameter name appears in a `@param` type hint.
@@ -709,20 +860,26 @@ fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBindingMode {
     match ty {
         PhpType::Nullable(inner) => classify_from_php_type(tpl_name, inner),
         PhpType::Union(members) => {
+            let mut fallback: Option<TemplateBindingMode> = None;
             for member in members {
                 if member.is_null() {
                     continue;
                 }
-                let result = classify_from_php_type(tpl_name, member);
-                if !matches!(result, TemplateBindingMode::Direct) {
-                    return result;
-                }
-                // If it matched Direct because it IS the template name, return it.
+                // If the template name appears directly as a union
+                // member, prefer Direct immediately.  Direct always
+                // works regardless of what the argument is, while
+                // CallableReturnType only works when the argument is
+                // a closure.  This handles the common Laravel
+                // `(Closure($this): T)|T|null` pattern in `when()`.
                 if member.is_named(tpl_name) {
                     return TemplateBindingMode::Direct;
                 }
+                let result = classify_from_php_type(tpl_name, member);
+                if !matches!(result, TemplateBindingMode::Direct) && fallback.is_none() {
+                    fallback = Some(result);
+                }
             }
-            TemplateBindingMode::Direct
+            fallback.unwrap_or(TemplateBindingMode::Direct)
         }
         PhpType::Array(inner) => {
             if inner.as_ref().is_named(tpl_name) {
@@ -753,6 +910,12 @@ fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBindingMode {
                 if type_contains_name(&p.type_hint, tpl_name) {
                     return TemplateBindingMode::CallableParamType(i);
                 }
+            }
+            TemplateBindingMode::Direct
+        }
+        PhpType::ClassString(Some(inner)) => {
+            if inner.as_ref().is_named(tpl_name) {
+                return TemplateBindingMode::ClassStringInner;
             }
             TemplateBindingMode::Direct
         }
@@ -876,15 +1039,7 @@ fn resolve_rhs_array_access<'b>(
             let base_var = base_dv.name.to_string();
             docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
                 .or_else(|| {
-                    let resolved = super::resolution::resolve_variable_types(
-                        &base_var,
-                        ctx.current_class,
-                        ctx.all_classes,
-                        ctx.content,
-                        access_offset as u32,
-                        ctx.class_loader,
-                        Loaders::with_function(ctx.function_loader()),
-                    );
+                    let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
                     if resolved.is_empty() {
                         None
                     } else {
@@ -1091,6 +1246,17 @@ pub(crate) fn build_function_template_subs(
                 {
                     // Fallback: treat as direct if not an array literal.
                     subs.insert(tpl_name.clone(), resolved_type);
+                }
+            }
+            TemplateBindingMode::ClassStringInner => {
+                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+                    // Unwrap `class-string<X>` → `X` so that the
+                    // substitution doesn't double-wrap.
+                    let unwrapped = match resolved_type {
+                        PhpType::ClassString(Some(inner)) => *inner,
+                        _ => resolved_type,
+                    };
+                    subs.insert(tpl_name.clone(), unwrapped);
                 }
             }
             TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
@@ -1342,6 +1508,7 @@ fn resolve_rhs_function_call<'b>(
                 &func_call.argument_list,
                 Some(&var_resolver),
                 Some(current_class_name),
+                class_loader,
             );
             if let Some(ref ty) = resolved_type {
                 let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -1649,17 +1816,13 @@ fn resolve_rhs_method_call_inner<'b>(
             (classes, vec![])
         } else if let Expression::Variable(Variable::Direct(dv)) = object {
             let var = dv.name.to_string();
-            let resolved = crate::completion::variable::resolution::resolve_variable_types(
-                &var,
-                ctx.current_class,
-                ctx.all_classes,
-                ctx.content,
-                // Use the object's end offset so preceding assignments
-                // are visible but the current assignment is not.
-                object.span().end.offset,
-                ctx.class_loader,
-                crate::completion::resolver::Loaders::with_function(ctx.function_loader()),
-            );
+            // Check match-arm narrowing override first — when inside
+            // a match(true) arm, the variable may be narrowed to a
+            // specific class by the arm's instanceof condition.
+            let resolved = match ctx.match_arm_narrowing.get(&var).cloned() {
+                Some(overridden) => overridden,
+                None => resolve_var_types(&var, ctx, object.span().end.offset),
+            };
             if !resolved.is_empty() {
                 let classes = ResolvedType::into_classes(resolved.clone());
                 (classes, resolved)
@@ -1736,7 +1899,7 @@ fn resolve_rhs_method_call_inner<'b>(
                 };
                 match receiver_type {
                     Some(rt) => substituted.replace_self_with_type(&rt),
-                    None => substituted.replace_self(&owner.name),
+                    None => substituted.replace_self(&owner.fqn()),
                 }
             });
 
@@ -1864,15 +2027,7 @@ fn resolve_rhs_static_call(
                 // inner type from `class-string<T>`.  This handles
                 // parameters typed as `@param class-string<Foo> $var`
                 // where there is no `$var = Foo::class` assignment.
-                let resolved = super::resolution::resolve_variable_types(
-                    &var_name,
-                    ctx.current_class,
-                    ctx.all_classes,
-                    ctx.content,
-                    ctx.cursor_offset,
-                    ctx.class_loader,
-                    Loaders::with_function(ctx.function_loader()),
-                );
+                let resolved = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
                 resolved.iter().find_map(|rt| match &rt.type_string {
                     PhpType::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
                     PhpType::Nullable(inner) => match inner.as_ref() {
@@ -1947,7 +2102,7 @@ fn resolve_rhs_static_call(
                     } else {
                         ret.clone()
                     };
-                    substituted.replace_self(&owner.name)
+                    substituted.replace_self(&owner.fqn())
                 });
 
             let results = Backend::resolve_method_return_types_with_args(
@@ -2149,11 +2304,16 @@ fn resolve_rhs_property_access(
                     .collect()
             } else if let Expression::Variable(Variable::Direct(dv)) = obj {
                 let var = dv.name.to_string();
-                ResolvedType::into_classes(crate::completion::resolver::resolve_target_classes(
-                    &var,
-                    crate::types::AccessKind::Arrow,
-                    &ctx.as_resolution_ctx(),
-                ))
+                // Check match-arm narrowing override first.
+                if let Some(overridden) = ctx.match_arm_narrowing.get(&var).cloned() {
+                    ResolvedType::into_classes(overridden)
+                } else {
+                    ResolvedType::into_classes(crate::completion::resolver::resolve_target_classes(
+                        &var,
+                        crate::types::AccessKind::Arrow,
+                        &ctx.as_resolution_ctx(),
+                    ))
+                }
             } else {
                 // Handle non-variable object expressions like
                 // `(new Canvas())->easel`, `getService()->prop`,

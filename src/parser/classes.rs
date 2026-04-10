@@ -1156,7 +1156,7 @@ impl Backend {
 
                     let doc_info = extract_class_docblock(enum_def, doc_ctx);
 
-                    let interfaces: Vec<String> = enum_def
+                    let mut interfaces: Vec<String> = enum_def
                         .implements
                         .as_ref()
                         .map(|imp| {
@@ -1166,6 +1166,16 @@ impl Backend {
                                 .collect()
                         })
                         .unwrap_or_default();
+
+                    // Also add the implicit interface to the interfaces
+                    // list so that hierarchy checks (`is_subtype_of`)
+                    // recognise backed enums as subtypes of `BackedEnum`
+                    // and all enums as subtypes of `UnitEnum`.
+                    if !interfaces.iter().any(|i| {
+                        i.trim_start_matches('\\') == implicit_interface.trim_start_matches('\\')
+                    }) {
+                        interfaces.push(implicit_interface.to_string());
+                    }
 
                     let keyword_offset = enum_def.r#enum.span.start.offset;
                     let start_offset = enum_def.left_brace.start.offset;

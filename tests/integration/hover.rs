@@ -9805,3 +9805,60 @@ class Consumer {
         text
     );
 }
+
+// ── Hover on generic method shows substituted return type ───────────────────
+
+#[test]
+fn hover_generic_trait_method_shows_concrete_return_type() {
+    // A generic class uses a trait with a template param.  After trait
+    // merging the method's return type contains the class's template
+    // param.  When hovering on the method via a concrete instantiation,
+    // the hover should show the substituted type, not the raw param.
+    let content = r#"<?php
+/** @template TItem */
+trait Fetchable {
+    /** @return TItem|null */
+    public function first() { return null; }
+}
+
+/**
+ * @template TElement
+ */
+class Box {
+    /** @use Fetchable<TElement> */
+    use Fetchable;
+
+    /** @return static */
+    public function filter(): static { return $this; }
+}
+
+class Pen {
+    public function write(): string { return ''; }
+}
+
+function demo(): void {
+    /** @var Box<Pen> $box */
+    $box = new Box();
+    $box->first();
+}
+"#;
+
+    let uri = "file:///test.php";
+    let backend = create_test_backend();
+    backend.update_ast(uri, content);
+
+    // Hover on `first` at line 25 (0-based): `$box->first();`
+    let hover = hover_at(&backend, uri, content, 25, 11).expect("expected hover on first()");
+    let text = hover_text(&hover);
+
+    assert!(
+        text.contains("Pen|null") || text.contains("Pen | null"),
+        "Hover on first() should show substituted return type 'Pen|null', got:\n{}",
+        text
+    );
+    assert!(
+        !text.contains("TElement"),
+        "Hover should NOT show raw template param 'TElement', got:\n{}",
+        text
+    );
+}

@@ -437,7 +437,7 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
 
         if let Some(cls) = owner {
             return crate::inheritance::resolve_method_return_type(&cls, method_name, class_loader)
-                .map(|ret| ret.replace_self(&cls.name));
+                .map(|ret| ret.replace_self(&cls.fqn()));
         }
         return None;
     }
@@ -463,7 +463,7 @@ pub(in crate::completion) fn extract_first_class_callable_return_type(
 
         if let Some(cls) = owner {
             return crate::inheritance::resolve_method_return_type(&cls, method_name, class_loader)
-                .map(|ret| ret.replace_self(&cls.name));
+                .map(|ret| ret.replace_self(&cls.fqn()));
         }
         return None;
     }

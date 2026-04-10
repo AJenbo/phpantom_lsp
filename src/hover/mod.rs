@@ -574,8 +574,8 @@ impl Backend {
                     let find_result =
                         Self::find_member_for_hover(&merged, member_name, *is_method_call);
 
-                    let (member_result, owner) = if find_result.is_some() {
-                        (find_result, merged)
+                    let (mut member_result, mut owner) = if find_result.is_some() {
+                        (find_result, merged.clone())
                     } else {
                         // Fall back to the candidate directly — it may
                         // contain model-specific members (e.g. Eloquent
@@ -585,6 +585,49 @@ impl Backend {
                             Self::find_member_for_hover(target_class, member_name, *is_method_call);
                         (result, target_class.clone())
                     };
+
+                    // ── Enrich with call-site generic substitution ──
+                    // The merged (cached) class has raw template param
+                    // names (e.g. TModel) because the cache is FQN-keyed
+                    // and shared across call sites.  The candidate from
+                    // resolve_target_classes carries concrete substitutions
+                    // (e.g. TModel→BlogAuthor).  When the merged member's
+                    // return type still references a template param, swap
+                    // it with the candidate's substituted return type and
+                    // use the candidate as the owner.
+                    if !merged.template_params.is_empty() {
+                        match &member_result {
+                            Some(HoverMemberHit::Method(method)) => {
+                                if let Some(ref ret) = method.return_type
+                                    && ret.references_any_template_param(&merged.template_params)
+                                    && let Some(HoverMemberHit::Method(subst_method)) =
+                                        Self::find_member_for_hover(
+                                            target_class,
+                                            member_name,
+                                            *is_method_call,
+                                        )
+                                {
+                                    member_result = Some(HoverMemberHit::Method(subst_method));
+                                    owner = target_class.clone();
+                                }
+                            }
+                            Some(HoverMemberHit::Property(prop)) => {
+                                if let Some(ref hint) = prop.type_hint
+                                    && hint.references_any_template_param(&merged.template_params)
+                                    && let Some(HoverMemberHit::Property(subst_prop)) =
+                                        Self::find_member_for_hover(
+                                            target_class,
+                                            member_name,
+                                            *is_method_call,
+                                        )
+                                {
+                                    member_result = Some(HoverMemberHit::Property(subst_prop));
+                                    owner = target_class.clone();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
 
                     let hover = match member_result {
                         Some(HoverMemberHit::Method(ref method)) => {

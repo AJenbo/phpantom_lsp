@@ -157,7 +157,6 @@ fn check_kind_in_context(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<(DiagnosticSeverity, String)> {
     let kind = class.kind;
-    let short = short_name(fqn);
 
     match ctx {
         ClassRefContext::New => {
@@ -165,19 +164,19 @@ fn check_kind_in_context(
             match kind {
                 ClassLikeKind::Interface => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("Cannot instantiate interface '{}'", short),
+                    format!("Cannot instantiate interface '{}'", fqn),
                 )),
                 ClassLikeKind::Trait => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("Cannot instantiate trait '{}'", short),
+                    format!("Cannot instantiate trait '{}'", fqn),
                 )),
                 ClassLikeKind::Enum => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("Cannot instantiate enum '{}'", short),
+                    format!("Cannot instantiate enum '{}'", fqn),
                 )),
                 ClassLikeKind::Class if class.is_abstract => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("Cannot instantiate abstract class '{}'", short),
+                    format!("Cannot instantiate abstract class '{}'", fqn),
                 )),
                 _ => None,
             }
@@ -189,23 +188,23 @@ fn check_kind_in_context(
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is an interface and cannot be used in 'extends' for a class (use 'implements' instead)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is a trait and cannot be used in 'extends' (use 'use' inside the class body instead)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("'{}' is an enum and cannot be extended", short),
+                    format!("'{}' is an enum and cannot be extended", fqn),
                 )),
                 ClassLikeKind::Class if class.is_final => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("Cannot extend final class '{}'", short),
+                    format!("Cannot extend final class '{}'", fqn),
                 )),
                 _ => None,
             }
@@ -217,21 +216,21 @@ fn check_kind_in_context(
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is a class, but interfaces can only extend other interfaces",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is a trait, but interfaces can only extend other interfaces",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is an enum, but interfaces can only extend other interfaces",
-                        short
+                        fqn
                     ),
                 )),
                 _ => None,
@@ -244,19 +243,19 @@ fn check_kind_in_context(
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is a class, not an interface (use 'extends' to inherit from a class)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is a trait, not an interface (use 'use' inside the class body for traits)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("'{}' is an enum, not an interface", short),
+                    format!("'{}' is an enum, not an interface", fqn),
                 )),
                 _ => None,
             }
@@ -268,19 +267,19 @@ fn check_kind_in_context(
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is a class, not a trait (use 'extends' to inherit from a class)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Interface => Some((
                     DiagnosticSeverity::ERROR,
                     format!(
                         "'{}' is an interface, not a trait (use 'implements' for interfaces)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
                     DiagnosticSeverity::ERROR,
-                    format!("'{}' is an enum, not a trait", short),
+                    format!("'{}' is an enum, not a trait", fqn),
                 )),
                 _ => None,
             }
@@ -292,7 +291,7 @@ fn check_kind_in_context(
                     DiagnosticSeverity::WARNING,
                     format!(
                         "'instanceof' with trait '{}' always evaluates to false",
-                        short
+                        fqn
                     ),
                 ))
             } else {
@@ -304,13 +303,13 @@ fn check_kind_in_context(
             match kind {
                 ClassLikeKind::Trait => Some((
                     DiagnosticSeverity::WARNING,
-                    format!("Trait '{}' in catch block will never catch anything", short),
+                    format!("Trait '{}' in catch block will never catch anything", fqn),
                 )),
                 ClassLikeKind::Enum => Some((
                     DiagnosticSeverity::ERROR,
                     format!(
                         "Enum '{}' cannot be caught (only classes and interfaces that implement Throwable can be caught)",
-                        short
+                        fqn
                     ),
                 )),
                 ClassLikeKind::Class | ClassLikeKind::Interface => {
@@ -320,7 +319,7 @@ fn check_kind_in_context(
                             DiagnosticSeverity::ERROR,
                             format!(
                                 "'{}' does not implement Throwable and cannot be caught",
-                                short
+                                fqn
                             ),
                         ))
                     } else {
@@ -336,7 +335,7 @@ fn check_kind_in_context(
                     DiagnosticSeverity::WARNING,
                     format!(
                         "Trait '{}' used as a type hint will always fail type checking",
-                        short
+                        fqn
                     ),
                 ))
             } else {

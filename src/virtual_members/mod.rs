@@ -819,11 +819,7 @@ fn resolve_class_fully_inner(
     // the merged Test2 class gets `implements_generics` containing
     // `("MyIterator", ["int", "string"])`.
     for (name, args) in &all_implements_generics {
-        if !merged
-            .implements_generics
-            .iter()
-            .any(|(n, _)| short_name(n) == short_name(name))
-        {
+        if !merged.implements_generics.iter().any(|(n, _)| n == name) {
             merged
                 .implements_generics
                 .push((name.clone(), args.clone()));
@@ -942,7 +938,7 @@ fn merge_interface_members_into(
 /// `@implements` generics.
 ///
 /// Searches `all_implements_generics` for an entry whose class name
-/// matches `iface_name` (by short name comparison), then zips the
+/// matches `iface_name` (by FQN comparison), then zips the
 /// type arguments with the interface's `template_params`.
 ///
 /// Returns an empty map if no matching `@implements` annotation exists
@@ -956,11 +952,9 @@ fn build_implements_substitution_map(
         return HashMap::new();
     }
 
-    let iface_short = short_name(iface_name);
-
     let type_args = all_implements_generics
         .iter()
-        .find(|(name, _)| short_name(name) == iface_short)
+        .find(|(name, _)| name == iface_name)
         .map(|(_, args)| args);
 
     let type_args = match type_args {

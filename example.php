@@ -19,18 +19,10 @@
 namespace Demo {
 
 use Attribute;
-use Bug10298\PropAttr;
-use Bug5607\Cl;
 use Closure;
 use Demo\ValidationException;
 use Demo\NotFoundException;
-use EloquentBuilder\OnlyUsers;
 use Exception;
-use Override;
-use PHPStan\DependencyInjection\GenerateFactory;
-use PHPStan\Reflection\ClassReflection;
-use ReadonlyPropertyAssignPhpDoc\C;
-use Stringable;
 use Demo\UserProfile as Profile;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2727,6 +2719,45 @@ class ArgumentCountDemo
     }
 }
 
+class TypeErrorDemo
+{
+    public function demo(): void
+    {
+        $user = new User('Alice', 'alice@test.com');
+
+        // Correct — no diagnostic:
+        $user->setName('Bob');
+        $user->setStatus(Status::Active);
+
+        // Type error — string passed to int parameter:
+        $this->requiresInt("not a number");
+
+        // Type error — null passed to non-nullable parameter:
+        $this->requiresString(null);
+
+        // Type error — wrong class type:
+        $pen = new Pen('blue');
+        $this->requiresUser($pen);
+
+        // No diagnostic — subclass is compatible:
+        $admin = new AdminUser('Admin', 'admin@test.com', ['manage']);
+        $this->requiresUser($admin);
+
+        // No diagnostic — null is valid for nullable parameter:
+        $this->acceptsNullable(null);
+        $this->acceptsNullable("hello");
+
+        // No diagnostic — int widens to float:
+        $this->requiresFloat(42);
+    }
+
+    private function requiresInt(int $value): void {}
+    private function requiresString(string $text): void {}
+    private function requiresUser(User $user): void {}
+    private function acceptsNullable(?string $text): void {}
+    private function requiresFloat(float $value): void {}
+}
+
 
 // ── Implement Missing Methods (Code Action) ─────────────────────────────────
 // Uncomment the class below, place the cursor inside it, and trigger
@@ -3838,7 +3869,7 @@ class ScaffoldingEventBus
     {
         $params = (new \ReflectionFunction($callback))->getParameters();
         $type = $params[0]->getType();
-        $class = $type ? $type->getName() : 'stdClass';
+        $class = $type instanceof \ReflectionNamedType ? $type->getName() : 'stdClass';
         return (new \ReflectionClass($class))->newInstanceWithoutConstructor();
     }
 }
@@ -3854,7 +3885,7 @@ class ScaffoldingBatchProcessor
     {
         $params = (new \ReflectionFunction($handler))->getParameters();
         $type = $params[1]->getType();
-        $class = $type ? $type->getName() : 'stdClass';
+        $class = $type instanceof \ReflectionNamedType ? $type->getName() : 'stdClass';
         return (new \ReflectionClass($class))->newInstanceWithoutConstructor();
     }
 }

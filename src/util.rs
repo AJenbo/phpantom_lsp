@@ -65,6 +65,28 @@ pub(crate) fn resolve_to_fqn(
     name.to_string()
 }
 
+/// Resolve a class name to its FQN via the class loader.
+///
+/// Returns the FQN from the loaded `ClassInfo` when the loader can find
+/// the class, or falls back to the original `name` unchanged.
+///
+/// **Caveat:** when the loader cannot resolve `name`, the original string
+/// is returned as-is.  If `name` is a short (unqualified) class name,
+/// the returned value is *not* a FQN — it is the same short name.
+/// Callers that need a guaranteed FQN should use [`resolve_to_fqn`]
+/// with the file's use-map and namespace instead, falling back to this
+/// function only for names that are already expected to be resolvable
+/// by the class loader (e.g. names extracted from `::class` expressions
+/// or already-resolved type hints).
+pub(crate) fn resolve_name_via_loader(
+    name: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> String {
+    class_loader(name)
+        .map(|cls| cls.fqn())
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Check whether two LSP ranges overlap (share at least one character
 /// position).
 ///
@@ -767,41 +789,59 @@ pub(crate) fn is_subtype_of(
     ancestor_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> bool {
-    let ancestor_short = short_name(ancestor_name);
+    // Resolve the ancestor to its FQN so that all comparisons below are
+    // FQN-vs-FQN.  When `ancestor_name` is already a FQN (contains `\`)
+    // we use it directly.  When it is a short name we try to load it
+    // through the class_loader — which consults the use-map, namespace,
+    // and stubs — and use the loaded class's FQN.  For root-namespace
+    // classes (e.g. `RuntimeException`) the FQN equals the short name,
+    // so the fallback to `ancestor_name` is correct.
+    let ancestor_fqn: String = if ancestor_name.contains('\\') {
+        ancestor_name.to_string()
+    } else if let Some(loaded) = class_loader(ancestor_name) {
+        loaded.fqn()
+    } else {
+        // Cannot resolve — keep the original name.  For root-namespace
+        // classes this is already the FQN.
+        ancestor_name.to_string()
+    };
+    let ancestor = ancestor_fqn.as_str();
 
-    // Same class?  When the ancestor is a FQN, compare against the
-    // class's own FQN to avoid false positives when two classes share
-    // the same short name (e.g. `Contracts\Provider` vs
-    // `Concrete\Provider`).
-    if ancestor_name.contains('\\') {
-        if class.fqn() == ancestor_name {
-            return true;
-        }
-    } else if class.name == ancestor_name {
+    // Same class?  Always compare by FQN.
+    if class.fqn() == ancestor {
         return true;
     }
 
-    // When the ancestor is qualified, only match against normalised
-    // FQNs — never fall back to short-name comparison, which would
-    // produce false positives when two different classes share the
-    // same short name (e.g. `Contracts\Provider` vs
-    // `Concrete\Provider`).
-    let fqn_mode = ancestor_name.contains('\\');
-
-    // Check interfaces on the class itself.
-    for iface in &class.interfaces {
-        if iface == ancestor_name {
+    // Check interfaces on the class itself (stored as FQNs after
+    // resolve_parent_class_names), walking the full interface
+    // inheritance tree so that transitive relationships are found
+    // (e.g. Response implements ResponseInterface extends MessageInterface).
+    let mut iface_queue: Vec<String> = class.interfaces.clone();
+    let mut visited_ifaces: std::collections::HashSet<String> =
+        iface_queue.iter().cloned().collect();
+    while let Some(iface_name) = iface_queue.pop() {
+        if iface_name == ancestor {
             return true;
         }
-        if !fqn_mode {
-            let iface_short = short_name(iface);
-            if iface_short == ancestor_short {
-                return true;
+        // Load the interface and check its parents (interface extends).
+        if let Some(iface_info) = class_loader(&iface_name) {
+            // Interface parents are stored in both `parent_class`
+            // (first parent for single-extends compat) and
+            // `interfaces` (all parents for multi-extends).
+            for parent_iface in &iface_info.interfaces {
+                if visited_ifaces.insert(parent_iface.clone()) {
+                    iface_queue.push(parent_iface.clone());
+                }
+            }
+            if let Some(ref pc) = iface_info.parent_class
+                && visited_ifaces.insert(pc.clone())
+            {
+                iface_queue.push(pc.clone());
             }
         }
     }
 
-    // Walk the parent chain.
+    // Walk the parent class chain (parent_class is also a resolved FQN).
     let mut current_parent = class.parent_class.clone();
     let mut depth = 0u32;
     while let Some(ref name) = current_parent {
@@ -809,25 +849,29 @@ pub(crate) fn is_subtype_of(
         if depth > 20 {
             break;
         }
-        if name == ancestor_name {
+        if name == ancestor {
             return true;
         }
-        if !fqn_mode {
-            let short = short_name(name);
-            if short == ancestor_short {
-                return true;
-            }
-        }
-        // Load the parent to check its interfaces and continue the chain.
+        // Load the parent to check its interfaces (transitively)
+        // and continue the class chain.
         if let Some(parent_info) = class_loader(name) {
-            for iface in &parent_info.interfaces {
-                if iface == ancestor_name {
+            let mut p_iface_queue: Vec<String> = parent_info.interfaces.clone();
+            let mut p_visited: std::collections::HashSet<String> =
+                p_iface_queue.iter().cloned().collect();
+            while let Some(iface_name) = p_iface_queue.pop() {
+                if iface_name == ancestor {
                     return true;
                 }
-                if !fqn_mode {
-                    let iface_short = short_name(iface);
-                    if iface_short == ancestor_short {
-                        return true;
+                if let Some(iface_info) = class_loader(&iface_name) {
+                    for pi in &iface_info.interfaces {
+                        if p_visited.insert(pi.clone()) {
+                            p_iface_queue.push(pi.clone());
+                        }
+                    }
+                    if let Some(ref pc) = iface_info.parent_class
+                        && p_visited.insert(pc.clone())
+                    {
+                        p_iface_queue.push(pc.clone());
                     }
                 }
             }
@@ -941,6 +985,64 @@ pub(crate) fn is_subtype_of_typed(
         return members
             .iter()
             .all(|m| is_subtype_of_typed(subtype, m, class_loader));
+    }
+
+    // ── Generic covariance with class-loader awareness ──────────
+    // The structural `is_subtype_of` compares generic type params
+    // by structural equality, which fails when one side uses a
+    // namespace-qualified name and the other uses a short name
+    // (e.g. `list<Pen>` vs `list<Demo\Pen>`).  Re-check with the
+    // class loader so nominal hierarchy applies to inner params.
+    if let (PhpType::Generic(name_sub, args_sub), PhpType::Generic(name_sup, args_sup)) =
+        (subtype, supertype)
+    {
+        let base_sub = name_sub.to_ascii_lowercase();
+        let base_sup = name_sup.to_ascii_lowercase();
+        let bases_compatible = base_sub == base_sup
+            || (crate::php_type::is_array_like_name(name_sub)
+                && crate::php_type::is_array_like_name(name_sup));
+        if bases_compatible && args_sub.len() == args_sup.len() {
+            let is_array_like = crate::php_type::is_array_like_name(name_sub)
+                || crate::php_type::is_array_like_name(name_sup);
+            let all_params_ok = args_sub.iter().zip(args_sup.iter()).all(|(s, t)| {
+                if is_array_like {
+                    // Arrays are covariant in PHP (read-only semantics)
+                    is_subtype_of_typed(s, t, class_loader)
+                } else {
+                    // Non-array generics are invariant by default
+                    // (both directions must hold, or they must be equal)
+                    s == t
+                        || (is_subtype_of_typed(s, t, class_loader)
+                            && is_subtype_of_typed(t, s, class_loader))
+                }
+            });
+            if all_params_ok {
+                return true;
+            }
+        }
+    }
+
+    // ── Array slice covariance ──────────────────────────────────
+    // The structural `is_subtype_of` compares `X[]` vs `Y[]` by
+    // structural equality on the inner type, which misses nominal
+    // subclass relationships (e.g. `Cat[]` <: `Animal[]` where
+    // `Cat extends Animal`).  Re-check with the class loader so
+    // the hierarchy walk applies to inner types.
+    if let (PhpType::Array(inner_sub), PhpType::Array(inner_sup)) = (subtype, supertype)
+        && is_subtype_of_typed(inner_sub, inner_sup, class_loader)
+    {
+        return true;
+    }
+
+    // ── Callable specification <: Closure / object ──────────────
+    // A `Closure(int): string` is a Closure instance, which is an
+    // object.  The structural check only handles `callable` as
+    // the named supertype; extend to `Closure` and `object`.
+    if matches!(subtype, PhpType::Callable { .. })
+        && let Some(sup) = supertype.base_name()
+        && (sup.eq_ignore_ascii_case("Closure") || sup.eq_ignore_ascii_case("object"))
+    {
+        return true;
     }
 
     // ── Nominal class hierarchy check ───────────────────────────
@@ -1809,5 +1911,149 @@ mod tests {
         assert!(!is_self_or_static(""));
         assert!(!is_self_or_static("this"));
         assert!(!is_self_or_static("Foo"));
+    }
+
+    /// Helper to build a minimal `ClassInfo` for hierarchy tests.
+    fn make_class(
+        name: &str,
+        namespace: Option<&str>,
+        parent: Option<&str>,
+        interfaces: &[&str],
+    ) -> Arc<crate::types::ClassInfo> {
+        Arc::new(crate::types::ClassInfo {
+            name: name.to_string(),
+            file_namespace: namespace.map(|s| s.to_string()),
+            parent_class: parent.map(|s| s.to_string()),
+            interfaces: interfaces.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        })
+    }
+
+    /// Build a class loader from a slice of `Arc<ClassInfo>`.
+    fn loader_from(
+        classes: &[Arc<crate::types::ClassInfo>],
+    ) -> impl Fn(&str) -> Option<Arc<crate::types::ClassInfo>> + '_ {
+        move |name: &str| classes.iter().find(|c| c.fqn() == name).cloned()
+    }
+
+    // ── is_subtype_of: FQN self-check ──────────────────────────
+
+    #[test]
+    fn subtype_of_self_by_fqn() {
+        let cls = make_class("User", Some("App\\Models"), None, &[]);
+        let classes = [cls.clone()];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&cls, "App\\Models\\User", &loader));
+    }
+
+    #[test]
+    fn subtype_of_self_root_namespace() {
+        // Root-namespace class: FQN == short name.
+        let cls = make_class("RuntimeException", None, None, &[]);
+        let classes = [cls.clone()];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&cls, "RuntimeException", &loader));
+    }
+
+    #[test]
+    fn subtype_of_self_short_name_resolves_via_loader() {
+        // Passing a short name that the loader can resolve to a FQN.
+        let cls = make_class("User", Some("App\\Models"), None, &[]);
+        let classes = [cls.clone()];
+        let loader = loader_from(&classes);
+        // The loader finds "User" → no, it only matches on fqn().
+        // So passing just "User" when the class is App\Models\User
+        // should NOT match (different FQN).
+        assert!(!is_subtype_of(&cls, "User", &loader));
+    }
+
+    // ── is_subtype_of: interface matching by FQN ────────────────
+
+    #[test]
+    fn subtype_of_interface_fqn_match() {
+        let cls = make_class(
+            "UserRepo",
+            Some("App\\Repos"),
+            None,
+            &["App\\Contracts\\Repository"],
+        );
+        let iface = make_class("Repository", Some("App\\Contracts"), None, &[]);
+        let classes = [cls.clone(), iface];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&cls, "App\\Contracts\\Repository", &loader));
+    }
+
+    #[test]
+    fn subtype_of_interface_short_name_does_not_match_different_namespace() {
+        // Two unrelated classes that share the short name "Carbon".
+        // `is_subtype_of` must NOT treat them as the same type.
+        let vendor_carbon = make_class("Carbon", Some("Vendor\\DateTime"), None, &[]);
+        let cls = make_class("MyDate", Some("App"), None, &["Vendor\\DateTime\\Carbon"]);
+        let app_carbon = make_class("Carbon", Some("App\\DateTime"), None, &[]);
+        let classes = [cls.clone(), vendor_carbon, app_carbon.clone()];
+        let loader = loader_from(&classes);
+
+        // The class implements Vendor\DateTime\Carbon, NOT App\DateTime\Carbon.
+        assert!(is_subtype_of(&cls, "Vendor\\DateTime\\Carbon", &loader));
+        assert!(!is_subtype_of(&cls, "App\\DateTime\\Carbon", &loader));
+    }
+
+    // ── is_subtype_of: parent chain by FQN ──────────────────────
+
+    #[test]
+    fn subtype_of_parent_fqn() {
+        let parent = make_class("BaseModel", Some("App\\Models"), None, &[]);
+        let child = make_class(
+            "User",
+            Some("App\\Models"),
+            Some("App\\Models\\BaseModel"),
+            &[],
+        );
+        let classes = [parent, child.clone()];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&child, "App\\Models\\BaseModel", &loader));
+    }
+
+    #[test]
+    fn subtype_of_grandparent_fqn() {
+        let grandparent = make_class("Model", Some("Illuminate"), None, &[]);
+        let parent = make_class("BaseModel", Some("App"), Some("Illuminate\\Model"), &[]);
+        let child = make_class("User", Some("App"), Some("App\\BaseModel"), &[]);
+        let classes = [grandparent, parent, child.clone()];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&child, "Illuminate\\Model", &loader));
+    }
+
+    #[test]
+    fn subtype_of_parent_interface_fqn() {
+        // Parent implements an interface; child should also be a subtype.
+        let iface = make_class("Countable", None, None, &[]);
+        let parent = make_class("Collection", Some("App"), None, &["Countable"]);
+        let child = make_class("UserCollection", Some("App"), Some("App\\Collection"), &[]);
+        let classes = [iface, parent, child.clone()];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&child, "Countable", &loader));
+    }
+
+    #[test]
+    fn subtype_of_unrelated_class_returns_false() {
+        let cls = make_class("User", Some("App"), None, &[]);
+        let other = make_class("Order", Some("App"), None, &[]);
+        let classes = [cls.clone(), other];
+        let loader = loader_from(&classes);
+        assert!(!is_subtype_of(&cls, "App\\Order", &loader));
+    }
+
+    // ── is_subtype_of: short ancestor resolves through loader ───
+
+    #[test]
+    fn subtype_of_short_ancestor_resolved_by_loader() {
+        // The ancestor name "RuntimeException" is a root-namespace class.
+        // The loader can resolve it, and the comparison should work.
+        let exc = make_class("RuntimeException", None, None, &["Exception"]);
+        let cls = make_class("AppException", Some("App"), Some("RuntimeException"), &[]);
+        let classes = [exc, cls.clone()];
+        let loader = loader_from(&classes);
+        assert!(is_subtype_of(&cls, "RuntimeException", &loader));
     }
 }
