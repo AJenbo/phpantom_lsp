@@ -27,7 +27,7 @@ use crate::completion::resolver::{Loaders, VarResolutionCtx};
 /// Wraps `resolve_rhs_expression` + `types_joined` into a single
 /// `Option<PhpType>`.  Returns `None` when the unified pipeline
 /// produces no results or an empty type string.
-pub(in crate::completion) fn resolve_expression_type<'b>(
+pub(crate) fn resolve_expression_type<'b>(
     expr: &'b mago_syntax::ast::Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {

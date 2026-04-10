@@ -1344,7 +1344,7 @@ fn resolve_closure_params_with_inferred(
                                 resolved_classes.iter().any(|explicit_cls| {
                                     crate::util::is_subtype_of_names(
                                         &inferred_cls.fqn(),
-                                        &explicit_cls.name,
+                                        &explicit_cls.fqn(),
                                         ctx.class_loader,
                                     )
                                 })

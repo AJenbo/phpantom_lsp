@@ -109,7 +109,7 @@ pub(crate) struct ResolutionCtx<'a> {
 /// Introducing this struct avoids passing 7–10 individual arguments to
 /// every helper in the resolution chain, which keeps clippy happy and
 /// makes call-sites much easier to read.
-pub(super) struct VarResolutionCtx<'a> {
+pub(crate) struct VarResolutionCtx<'a> {
     pub var_name: &'a str,
     pub current_class: &'a ClassInfo,
     pub all_classes: &'a [Arc<ClassInfo>],
@@ -228,7 +228,7 @@ impl<'a> VarResolutionCtx<'a> {
 /// Scope boundaries and variable definitions are stored alongside the
 /// cache and set by [`set_diagnostic_subject_cache_scopes`].
 type DiagSubjectCache =
-    HashMap<(String, AccessKind, u32, u32, u32, u32), Vec<crate::types::ResolvedType>>;
+    HashMap<(String, AccessKind, u32, u32, u32, u32, u32), Vec<crate::types::ResolvedType>>;
 
 /// File-level data stored alongside the diagnostic subject cache so
 /// that [`resolve_target_classes`] can compute the enclosing scope and
@@ -518,17 +518,21 @@ fn resolve_target_classes_inner(
     // ── Fast path: check the thread-local diagnostic cache ──────
     let scope_start = diag_cache_enclosing_scope(ctx.cursor_offset);
     let var_def_offset = diag_cache_var_def_offset(subject, ctx.cursor_offset);
-    // For variable subjects (excluding $this), use the innermost
-    // narrowing block (if/elseif/else body) as a cache discriminator
-    // so that accesses inside different instanceof-narrowing contexts
-    // get independent cache entries.  Accesses in the same block
-    // share a cache entry because they receive identical narrowing.
-    let narrowing_offset = if subject.starts_with('$') && !subject.starts_with("$this") {
+    // Use the innermost narrowing block (if/elseif/else body) as a
+    // cache discriminator so that accesses inside different
+    // instanceof-narrowing contexts get independent cache entries.
+    // This applies to regular variables ($var) AND property chains
+    // on $this ($this->prop), because instanceof checks and
+    // assert() calls can narrow property types just like locals.
+    // Bare $this is excluded because its type never changes.
+    let needs_narrowing = subject.starts_with('$')
+        && (subject.starts_with("$this->") || !subject.starts_with("$this"));
+    let narrowing_offset = if needs_narrowing {
         diag_cache_narrowing_block(ctx.cursor_offset)
     } else {
         0
     };
-    let assert_offset = if subject.starts_with('$') && !subject.starts_with("$this") {
+    let assert_offset = if needs_narrowing {
         diag_cache_assert_offset(ctx.cursor_offset)
     } else {
         0
@@ -540,6 +544,15 @@ fn resolve_target_classes_inner(
         var_def_offset,
         narrowing_offset,
         assert_offset,
+        // For subjects that can be narrowed, include the access
+        // offset so that guard-clause narrowing (which depends on
+        // cursor position, not block membership) produces
+        // independent entries for each access site.
+        if needs_narrowing {
+            ctx.cursor_offset
+        } else {
+            0
+        },
     );
 
     if !skip_cache_lookup {

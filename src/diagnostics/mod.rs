@@ -121,6 +121,7 @@ pub(crate) mod helpers;
 mod implementation_errors;
 mod invalid_class_kind;
 mod syntax_errors;
+mod type_errors;
 pub(crate) mod undefined_variables;
 pub(crate) mod unknown_classes;
 pub(crate) mod unknown_functions;
@@ -178,6 +179,7 @@ impl Backend {
         // inside collect_unknown_member_diagnostics (in the Untyped arm)
         // to avoid a second full walk with duplicate type resolution.
         self.collect_argument_count_diagnostics(uri_str, content, out);
+        self.collect_type_error_diagnostics(uri_str, content, out);
         self.collect_implementation_error_diagnostics(uri_str, content, out);
         self.collect_deprecated_diagnostics(uri_str, content, out);
         self.collect_undefined_variable_diagnostics(uri_str, content, out);

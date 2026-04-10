@@ -487,6 +487,7 @@ impl Backend {
                                 text_args,
                                 Some(&var_resolver),
                                 ctx.current_class.map(|c| c.name.as_str()),
+                                ctx.class_loader,
                             )
                         } else {
                             resolve_conditional_without_args(cond, &func_info.parameters)
@@ -735,6 +736,7 @@ impl Backend {
                         var_resolver,
                         mr_ctx.calling_class_name,
                         Some(&class_info.template_param_defaults),
+                        mr_ctx.class_loader,
                     )
                 } else {
                     resolve_conditional_without_args_and_defaults(
@@ -987,7 +989,7 @@ fn is_valid_virtual_narrowing(
     // class at runtime.  The virtual type must be the owner class itself
     // or a subclass of it.
     if native_type.is_self_like() {
-        return is_type_subclass_of(virtual_type, &owner_class.name, all_classes, class_loader);
+        return is_type_subclass_of(virtual_type, &owner_class.fqn(), all_classes, class_loader);
     }
 
     // Both are concrete types.  For scalar-to-scalar, delegate to the
@@ -1180,12 +1182,22 @@ impl Backend {
                 .chars()
                 .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
         {
-            return Some(PhpType::Named(name.to_string()));
+            let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
+                cls.fqn()
+            } else {
+                name.to_string()
+            };
+            return Some(PhpType::Named(resolved_name));
         }
 
         // new ClassName(…) → ClassName
         if let Some(class_name) = super::source::helpers::extract_new_expression_class(trimmed) {
-            return Some(PhpType::Named(class_name));
+            let resolved_name = if let Some(cls) = (ctx.class_loader)(&class_name) {
+                cls.fqn()
+            } else {
+                class_name
+            };
+            return Some(PhpType::Named(resolved_name));
         }
 
         // $this / self / static → current class

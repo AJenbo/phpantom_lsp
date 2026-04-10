@@ -91,16 +91,22 @@ impl Backend {
     /// publishing them via `textDocument/publishDiagnostics`.
     pub fn collect_undefined_variable_diagnostics(
         &self,
-        _uri: &str,
+        uri: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        // Gather file-level context for FQN resolution of function and
+        // class names inside the by-ref resolver.
+        let file_use_map: std::collections::HashMap<String, String> = self.file_use_map(uri);
+        let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
+
         // Build a by-ref resolver that uses Backend to look up function
         // and method signatures.  This lets the scope collector mark
         // by-ref arguments as writes for user-defined functions, static
         // methods, and constructors — not just the hardcoded table.
-        let resolver: ByRefResolver<'_> =
-            &|call_kind: &ByRefCallKind<'_>| self.resolve_by_ref_positions(call_kind);
+        let resolver: ByRefResolver<'_> = &|call_kind: &ByRefCallKind<'_>| {
+            self.resolve_by_ref_positions(call_kind, &file_use_map, &file_namespace)
+        };
 
         with_parsed_program(content, "undefined_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
@@ -120,10 +126,21 @@ impl Backend {
     ///
     /// Returns `Some(vec![...])` with 0-based argument positions that are
     /// by-reference, or `None` if the callee cannot be resolved.
-    fn resolve_by_ref_positions(&self, call_kind: &ByRefCallKind<'_>) -> Option<Vec<usize>> {
+    fn resolve_by_ref_positions(
+        &self,
+        call_kind: &ByRefCallKind<'_>,
+        file_use_map: &std::collections::HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<Vec<usize>> {
         match call_kind {
             ByRefCallKind::Function(name) => {
-                let candidates: Vec<&str> = vec![*name];
+                // Build FQN candidates: the raw name, plus the
+                // namespace-qualified name if the file has a namespace.
+                let fqn = crate::util::resolve_to_fqn(name, file_use_map, file_namespace);
+                let mut candidates: Vec<&str> = vec![*name];
+                if fqn != *name {
+                    candidates.push(&fqn);
+                }
                 let func_info = self.find_or_load_function(&candidates)?;
                 let positions: Vec<usize> = func_info
                     .parameters
@@ -135,7 +152,10 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::StaticMethod(class_name, method_name) => {
-                let cls = self.find_or_load_class(class_name)?;
+                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+                let cls = self
+                    .find_or_load_class(class_name)
+                    .or_else(|| self.find_or_load_class(&fqn))?;
                 let method = cls.methods.iter().find(|m| m.name == *method_name)?;
                 let positions: Vec<usize> = method
                     .parameters
@@ -147,9 +167,30 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::Constructor(class_name) => {
-                let cls = self.find_or_load_class(class_name)?;
+                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+                let cls = self
+                    .find_or_load_class(class_name)
+                    .or_else(|| self.find_or_load_class(&fqn))?;
                 let ctor = cls.methods.iter().find(|m| m.name == "__construct")?;
                 let positions: Vec<usize> = ctor
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.is_reference)
+                    .map(|(i, _)| i)
+                    .collect();
+                Some(positions)
+            }
+            ByRefCallKind::InstanceMethod(class_name, method_name) => {
+                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+                let cls = self
+                    .find_or_load_class(class_name)
+                    .or_else(|| self.find_or_load_class(&fqn))?;
+                let merged = crate::inheritance::resolve_class_with_inheritance(&cls, &|name| {
+                    self.find_or_load_class(name)
+                });
+                let method = merged.methods.iter().find(|m| m.name == *method_name)?;
+                let positions: Vec<usize> = method
                     .parameters
                     .iter()
                     .enumerate()
@@ -198,13 +239,16 @@ fn collect_from_statement(
             );
         }
         Statement::Class(class) => {
-            collect_from_class_members(class.members.as_slice(), ctx, resolver);
+            let class_name = class.name.value.to_string();
+            collect_from_class_members(class.members.as_slice(), ctx, resolver, Some(&class_name));
         }
         Statement::Trait(tr) => {
-            collect_from_class_members(tr.members.as_slice(), ctx, resolver);
+            let trait_name = tr.name.value.to_string();
+            collect_from_class_members(tr.members.as_slice(), ctx, resolver, Some(&trait_name));
         }
         Statement::Enum(en) => {
-            collect_from_class_members(en.members.as_slice(), ctx, resolver);
+            let enum_name = en.name.value.to_string();
+            collect_from_class_members(en.members.as_slice(), ctx, resolver, Some(&enum_name));
         }
         Statement::Interface(_) => {
             // Interfaces don't have method bodies.
@@ -228,6 +272,7 @@ fn collect_from_class_members(
     members: &[ClassLikeMember<'_>],
     ctx: &mut DiagnosticCtx<'_>,
     resolver: Option<ByRefResolver<'_>>,
+    class_name: Option<&str>,
 ) {
     for member in members.iter() {
         if let ClassLikeMember::Method(method) = member
@@ -248,6 +293,7 @@ fn collect_from_class_members(
                 body_end,
                 FrameKind::Method,
                 resolver,
+                class_name.map(|s| s.to_string()),
             );
 
             check_scope(&scope, block.statements.as_slice(), ctx, !is_static);
@@ -2853,6 +2899,97 @@ function test(string $src): void {
         assert!(
             diags.is_empty(),
             "Constructor by-ref $warnings should be treated as defined. Got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_namespaced_unqualified_function_byref_param() {
+        let php = r#"<?php
+namespace App;
+function initItem(?string &$out): void {
+    $out = 'hello';
+}
+class Svc {
+    public function demo(): void {
+        initItem($result);
+        echo $result;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Unqualified call to namespaced function with by-ref param should not flag $result. Got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_namespaced_static_method_byref_param() {
+        let php = r#"<?php
+namespace App;
+class Factory {
+    public static function create(?string &$out): void {
+        $out = 'hello';
+    }
+}
+class Svc {
+    public function demo(): void {
+        Factory::create($result);
+        echo $result;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Static method with by-ref param in namespace should not flag $result. Got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_namespaced_constructor_byref_param() {
+        let php = r#"<?php
+namespace App;
+class Builder {
+    public function __construct(?string &$out) {
+        $out = 'built';
+    }
+}
+class Svc {
+    public function demo(): void {
+        new Builder($result);
+        echo $result;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Constructor with by-ref param in namespace should not flag $result. Got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_this_method_byref_param() {
+        let php = r#"<?php
+class Svc {
+    private function init(?string &$out): void {
+        $out = 'ready';
+    }
+    public function demo(): void {
+        $this->init($result);
+        echo $result;
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "$this->method() with by-ref param should not flag $result. Got: {:?}",
             diags,
         );
     }

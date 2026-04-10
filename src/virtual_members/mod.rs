@@ -822,7 +822,7 @@ fn resolve_class_fully_inner(
         if !merged
             .implements_generics
             .iter()
-            .any(|(n, _)| short_name(n) == short_name(name))
+            .any(|(n, _)| n == name || short_name(n) == short_name(name))
         {
             merged
                 .implements_generics
@@ -956,11 +956,9 @@ fn build_implements_substitution_map(
         return HashMap::new();
     }
 
-    let iface_short = short_name(iface_name);
-
     let type_args = all_implements_generics
         .iter()
-        .find(|(name, _)| short_name(name) == iface_short)
+        .find(|(name, _)| name == iface_name || short_name(name) == short_name(iface_name))
         .map(|(_, args)| args);
 
     let type_args = match type_args {

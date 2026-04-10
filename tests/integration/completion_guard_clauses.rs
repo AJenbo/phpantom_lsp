@@ -1593,6 +1593,165 @@ async fn test_guard_clause_null_equality_return_narrows() {
 /// Variable assigned via `?? null` then guarded with `!$var` + `continue`.
 /// Reproduces the exact pattern from the null/falsy guard clause narrowing bug.
 #[tokio::test]
+async fn test_guard_clause_property_negated_instanceof_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_prop_neg_instanceof.php").unwrap();
+    // Faithfully reproduces the PropertyNarrowingDemo from example.php:
+    // - Namespace wrapping
+    // - A preceding positive instanceof if-block (non-guard)
+    // - A negated instanceof guard clause
+    // - Cursor after the guard clause
+    let text = concat!(
+        "<?php\n",
+        "namespace Demo;\n",
+        "class Dog {\n",
+        "    public function bark(): void {}\n",
+        "}\n",
+        "class Cat {\n",
+        "    public function purr(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    private Dog|Cat $pet;\n",
+        "    public function test(): void {\n",
+        "        if ($this->pet instanceof Cat) {\n",
+        "            $this->pet->purr();\n",
+        "        }\n",
+        "        if (!$this->pet instanceof Dog) {\n",
+        "            return;\n",
+        "        }\n",
+        "        $this->pet->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 17,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' after negated instanceof guard on property, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' after negated instanceof guard on property, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_guard_clause_property_positive_instanceof_excludes() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_prop_pos_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Dog {\n",
+        "    public function bark(): void {}\n",
+        "}\n",
+        "class Cat {\n",
+        "    public function purr(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    private Dog|Cat $pet;\n",
+        "    public function test(): void {\n",
+        "        if ($this->pet instanceof Cat) {\n",
+        "            return;\n",
+        "        }\n",
+        "        $this->pet->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 13,
+                    character: 22,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"bark"),
+                "Should include Dog's 'bark' after positive instanceof guard excludes Cat, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' after positive instanceof guard excludes Cat, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
 async fn test_guard_clause_null_coalesce_then_falsy_continue() {
     let backend = create_test_backend();
 

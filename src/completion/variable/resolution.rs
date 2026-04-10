@@ -69,18 +69,25 @@ thread_local! {
 
 /// Maximum nesting depth for `resolve_variable_types` calls.
 ///
-/// Four levels covers legitimate nested resolution such as:
-///   depth 0: resolve `$arr` built via `$arr[$key] = ['k' => $var]`
-///   depth 1: resolve `$var` (array element variable in the shape literal)
-///   depth 2: resolve `$item->prop` (RHS of `$var = $item->prop`)
-///   depth 3: resolve `$item` (foreach value binding → iterable param)
+/// Six levels covers legitimate nested resolution chains where each
+/// variable assignment depends on the previous variable's type:
+///
+///   depth 0: resolve `$debt`       (from `$order->getDebtCollection()`)
+///   depth 1: resolve `$order`      (from `$period->getOrder()`)
+///   depth 2: resolve `$period`     (from `$agreement->getPeriods()->…->lastPeriod()`)
+///   depth 3: resolve `$agreement`  (from `$customer->getLatestAgreement()`)
+///   depth 4: resolve `$customer`   (from `$event->token->getCustomer()`)
+///   depth 5: resolve `$event`      (method parameter — no further recursion)
+///
+/// This pattern is common in Laravel code where each step guards
+/// against null and then chains to the next model accessor.
 ///
 /// Cycles like `foreach ($x->method() as $x)` are caught by a
 /// targeted check in `try_resolve_foreach_value_type` (which skips
 /// resolution when the value variable shadows the iterator receiver)
 /// rather than by this depth limit alone.  The depth limit is a
 /// safety net for any remaining recursive patterns.
-const MAX_VAR_RESOLUTION_DEPTH: u8 = 4;
+const MAX_VAR_RESOLUTION_DEPTH: u8 = 6;
 
 /// Returns `true` when any `resolve_variable_types` call on the
 /// current stack has returned empty because the depth guard fired.
@@ -2884,7 +2891,15 @@ fn extract_native_type_from_rhs<'b>(
     match rhs {
         // `new ClassName(…)` → the class name.
         Expression::Instantiation(inst) => match inst.class {
-            Expression::Identifier(ident) => Some(PhpType::Named(ident.value().to_string())),
+            Expression::Identifier(ident) => {
+                let name = ident.value().to_string();
+                let fqn = if let Some(cls) = (ctx.class_loader)(&name) {
+                    cls.fqn()
+                } else {
+                    name
+                };
+                Some(PhpType::Named(fqn))
+            }
             Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.clone())),
             Expression::Static(_) => Some(PhpType::Named(ctx.current_class.name.clone())),
             _ => None,

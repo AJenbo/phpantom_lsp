@@ -4863,3 +4863,88 @@ $results[0]->week;
         "expected no diagnostics for interleaved array-access property chain, got: {diags:?}",
     );
 }
+
+// ── Property narrowing via guard clauses ────────────────────────
+
+#[test]
+fn no_false_positive_after_negated_instanceof_guard_on_property() {
+    let php = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    private Dog|Cat $pet;
+    public function test(): void {
+        if ($this->pet instanceof Dog) {
+            $this->pet->bark();
+        }
+        if (!$this->pet instanceof Cat) {
+            return;
+        }
+        $this->pet->purr();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after negated instanceof guard on property, got: {diags:?}",
+    );
+}
+
+#[test]
+fn no_false_positive_after_positive_instanceof_guard_on_property() {
+    let php = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    private Dog|Cat $pet;
+    public function test(): void {
+        if ($this->pet instanceof Cat) {
+            return;
+        }
+        $this->pet->bark();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after positive instanceof guard excludes Cat on property, got: {diags:?}",
+    );
+}
+
+#[test]
+fn no_false_positive_after_assert_instanceof_on_property() {
+    let php = r#"<?php
+class Dog {
+    public function bark(): string { return ''; }
+}
+class Cat {
+    public function purr(): string { return ''; }
+}
+class Svc {
+    /** @var Dog|Cat|null */
+    public $pet;
+    public function test(): void {
+        assert($this->pet instanceof Dog);
+        $this->pet->bark();
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after assert instanceof on property, got: {diags:?}",
+    );
+}

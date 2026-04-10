@@ -2198,6 +2198,60 @@ impl PhpType {
         }
     }
 
+    /// Whether this type references any of the given template parameter names.
+    ///
+    /// Returns `true` when a `Named` leaf matches one of the names in
+    /// `template_params`, or when any nested position (union members,
+    /// generic args, nullable inner, etc.) does.  This is used to detect
+    /// unsubstituted template parameters in method return types so that
+    /// hover can swap them with the call-site-substituted version.
+    pub fn references_any_template_param(&self, template_params: &[String]) -> bool {
+        if template_params.is_empty() {
+            return false;
+        }
+        match self {
+            PhpType::Named(name) => template_params.iter().any(|p| p == name),
+            PhpType::Nullable(inner) => inner.references_any_template_param(template_params),
+            PhpType::Union(members) | PhpType::Intersection(members) => members
+                .iter()
+                .any(|m| m.references_any_template_param(template_params)),
+            PhpType::Generic(name, args) => {
+                template_params.iter().any(|p| p == name)
+                    || args
+                        .iter()
+                        .any(|a| a.references_any_template_param(template_params))
+            }
+            PhpType::Array(inner) => inner.references_any_template_param(template_params),
+            PhpType::ClassString(Some(inner)) | PhpType::InterfaceString(Some(inner)) => {
+                inner.references_any_template_param(template_params)
+            }
+            PhpType::KeyOf(inner) | PhpType::ValueOf(inner) => {
+                inner.references_any_template_param(template_params)
+            }
+            PhpType::Conditional {
+                then_type,
+                else_type,
+                ..
+            } => {
+                then_type.references_any_template_param(template_params)
+                    || else_type.references_any_template_param(template_params)
+            }
+            PhpType::Callable {
+                params,
+                return_type,
+                ..
+            } => {
+                params
+                    .iter()
+                    .any(|p| p.type_hint.references_any_template_param(template_params))
+                    || return_type
+                        .as_ref()
+                        .is_some_and(|r| r.references_any_template_param(template_params))
+            }
+            _ => false,
+        }
+    }
+
     pub fn equivalent(&self, other: &PhpType) -> bool {
         if self == other {
             return true;
@@ -2361,16 +2415,45 @@ impl PhpType {
         }
 
         // ── ArrayShape <: array / iterable ──────────────────────────
-        if matches!(self, PhpType::ArrayShape(_)) {
+        if let PhpType::ArrayShape(entries) = self {
             if let PhpType::Named(sup) = supertype {
                 return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
             }
-            if matches!(
-                supertype,
-                PhpType::ArrayShape(_) | PhpType::Generic(..) | PhpType::Array(_)
-            ) {
-                // Structural shape-to-shape or shape-to-generic-array
-                // comparison is complex; fall through to false for now.
+
+            // ArrayShape <: array<K, V>  (or other generic array-like)
+            // Every shape key must be a subtype of K, every value a subtype of V.
+            if let PhpType::Generic(name, params) = supertype
+                && is_array_like_name(name)
+            {
+                match params.len() {
+                    // array<V> — only check values.
+                    1 => {
+                        let val_type = &params[0];
+                        return entries.iter().all(|e| e.value_type.is_subtype_of(val_type));
+                    }
+                    // array<K, V> — check both keys and values.
+                    2 => {
+                        let key_type = &params[0];
+                        let val_type = &params[1];
+                        return entries.iter().all(|e| {
+                            // Determine the key's type: named string keys are
+                            // literal-string, positional keys are int.
+                            let entry_key_type = match &e.key {
+                                Some(k) if k.parse::<i64>().is_ok() => PhpType::int(),
+                                Some(_) => PhpType::string(),
+                                None => PhpType::int(),
+                            };
+                            entry_key_type.is_subtype_of(key_type)
+                                && e.value_type.is_subtype_of(val_type)
+                        });
+                    }
+                    _ => {}
+                }
+            }
+
+            // ArrayShape <: T[] — check all values against T.
+            if let PhpType::Array(inner) = supertype {
+                return entries.iter().all(|e| e.value_type.is_subtype_of(inner));
             }
         }
 
@@ -2470,11 +2553,26 @@ impl PhpType {
             return ret_ok && params_ok;
         }
 
-        // Callable <: callable (named)
+        // Callable/Closure specification <: callable | Closure | object
+        // A callable specification like `Closure(int): void` is always
+        // a Closure instance, which is both callable and an object.
         if matches!(self, PhpType::Callable { .. })
             && let PhpType::Named(sup) = supertype
         {
-            return matches!(sup.to_ascii_lowercase().as_str(), "callable");
+            return matches!(
+                sup.to_ascii_lowercase().as_str(),
+                "callable" | "closure" | "object"
+            );
+        }
+
+        // Bare `Closure` or `callable` <: callable specification.
+        // A bare `Closure` might have any signature — we cannot prove
+        // it violates the specification, so treat it as compatible.
+        if let PhpType::Named(sub) = self
+            && matches!(sub.to_ascii_lowercase().as_str(), "callable" | "closure")
+            && matches!(supertype, PhpType::Callable { .. })
+        {
+            return true;
         }
 
         false
@@ -2933,10 +3031,10 @@ fn is_named_subtype(sub: &str, sup: &str) -> bool {
         ),
 
         // ── object supertype ────────────────────────────────────
-        // Any named non-scalar is potentially an object subtype,
-        // but we can't confirm without class hierarchy. Only
-        // handle `callable-object`.
-        "object" => matches!(sub_n, "callable-object"),
+        // Every class/interface/enum instance is an object.  If the
+        // sub-name is not a recognised scalar/keyword, it must be a
+        // class-like name and therefore a subtype of `object`.
+        "object" => matches!(sub_n, "callable-object" | "closure") || !is_scalar_name(sub),
 
         // ── callable supertype ──────────────────────────────────
         "callable" => matches!(
@@ -2992,15 +3090,42 @@ fn literal_is_subtype_of(lit: &str, supertype: &PhpType) -> bool {
             }
             // String literal → string (and its supertypes).
             if lit.starts_with('\'') || lit.starts_with('"') {
-                return matches!(
+                // Extract the content between the quotes.
+                let content = &lit[1..lit.len().saturating_sub(1)];
+
+                if matches!(
                     sup_l.as_str(),
-                    "string"
-                        | "literal-string"
-                        | "non-empty-string"
-                        | "non-empty-literal-string"
-                        | "scalar"
-                        | "array-key"
-                );
+                    "string" | "literal-string" | "scalar" | "array-key"
+                ) {
+                    return true;
+                }
+
+                // Non-empty string subtypes: any literal with content.
+                if !content.is_empty()
+                    && matches!(
+                        sup_l.as_str(),
+                        "non-empty-string" | "non-empty-literal-string"
+                    )
+                {
+                    return true;
+                }
+
+                // Truthy/non-falsy string: non-empty and not "0".
+                if !content.is_empty()
+                    && content != "0"
+                    && matches!(sup_l.as_str(), "truthy-string" | "non-falsy-string")
+                {
+                    return true;
+                }
+
+                // Numeric-string: the content parses as a number.
+                if sup_l == "numeric-string"
+                    && (content.parse::<i64>().is_ok() || content.parse::<f64>().is_ok())
+                {
+                    return true;
+                }
+
+                return false;
             }
             false
         }
@@ -3284,7 +3409,7 @@ pub(crate) fn is_primitive_scalar_name(name: &str) -> bool {
 }
 
 /// Returns `true` for type names that represent array-like types in PHP.
-fn is_array_like_name(name: &str) -> bool {
+pub fn is_array_like_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "array" | "list" | "non-empty-array" | "non-empty-list" | "iterable"
@@ -5908,6 +6033,66 @@ mod tests {
         }
 
         #[test]
+        fn array_shape_is_subtype_of_generic_array_string_mixed() {
+            assert!(
+                PhpType::parse("array{id: int, refunded_amount: string}")
+                    .is_subtype_of(&PhpType::parse("array<string, mixed>"))
+            );
+        }
+
+        #[test]
+        fn array_shape_is_subtype_of_generic_array_string_scalar() {
+            assert!(
+                PhpType::parse("array{name: string, age: int}")
+                    .is_subtype_of(&PhpType::parse("array<string, string|int>"))
+            );
+        }
+
+        #[test]
+        fn array_shape_not_subtype_of_generic_array_wrong_value() {
+            // Shape has an int value but supertype requires string values.
+            assert!(
+                !PhpType::parse("array{name: string, age: int}")
+                    .is_subtype_of(&PhpType::parse("array<string, string>"))
+            );
+        }
+
+        #[test]
+        fn array_shape_is_subtype_of_generic_array_single_param() {
+            // array<mixed> — only value type checked.
+            assert!(
+                PhpType::parse("array{name: string, count: int}")
+                    .is_subtype_of(&PhpType::parse("array<mixed>"))
+            );
+        }
+
+        #[test]
+        fn array_shape_is_subtype_of_array_slice() {
+            // array{name: string, label: string} <: string[]
+            assert!(
+                PhpType::parse("array{name: string, label: string}")
+                    .is_subtype_of(&PhpType::parse("string[]"))
+            );
+        }
+
+        #[test]
+        fn array_shape_not_subtype_of_array_slice_wrong_value() {
+            assert!(
+                !PhpType::parse("array{name: string, age: int}")
+                    .is_subtype_of(&PhpType::parse("string[]"))
+            );
+        }
+
+        #[test]
+        fn array_shape_with_int_keys_subtype_of_array_int_mixed() {
+            // Positional entries have int keys.
+            assert!(
+                PhpType::parse("array{string, int}")
+                    .is_subtype_of(&PhpType::parse("array<int, mixed>"))
+            );
+        }
+
+        #[test]
         fn generic_array_is_subtype_of_array() {
             assert!(PhpType::parse("array<int, string>").is_subtype_of(&PhpType::array()));
         }
@@ -5976,6 +6161,68 @@ mod tests {
         #[test]
         fn literal_int_is_subtype_of_float() {
             assert!(PhpType::Literal("42".into()).is_subtype_of(&PhpType::float()));
+        }
+
+        #[test]
+        fn literal_numeric_string_is_subtype_of_numeric_string() {
+            assert!(
+                PhpType::Literal("'0.00'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+            );
+        }
+
+        #[test]
+        fn literal_integer_string_is_subtype_of_numeric_string() {
+            assert!(
+                PhpType::Literal("'42'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+            );
+        }
+
+        #[test]
+        fn literal_non_numeric_string_is_not_subtype_of_numeric_string() {
+            assert!(
+                !PhpType::Literal("'hello'".into())
+                    .is_subtype_of(&PhpType::parse("numeric-string"))
+            );
+        }
+
+        #[test]
+        fn literal_empty_string_is_not_subtype_of_non_empty_string() {
+            assert!(
+                !PhpType::Literal("''".into()).is_subtype_of(&PhpType::parse("non-empty-string"))
+            );
+        }
+
+        #[test]
+        fn literal_non_empty_string_is_subtype_of_non_empty_string() {
+            assert!(
+                PhpType::Literal("'foo'".into()).is_subtype_of(&PhpType::parse("non-empty-string"))
+            );
+        }
+
+        #[test]
+        fn literal_string_is_subtype_of_truthy_string() {
+            assert!(
+                PhpType::Literal("'foo'".into()).is_subtype_of(&PhpType::parse("truthy-string"))
+            );
+        }
+
+        #[test]
+        fn literal_zero_string_is_not_subtype_of_truthy_string() {
+            assert!(
+                !PhpType::Literal("'0'".into()).is_subtype_of(&PhpType::parse("truthy-string"))
+            );
+        }
+
+        #[test]
+        fn literal_empty_string_is_not_subtype_of_truthy_string() {
+            assert!(!PhpType::Literal("''".into()).is_subtype_of(&PhpType::parse("truthy-string")));
+        }
+
+        #[test]
+        fn literal_negative_numeric_string_is_subtype_of_numeric_string() {
+            assert!(
+                PhpType::Literal("'-3.14'".into()).is_subtype_of(&PhpType::parse("numeric-string"))
+            );
         }
 
         // ── IntRange subtyping ──────────────────────────────────────────

@@ -17,11 +17,12 @@
 ///   arguments were provided (or none were preserved); walks the
 ///   conditional tree taking the "null default" branch at each level.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mago_syntax::ast::*;
 
 use crate::php_type::PhpType;
-use crate::types::ParameterInfo;
+use crate::types::{ClassInfo, ParameterInfo};
 
 /// Callback that resolves a variable name (e.g. `"$requestType"`) to the
 /// class names it holds as class-string values (e.g. from match expression
@@ -80,6 +81,7 @@ pub(crate) fn resolve_conditional_with_text_args(
     text_args: &str,
     var_resolver: VarClassStringResolver<'_>,
     calling_class_name: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     resolve_conditional_with_text_args_and_defaults(
         conditional,
@@ -88,6 +90,7 @@ pub(crate) fn resolve_conditional_with_text_args(
         var_resolver,
         calling_class_name,
         None,
+        class_loader,
     )
 }
 
@@ -104,6 +107,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     var_resolver: VarClassStringResolver<'_>,
     calling_class_name: Option<&str>,
     template_defaults: Option<&HashMap<String, PhpType>>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     match conditional {
         PhpType::Conditional {
@@ -166,6 +170,16 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
                     }
                     if !class_names.is_empty() {
+                        let class_names: Vec<String> = class_names
+                            .into_iter()
+                            .map(|n| {
+                                if let Some(cls) = class_loader(&n) {
+                                    cls.fqn()
+                                } else {
+                                    n
+                                }
+                            })
+                            .collect();
                         let ty = if class_names.len() == 1 {
                             PhpType::Named(class_names.into_iter().next().unwrap())
                         } else {
@@ -180,6 +194,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     );
                 }
 
@@ -189,7 +204,12 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 {
                     let class_name =
                         resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
-                    return Some(PhpType::Named(class_name));
+                    let resolved = if let Some(cls) = class_loader(&class_name) {
+                        cls.fqn()
+                    } else {
+                        class_name
+                    };
+                    return Some(PhpType::Named(resolved));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -200,6 +220,16 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 {
                     let names = resolver(trimmed);
                     if !names.is_empty() {
+                        let names: Vec<String> = names
+                            .into_iter()
+                            .map(|n| {
+                                if let Some(cls) = class_loader(&n) {
+                                    cls.fqn()
+                                } else {
+                                    n
+                                }
+                            })
+                            .collect();
                         let ty = if names.len() == 1 {
                             PhpType::Named(names.into_iter().next().unwrap())
                         } else {
@@ -216,6 +246,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     var_resolver,
                     calling_class_name,
                     template_defaults,
+                    class_loader,
                 )
             } else if condition.as_ref().is_null() {
                 if arg_text.is_none() || arg_text == Some("") || arg_text == Some("null") {
@@ -227,6 +258,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     )
                 } else {
                     // Argument was provided → not null
@@ -237,6 +269,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     )
                 }
             } else if let PhpType::Literal(s) = condition.as_ref() {
@@ -262,6 +295,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                             var_resolver,
                             calling_class_name,
                             template_defaults,
+                            class_loader,
                         );
                     }
                 }
@@ -273,6 +307,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     var_resolver,
                     calling_class_name,
                     template_defaults,
+                    class_loader,
                 )
             } else {
                 // IsType equivalent: can't statically determine most
@@ -290,6 +325,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     );
                 }
                 // Can't statically determine; fall through to else.
@@ -300,6 +336,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     var_resolver,
                     calling_class_name,
                     template_defaults,
+                    class_loader,
                 )
             }
         }
@@ -403,6 +440,7 @@ pub(crate) fn resolve_conditional_with_args<'b>(
     argument_list: &ArgumentList<'b>,
     var_resolver: VarClassStringResolver<'_>,
     calling_class_name: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     resolve_conditional_with_args_and_defaults(
         conditional,
@@ -411,6 +449,7 @@ pub(crate) fn resolve_conditional_with_args<'b>(
         var_resolver,
         calling_class_name,
         None,
+        class_loader,
     )
 }
 
@@ -423,6 +462,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
     var_resolver: VarClassStringResolver<'_>,
     calling_class_name: Option<&str>,
     template_defaults: Option<&HashMap<String, PhpType>>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     match conditional {
         PhpType::Conditional {
@@ -476,7 +516,12 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 if let Some(class_name) = arg_expr.and_then(extract_class_string_from_expr) {
                     let class_name =
                         resolve_self_keyword(&class_name, calling_class_name).unwrap_or(class_name);
-                    return Some(PhpType::Named(class_name));
+                    let resolved = if let Some(cls) = class_loader(&class_name) {
+                        cls.fqn()
+                    } else {
+                        class_name
+                    };
+                    return Some(PhpType::Named(resolved));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -485,6 +530,16 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 {
                     let names = resolver(dv.name);
                     if !names.is_empty() {
+                        let names: Vec<String> = names
+                            .into_iter()
+                            .map(|n| {
+                                if let Some(cls) = class_loader(&n) {
+                                    cls.fqn()
+                                } else {
+                                    n
+                                }
+                            })
+                            .collect();
                         let ty = if names.len() == 1 {
                             PhpType::Named(names.into_iter().next().unwrap())
                         } else {
@@ -501,6 +556,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     var_resolver,
                     calling_class_name,
                     template_defaults,
+                    class_loader,
                 )
             } else if condition.as_ref().is_null() {
                 if arg_expr.is_none() {
@@ -512,6 +568,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     )
                 } else {
                     // Argument was provided → not null
@@ -522,6 +579,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     )
                 }
             } else if let PhpType::Literal(s) = condition.as_ref() {
@@ -551,6 +609,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     )
                 } else {
                     resolve_conditional_with_args_and_defaults(
@@ -560,6 +619,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     )
                 }
             } else {
@@ -576,6 +636,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         var_resolver,
                         calling_class_name,
                         template_defaults,
+                        class_loader,
                     );
                 }
                 // We can't statically determine the type of an
@@ -587,6 +648,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     var_resolver,
                     calling_class_name,
                     template_defaults,
+                    class_loader,
                 )
             }
         }

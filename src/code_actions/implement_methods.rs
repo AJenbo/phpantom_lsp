@@ -152,6 +152,15 @@ pub(crate) fn collect_missing_methods(
 
     // ── Interfaces ──────────────────────────────────────────────────────
     for iface_name in &class.interfaces {
+        // Skip implicit BackedEnum/UnitEnum interfaces on enums.
+        // PHP provides from(), tryFrom(), and cases() automatically
+        // at runtime — they don't need to be declared in the enum body.
+        if class.kind == crate::types::ClassLikeKind::Enum {
+            let stripped = iface_name.strip_prefix('\\').unwrap_or(iface_name);
+            if stripped == "BackedEnum" || stripped == "UnitEnum" {
+                continue;
+            }
+        }
         collect_from_interface(
             iface_name,
             class_loader,

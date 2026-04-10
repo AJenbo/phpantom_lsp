@@ -51,6 +51,9 @@ pub(crate) enum ByRefCallKind<'a> {
     StaticMethod(&'a str, &'a str),
     /// A constructor call (e.g. `new Cls($var)`).
     Constructor(&'a str),
+    /// An instance method call on `$this` (e.g. `$this->method($var)`).
+    /// The class name is the enclosing class at the call site.
+    InstanceMethod(&'a str, &'a str),
 }
 
 /// Callback that resolves by-reference parameter positions for a call.
@@ -429,29 +432,39 @@ struct Collector<'a> {
     /// Optional callback that resolves by-reference parameter positions
     /// for function/static-method/constructor calls.
     by_ref_resolver: Option<ByRefResolver<'a>>,
+    /// Name of the enclosing class (when walking a method body).
+    /// Used to resolve `$this->method()` by-ref parameters.
+    enclosing_class_name: Option<String>,
 }
 
 impl<'a> Collector<'a> {
     fn new() -> Self {
-        Self {
+        Collector {
             accesses: Vec::new(),
             frames: Vec::new(),
             has_this_or_self: false,
             has_reference_params: false,
             frame_stack: Vec::new(),
             by_ref_resolver: None,
+            enclosing_class_name: None,
         }
     }
 
     fn with_resolver(resolver: ByRefResolver<'a>) -> Self {
-        Self {
+        Collector {
             accesses: Vec::new(),
             frames: Vec::new(),
             has_this_or_self: false,
             has_reference_params: false,
             frame_stack: Vec::new(),
             by_ref_resolver: Some(resolver),
+            enclosing_class_name: None,
         }
+    }
+
+    /// Return the enclosing class name, if set.
+    fn enclosing_class_name(&self) -> Option<&str> {
+        self.enclosing_class_name.as_deref()
     }
 
     fn push_access(&mut self, name: String, offset: u32, kind: AccessKind) {
@@ -575,6 +588,7 @@ pub(crate) fn collect_function_scope_with_resolver<'a>(
         body_end,
         FrameKind::Function,
         resolver,
+        None,
     )
 }
 
@@ -588,7 +602,9 @@ pub(crate) fn collect_function_scope_with_kind<'a>(
     body_end: u32,
     kind: FrameKind,
 ) -> ScopeMap {
-    collect_function_scope_with_kind_and_resolver(params, body, body_start, body_end, kind, None)
+    collect_function_scope_with_kind_and_resolver(
+        params, body, body_start, body_end, kind, None, None,
+    )
 }
 
 /// Like [`collect_function_scope_with_kind`] but accepts an optional
@@ -601,11 +617,13 @@ pub(crate) fn collect_function_scope_with_kind_and_resolver<'a>(
     body_end: u32,
     kind: FrameKind,
     resolver: Option<ByRefResolver<'_>>,
+    enclosing_class_name: Option<String>,
 ) -> ScopeMap {
     let mut collector = match resolver {
         Some(r) => Collector::with_resolver(r),
         None => Collector::new(),
     };
+    collector.enclosing_class_name = enclosing_class_name;
 
     let param_names: Vec<String> = params
         .parameters
@@ -864,29 +882,24 @@ fn walk_expression(expr: &Expression<'_>, collector: &mut Collector<'_>) {
             walk_assignment(assignment, collector);
         }
         // ── Function / method / static-method calls ──
-        Expression::Call(call) => {
-            match call {
-                Call::Function(func_call) => {
-                    walk_expression(func_call.function, collector);
-                    walk_function_call_arguments(func_call, collector);
-                }
-                Call::Method(method_call) => {
-                    walk_expression(method_call.object, collector);
-                    // Instance method calls: we cannot resolve the receiver
-                    // type in the scope collector, so arguments are treated
-                    // as reads.  Future work (T25) will handle this.
-                    walk_arguments(&method_call.argument_list, collector);
-                }
-                Call::NullSafeMethod(method_call) => {
-                    walk_expression(method_call.object, collector);
-                    walk_arguments(&method_call.argument_list, collector);
-                }
-                Call::StaticMethod(static_call) => {
-                    walk_expression(static_call.class, collector);
-                    walk_static_method_call_arguments(static_call, collector);
-                }
+        Expression::Call(call) => match call {
+            Call::Function(func_call) => {
+                walk_expression(func_call.function, collector);
+                walk_function_call_arguments(func_call, collector);
             }
-        }
+            Call::Method(method_call) => {
+                walk_expression(method_call.object, collector);
+                walk_instance_method_call_arguments(method_call, collector);
+            }
+            Call::NullSafeMethod(method_call) => {
+                walk_expression(method_call.object, collector);
+                walk_arguments(&method_call.argument_list, collector);
+            }
+            Call::StaticMethod(static_call) => {
+                walk_expression(static_call.class, collector);
+                walk_static_method_call_arguments(static_call, collector);
+            }
+        },
         // ── Property / constant access ──
         Expression::Access(access) => match access {
             Access::Property(pa) => {
@@ -1390,6 +1403,58 @@ fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Co
 
 /// Walk arguments for a static method call, checking the optional
 /// resolver for by-reference parameter positions.
+/// Walk arguments for an instance method call (`$obj->method(...)`),
+/// checking the optional resolver for by-reference parameter positions
+/// when the receiver is `$this`.
+fn walk_instance_method_call_arguments(
+    method_call: &MethodCall<'_>,
+    collector: &mut Collector<'_>,
+) {
+    // Only handle `$this->method()` — for arbitrary receivers we cannot
+    // resolve the class type in the scope collector.
+    let is_this = matches!(method_call.object, Expression::Variable(Variable::Direct(dv)) if dv.name == "$this");
+    if !is_this {
+        walk_arguments(&method_call.argument_list, collector);
+        return;
+    }
+
+    let method_name = match &method_call.method {
+        ClassLikeMemberSelector::Identifier(ident) => ident.value,
+        _ => {
+            walk_arguments(&method_call.argument_list, collector);
+            return;
+        }
+    };
+
+    // Find the enclosing class name from the collector's class stack.
+    let enclosing_class = collector.enclosing_class_name();
+    let enclosing_class = match enclosing_class {
+        Some(name) => name,
+        None => {
+            walk_arguments(&method_call.argument_list, collector);
+            return;
+        }
+    };
+
+    if let Some(ref resolver) = collector.by_ref_resolver {
+        let kind = ByRefCallKind::InstanceMethod(enclosing_class, method_name);
+        if let Some(positions) = resolver(&kind)
+            && !positions.is_empty()
+        {
+            for (idx, arg) in method_call.argument_list.arguments.iter().enumerate() {
+                if positions.contains(&idx) {
+                    walk_expression_as_write(arg.value(), collector);
+                } else {
+                    walk_expression(arg.value(), collector);
+                }
+            }
+            return;
+        }
+    }
+
+    walk_arguments(&method_call.argument_list, collector);
+}
+
 fn walk_static_method_call_arguments(
     static_call: &StaticMethodCall<'_>,
     collector: &mut Collector<'_>,

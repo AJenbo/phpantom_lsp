@@ -897,7 +897,14 @@ impl Backend {
         // ClassC.  Load each directly-implemented interface and
         // recursively check whether it extends the target.
         for iface in &cls.interfaces {
-            if Self::interface_extends_target(iface, target_short, target_fqn, class_loader, 0) {
+            if Self::interface_extends_target(
+                iface,
+                target_short,
+                target_fqn,
+                has_fqn,
+                class_loader,
+                0,
+            ) {
                 return true;
             }
         }
@@ -925,6 +932,7 @@ impl Backend {
                         iface,
                         target_short,
                         target_fqn,
+                        has_fqn,
                         class_loader,
                         0,
                     ) {
@@ -957,6 +965,7 @@ impl Backend {
         iface_name: &str,
         target_short: &str,
         target_fqn: &str,
+        has_fqn: bool,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         depth: u32,
     ) -> bool {
@@ -972,13 +981,14 @@ impl Backend {
         // backward compatibility).
         if let Some(ref parent) = iface_cls.parent_class {
             let parent_short = short_name(parent);
-            if parent_short == target_short || parent == target_fqn {
+            if parent == target_fqn || (!has_fqn && parent_short == target_short) {
                 return true;
             }
             if Self::interface_extends_target(
                 parent,
                 target_short,
                 target_fqn,
+                has_fqn,
                 class_loader,
                 depth + 1,
             ) {
@@ -990,13 +1000,14 @@ impl Backend {
         // interfaces that extend more than one parent).
         for parent_iface in &iface_cls.interfaces {
             let parent_short = short_name(parent_iface);
-            if parent_short == target_short || parent_iface == target_fqn {
+            if parent_iface == target_fqn || (!has_fqn && parent_short == target_short) {
                 return true;
             }
             if Self::interface_extends_target(
                 parent_iface,
                 target_short,
                 target_fqn,
+                has_fqn,
                 class_loader,
                 depth + 1,
             ) {

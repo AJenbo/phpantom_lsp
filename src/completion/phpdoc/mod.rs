@@ -569,6 +569,8 @@ pub fn build_phpdoc_completions(
                         Some(&ThrowsContext {
                             class_loader: cl,
                             function_loader: smart.function_loader,
+                            use_map,
+                            file_namespace,
                         }),
                     )
                 } else {
@@ -581,9 +583,10 @@ pub fn build_phpdoc_completions(
                     .iter()
                     .map(|t| t.to_string())
                     .filter(|t| {
+                        let t_short = crate::util::short_name(t);
                         !existing_throws
                             .iter()
-                            .any(|e| e.eq_ignore_ascii_case(t.as_str()))
+                            .any(|e| e.eq_ignore_ascii_case(t_short))
                     })
                     .collect();
 
@@ -591,8 +594,9 @@ pub fn build_phpdoc_completions(
                     let use_block = analyze_use_block(content);
 
                     for (idx, exc_type) in missing.iter().enumerate() {
-                        let insert = format!("throws {}", exc_type);
-                        let label = format!("@throws {}", exc_type);
+                        let display_name = crate::util::short_name(exc_type);
+                        let insert = format!("throws {}", display_name);
+                        let label = format!("@throws {}", display_name);
 
                         // Build an auto-import edit if the exception type
                         // isn't already imported.

@@ -167,8 +167,8 @@ impl Backend {
                     let default_type = PhpType::untyped();
                     let ret_type = method.return_type.as_ref().unwrap_or(&default_type);
 
-                    // Replace self/static/$this with the owning class name.
-                    let resolved = ret_type.replace_self(&merged.name);
+                    // Replace self/static/$this with the owning class FQN.
+                    let resolved = ret_type.replace_self(&merged.fqn());
 
                     if !resolved.top_level_class_names().is_empty() {
                         return Some(resolved);
@@ -180,7 +180,7 @@ impl Backend {
                     let default_type = PhpType::untyped();
                     let prop_type = prop.type_hint.as_ref().unwrap_or(&default_type);
 
-                    let resolved = prop_type.replace_self(&merged.name);
+                    let resolved = prop_type.replace_self(&merged.fqn());
 
                     if !resolved.top_level_class_names().is_empty() {
                         return Some(resolved);

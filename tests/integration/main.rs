@@ -82,6 +82,7 @@ mod definition_unions;
 mod definition_variables;
 mod diag_timing;
 mod diagnostics_deprecated;
+mod diagnostics_type_errors;
 mod diagnostics_undefined_variables;
 mod diagnostics_unknown_members;
 mod docblock_types;

@@ -14,7 +14,6 @@ use crate::Backend;
 use crate::code_actions::implement_methods::collect_missing_methods;
 use crate::symbol_map::SymbolKind;
 use crate::types::ClassLikeKind;
-use crate::util::short_name;
 
 impl Backend {
     /// Collect implementation-error diagnostics for a single file.
@@ -169,8 +168,7 @@ fn method_source_description(
         if let Some(iface) = class_loader(iface_name)
             && has_method_in_chain(&iface, method_name, class_loader, &mut HashSet::new())
         {
-            let short = short_name(iface_name);
-            return format!("interface '{}'", short);
+            return format!("interface '{}'", iface_name);
         }
     }
 
@@ -179,8 +177,7 @@ fn method_source_description(
         && let Some(parent) = class_loader(parent_name)
         && has_abstract_method_in_chain(&parent, method_name, class_loader, &mut HashSet::new())
     {
-        let short = short_name(parent_name);
-        return format!("class '{}'", short);
+        return format!("class '{}'", parent_name);
     }
 
     // Fallback — shouldn't happen if collect_missing_methods found it.
@@ -670,5 +667,80 @@ class MyClass implements Foo {}
             .filter(|&c| c == '\n')
             .count() as u32;
         assert_eq!(range.start.line, class_line);
+    }
+
+    #[test]
+    fn no_diagnostic_for_backed_enum_implicit_interface() {
+        // PHP backed enums automatically implement BackedEnum (which
+        // extends UnitEnum).  The parser adds these as implicit
+        // interfaces, but the implementation checker must skip them
+        // because PHP provides from(), tryFrom(), and cases()
+        // automatically at runtime.
+        let php = r#"<?php
+interface UnitEnum {
+    public static function cases(): array;
+}
+interface BackedEnum extends UnitEnum {
+    public static function from(int|string $value): static;
+    public static function tryFrom(int|string $value): ?static;
+}
+
+enum Status: string {
+    case Active = 'active';
+    case Inactive = 'inactive';
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Backed enum should not require explicit BackedEnum/UnitEnum implementations, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_unit_enum_implicit_interface() {
+        // PHP enums without a backing type automatically implement
+        // UnitEnum.  Same as above — cases() is provided by PHP.
+        let php = r#"<?php
+interface UnitEnum {
+    public static function cases(): array;
+}
+
+enum Suit {
+    case Hearts;
+    case Diamonds;
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "Unit enum should not require explicit UnitEnum implementation, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostic_for_enum_missing_own_interface_method() {
+        // Enums that explicitly implement a user-defined interface
+        // must still satisfy those methods — only the implicit
+        // BackedEnum/UnitEnum interfaces are exempt.
+        let php = r#"<?php
+interface Labelable {
+    public function label(): string;
+}
+
+enum Color: string implements Labelable {
+    case Red = 'red';
+}
+"#;
+        let diags = collect(php);
+        assert_eq!(
+            diags.len(),
+            1,
+            "Enum should still flag missing methods from user-defined interfaces, got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("label"),
+            "Diagnostic should mention the missing 'label' method"
+        );
     }
 }

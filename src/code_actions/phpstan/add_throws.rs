@@ -34,8 +34,8 @@ use crate::code_actions::make_code_action_data;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::parser::with_parsed_program;
 use crate::util::{
-    byte_range_to_lsp_range, offset_to_position, ranges_overlap, short_name as util_short_name,
-    strip_fqn_prefix, strip_trailing_modifiers,
+    byte_range_to_lsp_range, offset_to_position, ranges_overlap, strip_fqn_prefix,
+    strip_trailing_modifiers,
 };
 
 /// The PHPStan identifier we match on.
@@ -119,7 +119,12 @@ impl Backend {
             };
 
             // Check if this exception is already in @throws.
-            if docblock_already_has_throws(&docblock_info, short_name) {
+            if docblock_already_has_throws(
+                &docblock_info,
+                &exception_fqn,
+                &file_use_map,
+                &file_namespace,
+            ) {
                 continue;
             }
 
@@ -383,8 +388,18 @@ fn find_enclosing_docblock(content: &str, diag_line: usize) -> Option<DocblockIn
 }
 
 /// Check if the existing docblock already documents a `@throws` for
-/// the given short exception name.
-fn docblock_already_has_throws(info: &DocblockInfo, short_name: &str) -> bool {
+/// the given exception type.
+///
+/// `exception_fqn` is the fully-qualified name from PHPStan (no
+/// leading `\`).  Each `@throws` tag in the docblock is resolved
+/// through the use-map so that `@throws RuntimeException` matches
+/// `App\Exceptions\RuntimeException` when the import exists.
+fn docblock_already_has_throws(
+    info: &DocblockInfo,
+    exception_fqn: &str,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
+) -> bool {
     if !info.has_docblock {
         return false;
     }
@@ -392,12 +407,17 @@ fn docblock_already_has_throws(info: &DocblockInfo, short_name: &str) -> bool {
         Some(parsed) => parsed,
         None => return false,
     };
-    let lower = short_name.to_lowercase();
+    // PHPStan already reports FQNs — just normalise.
+    let target_fqn = exception_fqn
+        .strip_prefix('\\')
+        .unwrap_or(exception_fqn)
+        .to_lowercase();
     for tag in parsed.tags_by_kind(mago_docblock::document::TagKind::Throws) {
         let rest = tag.description.trim();
         if let Some(type_name) = rest.split_whitespace().next() {
-            let short = util_short_name(type_name);
-            if short.eq_ignore_ascii_case(&lower) {
+            let tag_fqn =
+                crate::util::resolve_to_fqn(type_name, use_map, file_namespace).to_lowercase();
+            if tag_fqn == target_fqn {
                 return true;
             }
         }
@@ -710,7 +730,15 @@ mod tests {
             indent: "    ".to_string(),
             sig_line_start: 0,
         };
-        assert!(docblock_already_has_throws(&info, "FooException"));
+        let use_map = HashMap::new();
+        let ns = None;
+        // PHPStan reports FQNs; global-namespace class → bare name is the FQN.
+        assert!(docblock_already_has_throws(
+            &info,
+            "FooException",
+            &use_map,
+            &ns
+        ));
     }
 
     #[test]
@@ -723,7 +751,14 @@ mod tests {
             indent: "    ".to_string(),
             sig_line_start: 0,
         };
-        assert!(docblock_already_has_throws(&info, "FooException"));
+        let use_map = HashMap::new();
+        let ns = None;
+        assert!(docblock_already_has_throws(
+            &info,
+            "FooException",
+            &use_map,
+            &ns
+        ));
     }
 
     #[test]
@@ -736,7 +771,19 @@ mod tests {
             indent: "    ".to_string(),
             sig_line_start: 0,
         };
-        assert!(docblock_already_has_throws(&info, "FooException"));
+        let mut use_map = HashMap::new();
+        use_map.insert(
+            "FooException".to_string(),
+            "App\\Exceptions\\FooException".to_string(),
+        );
+        let ns = None;
+        // PHPStan reports the FQN `App\Exceptions\FooException`.
+        assert!(docblock_already_has_throws(
+            &info,
+            "App\\Exceptions\\FooException",
+            &use_map,
+            &ns
+        ));
     }
 
     #[test]
@@ -749,7 +796,14 @@ mod tests {
             indent: "    ".to_string(),
             sig_line_start: 0,
         };
-        assert!(!docblock_already_has_throws(&info, "FooException"));
+        let use_map = HashMap::new();
+        let ns = None;
+        assert!(!docblock_already_has_throws(
+            &info,
+            "FooException",
+            &use_map,
+            &ns
+        ));
     }
 
     #[test]
@@ -762,7 +816,14 @@ mod tests {
             indent: "    ".to_string(),
             sig_line_start: 0,
         };
-        assert!(!docblock_already_has_throws(&info, "FooException"));
+        let use_map = HashMap::new();
+        let ns = None;
+        assert!(!docblock_already_has_throws(
+            &info,
+            "FooException",
+            &use_map,
+            &ns
+        ));
     }
 
     // ── find_enclosing_docblock ─────────────────────────────────────
@@ -894,7 +955,15 @@ mod tests {
     fn appends_after_existing_throws() {
         let php = "<?php\nclass Foo {\n    /**\n     * Summary.\n     *\n     * @throws FooException\n     */\n    public function bar(): void {\n        throw new \\RuntimeException();\n    }\n}\n";
         let info = find_enclosing_docblock(php, 8).unwrap();
-        assert!(!docblock_already_has_throws(&info, "RuntimeException"));
+        let use_map = HashMap::new();
+        let ns = None;
+        // PHPStan reports FQN; RuntimeException is global, so bare name is FQN.
+        assert!(!docblock_already_has_throws(
+            &info,
+            "RuntimeException",
+            &use_map,
+            &ns
+        ));
         let edit = build_throws_edit(php, &info, "RuntimeException");
         assert!(
             edit.new_text.contains("@throws RuntimeException"),

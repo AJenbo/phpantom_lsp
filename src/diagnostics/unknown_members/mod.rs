@@ -349,47 +349,57 @@ impl Backend {
                     0
                 };
 
-            // For variable subjects (excluding $this), use the
-            // innermost narrowing block (if/elseif/else body) as a
-            // cache discriminator so that accesses in different
+            // Use the innermost narrowing block (if/elseif/else body)
+            // as a cache discriminator so that accesses in different
             // instanceof-narrowing contexts get independent entries.
             // Accesses in the same block share a cache entry because
             // they receive identical narrowing.
-            let narrowing_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    symbol_map.find_narrowing_block(span.start)
-                } else {
-                    0
-                };
+            //
+            // This applies to regular variables ($var) AND property
+            // chains on $this ($this->prop), because instanceof
+            // checks and assert() calls can narrow property types
+            // just like local variables.  Bare $this is excluded
+            // because its type never changes within a method.
+            let needs_narrowing_discriminator = subject_text.starts_with('$')
+                && (subject_text.starts_with("$this->") || !subject_text.starts_with("$this"));
+            let narrowing_offset = if needs_narrowing_discriminator {
+                symbol_map.find_narrowing_block(span.start)
+            } else {
+                0
+            };
 
-            // For variable subjects, also check whether an
-            // `assert($var instanceof …)` precedes this access.
-            // Assert-instanceof does not create a block scope, so
-            // without this discriminator accesses before and after
-            // the assert would share the same (stale) cache entry.
-            let assert_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    symbol_map.find_preceding_assert_offset(span.start)
-                } else {
-                    0
-                };
+            // Also check whether an `assert($var instanceof …)`
+            // precedes this access.  Assert-instanceof does not
+            // create a block scope, so without this discriminator
+            // accesses before and after the assert would share the
+            // same (stale) cache entry.
+            let assert_offset = if needs_narrowing_discriminator {
+                symbol_map.find_preceding_assert_offset(span.start)
+            } else {
+                0
+            };
 
-            // For variable subjects, use the access span offset as a
-            // cache discriminator so that expression-level narrowing
-            // (ternary branches, inline && chains) produces
-            // independent entries.  Block-level narrowing (if/else)
-            // is already covered by `narrowing_offset`, but ternary
-            // expressions are standalone statements — they don't
-            // create a narrowing block.  Using the access offset
-            // ensures each member access is resolved at its own
-            // cursor position, which is what the unified resolution
-            // pipeline expects.
-            let access_offset =
-                if subject_text.starts_with('$') && !subject_text.starts_with("$this") {
-                    span.start
-                } else {
-                    0
-                };
+            // Use the access span offset as a cache discriminator so
+            // that expression-level narrowing (ternary branches,
+            // inline && chains) produces independent entries.
+            // Block-level narrowing (if/else) is already covered by
+            // `narrowing_offset`, but ternary expressions are
+            // standalone statements — they don't create a narrowing
+            // block.  Using the access offset ensures each member
+            // access is resolved at its own cursor position, which is
+            // what the unified resolution pipeline expects.
+            //
+            // This only applies to local variables ($var), NOT to
+            // $this->prop chains.  Property accesses on $this are
+            // already discriminated by narrowing_offset and
+            // assert_offset (which cover if/else and assert()
+            // narrowing).  Adding per-access offsets for $this->prop
+            // would bust the cache on every distinct source location,
+            // turning O(1) cached lookups into O(N) full resolutions
+            // and causing pathological slowdowns on large files.
+            let needs_access_offset =
+                subject_text.starts_with('$') && !subject_text.starts_with("$this");
+            let access_offset = if needs_access_offset { span.start } else { 0 };
 
             let cache_key = SubjectCacheKey {
                 subject_text: subject_text.clone(),

@@ -112,7 +112,15 @@ fn infer_element_type<'b>(
             .or_else(|| Some(PhpType::array())),
         // ── Object instantiation ──
         Expression::Instantiation(inst) => match inst.class {
-            Expression::Identifier(ident) => Some(PhpType::Named(ident.value().to_string())),
+            Expression::Identifier(ident) => {
+                let name = ident.value().to_string();
+                let fqn = if let Some(cls) = (ctx.class_loader)(&name) {
+                    cls.fqn()
+                } else {
+                    name
+                };
+                Some(PhpType::Named(fqn))
+            }
             Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.clone())),
             Expression::Static(_) => Some(PhpType::Named(ctx.current_class.name.clone())),
             _ => None,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::*;
@@ -901,9 +902,13 @@ fn test_find_cross_file_propagated_throws_basic() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -926,9 +931,13 @@ fn test_find_cross_file_propagated_throws_skips_this() {
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     assert!(
@@ -945,9 +954,13 @@ fn test_find_cross_file_propagated_throws_unknown_variable() {
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     assert!(results.is_empty());
@@ -961,14 +974,18 @@ fn test_find_cross_file_propagated_throws_property_access_ignored() {
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     assert!(
         results.is_empty(),
-        "Property accesses should not be treated as method calls"
+        "Property access should not be treated as a method call"
     );
 }
 
@@ -994,9 +1011,13 @@ fn test_find_cross_file_propagated_throws_multiple_calls() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -1019,9 +1040,13 @@ fn test_find_cross_file_propagated_throws_deduplicates_calls() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -1048,9 +1073,13 @@ fn test_find_cross_file_propagated_throws_method_without_throws() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     assert!(results.is_empty());
@@ -1075,9 +1104,13 @@ fn test_find_cross_file_propagated_throws_static_method_call() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -1092,9 +1125,13 @@ fn test_find_cross_file_propagated_throws_static_skips_self() {
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     assert!(
@@ -1139,9 +1176,13 @@ fn test_find_cross_file_propagated_throws_function_call() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: Some(&function_loader),
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -1167,9 +1208,13 @@ fn test_find_cross_file_propagated_throws_new_constructor() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -1188,9 +1233,13 @@ fn test_find_cross_file_propagated_throws_skips_php_keywords() {
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: None,
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     assert!(
@@ -1258,9 +1307,13 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let ctx = ThrowsContext {
         class_loader: &class_loader,
         function_loader: Some(&function_loader),
+        use_map: &use_map,
+        file_namespace: &file_namespace,
     };
     let results = find_cross_file_propagated_throws(body, signature, file_content, &ctx);
     let names: Vec<String> = results.iter().map(|t| t.type_name.to_string()).collect();
@@ -1320,12 +1373,16 @@ fn test_find_uncaught_with_class_loader_catches_cross_file() {
         }
     };
 
+    let use_map = HashMap::new();
+    let file_namespace = None;
     let uncaught = find_uncaught_throw_types_with_context(
         content,
         pos,
         Some(&ThrowsContext {
             class_loader: &class_loader,
             function_loader: None,
+            use_map: &use_map,
+            file_namespace: &file_namespace,
         }),
     );
     // RuntimeException is caught, but ConvertException is not.

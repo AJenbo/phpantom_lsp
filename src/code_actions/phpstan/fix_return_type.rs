@@ -448,7 +448,16 @@ pub(crate) fn infer_return_type(
 
             // Try syntax-level inference first (cheap).
             if let Some(t) = infer_type_from_literal(expr) {
-                return_types.push(t);
+                // Resolve short class names to FQN via the class loader
+                // so that `new Foo(…)` produces a fully-qualified type.
+                let resolved = t.resolve_names(&|name: &str| {
+                    if let Some(cls) = class_loader(name) {
+                        cls.fqn()
+                    } else {
+                        name.to_string()
+                    }
+                });
+                return_types.push(resolved);
                 continue;
             }
 

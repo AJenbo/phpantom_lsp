@@ -44,6 +44,9 @@ impl Backend {
             cache.get(uri).cloned().unwrap_or_default()
         };
 
+        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
+        let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
+
         for diag in &phpstan_diags {
             if !ranges_overlap(&diag.range, &params.range) {
                 continue;
@@ -75,7 +78,15 @@ impl Backend {
             };
 
             // Validate that the @throws line can be removed (validation only).
-            if build_remove_throws_edit(content, &docblock, &type_name_str).is_none() {
+            if build_remove_throws_edit(
+                content,
+                &docblock,
+                &type_name_str,
+                &file_use_map,
+                &file_namespace,
+            )
+            .is_none()
+            {
                 continue;
             }
 
@@ -112,6 +123,7 @@ impl Backend {
         data: &CodeActionData,
         content: &str,
     ) -> Option<WorkspaceEdit> {
+        let uri = &data.uri;
         let extra = &data.extra;
         let message = extra.get("diagnostic_message")?.as_str()?;
         let line = extra.get("diagnostic_line")?.as_u64()? as usize;
@@ -120,8 +132,17 @@ impl Backend {
         let type_name = extract_throws_type(message, code)?;
         let type_name_str = type_name.to_string();
 
+        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
+        let file_namespace: Option<String> = self.namespace_map.read().get(uri).cloned().flatten();
+
         let docblock = find_docblock_above_line(content, line)?;
-        let throws_edit = build_remove_throws_edit(content, &docblock, &type_name_str)?;
+        let throws_edit = build_remove_throws_edit(
+            content,
+            &docblock,
+            &type_name_str,
+            &file_use_map,
+            &file_namespace,
+        )?;
 
         let doc_uri: Url = data.uri.parse().ok()?;
         let mut changes = HashMap::new();
@@ -266,8 +287,15 @@ fn build_remove_throws_edit(
     content: &str,
     docblock: &DocblockAbove,
     type_name: &str,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
 ) -> Option<TextEdit> {
-    let short = short_name(type_name);
+    // PHPStan reports FQNs already (e.g. `App\Http\Controllers\Ex`),
+    // so just normalise — don't resolve through the use-map.
+    let target_fqn = type_name
+        .strip_prefix('\\')
+        .unwrap_or(type_name)
+        .to_lowercase();
 
     // Find the @throws line(s) to remove.
     let doc_lines: Vec<&str> = docblock.text.lines().collect();
@@ -288,15 +316,10 @@ fn build_remove_throws_edit(
         if let Some(rest) = trimmed.strip_prefix("@throws") {
             let rest = rest.trim_start();
             let tag_type = rest.split_whitespace().next().unwrap_or("");
-            let tag_short = short_name(tag_type);
+            let tag_fqn =
+                crate::util::resolve_to_fqn(tag_type, use_map, file_namespace).to_lowercase();
 
-            // Match by short name (case-insensitive) — the docblock
-            // might use the short name, the FQN, or a leading-backslash
-            // variant.  The message from PHPStan can also be FQN.
-            if tag_short.eq_ignore_ascii_case(short)
-                || crate::util::strip_fqn_prefix(tag_type)
-                    .eq_ignore_ascii_case(crate::util::strip_fqn_prefix(type_name))
-            {
+            if tag_fqn == target_fqn {
                 lines_to_remove.push(i);
             }
         }
@@ -535,8 +558,14 @@ class Foo {
     public function bar(): void {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::from([(
+            "Decimal".to_string(),
+            "Luxplus\\Decimal\\Decimal".to_string(),
+        )]);
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 7).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "Luxplus\\Decimal\\Decimal").unwrap();
+        let edit =
+            build_remove_throws_edit(php, &db, "Luxplus\\Decimal\\Decimal", &use_map, &ns).unwrap();
         assert!(
             !edit.new_text.contains("@throws"),
             "should remove @throws: {:?}",
@@ -560,8 +589,12 @@ class Foo {
     public function bar(): void {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 5).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "\\TheSeer\\Tokenizer\\Exception").unwrap();
+        let edit =
+            build_remove_throws_edit(php, &db, "\\TheSeer\\Tokenizer\\Exception", &use_map, &ns)
+                .unwrap();
         // The docblock only had the @throws line, so the entire
         // docblock should be removed.
         assert_eq!(
@@ -581,8 +614,19 @@ class Foo {
     public function bar(): void {}
 }
 ";
+        // The docblock says `Exception` (unqualified). With no use-map
+        // and no namespace the resolver keeps it as `Exception`, which
+        // differs from the FQN `TheSeer\Tokenizer\Exception`. To make
+        // the match work the use-map must map `Exception` to the FQN.
+        let use_map: HashMap<String, String> = HashMap::from([(
+            "Exception".to_string(),
+            "TheSeer\\Tokenizer\\Exception".to_string(),
+        )]);
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 5).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "TheSeer\\Tokenizer\\Exception").unwrap();
+        let edit =
+            build_remove_throws_edit(php, &db, "TheSeer\\Tokenizer\\Exception", &use_map, &ns)
+                .unwrap();
         assert_eq!(edit.new_text, "");
     }
 
@@ -598,8 +642,10 @@ class Foo {
     public function bar(): void {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 6).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "FooException").unwrap();
+        let edit = build_remove_throws_edit(php, &db, "FooException", &use_map, &ns).unwrap();
         assert!(
             !edit.new_text.contains("FooException"),
             "should remove FooException: {:?}",
@@ -627,8 +673,12 @@ class Foo {
 ";
         let db = find_docblock_above_line(php, 5).unwrap();
         // PHPStan reports the type as "App\Http\Controllers\not"
-        // because it resolves relative to the namespace.
-        let edit = build_remove_throws_edit(php, &db, "App\\Http\\Controllers\\not").unwrap();
+        // because it resolves relative to the namespace. The file is
+        // in that namespace, so `not` resolves to the same FQN.
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = Some("App\\Http\\Controllers".to_string());
+        let edit = build_remove_throws_edit(php, &db, "App\\Http\\Controllers\\not", &use_map, &ns)
+            .unwrap();
         assert_eq!(edit.new_text, "");
     }
 
@@ -643,8 +693,10 @@ class Foo {
     public function bar(): void {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 5).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "Decimal").unwrap();
+        let edit = build_remove_throws_edit(php, &db, "Decimal", &use_map, &ns).unwrap();
         assert_eq!(
             edit.new_text, "",
             "docblock with only @throws should be removed"
@@ -667,8 +719,10 @@ class Foo {
     public function bar(string $a): string {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 10).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "Decimal").unwrap();
+        let edit = build_remove_throws_edit(php, &db, "Decimal", &use_map, &ns).unwrap();
         assert!(
             edit.new_text.contains("Summary."),
             "should keep summary: {:?}",
@@ -702,8 +756,10 @@ class Foo {
     public function bar(): void {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 5).unwrap();
-        assert!(build_remove_throws_edit(php, &db, "BarException").is_none());
+        assert!(build_remove_throws_edit(php, &db, "BarException", &use_map, &ns).is_none());
     }
 
     #[test]
@@ -719,8 +775,10 @@ class Foo {
     public function bar(string $a): void {}
 }
 ";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         let db = find_docblock_above_line(php, 7).unwrap();
-        let edit = build_remove_throws_edit(php, &db, "Decimal").unwrap();
+        let edit = build_remove_throws_edit(php, &db, "Decimal", &use_map, &ns).unwrap();
         // The blank `*` line between @param and @throws should also
         // be removed so we don't get a trailing blank line before `*/`.
         let trailing_blank = edit.new_text.contains(" *\n     */");
@@ -736,10 +794,12 @@ class Foo {
     #[test]
     fn removes_single_line_docblock_with_throws() {
         let php = "<?php\nclass Foo {\n    /** @throws Decimal */\n    public function bar(): void {}\n}\n";
+        let use_map: HashMap<String, String> = HashMap::new();
+        let ns: Option<String> = None;
         // Line 3 is `    public function bar(): void {}`
         let db = find_docblock_above_line(php, 3)
             .expect("should find single-line docblock above line 3");
-        let edit = build_remove_throws_edit(php, &db, "Decimal").unwrap();
+        let edit = build_remove_throws_edit(php, &db, "Decimal", &use_map, &ns).unwrap();
         assert_eq!(
             edit.new_text, "",
             "single-line docblock with only @throws should be removed"

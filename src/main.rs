@@ -27,7 +27,7 @@ struct Cli {
     // this allows LSP wrapper programs to pass a --stdio flag.
     // since this is the only supported communication at this time, this
     // flag can be ignored
-    #[arg(long, global = true)]
+    #[arg(long)]
     stdio: bool,
 
     /// Listen on a TCP address instead of stdin/stdout.
@@ -36,7 +36,7 @@ struct Cli {
     /// (e.g. 9257), in which case 127.0.0.1 is used as the host. Use port
     /// 0 to let the OS pick an available port. The server accepts a single
     /// connection and exits when the client disconnects.
-    #[arg(long, global = true, value_name = "ADDR")]
+    #[arg(long, value_name = "ADDR")]
     tcp: Option<String>,
 }
 

@@ -1256,8 +1256,8 @@ fn build_function_snippet(
     _indent: &str,
     content: &str,
     position: Position,
-    _use_map: &HashMap<String, String>,
-    _file_namespace: &Option<String>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
@@ -1265,6 +1265,8 @@ fn build_function_snippet(
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
+        use_map,
+        file_namespace,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -1352,7 +1354,9 @@ fn build_function_snippet(
             lines.push(" *".to_string());
         }
         for exc in &uncaught {
-            lines.push(format!(" * @throws {}", exc));
+            let exc_str = exc.to_string();
+            let display = crate::util::short_name(&exc_str);
+            lines.push(format!(" * @throws {}", display));
         }
     }
 
@@ -1377,8 +1381,8 @@ fn build_function_plain(
     indent: &str,
     content: &str,
     position: Position,
-    _use_map: &HashMap<String, String>,
-    _file_namespace: &Option<String>,
+    use_map: &HashMap<String, String>,
+    file_namespace: &Option<String>,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: FunctionLoader<'_>,
@@ -1386,6 +1390,8 @@ fn build_function_plain(
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
+        use_map,
+        file_namespace,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
@@ -1460,7 +1466,9 @@ fn build_function_plain(
             lines.push(format!("{} *", indent));
         }
         for exc in &uncaught {
-            lines.push(format!("{} * @throws {}", indent, exc));
+            let exc_str = exc.to_string();
+            let display = crate::util::short_name(&exc_str).to_string();
+            lines.push(format!("{} * @throws {}", indent, display));
         }
     }
 
@@ -1806,6 +1814,8 @@ fn build_throws_import_edits(
     let throws_ctx = ThrowsContext {
         class_loader,
         function_loader,
+        use_map,
+        file_namespace,
     };
     let uncaught = throws_analysis::find_uncaught_throw_types_with_context(
         content,
