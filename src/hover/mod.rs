@@ -535,6 +535,7 @@ impl Backend {
                     class_loader: &class_loader,
                     resolved_class_cache: Some(&self.resolved_class_cache),
                     function_loader: Some(&function_loader),
+                    scope_var_resolver: None,
                 };
 
                 let access_kind = if *is_static {

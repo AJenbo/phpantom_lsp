@@ -1,11 +1,9 @@
 /// Array literal inference, array function helpers, and generator yield
 /// reverse-inference.
 ///
-/// These are utility helpers that support the unified resolution pipeline
-/// and the foreach/destructuring resolution module.  The raw-type
-/// assignment pipeline that previously lived here has been deleted after
-/// all callers were migrated to the unified resolver
-/// (`resolve_variable_types` / `resolve_variable_types_branch_aware`).
+/// These are utility helpers that support the forward-walking variable
+/// resolver in [`super::forward_walk`] and the foreach/destructuring
+/// resolution module.
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
@@ -14,7 +12,6 @@ use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::types::ClassInfo;
 
 use crate::completion::resolver::VarResolutionCtx;
 
@@ -133,6 +130,23 @@ fn infer_element_type<'b>(
                 docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
             {
                 return Some(t);
+            }
+            // When a scope variable resolver is available (i.e. we are
+            // inside the forward walker), read the variable's type
+            // directly from the in-progress ScopeState instead of
+            // calling the full resolution pipeline which would trigger
+            // a recursive method-body walk.
+            if let Some(resolver) = ctx.scope_var_resolver {
+                let prefixed = if var_text.starts_with('$') {
+                    var_text.clone()
+                } else {
+                    format!("${}", var_text)
+                };
+                let from_scope = resolver(&prefixed);
+                if !from_scope.is_empty() {
+                    return Some(crate::types::ResolvedType::types_joined(&from_scope));
+                }
+                return None;
             }
             // Fall back to the full variable type resolution pipeline
             // (parameter type hints, @param docblocks, assignments,
@@ -320,106 +334,4 @@ fn extract_array_map_element_type(
     let arr_expr = super::resolution::nth_arg_expr(args, 1)?;
     let raw = super::resolution::resolve_arg_raw_type(arr_expr, ctx)?;
     raw.extract_value_type(true).cloned()
-}
-
-/// Reverse-infer a variable's type from `yield $var` statements when
-/// the enclosing function declares `@return Generator<TKey, TValue, …>`.
-///
-/// Scans the source text around the cursor for `yield $varName`
-/// patterns within the enclosing function body.  When found, extracts
-/// the TValue (2nd generic parameter) from the Generator return type
-/// and resolves it to `ClassInfo`.
-///
-/// This is a fallback used only when normal assignment-based resolution
-/// produced no results — the developer is inside a generator body and
-/// using a variable that is yielded but was not explicitly typed via
-/// an assignment or parameter.
-pub(in crate::completion) fn try_infer_from_generator_yield(
-    return_type: &PhpType,
-    ctx: &VarResolutionCtx<'_>,
-) -> Vec<ClassInfo> {
-    // Only applies to Generator return types.
-    let value_type = match return_type.extract_value_type(false) {
-        Some(vt) => vt,
-        None => return vec![],
-    };
-
-    // Scan the source text for `yield $varName` or `yield $varName;`
-    // within a reasonable window around the cursor.  We look at the
-    // enclosing function body (everything between the outermost `{`
-    // and `}` that contains the cursor).
-    let var_name = ctx.var_name;
-    let content = ctx.content;
-    let cursor = ctx.cursor_offset as usize;
-
-    // Find the enclosing function body boundaries by scanning backward
-    // for the opening `{`.
-    let search_before = content.get(..cursor).unwrap_or("");
-    let mut brace_depth = 0i32;
-    let mut body_start = None;
-    for (i, ch) in search_before.char_indices().rev() {
-        match ch {
-            '}' => brace_depth += 1,
-            '{' => {
-                brace_depth -= 1;
-                if brace_depth < 0 {
-                    body_start = Some(i + 1);
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let start = match body_start {
-        Some(s) => s,
-        None => return vec![],
-    };
-
-    // Find the matching closing `}` by scanning forward from the
-    // opening brace.
-    let after_open = content.get(start..).unwrap_or("");
-    let mut depth = 0i32;
-    let mut body_end = content.len();
-    for (i, ch) in after_open.char_indices() {
-        match ch {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth < 0 {
-                    body_end = start + i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let body = content.get(start..body_end).unwrap_or("");
-
-    // Look for `yield $varName` (not `yield from` or `yield $key => $varName`).
-    // We check for simple patterns:
-    //   - `yield $varName;`
-    //   - `yield $varName `  (before semicolon or end of expression)
-    let yield_pattern = format!("yield {}", var_name);
-    let has_yield = body.contains(&yield_pattern);
-
-    // Also check for `yield $key => $varName` pattern — the variable
-    // is the value part in a key-value yield.
-    let yield_pair_needle = format!("=> {}", var_name);
-    let has_yield_pair = body.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed.contains("yield ") && trimmed.contains(&yield_pair_needle)
-    });
-
-    if !has_yield && !has_yield_pair {
-        return vec![];
-    }
-
-    crate::completion::type_resolution::type_hint_to_classes_typed(
-        value_type,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    )
 }

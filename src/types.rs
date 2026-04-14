@@ -1784,7 +1784,7 @@ impl ResolvedType {
     /// but loses generic parameters.  Future sprints will populate the
     /// type string from the actual return type annotation.
     pub fn from_class(class: ClassInfo) -> Self {
-        let type_string = PhpType::Named(class.name.clone());
+        let type_string = PhpType::Named(class.fqn());
         Self {
             type_string,
             class_info: Some(class),
@@ -1819,6 +1819,7 @@ impl ResolvedType {
 
     /// Strip null from the type, preserving class info (since
     /// null-stripping never invalidates the class).
+    #[allow(dead_code)]
     pub(crate) fn strip_null(&mut self) {
         if let Some(non_null) = self.type_string.non_null_type() {
             self.type_string = non_null;

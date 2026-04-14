@@ -414,6 +414,7 @@ impl Backend {
                         class_loader: &class_loader,
                         resolved_class_cache: Some(resolved_cache),
                         function_loader: Some(&function_loader),
+                        scope_var_resolver: None,
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
                 })
@@ -555,6 +556,7 @@ impl Backend {
                                 class_loader: &class_loader,
                                 resolved_class_cache: Some(resolved_cache),
                                 function_loader: Some(&function_loader),
+                                scope_var_resolver: None,
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {

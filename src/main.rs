@@ -202,7 +202,6 @@ async fn main() {
                     eprintln!("Error: cannot determine project root directory");
                     std::process::exit(1);
                 });
-
             // Auto-detect colour support: enabled unless --no-colour is
             // passed or stdout is not a terminal.
             let use_colour = !no_colour && atty_stdout();
@@ -238,7 +237,6 @@ async fn main() {
                     eprintln!("Error: cannot determine project root directory");
                     std::process::exit(1);
                 });
-
             let use_colour = !no_colour && atty_stdout();
 
             let output_format = match format {

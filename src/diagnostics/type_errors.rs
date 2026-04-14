@@ -1404,6 +1404,7 @@ impl Backend {
                         enclosing_return_type: None,
                         branch_aware: true,
                         match_arm_narrowing: HashMap::new(),
+                        scope_var_resolver: None,
                     };
 
                     let mut resolved_args = Vec::with_capacity(exprs.len());

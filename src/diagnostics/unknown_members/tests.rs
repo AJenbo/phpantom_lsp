@@ -2807,6 +2807,89 @@ public function find(array $pens): void {
     );
 }
 
+/// `$valid = null; foreach (...) { if (...) { $valid = $item; break; } }`
+/// `if (!$valid) { return ...; } $valid->details` must not produce a
+/// scalar_member_access diagnostic.  The guard clause (`if (!$valid) { return; }`)
+/// strips null from the scope, leaving only the class type.
+///
+/// This test activates the forward-walker scope cache to reproduce a
+/// regression where the scope cache records `$validMandate` as `null`
+/// only (the foreach body assignment is lost or the guard clause
+/// narrowing doesn't strip null).
+#[test]
+fn no_false_positive_null_init_foreach_guard_clause_early_return() {
+    let php = r#"<?php
+class Mandate {
+    public object $details;
+    public function isInvalid(): bool { return false; }
+}
+class Client {
+    /** @return mixed */
+    public function getMandates(): mixed { return []; }
+}
+class Svc {
+    public function check(): ?object {
+        $client = new Client();
+        $mandates = $client->getMandates();
+        $validMandate = null;
+        /** @var Mandate $mandate */
+        foreach ($mandates as $mandate) {
+            if (!$mandate->isInvalid()) {
+                $validMandate = $mandate;
+                break;
+            }
+        }
+
+        if (!$validMandate) {
+            return null;
+        }
+
+        $details = $validMandate->details;
+        return $details;
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    backend.update_ast("file:///test.php", php);
+
+    // Activate the scope cache and build scopes (mirrors the analyse path).
+    let _scope_guard = crate::completion::variable::forward_walk::with_diagnostic_scope_cache();
+    {
+        let file_ctx = backend.file_context("file:///test.php");
+        let class_loader = backend.class_loader(&file_ctx);
+        let function_loader_cl = backend.function_loader(&file_ctx);
+        let constant_loader_cl = backend.constant_loader();
+        let loaders = crate::completion::resolver::Loaders {
+            function_loader: Some(&function_loader_cl),
+            constant_loader: Some(&constant_loader_cl),
+        };
+        let local_classes: Vec<std::sync::Arc<crate::types::ClassInfo>> = backend
+            .ast_map
+            .read()
+            .get("file:///test.php")
+            .cloned()
+            .unwrap_or_default();
+        crate::completion::variable::forward_walk::build_diagnostic_scopes(
+            php,
+            &local_classes,
+            &class_loader,
+            loaders,
+            Some(&backend.resolved_class_cache),
+        );
+    }
+
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics("file:///test.php", php, &mut diags);
+    let scalar_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .collect();
+    assert!(
+        scalar_diags.is_empty(),
+        "should not flag scalar_member_access on $validMandate->details after guard clause, got: {scalar_diags:?}"
+    );
+}
+
 /// Direct instantiation inside foreach body (no var-to-var).
 #[test]
 fn no_false_positive_null_init_foreach_direct_reassign() {
@@ -4388,15 +4471,11 @@ public function capture(Order $order, array $payments): void {
 
 #[test]
 fn no_false_positive_when_variable_reassigned_inside_nested_foreach() {
-    // Regression test for depth-limited variable resolution.  When
-    // `$orderCostPrice` is reassigned inside a nested foreach via
-    // `$orderCostPrice = $orderCostPrice->add(…)`, the
-    // self-referential RHS triggers recursive calls to
-    // resolve_variable_types.  With two levels of foreach nesting
-    // the recursion reaches MAX_VAR_RESOLUTION_DEPTH, producing an
-    // empty result.  The outer foreach access must still resolve
-    // correctly (at depth 0) without a false "type could not be
-    // resolved" diagnostic.
+    // Regression test for self-referential variable reassignment.
+    // When `$orderCostPrice` is reassigned inside a nested foreach
+    // via `$orderCostPrice = $orderCostPrice->add(…)`, the forward
+    // walker must resolve the outer foreach access correctly without
+    // a false "type could not be resolved" diagnostic.
     //
     // Real-world pattern from OrderService:618:
     //   $zero = new Decimal('0');

@@ -293,3 +293,132 @@ include new passing tests for at least these scenarios:
 `resolved_class_cache` and/or `fqn_index` entries for the changed
 URI must be evicted so that the next hover request re-parses the
 file and picks up the new docblock content.
+
+## B19 — Namespace-qualified scalar types hit class resolution
+
+**Root cause:** When `find_or_load_class` is called with names like
+`Tests\Feature\BusinessCentral\int`, `Tests\Support\array`, or
+`Tests\Unit\Customers\bool`, these are scalar type hints that were
+namespace-qualified by the name resolver (or the variable resolution
+pipeline) instead of being recognised as built-in types. The class
+resolution pipeline then walks through `fqn_index`, `class_index`,
+`classmap`, and PSR-4 for each one before giving up and caching
+a negative result. In the analyse pipeline this adds thousands of
+wasted lookups per run.
+
+**Where to fix:** Two complementary fixes:
+
+1. The callers that produce these names (variable resolution,
+   type-hint resolution) should recognise bare scalar keywords
+   (`int`, `float`, `string`, `bool`, `array`, `object`, `mixed`,
+   `void`, `null`, `never`, `true`, `false`, `callable`, `iterable`,
+   `self`, `static`, `parent`) and never pass them to class
+   resolution — even when they carry a namespace prefix. A type
+   whose last segment is a scalar keyword is never a class.
+
+2. As a safety net, `find_or_load_class_inner` could short-circuit
+   on names whose last segment is a known scalar keyword, avoiding
+   the multi-phase search entirely.
+
+## B20 — `path_to_uri` produces malformed `file://` URIs from relative paths
+
+**Root cause:** `crate::util::path_to_uri` calls
+`Url::from_file_path(path)`, which requires an absolute path.
+When the workspace root is relative (e.g. `shared`), all derived
+paths are also relative (e.g. `shared/tests/TestCase.php`).
+`Url::from_file_path` fails and the fallback
+`format!("file://{}", path.display())` produces URIs like
+`file://shared/tests/TestCase.php`. This is malformed: the `shared`
+segment becomes the URI authority (hostname), not a path component.
+The correct project-relative URI would use only the path within the
+workspace root (e.g. `file://tests/TestCase.php`), and even that is
+non-standard since `file://` URIs are meant to carry absolute paths.
+
+**Symptoms:**
+
+- `class_index` and `ast_map` are keyed by these malformed URIs.
+  `Url::parse(...).to_file_path()` fails on them, so any code path
+  that converts a cached URI back to a file path silently returns
+  `None`.
+- Any future code that relies on round-tripping a stored URI back
+  to a file path (e.g. for cache eviction, go-to-definition across
+  files, or incremental re-indexing) will silently fail for every
+  file indexed under a relative workspace root.
+
+**Where to fix:** `path_to_uri` (in `util.rs`) should canonicalize
+relative paths to absolute before calling `Url::from_file_path`.
+Alternatively, all callers that construct paths from the workspace
+root should produce absolute paths in the first place. The
+workspace root itself could be canonicalized at startup in
+`analyse::run` and `fix::run` (for the CLI) and in the LSP
+`initialize` handler (for the server).  Whichever approach is
+chosen, every URI stored in `ast_map`, `class_index`, `fqn_index`,
+`use_map`, `namespace_map`, and `symbol_maps` must use consistent
+absolute `file:///` URIs so that lookups and cache eviction work
+correctly regardless of how the tool was invoked.
+
+## B21 — `shared/src/database/Model/Products/Product.php` analysis hangs
+
+**Symptom:** `phpantom_lsp analyze --project-root shared -- src/database/Model/Products/Product.php`
+does not complete within 60 seconds (debug build). The other two
+baseline files (`BaseCsvProductUpdaterTemplate.php` and `Klarna.php`)
+complete in under 5 seconds. This was reproducible before and after
+the T25 backward-scanner removal, so it is not a regression from
+that work.
+
+**Likely cause:** The Product model is a large Eloquent model with
+many relations, scopes, accessors, and virtual members. The
+diagnostic pass likely triggers deep resolution chains (e.g.
+Builder generic substitution, relation return types, virtual member
+synthesis) that multiply into excessive work. A single expensive
+method body with many member-access diagnostics could account for
+the hang.
+
+**Where to fix:** Profile the analysis of this file to identify the
+hot path. Likely candidates: `resolve_target_classes` called
+repeatedly for the same subject within a single method body,
+`type_hint_to_classes` resolving the same generic type repeatedly
+without caching, or `inheritance::merge` being called redundantly
+for the same class. The `resolved_class_cache` (P9) may also help
+if generic-arg specialisation is implemented.
+
+---
+
+## B22 — `$this` resolves in static methods
+
+**Symptom:** Inside a `static` method, `$this->method()` resolves
+as if the method were non-static. Variables assigned from
+`$this->method()` get a type, and member access on those variables
+produces no diagnostic. PHP would throw a fatal error at runtime.
+
+**Where to fix:** The forward walker (and/or backward scanner) seeds
+`$this` with the enclosing class type without checking whether the
+method is static. The seeding logic should skip `$this` when the
+enclosing function has the `static` modifier.
+
+**Test:** `tests/integration/diag_timing.rs` —
+`this_not_seeded_in_static_method` (currently `#[ignore]`). Remove
+the `#[ignore]` attribute once fixed.
+
+## B23 — Foreach array destructuring not handled by forward walker
+
+**Symptom:** `foreach ($items as [$a, $b])` and
+`foreach ($items as list($a, $b))` do not bind `$a` and `$b` in the
+forward walker's scope. Member access on those variables produces
+false-positive "unknown member" diagnostics. Regular destructuring
+assignments (`[$a, $b] = $expr`) work correctly.
+
+**Root cause:** `forward_walk.rs` explicitly skips destructuring in
+the foreach value position (around line 4753) with a comment
+"For now, skip — this is a complex pattern." The `bind_foreach_value`
+function only handles simple variables and nested `ForeachTarget`
+patterns, not list/array destructuring.
+
+**Where to fix:** Extend `bind_foreach_value` in `forward_walk.rs`
+to handle `ListExpression` and array destructuring patterns in the
+foreach value position, reusing the existing
+`process_destructuring_assignment` logic that already works for
+standalone `[$a, $b] = $expr` assignments.
+
+**Not a regression.** The old backward scanner also did not handle
+foreach destructuring — this is a pre-existing gap carried forward.

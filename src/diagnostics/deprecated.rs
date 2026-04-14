@@ -20,11 +20,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::Loaders;
-use crate::completion::variable::resolution::resolve_variable_types;
+use crate::completion::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::names::OwnedResolvedNames;
 use crate::symbol_map::SymbolKind;
-use crate::types::{ClassInfo, ResolvedType};
+use crate::types::AccessKind;
+use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::resolve_to_fqn;
@@ -148,14 +148,27 @@ impl Backend {
                             let cache_key = (subject_text.trim().to_string(), enclosing_name);
 
                             let cached = var_type_cache.entry(cache_key).or_insert_with_key(|_| {
-                                resolve_variable_subject(
-                                    subject_text,
-                                    span.start,
+                                let enclosing_class = local_classes
+                                    .iter()
+                                    .find(|c| {
+                                        !c.name.starts_with("__anonymous@")
+                                            && span.start >= c.start_offset
+                                            && span.start <= c.end_offset
+                                    })
+                                    .map(|c| ClassInfo::clone(c));
+
+                                let rctx = ResolutionCtx {
+                                    current_class: enclosing_class.as_ref(),
+                                    all_classes: &local_classes,
                                     content,
-                                    &local_classes,
-                                    &class_loader,
-                                    &function_loader,
-                                )
+                                    cursor_offset: span.start,
+                                    class_loader: &class_loader,
+                                    resolved_class_cache: Some(cache),
+                                    function_loader: Some(&function_loader),
+                                    scope_var_resolver: None,
+                                };
+
+                                resolve_variable_subject(subject_text, *is_static, &rctx)
                             });
 
                             match cached {
@@ -406,45 +419,30 @@ fn resolve_subject_to_class_name(
     }
 }
 
-/// Resolve a `$variable` subject to a `ClassInfo` using the full
-/// variable type resolution pipeline.
+/// Resolve a subject expression to a `ClassInfo` using the full resolver
+/// pipeline ([`resolve_subject_outcome`]).
 ///
-/// Finds the enclosing class for the access site, then delegates to
-/// [`resolve_variable_types`] which re-parses the source and walks the
-/// AST to infer the variable's type from assignments, parameter type
-/// hints, foreach bindings, etc.
+/// This handles both simple `$variable` subjects and complex expressions
+/// like `$payment->getOrder()` or `$this->faker`.  The resolver uses
+/// the diagnostic scope cache (when active) for variable lookups,
+/// avoiding backward-scanner fallthroughs.
 fn resolve_variable_subject(
     subject_text: &str,
-    access_offset: u32,
-    content: &str,
-    local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
+    is_static: bool,
+    rctx: &ResolutionCtx<'_>,
 ) -> Option<ClassInfo> {
-    let var_name = subject_text.trim();
+    let access_kind = if is_static {
+        AccessKind::DoubleColon
+    } else {
+        AccessKind::Arrow
+    };
 
-    // Find the enclosing class based on offset ranges.
-    let enclosing_class = local_classes
-        .iter()
-        .find(|c| {
-            !c.name.starts_with("__anonymous@")
-                && access_offset >= c.start_offset
-                && access_offset <= c.end_offset
-        })
-        .map(|c| ClassInfo::clone(c))
-        .unwrap_or_default();
-
-    let results = ResolvedType::into_classes(resolve_variable_types(
-        var_name,
-        &enclosing_class,
-        local_classes,
-        content,
-        access_offset,
-        class_loader,
-        Loaders::with_function(Some(function_loader)),
-    ));
-
-    results.into_iter().next()
+    match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
+        SubjectOutcome::Resolved(classes) => {
+            classes.into_iter().next().map(|arc| ClassInfo::clone(&arc))
+        }
+        _ => None,
+    }
 }
 
 /// Find the FQN of the first non-anonymous class in the file (heuristic

@@ -83,6 +83,7 @@ impl Backend {
                     function_loader: Some(
                         &function_loader as &dyn Fn(&str) -> Option<FunctionInfo>,
                     ),
+                    scope_var_resolver: None,
                 };
 
                 let candidates = ResolvedType::into_arced_classes(

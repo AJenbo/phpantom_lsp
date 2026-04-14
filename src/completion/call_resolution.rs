@@ -548,6 +548,7 @@ impl Backend {
             class_loader: &class_loader,
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader_cl),
+            scope_var_resolver: None,
         };
 
         let parsed = SubjectExpr::parse(expr);
@@ -1192,15 +1193,13 @@ impl Backend {
                 if ret.is_self_like() {
                     return vec![Arc::new(class_info.clone())];
                 }
-                return super::type_resolution::type_hint_to_classes_typed(
+                let resolved = super::type_resolution::type_hint_to_classes_typed(
                     ret,
                     &class_info.fqn(),
                     all_classes,
                     class_loader,
-                )
-                .into_iter()
-                .map(Arc::new)
-                .collect();
+                );
+                return resolved.into_iter().map(Arc::new).collect();
             }
             vec![]
         };

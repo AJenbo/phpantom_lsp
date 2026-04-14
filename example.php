@@ -3432,6 +3432,65 @@ class UntypedPropertyInferenceDemo
 }
 
 
+// ── Deep Variable Chain ─────────────────────────────────────────────────────
+// The variable resolver walks function bodies top-to-bottom in a single pass.
+// Assignment chains of any depth resolve without recursion or depth limits.
+// Place the cursor after `->` on any variable below to see completions from
+// the correct class, regardless of how many intermediate assignments there are.
+
+class DeepVariableChainDemo
+{
+    public function demo(): void
+    {
+        // 5-level chain: each variable is assigned from a method/property on the previous.
+        $brush = new Brush();
+        $canvas = $brush->getCanvas();
+        $easel = $canvas->easel;
+        $material = $easel->material;         // string from Easel::$material
+        $back = $canvas->getBrush();
+        $back->stroke();                      // Brush::stroke() — full round-trip
+
+        // Reassignment chains: the resolver picks the most recent assignment.
+        $tool = new Pen();
+        $tool->write();                       // Pen::write()
+        $tool = new Pencil();
+        $tool->sketch();                      // Pencil::sketch() — Pen::write() is gone
+        $tool = new Marker();
+        $tool->highlight();                   // Marker::highlight()
+    }
+}
+
+
+// ── Closure Scope Inference ─────────────────────────────────────────────────
+// Closures capture variables from the enclosing scope via `use()`. Arrow
+// functions inherit the enclosing scope automatically. Untyped closure
+// parameters are inferred from the callable signature of the enclosing call.
+
+class ClosureScopeInferenceDemo
+{
+    /** @param list<Pen> $pens */
+    public function demo(array $pens): void
+    {
+        // Closure captures $pens via use() and iterates over it.
+        $worker = function () use ($pens): void {
+            foreach ($pens as $pen) {
+                $pen->write();                // Pen from captured $pens
+            }
+        };
+
+        // Arrow function inherits enclosing scope automatically.
+        $brush = new Brush();
+        $sized = fn() => $brush->setSize('large');
+
+        // Variables survive past closure arguments in chained calls.
+        $product = new Pen();
+        $items = [1, 2, 3];
+        array_map(function (int $i) { return $i * 2; }, $items);
+        $product->write();                    // Pen — not lost after the closure
+    }
+}
+
+
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃  SCAFFOLDING — Supporting definitions below this line.              ┃
 
@@ -6175,6 +6234,26 @@ function runDemoAssertions(): void
     $repoRef = new ScaffoldingUntypedRepo();
     $found = $repoRef->findById(1);
     assert($found instanceof Pen, 'ScaffoldingUntypedRepo::findById() must return Pen');
+
+    // ── Deep variable chain ────────────────────────────────────────────
+    $chainBrush = new Brush();
+    $chainCanvas = $chainBrush->getCanvas();
+    assert($chainCanvas instanceof Canvas, 'Brush::getCanvas() must return Canvas');
+    $chainEasel = $chainCanvas->easel;
+    assert($chainEasel instanceof Easel, 'Canvas::$easel must be Easel');
+    $chainMaterial = $chainEasel->material;
+    assert(is_string($chainMaterial), 'Easel::$material must be string');
+    $chainBack = $chainCanvas->getBrush();
+    assert($chainBack instanceof Brush, 'Canvas::getBrush() must return Brush');
+
+    // ── Closure scope inference ────────────────────────────────────────
+    $scopePens = [new Pen()];
+    $scopeWorker = function () use ($scopePens): void {
+        foreach ($scopePens as $sp) {
+            assert($sp instanceof Pen, 'Captured $pens element must be Pen');
+        }
+    };
+    $scopeWorker();
 
     echo "All assertions passed.\n";
 }

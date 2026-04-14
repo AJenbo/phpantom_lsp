@@ -53,6 +53,7 @@ pub(in crate::completion) fn resolve_class_string_targets(
                 enclosing_return_type: None,
                 branch_aware: false,
                 match_arm_narrowing: Default::default(),
+                scope_var_resolver: None,
             };
             resolve_class_string_in_statements(program.statements.iter(), &ctx)
         },

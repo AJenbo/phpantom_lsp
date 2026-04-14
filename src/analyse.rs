@@ -272,6 +272,34 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         let _callable_guard =
                             crate::completion::call_resolution::with_callable_target_cache();
 
+                        // ── Forward-walked diagnostic scope cache ───
+                        // Walk every function/method body once with the
+                        // forward walker, recording scope snapshots at
+                        // each statement boundary.  All subsequent
+                        // `resolve_variable_types` calls from diagnostic
+                        // collectors hit the cache (O(log N) lookup)
+                        // instead of doing a full backward scan.
+                        let _scope_guard =
+                            crate::completion::variable::forward_walk::with_diagnostic_scope_cache(
+                            );
+                        {
+                            let file_ctx = backend.file_context(uri);
+                            let class_loader = backend.class_loader(&file_ctx);
+                            let function_loader_cl = backend.function_loader(&file_ctx);
+                            let constant_loader_cl = backend.constant_loader();
+                            let loaders = crate::completion::resolver::Loaders {
+                                function_loader: Some(&function_loader_cl),
+                                constant_loader: Some(&constant_loader_cl),
+                            };
+                            crate::completion::variable::forward_walk::build_diagnostic_scopes(
+                                content,
+                                &file_ctx.classes,
+                                &class_loader,
+                                loaders,
+                                Some(&backend.resolved_class_cache),
+                            );
+                        }
+
                         let mut raw = Vec::new();
 
                         // In debug builds, time each collector and warn

@@ -1488,6 +1488,7 @@ fn infer_callable_param_types_for_call(
                     cursor_offset: obj_span.end.offset,
                     class_loader: closure_ctx.class_loader,
                     function_loader: None,
+                    scope_var_resolver: None,
                     resolved_class_cache: None,
                 };
                 let receiver_classes = ResolvedType::into_arced_classes(
@@ -1525,6 +1526,7 @@ fn infer_callable_param_types_for_call(
                     cursor_offset: obj_span.end.offset,
                     class_loader: closure_ctx.class_loader,
                     function_loader: None,
+                    scope_var_resolver: None,
                     resolved_class_cache: None,
                 };
                 let receiver_classes = ResolvedType::into_arced_classes(

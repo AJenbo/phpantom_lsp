@@ -43,36 +43,53 @@ use crate::completion::resolver::{Loaders, VarResolutionCtx};
 use crate::completion::type_resolution;
 use crate::util::strip_fqn_prefix;
 
-/// Dispatch to [`resolve_variable_types`] or
-/// [`resolve_variable_types_branch_aware`] depending on
-/// `ctx.branch_aware`.  This keeps callers from duplicating the
-/// if/else dispatch at every call site.
+/// Resolve a variable's type for use in RHS expression evaluation.
+///
+/// When `ctx.scope_var_resolver` is set (forward-walker RHS
+/// resolution), the scope resolver is consulted first.  This reads
+/// directly from the forward walker's in-progress `ScopeState`,
+/// avoiding re-entry into the forward walk.  Otherwise falls back to
+/// [`resolve_variable_types`] (which itself checks the diagnostic
+/// scope cache and then delegates to the forward walker).
 fn resolve_var_types(
     var_name: &str,
     ctx: &VarResolutionCtx<'_>,
     cursor_offset: u32,
 ) -> Vec<ResolvedType> {
-    if ctx.branch_aware {
-        super::resolution::resolve_variable_types_branch_aware(
-            var_name,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            cursor_offset,
-            ctx.class_loader,
-            Loaders::with_function(ctx.function_loader()),
-        )
-    } else {
-        super::resolution::resolve_variable_types(
-            var_name,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.content,
-            cursor_offset,
-            ctx.class_loader,
-            Loaders::with_function(ctx.function_loader()),
-        )
+    // ── Forward-walker fast path ────────────────────────────────
+    // When a scope_var_resolver is available, read variable types
+    // directly from the forward walker's ScopeState.  This avoids
+    // the feedback loop where the backward scanner hits the
+    // (incomplete) diagnostic scope cache during the forward walk.
+    if let Some(resolver) = ctx.scope_var_resolver {
+        let prefixed = if var_name.starts_with('$') {
+            var_name.to_string()
+        } else {
+            format!("${}", var_name)
+        };
+        let from_scope = resolver(&prefixed);
+        if !from_scope.is_empty() {
+            return from_scope;
+        }
+        // The forward walker is the authority for variable types.
+        // If the variable isn't in its ScopeState, it hasn't been
+        // assigned yet at this point in the walk.  Falling through
+        // to `resolve_variable_types` would re-enter the forward
+        // walker, causing O(N²) blowup
+        // or stack overflow.  Return empty so the RHS resolver
+        // treats the variable as unresolved.
+        return vec![];
     }
+
+    super::resolution::resolve_variable_types(
+        var_name,
+        ctx.current_class,
+        ctx.all_classes,
+        ctx.content,
+        cursor_offset,
+        ctx.class_loader,
+        Loaders::with_function(ctx.function_loader()),
+    )
 }
 
 // ── Match-arm narrowing override ────────────────────────────────────
@@ -1399,7 +1416,73 @@ fn resolve_arg_variable_raw_type(
         return Some(raw);
     }
 
-    // 2. Fall back to unified variable resolution pipeline.
+    // 2. When the diagnostic scope cache is active (and not still being
+    //    built), read the variable's type from the pre-computed forward-
+    //    walked scope snapshots.  This avoids hitting the backward
+    //    scanner during diagnostic collection.
+    if super::forward_walk::is_diagnostic_scope_active()
+        && !super::forward_walk::is_building_scopes()
+    {
+        let prefixed = if var_name.starts_with('$') {
+            var_name.to_string()
+        } else {
+            format!("${}", var_name)
+        };
+        if let Some(types) =
+            super::forward_walk::lookup_diagnostic_scope(&prefixed, rctx.cursor_offset)
+        {
+            return Some(ResolvedType::types_joined(&types));
+        }
+    }
+
+    // 3. When a scope_var_resolver is available (forward walker is
+    //    active on either diagnostic or completion path), read from
+    //    the in-progress ScopeState.  If the variable isn't there,
+    //    it hasn't been assigned yet — return None rather than
+    //    falling through to resolve_variable_types which would
+    //    re-enter the forward walker and cause stack overflow.
+    if let Some(resolver) = rctx.scope_var_resolver {
+        let prefixed = if var_name.starts_with('$') {
+            var_name.to_string()
+        } else {
+            format!("${}", var_name)
+        };
+        let from_scope = resolver(&prefixed);
+        if from_scope.is_empty() {
+            return None;
+        }
+        return Some(ResolvedType::types_joined(&from_scope));
+    }
+
+    // 4. During the build phase, the forward walker is the authority.
+    //    If the variable isn't in the scope cache, don't fall through
+    //    to the backward scanner — return None so the caller treats
+    //    it as unresolved.
+    if super::forward_walk::is_building_scopes() {
+        return None;
+    }
+
+    // 5. Fall back to unified variable resolution pipeline (backward
+    //    scanner).  This path is only reached for interactive features
+    //    (hover, completion, goto-def) where no scope cache is active
+    //    and no scope_var_resolver was provided.
+    //
+    // Guard: resolve_variable_types is designed for bare `$variable`
+    // names.  Complex expressions (array access like `$arr['key']`,
+    // comparisons like `$x === 'foo'`, boolean chains, null coalescing)
+    // are not variable names and will never match a scope entry.
+    // Skip them to avoid wasted backward scans and fallthrough noise.
+    if var_name.contains("->")
+        || var_name.contains("::")
+        || var_name.contains('[')
+        || var_name.contains("===")
+        || var_name.contains("&&")
+        || var_name.contains("??")
+        || var_name.contains("||")
+    {
+        return None;
+    }
+
     let default_class = crate::types::ClassInfo::default();
     let current_class = rctx.current_class.unwrap_or(&default_class);
     let resolved = super::resolution::resolve_variable_types(
@@ -2499,11 +2582,32 @@ fn resolve_rhs_property_access(
                 if let Some(overridden) = ctx.match_arm_narrowing.get(&var).cloned() {
                     ResolvedType::into_classes(overridden)
                 } else {
-                    ResolvedType::into_classes(crate::completion::resolver::resolve_target_classes(
-                        &var,
-                        crate::types::AccessKind::Arrow,
-                        &ctx.as_resolution_ctx(),
-                    ))
+                    // When a scope_var_resolver is available (forward-walker
+                    // RHS resolution), try it first so we read from the
+                    // in-progress ScopeState instead of the diagnostic
+                    // scope cache or backward scanner.
+                    let from_scope = if let Some(resolver) = ctx.scope_var_resolver {
+                        let prefixed = if var.starts_with('$') {
+                            var.clone()
+                        } else {
+                            format!("${}", var)
+                        };
+                        resolver(&prefixed)
+                    } else {
+                        vec![]
+                    };
+                    let classes = ResolvedType::into_classes(from_scope);
+                    if !classes.is_empty() {
+                        classes
+                    } else {
+                        ResolvedType::into_classes(
+                            crate::completion::resolver::resolve_target_classes(
+                                &var,
+                                crate::types::AccessKind::Arrow,
+                                &ctx.as_resolution_ctx(),
+                            ),
+                        )
+                    }
                 }
             } else {
                 // Handle non-variable object expressions like

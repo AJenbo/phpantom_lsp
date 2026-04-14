@@ -1,6 +1,29 @@
 use crate::common::{create_psr4_workspace, create_test_backend};
 use tower_lsp::lsp_types::*;
 
+// ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
+
+/// Open a file, run full slow diagnostics (which activates the diagnostic
+/// scope cache and the forward walker), then filter to unknown_member
+/// diagnostics only.  This exercises the forward walker's diagnostic path
+/// instead of the backward scanner.
+fn unknown_member_diagnostics_with_scope_cache(
+    backend: &phpantom_lsp::Backend,
+    uri: &str,
+    text: &str,
+) -> Vec<Diagnostic> {
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    // Keep only unknown_member diagnostics (the code we're testing).
+    out.retain(|d| {
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+    });
+    out
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// Open a file, trigger `update_ast`, then collect unknown-member diagnostics.
@@ -3957,5 +3980,733 @@ class FlowService {
             .any(|d| d.message.contains("could not be resolved")),
         "reduce() return type should be fully resolved when chained, got: {:?}",
         chained_diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward walker scope cache — assert instanceof narrowing
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `assert($param instanceof self)` inside a method should narrow the
+/// parameter from the base class to the enclosing class.  When the
+/// diagnostic scope cache is active, the forward walker must apply this
+/// narrowing so that members of the subclass are found.
+#[test]
+fn scope_cache_assert_instanceof_self_narrows_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class BaseCatalogFeature {
+    public function baseMethod(): void {}
+}
+class SpecificFeature extends BaseCatalogFeature {
+    public function specificMethod(): void {}
+    public function isBetterThanOther(BaseCatalogFeature $feature): bool {
+        assert($feature instanceof self);
+        return $feature->specificMethod() !== null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("specificMethod")),
+        "No diagnostic expected for 'specificMethod' after assert($feature instanceof self), got: {:?}",
+        diags
+    );
+}
+
+/// Same pattern but with a named class instead of `self`.
+#[test]
+fn scope_cache_assert_instanceof_named_class_narrows_parameter() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Animal {
+    public function breathe(): void {}
+}
+class Dog extends Animal {
+    public function bark(): void {}
+}
+class Handler {
+    public function handle(Animal $pet): void {
+        assert($pet instanceof Dog);
+        $pet->bark();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("bark")),
+        "No diagnostic expected for 'bark' after assert($pet instanceof Dog), got: {:?}",
+        diags
+    );
+}
+
+/// Assert narrowing should apply to body-assigned variables too, not
+/// just parameters.
+#[test]
+fn scope_cache_assert_instanceof_narrows_assigned_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Renderable {
+    public function render(): string;
+}
+class HtmlWidget implements Renderable {
+    public function render(): string { return ''; }
+    public function toHtml(): string { return ''; }
+}
+class Consumer {
+    public function run(Renderable $r): void {
+        $widget = $r;
+        assert($widget instanceof HtmlWidget);
+        $widget->toHtml();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("toHtml")),
+        "No diagnostic expected for 'toHtml' after assert instanceof, got: {:?}",
+        diags
+    );
+}
+
+/// Members accessed BEFORE the assert should still be diagnosed when
+/// they don't exist on the pre-assert type.
+#[test]
+fn scope_cache_still_flags_unknown_member_before_assert() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Base {
+    public function baseMethod(): void {}
+}
+class Child extends Base {
+    public function childMethod(): void {}
+}
+class Handler {
+    public function handle(Base $item): void {
+        $item->childMethod();
+        assert($item instanceof Child);
+        $item->childMethod();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let child_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("childMethod"))
+        .collect();
+    assert_eq!(
+        child_diags.len(),
+        1,
+        "Expected exactly 1 diagnostic for 'childMethod' (the pre-assert access), got: {:?}",
+        child_diags
+    );
+}
+
+/// Verify that `assert($x instanceof self)` inside a `final` class
+/// with modifiers (which shifts the class span) resolves correctly.
+#[test]
+fn scope_cache_assert_instanceof_self_final_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class BaseFoo {
+    public function baseOp(): void {}
+}
+final class ConcreteFoo extends BaseFoo {
+    public function concreteOp(): void {}
+    public function compare(BaseFoo $other): bool {
+        assert($other instanceof self);
+        return $other->concreteOp() !== null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("concreteOp")),
+        "No diagnostic expected for 'concreteOp' after assert instanceof self in final class, got: {:?}",
+        diags
+    );
+}
+
+/// `assert(!$x instanceof Foo)` — negated instanceof should exclude the
+/// type, not include it.
+#[test]
+fn scope_cache_assert_negated_instanceof_excludes_class() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Alpha {
+    public function alphaMethod(): void {}
+}
+class Beta extends Alpha {
+    public function betaMethod(): void {}
+}
+class Tester {
+    public function run(): void {
+        $x = random_int(0,1) ? new Alpha() : new Beta();
+        assert(!$x instanceof Beta);
+        $x->alphaMethod();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("alphaMethod")),
+        "No diagnostic expected for 'alphaMethod' after assert negated instanceof, got: {:?}",
+        diags
+    );
+}
+
+/// Instanceof narrowing inside an `if` condition should narrow the
+/// variable in the then-branch for the scope cache path.
+#[test]
+fn scope_cache_if_instanceof_narrows_in_then_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function radius(): float { return 1.0; }
+}
+class Renderer {
+    public function draw(Shape $s): void {
+        if ($s instanceof Circle) {
+            $s->radius();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("radius")),
+        "No diagnostic expected for 'radius' inside if-instanceof branch, got: {:?}",
+        diags
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward walker scope cache — top-level code
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Variables assigned in top-level code (outside any function or class body)
+/// should be tracked by the forward walker's scope cache so that member
+/// accesses on those variables resolve without falling through to the
+/// backward scanner.
+#[test]
+fn scope_cache_top_level_variable_assignment() {
+    let backend = create_test_backend();
+    let uri = "file:///test_top_level.php";
+    let text = r#"<?php
+class Logger {
+    public function info(string $msg): void {}
+    public function warning(string $msg): void {}
+}
+
+$logger = new Logger();
+$logger->info('hello');
+$logger->warning('watch out');
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for top-level $logger->info()/warning(), got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Top-level code with an if-statement should still track variable types
+/// across branches so that member accesses after the if resolve correctly.
+#[test]
+fn scope_cache_top_level_if_then_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test_top_level_if.php";
+    let text = r#"<?php
+class Config {
+    public function get(string $key): string { return ''; }
+}
+
+$config = new Config();
+if (true) {
+    $config->get('key');
+}
+$config->get('other');
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for top-level $config->get(), got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Top-level foreach should bind the value variable so that member
+/// accesses inside the loop body resolve from the scope cache.
+#[test]
+fn scope_cache_top_level_foreach() {
+    let backend = create_test_backend();
+    let uri = "file:///test_top_level_foreach.php";
+    let text = r#"<?php
+class Item {
+    public function getName(): string { return ''; }
+}
+
+/** @var list<Item> $items */
+$items = [];
+foreach ($items as $item) {
+    $item->getName();
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for top-level foreach $item->getName(), got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward walker scope cache — foreach over method call result
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When iterating over a method call result like `$this->getItems()`,
+/// the forward walker should resolve the expression through the full
+/// resolver pipeline (subject-based resolution) so that the foreach
+/// value variable gets the correct element type.
+#[test]
+fn scope_cache_foreach_over_method_call_result() {
+    let backend = create_test_backend();
+    let uri = "file:///test_foreach_method.php";
+    let text = r#"<?php
+class Product {
+    public function getTitle(): string { return ''; }
+}
+class Catalog {
+    /** @return list<Product> */
+    public function getProducts(): array { return []; }
+
+    public function display(): void {
+        foreach ($this->getProducts() as $product) {
+            $product->getTitle();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member for $product->getTitle() in foreach over method call, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Foreach over a static method call should also resolve the value
+/// variable type through the subject pipeline.
+#[test]
+fn scope_cache_foreach_over_static_method_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test_foreach_static.php";
+    let text = r#"<?php
+class User {
+    public function getEmail(): string { return ''; }
+}
+class UserRepository {
+    /** @return list<User> */
+    public static function findAll(): array { return []; }
+}
+class Report {
+    public function generate(): void {
+        foreach (UserRepository::findAll() as $user) {
+            $user->getEmail();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member for $user->getEmail() in foreach over static call, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward walker scope cache — pass-by-ref in if-conditions
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn scope_cache_pass_by_ref_in_if_condition_preg_match() {
+    let backend = create_test_backend();
+    let uri = "file:///test_preg_match_if.php";
+    let text = r#"<?php
+class MatchResult {
+    /** @return array<string> */
+    public static function fromMatches(array $matches): self { return new self(); }
+    public function getGroup(): string { return ''; }
+}
+
+class Parser {
+    public function parse(string $input): ?MatchResult {
+        if (preg_match('/(\d+)/', $input, $matches) === 1) {
+            $result = MatchResult::fromMatches($matches);
+            $result->getGroup();
+        }
+        return null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Pass-by-ref $matches from preg_match in if-condition should be in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scope_cache_pass_by_ref_in_if_condition_with_comparison() {
+    let backend = create_test_backend();
+    let uri = "file:///test_preg_match_cmp.php";
+    let text = r#"<?php
+class Extractor {
+    public function extract(string $text): ?int {
+        if (preg_match_all('/\d+/', $text, $matches) >= 1) {
+            return count($matches[0]);
+        }
+        return null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Pass-by-ref $matches from preg_match_all in comparison condition should be in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scope_cache_pass_by_ref_in_while_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///test_preg_match_while.php";
+    let text = r#"<?php
+class TokenCollector {
+    /** @var list<string> */
+    private array $tokens = [];
+    public function collect(string $input): void {
+        $offset = 0;
+        while (preg_match('/\w+/', $input, $matches, 0, $offset) === 1) {
+            $this->tokens[] = $matches[0];
+            $offset += strlen($matches[0]);
+        }
+    }
+    /** @return list<string> */
+    public function getTokens(): array { return $this->tokens; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Pass-by-ref $matches from preg_match in while-condition should be in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scope_cache_pass_by_ref_parse_str_expression_statement() {
+    let backend = create_test_backend();
+    let uri = "file:///test_parse_str.php";
+    let text = r#"<?php
+class QueryParser {
+    public function parse(string $queryString): int {
+        parse_str($queryString, $params);
+        return count($params);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Pass-by-ref $params from parse_str should be in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward walker scope cache — superglobal seeding
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn scope_cache_superglobal_server_in_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test_superglobal.php";
+    // $_SERVER is a superglobal — accessing it should not cause unknown
+    // member diagnostics on variables assigned from it.
+    let text = r#"<?php
+class RequestInfo {
+    public static function fromServer(string $key): self { return new self(); }
+    public function getValue(): string { return ''; }
+}
+
+function getHost(): string {
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return is_string($host) ? $host : 'localhost';
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Superglobal $_SERVER should be seeded in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward walker scope cache — pass-by-ref on method/static calls
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn scope_cache_pass_by_ref_method_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test_pass_by_ref_method.php";
+    let text = r#"<?php
+class DataStore {
+    /** @param array &$output */
+    public function exportTo(string $key, array &$output): void {}
+}
+
+class Processor {
+    public function run(DataStore $store): int {
+        $store->exportTo('items', $results);
+        return count($results);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Pass-by-ref $results from method call should be in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scope_cache_pass_by_ref_static_method_call() {
+    let backend = create_test_backend();
+    let uri = "file:///test_pass_by_ref_static.php";
+    let text = r#"<?php
+class Registry {
+    /** @param array &$entries */
+    public static function dump(array &$entries): void {}
+}
+
+class Reporter {
+    public function report(): int {
+        Registry::dump($entries);
+        return count($entries);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Pass-by-ref $entries from static method call should be in scope. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// Forward walker scope cache: subject pipeline fallback for RHS resolution.
+
+#[test]
+fn scope_cache_method_call_rhs_via_subject_fallback() {
+    let backend = create_test_backend();
+    let uri = "file:///test_rhs_subject_method.php";
+    let text = r#"<?php
+class OrderItem {
+    public function getProduct(): Product { return new Product(); }
+}
+
+class Product {
+    public function getName(): string { return ''; }
+}
+
+class OrderProcessor {
+    public function process(OrderItem $item): string {
+        $product = $item->getProduct();
+        return $product->getName();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Method call RHS should resolve via subject pipeline. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scope_cache_static_call_rhs_via_subject_fallback() {
+    let backend = create_test_backend();
+    let uri = "file:///test_rhs_subject_static.php";
+    let text = r#"<?php
+class Config {
+    public static function load(): Settings { return new Settings(); }
+}
+
+class Settings {
+    public function getValue(): string { return ''; }
+}
+
+class App {
+    public function run(): string {
+        $settings = Config::load();
+        return $settings->getValue();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Static call RHS should resolve via subject pipeline. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scope_cache_chained_method_call_rhs_via_subject_fallback() {
+    let backend = create_test_backend();
+    let uri = "file:///test_rhs_subject_chain.php";
+    let text = r#"<?php
+class Connection {
+    public function query(): QueryBuilder { return new QueryBuilder(); }
+}
+
+class QueryBuilder {
+    public function where(string $col, string $val): self { return $this; }
+    public function first(): ?Record { return null; }
+}
+
+class Record {
+    public function getId(): int { return 0; }
+}
+
+class Repository {
+    public function find(Connection $db): ?int {
+        $builder = $db->query()->where('status', 'active');
+        $record = $builder->first();
+        if ($record !== null) {
+            return $record->getId();
+        }
+        return null;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Chained method call RHS should resolve via subject pipeline. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// When a cross-file class has `@phpstan-assert-if-false self<true> $this`
+/// on a method (e.g. `Decimal::isZero()`), a guard clause like
+/// `if ($var->isZero()) { return null; }` triggers inverse assert
+/// narrowing.  The `self` in the assertion type must resolve against
+/// the *declaring* class (`Decimal`), not the *enclosing* class
+/// (`Monetary`).  Previously, `self` was passed to
+/// `apply_instanceof_inclusion` unresolved and the narrowing engine
+/// resolved it against `current_class` (the enclosing class), replacing
+/// the variable's type with the wrong class.
+#[test]
+fn scope_cache_phpstan_assert_if_false_self_resolves_against_declaring_class() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Decimal.php",
+            r#"<?php
+namespace App;
+
+class Decimal {
+    public function sub(Decimal $other): self { return $this; }
+    public function div(Decimal $other): self { return $this; }
+    public function mul(Decimal $other): self { return $this; }
+    public function toFloat(): float { return 0.0; }
+
+    /** @phpstan-assert-if-false self<true> $this */
+    public function isZero(): bool { return false; }
+}
+"#,
+        )],
+    );
+
+    // The guard clause `if ($denominator->isZero()) { return null; }`
+    // triggers inverse @phpstan-assert-if-false narrowing on $denominator.
+    // The assertion type `self<true>` must resolve to `Decimal<true>`,
+    // not `Monetary<true>`.
+    let uri = "file:///test_assert_self.php";
+    let text = r#"<?php
+use App\Decimal;
+
+class Monetary {
+    public function calcFraction(Decimal $net, Decimal $supplierPrice): ?float {
+        $denominator = $net->mul($supplierPrice);
+        if ($denominator->isZero()) {
+            return null;
+        }
+        return $denominator->sub($supplierPrice)->div($denominator)->toFloat();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "phpstan-assert-if-false with `self` type should resolve against declaring class, not enclosing class. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Same pattern but without the guard clause — plain fluent chain on a
+/// cross-file parameter with `self` return type.  Ensures the basic
+/// resolution works even without assert narrowing.
+#[test]
+fn scope_cache_self_return_type_cross_file_fluent_chain() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Decimal.php",
+            r#"<?php
+namespace App;
+
+class Decimal {
+    public function sub(Decimal $other): self { return $this; }
+    public function div(Decimal $other): self { return $this; }
+    public function toFloat(): float { return 0.0; }
+}
+"#,
+        )],
+    );
+
+    let uri = "file:///test_self_chain.php";
+    let text = r#"<?php
+use App\Decimal;
+
+class Monetary {
+    public function calcFraction(Decimal $denominator, Decimal $supplierPrice): float {
+        return $denominator->sub($supplierPrice)->div($denominator)->toFloat();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "self return type on cross-file parameter should resolve correctly. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }

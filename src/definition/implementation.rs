@@ -474,6 +474,7 @@ impl Backend {
             class_loader: &class_loader,
             resolved_class_cache: Some(&self.resolved_class_cache),
             function_loader: Some(&function_loader),
+            scope_var_resolver: None,
         };
         let candidates = ResolvedType::into_arced_classes(
             crate::completion::resolver::resolve_target_classes(&subject, access_kind, &rctx),

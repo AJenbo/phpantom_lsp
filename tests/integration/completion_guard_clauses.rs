@@ -451,15 +451,17 @@ async fn test_guard_clause_no_narrowing_when_else_exists() {
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
-            // Guard clause narrowing should NOT apply when else exists
+            // The forward walker correctly resolves to only Dog here: the cursor
+            // is after the if/else, and the guard clause (`!$pet instanceof Dog`
+            // → return) eliminates Cat, leaving only Dog visible.
             assert!(
                 method_names.contains(&"bark"),
-                "Should include Dog's 'bark' — else exists so no guard, got: {:?}",
+                "Should include Dog's 'bark' — forward walker narrows to Dog, got: {:?}",
                 method_names
             );
             assert!(
-                method_names.contains(&"purr"),
-                "Should include Cat's 'purr' — else exists so no guard, got: {:?}",
+                !method_names.contains(&"purr"),
+                "Should NOT include Cat's 'purr' — forward walker excludes Cat after guard clause, got: {:?}",
                 method_names
             );
         }

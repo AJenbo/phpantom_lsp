@@ -1359,10 +1359,11 @@ async fn test_completion_ambiguous_variable_if_else_union() {
     match result.unwrap() {
         CompletionResponse::Array(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-            // Should include members from all three candidate types
+            // The forward walker correctly excludes Writer (dead branch before
+            // the if/else), so only Printer and Sender are candidates.
             assert!(
-                labels.iter().any(|l| l.starts_with("write")),
-                "Should include write from Writer, got: {:?}",
+                !labels.iter().any(|l| l.starts_with("write")),
+                "Should NOT include write from Writer (dead branch), got: {:?}",
                 labels
             );
             assert!(
@@ -20967,6 +20968,324 @@ async fn test_foreach_variable_type_from_param_array_shape() {
                 labels.iter().any(|l| l.starts_with("parentProduct")),
                 "Should include 'parentProduct' from Product via array shape foreach. Got: {:?}",
                 labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+// ─── Deep variable chain tests ──────────────────────────────────────────────
+
+/// Deep variable assignment chain inside a method body: each variable
+/// depends on the previous one.  The recursive resolution walks
+/// backwards through the chain (depth 5) to resolve the final type.
+#[tokio::test]
+async fn test_completion_deep_variable_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///deep_var_chain.php").unwrap();
+    // 5-level chain: param $a → $b → $c → $d → $e → $final
+    let text = concat!(
+        "<?php\n",                                                                 // 0
+        "class DeepA {\n",                                                         // 1
+        "    public function getB(): DeepB { return new DeepB(); }\n",             // 2
+        "}\n",                                                                     // 3
+        "class DeepB {\n",                                                         // 4
+        "    public function getC(): DeepC { return new DeepC(); }\n",             // 5
+        "}\n",                                                                     // 6
+        "class DeepC {\n",                                                         // 7
+        "    public function getD(): DeepD { return new DeepD(); }\n",             // 8
+        "}\n",                                                                     // 9
+        "class DeepD {\n",                                                         // 10
+        "    public function getE(): DeepE { return new DeepE(); }\n",             // 11
+        "}\n",                                                                     // 12
+        "class DeepE {\n",                                                         // 13
+        "    public function getFinal(): DeepFinal { return new DeepFinal(); }\n", // 14
+        "}\n",                                                                     // 15
+        "class DeepFinal {\n",                                                     // 16
+        "    public function deepResult(): string { return ''; }\n",               // 17
+        "}\n",                                                                     // 18
+        "class DeepChainTest {\n",                                                 // 19
+        "    public function test(DeepA $a) {\n",                                  // 20
+        "        $b = $a->getB();\n",                                              // 21
+        "        $c = $b->getC();\n",                                              // 22
+        "        $d = $c->getD();\n",                                              // 23
+        "        $e = $d->getE();\n",                                              // 24
+        "        $final = $e->getFinal();\n",                                      // 25
+        "        $final->\n",                                                      // 26
+        "    }\n",                                                                 // 27
+        "}\n",                                                                     // 28
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 26,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Deep variable chain (5 levels) should resolve"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"deepResult"),
+                "Should include 'deepResult' from DeepFinal at end of 5-level chain. Got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// 10-level variable assignment chain. Regression guard for the elimination of the old
+/// `MAX_VAR_RESOLUTION_DEPTH=4` limit. Each level returns a different class, so the
+/// chain is only fully resolved if there is no artificial depth cap.
+#[tokio::test]
+async fn test_completion_very_deep_variable_chain_no_depth_limit() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///very_deep_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Level1 { public function next(): Level2 { return new Level2(); } }\n",
+        "class Level2 { public function next(): Level3 { return new Level3(); } }\n",
+        "class Level3 { public function next(): Level4 { return new Level4(); } }\n",
+        "class Level4 { public function next(): Level5 { return new Level5(); } }\n",
+        "class Level5 { public function next(): Level6 { return new Level6(); } }\n",
+        "class Level6 { public function next(): Level7 { return new Level7(); } }\n",
+        "class Level7 { public function next(): Level8 { return new Level8(); } }\n",
+        "class Level8 { public function next(): Level9 { return new Level9(); } }\n",
+        "class Level9 { public function next(): Level10 { return new Level10(); } }\n",
+        "class Level10 { public function finalMethod(): string { return ''; } }\n",
+        "class DeepChainTest {\n",
+        "    public function test(): void {\n",
+        "        $a = new Level1();\n",
+        "        $b = $a->next();\n",
+        "        $c = $b->next();\n",
+        "        $d = $c->next();\n",
+        "        $e = $d->next();\n",
+        "        $f = $e->next();\n",
+        "        $g = $f->next();\n",
+        "        $h = $g->next();\n",
+        "        $i = $h->next();\n",
+        "        $j = $i->next();\n",
+        "        $j->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 23,
+                character: 13,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "10-level variable chain should resolve without hitting a depth limit"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"finalMethod"),
+                "Should include 'finalMethod' from Level10 at end of 10-level chain. Got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Deep variable chain in a standalone function (not inside a class).
+/// Verifies that function-parameter types are picked up and chained
+/// through intermediate variable assignments.
+#[tokio::test]
+async fn test_completion_deep_variable_chain_standalone_function() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///deep_func_chain.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class ChainStart {\n",
+        "    public function step1(): ChainMid { return new ChainMid(); }\n",
+        "}\n",
+        "class ChainMid {\n",
+        "    public function step2(): ChainEnd { return new ChainEnd(); }\n",
+        "}\n",
+        "class ChainEnd {\n",
+        "    public function finalValue(): int { return 0; }\n",
+        "}\n",
+        "function processChain(ChainStart $start) {\n",
+        "    $mid = $start->step1();\n",
+        "    $end = $mid->step2();\n",
+        "    $end->\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 10,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Variable chain in standalone function should resolve"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"finalValue"),
+                "Should include 'finalValue' from ChainEnd. Got: {:?}",
+                names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+/// Multiple parameters referenced in assignment chains: `$a` and `$b`
+/// are both params, and both feed into separate variables that are used
+/// later.  Both parameter types should be available for RHS resolution
+/// when resolving the derived variables.
+#[tokio::test]
+async fn test_completion_cross_parameter_reference_in_chain() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///cross_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                                     // 0
+        "class ParamA {\n",                                                            // 1
+        "    public function toResult(): ParamResult { return new ParamResult(); }\n", // 2
+        "}\n",                                                                         // 3
+        "class ParamB {\n",                                                            // 4
+        "    public function toOther(): ParamOther { return new ParamOther(); }\n",    // 5
+        "}\n",                                                                         // 6
+        "class ParamResult {\n",                                                       // 7
+        "    public function output(): void {}\n",                                     // 8
+        "}\n",                                                                         // 9
+        "class ParamOther {\n",                                                        // 10
+        "    public function info(): string { return ''; }\n",                         // 11
+        "}\n",                                                                         // 12
+        "class CrossParamTest {\n",                                                    // 13
+        "    public function test(ParamA $a, ParamB $b) {\n",                          // 14
+        "        $fromA = $a->toResult();\n",                                          // 15
+        "        $fromB = $b->toOther();\n",                                           // 16
+        "        $fromA->\n",                                                          // 17
+        "    }\n",                                                                     // 18
+        "}\n",                                                                         // 19
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 17,
+                character: 16,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Cross-parameter reference chain should resolve"
+    );
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let names: Vec<&str> = items
+                .iter()
+                .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
+                .collect();
+            assert!(
+                names.contains(&"output"),
+                "Should include 'output' from ParamResult. Got: {:?}",
+                names
             );
         }
         _ => panic!("Expected CompletionResponse::Array"),

@@ -967,6 +967,7 @@ pub fn find_iterable_raw_type_in_source(
     // scope and must be skipped.
     let mut brace_depth = 0i32;
     let mut min_depth = 0i32;
+    let mut max_depth = 0i32;
     let mut seen_sibling_scope = false;
 
     // Track the previous non-empty line we saw while scanning backward.
@@ -991,6 +992,7 @@ pub fn find_iterable_raw_type_in_source(
         }
 
         min_depth = min_depth.min(brace_depth);
+        max_depth = max_depth.max(brace_depth);
 
         // Once we have exited our containing scope (min_depth < 0) and
         // re-entered a block close to that level, we are inside a
@@ -1008,6 +1010,41 @@ pub fn find_iterable_raw_type_in_source(
         if min_depth < 0 && brace_depth > min_depth {
             seen_sibling_scope = true;
         }
+
+        // Detect sibling function/method boundaries at the same class
+        // nesting level.  When scanning backward we may fully traverse
+        // a sibling method body (entering at `}`, exiting at `{`) and
+        // return to `brace_depth == 0` — the same level as our own
+        // method signature.  The `min_depth < 0` check above only
+        // fires when we cross the *enclosing* scope boundary (class
+        // `{`), so it misses sibling methods entirely.
+        //
+        // Fix: once we have entered and fully exited a block at our
+        // level (i.e. we saw `brace_depth > 0` and it returned to 0),
+        // any `function` keyword at depth 0 is a sibling method
+        // signature.  Its docblock belongs to that method, not ours.
+        //
+        // The `max_depth > 0` guard ensures we only trigger after
+        // traversing at least one complete block.  Without it, a
+        // scan starting from the parameter list `(` would flag the
+        // function's own signature as a sibling boundary, hiding
+        // the docblock directly above it.
+        if !seen_sibling_scope && !is_comment_line && brace_depth == 0 && max_depth > 0 {
+            // Check for a function/method keyword.  This covers:
+            //   `public function foo(...)`, `private static function bar(...)`,
+            //   `function baz(...)`, `public static function qux(): array`
+            // We look for the `function` keyword as a word boundary.
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("function ")
+                || lower.contains("function(")
+                || lower.ends_with("function")
+            {
+                // We've hit a sibling function signature.  Any
+                // docblock above this point belongs to that function.
+                seen_sibling_scope = true;
+            }
+        }
+
         if seen_sibling_scope {
             if !trimmed.is_empty() {
                 prev_non_empty_line = Some(trimmed);

@@ -166,7 +166,7 @@ impl Backend {
     /// Collect Phase 2 (slow) diagnostics: unknown class/member/function,
     /// argument count, implementation errors, deprecated usage.  These
     /// require type resolution and are expensive.
-    pub(crate) fn collect_slow_diagnostics(
+    pub fn collect_slow_diagnostics(
         &self,
         uri_str: &str,
         content: &str,
@@ -188,6 +188,33 @@ impl Backend {
         // `$query->where(...)`, and `Product::query()->where(...)`
         // call site in the file.
         let _callable_guard = crate::completion::call_resolution::with_callable_target_cache();
+
+        // ── Phase 2: forward-walked diagnostic scope cache ──────
+        // Walk every function/method body in the file once with the
+        // forward walker, recording scope snapshots at each statement
+        // boundary.  All subsequent `resolve_variable_types` calls
+        // from diagnostic collectors hit the cache (O(log N) lookup)
+        // instead of doing a full backward scan per member-access
+        // span.  This eliminates the O(N × depth × file_size) cost
+        // that caused multi-minute analysis times on large files.
+        let _scope_guard = crate::completion::variable::forward_walk::with_diagnostic_scope_cache();
+        {
+            let file_ctx = self.file_context(uri_str);
+            let class_loader = self.class_loader(&file_ctx);
+            let function_loader_cl = self.function_loader(&file_ctx);
+            let constant_loader_cl = self.constant_loader();
+            let loaders = crate::completion::resolver::Loaders {
+                function_loader: Some(&function_loader_cl),
+                constant_loader: Some(&constant_loader_cl),
+            };
+            crate::completion::variable::forward_walk::build_diagnostic_scopes(
+                content,
+                &file_ctx.classes,
+                &class_loader,
+                loaders,
+                Some(&self.resolved_class_cache),
+            );
+        }
 
         self.collect_unknown_class_diagnostics(uri_str, content, out);
         self.collect_unknown_member_diagnostics(uri_str, content, out);

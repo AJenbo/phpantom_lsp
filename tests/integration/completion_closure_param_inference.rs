@@ -2606,3 +2606,158 @@ async fn test_arrow_fn_untyped_param_inferred_from_function_template() {
         props,
     );
 }
+
+// ─── Generic type_string preservation through self/static returns ───────────
+
+/// When a method returns `static` on a generic class, the `ResolvedType`
+/// `type_string` must carry the reconstructed generic args (e.g.
+/// `Builder<Customer>` instead of bare `static`).  Without this, downstream
+/// consumers like `build_receiver_template_subs` see no generic args and
+/// cannot substitute template parameters in callable params.
+///
+/// Scenario: `Customer2::where(…)->where(…)->each(fn($items) { $items-> })`
+///
+/// - `Customer2::where()` explicitly returns `Builder<Customer>`
+/// - `Builder::where()` returns `static`
+/// - The second `where()` must produce `Builder<Customer>` (not bare `static`)
+/// - `each(callable(Collection<int, TModel>))` must substitute `TModel=Customer`
+/// - `$items` should resolve to `Collection<int, Customer>` with `first()` etc.
+#[tokio::test]
+async fn test_static_return_preserves_generic_type_string_in_chain() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/static_generic_chain.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Customer {\n",
+        "    public function isActive(): bool { return true; }\n",
+        "    public function getEmail(): string { return ''; }\n",
+        "}\n",
+        "/**\n",
+        " * @template TKey of array-key\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue|null */\n",
+        "    public function first(): mixed { return null; }\n",
+        "    /** @return int */\n",
+        "    public function count(): int { return 0; }\n",
+        "}\n",
+        "/**\n",
+        " * @template TModel\n",
+        " */\n",
+        "class Builder {\n",
+        "    /**\n",
+        "     * @param callable(Collection<int, TModel>): mixed $callback\n",
+        "     * @return bool\n",
+        "     */\n",
+        "    public function each(callable $callback): bool { return true; }\n",
+        "    /** @return static */\n",
+        "    public function where(string $col, mixed $val = null): static { return $this; }\n",
+        "    /** @return static */\n",
+        "    public function orderBy(string $col): static { return $this; }\n",
+        "}\n",
+        "class CustomerQuery {\n",
+        "    /** @return Builder<Customer> */\n",
+        "    public static function where(string $col, mixed $val = null): Builder { return new Builder(); }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        // Line 34: CustomerQuery::where()->orderBy()->each(fn($items) { $items-> })
+        // The chain is: CustomerQuery::where() => Builder<Customer>
+        //               ->orderBy() => static (should reconstruct to Builder<Customer>)
+        //               ->each(fn($items) => ...) => $items is Collection<int, Customer>
+        "        CustomerQuery::where('active', true)->orderBy('name')->each(function ($items) {\n",
+        "            $items->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 36: `            $items->` — $items is inferred from each()'s
+    // callable param after template substitution through the static chain.
+    let items = complete_at(&backend, &uri, src, 36, 20).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"first"),
+        "Expected 'first' from Collection on closure param after static return chain, got: {:?}",
+        names,
+    );
+    assert!(
+        names.contains(&"count"),
+        "Expected 'count' from Collection on closure param after static return chain, got: {:?}",
+        names,
+    );
+}
+
+/// Same as above but with two chained `static` returns to verify the
+/// generic type string propagates through multiple hops.
+#[tokio::test]
+async fn test_multiple_static_returns_preserve_generic_type_string() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/multi_static_chain.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public string $name = '';\n",
+        "    public int $price = 0;\n",
+        "}\n",
+        "/**\n",
+        " * @template TKey of array-key\n",
+        " * @template TValue\n",
+        " */\n",
+        "class Collection {\n",
+        "    /** @return TValue|null */\n",
+        "    public function first(): mixed { return null; }\n",
+        "}\n",
+        "/**\n",
+        " * @template TModel\n",
+        " */\n",
+        "class Builder {\n",
+        "    /**\n",
+        "     * @param callable(Collection<int, TModel>): mixed $callback\n",
+        "     * @return bool\n",
+        "     */\n",
+        "    public function chunk(int $count, callable $callback): bool { return true; }\n",
+        "    /** @return static */\n",
+        "    public function where(string $col, mixed $val = null): static { return $this; }\n",
+        "    /** @return static */\n",
+        "    public function orderBy(string $col): static { return $this; }\n",
+        "    /** @return static */\n",
+        "    public function limit(int $n): static { return $this; }\n",
+        "}\n",
+        "class ProductQuery {\n",
+        "    /** @return Builder<Product> */\n",
+        "    public static function query(): Builder { return new Builder(); }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        // Three chained static returns: query() => Builder<Product>
+        // ->where() => static => Builder<Product>
+        // ->orderBy() => static => Builder<Product>
+        // ->limit() => static => Builder<Product>
+        // ->chunk(100, fn($items) => $items->first()->...)
+        "        ProductQuery::query()->where('active', 1)->orderBy('name')->limit(50)->chunk(100, function ($items) {\n",
+        "            $first = $items->first();\n",
+        "            $first->\n",
+        "        });\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 37: `            $first->` — $first = $items->first() where
+    // $items is Collection<int, Product>, so first() returns Product|null.
+    let items = complete_at(&backend, &uri, src, 37, 20).await;
+    let props = property_names(&items);
+    assert!(
+        props.contains(&"name"),
+        "Expected 'name' from Product after multiple static returns in chain, got props: {:?}",
+        props,
+    );
+    assert!(
+        props.contains(&"price"),
+        "Expected 'price' from Product after multiple static returns in chain, got props: {:?}",
+        props,
+    );
+}

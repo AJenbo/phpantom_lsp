@@ -922,6 +922,7 @@ impl Backend {
                         class_loader: &class_loader,
                         resolved_class_cache: Some(&self.resolved_class_cache),
                         function_loader: Some(&function_loader),
+                        scope_var_resolver: None,
                     };
                     let mut resolved = super::resolver::resolve_target_classes(
                         &target.subject,
@@ -953,6 +954,7 @@ impl Backend {
                                 class_loader: &class_loader,
                                 resolved_class_cache: Some(&self.resolved_class_cache),
                                 function_loader: Some(&function_loader),
+                                scope_var_resolver: None,
                             };
                             resolved = super::resolver::resolve_target_classes(
                                 &target.subject,

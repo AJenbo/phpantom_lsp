@@ -1,0 +1,351 @@
+use crate::common::create_test_backend;
+use tower_lsp::lsp_types::*;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Open a file, run full slow diagnostics (which activates the diagnostic
+/// scope cache and the forward walker), then filter to unknown_member
+/// diagnostics only.
+fn unknown_member_diagnostics_with_scope_cache(
+    backend: &phpantom_lsp::Backend,
+    uri: &str,
+    text: &str,
+) -> Vec<Diagnostic> {
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    out.retain(|d| {
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+    });
+    out
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure with unresolvable param type still resolves $this
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn closure_with_unresolvable_param_still_resolves_this() {
+    let backend = create_test_backend();
+
+    // Register the Collection class so `$this->getName()` resolves.
+    let collection_uri = "file:///Collection.php";
+    let collection_text = r#"<?php
+class Collection {
+    /** @return string */
+    public function getName(): string { return ''; }
+}
+"#;
+    backend.update_ast(collection_uri, collection_text);
+
+    let service_uri = "file:///Service.php";
+    let service_text = r#"<?php
+class Service {
+    /** @return string */
+    public function getLabel(): string { return ''; }
+
+    public function run(): void {
+        // The callable param type `collection-of<T>` is a PHPStan
+        // pseudo-type that is unresolvable.  Previously this caused
+        // the entire closure body to be skipped by the forward
+        // walker, so $this would fall through to the backward
+        // scanner.  Now the forward walker walks the body, seeding
+        // $this from the outer scope.
+        $this->getLabel();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, service_uri, service_text);
+    // `$this->getLabel()` should NOT be flagged as unknown.
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for $this->getLabel(), got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure with unresolvable param still resolves use-captured variables
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn closure_with_unresolvable_param_still_resolves_use_vars() {
+    let backend = create_test_backend();
+
+    let product_uri = "file:///Product.php";
+    let product_text = r#"<?php
+class Product {
+    /** @return string */
+    public function getTitle(): string { return ''; }
+}
+"#;
+    backend.update_ast(product_uri, product_text);
+
+    let uri = "file:///test_unresolvable_use.php";
+    let text = r#"<?php
+class Handler {
+    public function handle(): void {
+        $product = new Product();
+        $fn = function($unknown) use ($product) {
+            $product->getTitle();
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for use-captured $product->getTitle(), got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure with mix of resolvable and unresolvable params resolves good ones
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn closure_with_mixed_resolvable_and_unresolvable_params() {
+    let backend = create_test_backend();
+
+    let builder_uri = "file:///Builder.php";
+    let builder_text = r#"<?php
+class Builder {
+    /** @return static */
+    public function where(string $col, mixed $val): static { return $this; }
+}
+"#;
+    backend.update_ast(builder_uri, builder_text);
+
+    let uri = "file:///test_mixed_params.php";
+    let text = r#"<?php
+class MyService {
+    public function run(): void {
+        $fn = function(Builder $query) {
+            $query->where('id', 1);
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    // `$query->where(...)` should resolve fine because Builder is a
+    // resolvable param — even if other params in the same closure were
+    // unresolvable, the good ones should still be seeded.
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for $query->where(), got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Multi-@var docblock inside closure overrides parameter types
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn multi_var_docblock_inside_closure_overrides_params() {
+    let backend = create_test_backend();
+
+    let app_uri = "file:///App.php";
+    let app_text = r#"<?php
+class App {
+    /** @return object */
+    public function make(string $class): object { return new \stdClass; }
+}
+"#;
+    backend.update_ast(app_uri, app_text);
+
+    let client_uri = "file:///Client.php";
+    let client_text = r#"<?php
+class Client {
+    /** @return string */
+    public function search(): string { return ''; }
+}
+"#;
+    backend.update_ast(client_uri, client_text);
+
+    let uri = "file:///test_multi_var.php";
+    let text = r#"<?php
+class Service {
+    public function register(): void {
+        $fn = function ($app, $params) {
+            /**
+             * @var App                      $app
+             * @var array{indexName: string} $params
+             */
+
+            /** @var Client $client */
+            $client = $app->make(Client::class);
+            $client->search();
+        };
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    // Both `$app->make(...)` and `$client->search()` should resolve
+    // thanks to the multi-@var block overriding $app and the single
+    // @var block overriding $client.
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Standalone @var block preceding another @var block before an expression
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn preceding_standalone_var_block_applied_to_scope() {
+    let backend = create_test_backend();
+
+    let repo_uri = "file:///Repository.php";
+    let repo_text = r#"<?php
+class Repository {
+    /** @return string */
+    public function find(): string { return ''; }
+}
+"#;
+    backend.update_ast(repo_uri, repo_text);
+
+    let mapper_uri = "file:///Mapper.php";
+    let mapper_text = r#"<?php
+class Mapper {
+    /** @return string */
+    public function map(mixed $data): string { return ''; }
+}
+"#;
+    backend.update_ast(mapper_uri, mapper_text);
+
+    let uri = "file:///test_preceding_var.php";
+    let text = r#"<?php
+class Handler {
+    public function handle(): void {
+        /** @var Repository $repo */
+
+        /** @var Mapper $mapper */
+        $result = $mapper->map($repo->find());
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    // `$mapper->map(...)` resolves from the immediate @var block, and
+    // `$repo->find()` resolves from the preceding standalone @var block.
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// No-var @var override must not leak into the RHS of the same assignment
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn no_var_override_does_not_leak_into_rhs() {
+    let backend = create_test_backend();
+
+    let data_uri = "file:///TokenData.php";
+    let data_text = r#"<?php
+class TokenData {
+    /** @return array<string, mixed> */
+    public function toArray(): array { return []; }
+}
+"#;
+    backend.update_ast(data_uri, data_text);
+
+    let order_uri = "file:///Orders.php";
+    let order_text = r#"<?php
+class Orders {
+    /** @return mixed */
+    public function generateToken(array $data): mixed { return null; }
+}
+"#;
+    backend.update_ast(order_uri, order_text);
+
+    let uri = "file:///test_no_var_rhs.php";
+    let text = r#"<?php
+class Service {
+    public function run(): void {
+        $data = new TokenData();
+        $orders = new Orders();
+
+        /** @var array<string, mixed> */
+        $data = $orders->generateToken($data->toArray());
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    // `$data->toArray()` on the RHS must still see $data as TokenData,
+    // not as the overridden `array<string, mixed>`.
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics for $data->toArray() in RHS, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pass-by-ref variable seeded by forward walker (parse_str pattern)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn pass_by_ref_parse_str_seeds_variable_in_scope() {
+    let backend = create_test_backend();
+
+    let uri = "file:///test_parse_str.php";
+    let text = r#"<?php
+class Endpoint {
+    public string $queryString = '';
+
+    /** @return array<mixed> */
+    public function getParameters(): array
+    {
+        $parameters = [];
+        if ($this->queryString) {
+            parse_str($this->queryString, $query);
+            foreach ($query as $key => $parameter) {
+                if (!is_string($key)) continue;
+                $parameters[$key] = $parameter;
+            }
+        }
+        return $parameters;
+    }
+}
+"#;
+    // The forward walker should seed $query via pass-by-ref from
+    // parse_str, so no fallthrough occurs for $query in the foreach.
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics, got: {diags:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pass-by-ref preg_match in if-condition seeds $matches
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn pass_by_ref_preg_match_in_if_condition_seeds_matches() {
+    let backend = create_test_backend();
+
+    let uri = "file:///test_preg_match.php";
+    let text = r#"<?php
+class Parser {
+    public function parse(string $msg): ?int
+    {
+        if (preg_match('/order line (?<LineId>\d+)/i', $msg, $matches) === 1) {
+            return (int)$matches['LineId'];
+        }
+        return null;
+    }
+}
+"#;
+    // preg_match passes $matches by reference — the forward walker
+    // should seed it via seed_pass_by_ref_in_condition so it doesn't
+    // fall through to the backward scanner.
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Expected no unknown_member diagnostics, got: {diags:?}"
+    );
+}
