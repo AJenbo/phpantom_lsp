@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776029794455,
+  "lastUpdate": 1776673676950,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3365,6 +3365,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 42.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3688ea5971aad042de7c397cc692fb4381aa8857",
+          "message": "Rewrite variable resolver as a single forward pass",
+          "timestamp": "2026-04-20T10:15:26+02:00",
+          "tree_id": "50f5fe844917cffee718230d0ffc8d84b7587ffc",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3688ea5971aad042de7c397cc692fb4381aa8857"
+        },
+        "date": 1776673676530,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 45.7,
             "unit": "MiB"
           }
         ]
