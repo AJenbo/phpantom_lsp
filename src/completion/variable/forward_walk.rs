@@ -3874,6 +3874,24 @@ fn process_array_key_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // Guard against infinite re-entry.  When `resolve_rhs_with_scope`
+    // triggers re-evaluation of the same array key assignment (e.g.
+    // `$a['k'] = f($a['k'])` where reading `$a['k']` re-enters
+    // through the scope resolver), bail out to break the cycle.
+    thread_local! {
+        static IN_ARRAY_KEY_ASSIGN: Cell<bool> = const { Cell::new(false) };
+    }
+    if IN_ARRAY_KEY_ASSIGN.with(|c| c.get()) {
+        return;
+    }
+    IN_ARRAY_KEY_ASSIGN.with(|c| c.set(true));
+    struct ArrayKeyAssignGuard;
+    impl Drop for ArrayKeyAssignGuard {
+        fn drop(&mut self) {
+            IN_ARRAY_KEY_ASSIGN.with(|c| c.set(false));
+        }
+    }
+    let _guard = ArrayKeyAssignGuard;
     // Delegate to the existing check_expression_for_assignment
     // infrastructure for array key assignments.  This handles
     // both string-keyed shape building and generic element tracking.
@@ -4763,7 +4781,7 @@ fn assignment_map_depth(statements: &[&Statement<'_>]) -> u32 {
     // one to discover the assignment, one to re-walk with the discovered
     // type visible from the start.  So: iterations = depth + 1.
     // Clamp to a reasonable maximum to avoid pathological cases.
-    (max_depth + 1).min(5)
+    (max_depth + 1).min(3)
 }
 
 /// Recursively compute the dependency chain depth for a variable.
@@ -5031,6 +5049,39 @@ fn scopes_equal(a: &ScopeState, b: &ScopeState) -> bool {
     true
 }
 
+/// Check whether the post-walk scope has any NEW or CHANGED variable
+/// types compared to the pre-loop scope.  This is the Mago-style
+/// fixed-point check that runs BEFORE a re-walk: if nothing changed,
+/// there's no point walking the body again.
+///
+/// Unlike `scopes_equal`, this is asymmetric: new variables in
+/// `after` that weren't in `before` count as changes, but variables
+/// in `before` that aren't in `after` do not (they were just not
+/// assigned in the loop body).
+fn scope_has_changes(before: &ScopeState, after: &ScopeState) -> bool {
+    for (name, after_types) in &after.locals {
+        match before.locals.get(name) {
+            None => {
+                // New variable assigned in the loop body.
+                if !after_types.is_empty() {
+                    return true;
+                }
+            }
+            Some(before_types) => {
+                if after_types.len() != before_types.len() {
+                    return true;
+                }
+                for (at, bt) in after_types.iter().zip(before_types.iter()) {
+                    if at.type_string != bt.type_string {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Process a `foreach` statement.
 fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
     let loop_depth = enter_loop();
@@ -5121,23 +5172,58 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     //
-    // Compute the assignment dependency depth of the loop body to
-    // determine how many iterations are needed for types to propagate
-    // through the entire chain.  Then iterate with fixed-point
-    // detection: stop early when scope no longer changes.
+    // Walk the body once (always needed).  Then check whether any
+    // variable types changed compared to the pre-loop scope.  Only
+    // re-walk if there are actual changes AND the assignment depth
+    // requires further propagation.  This matches Mago's approach:
+    // the fixed-point check happens BEFORE the expensive re-walk,
+    // not after.
     let body_stmts: Vec<&Statement<'b>> = match &foreach.body {
         ForeachBody::Statement(inner) => vec![*inner],
         ForeachBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let max_iterations = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignment_depth = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    for iteration in 0..max_iterations {
-        let scope_before = scope.clone();
-        let walk_ctx = if iteration + 1 < max_iterations {
-            &discovery_ctx
-        } else {
-            ctx
-        };
+    // ── Initial walk (always performed) ─────────────────────────
+    let initial_ctx = if assignment_depth > 1 { &discovery_ctx } else { ctx };
+    match &foreach.body {
+        ForeachBody::Statement(inner) => {
+            walk_body_forward(std::iter::once(*inner), scope, initial_ctx);
+        }
+        ForeachBody::ColonDelimited(body) => {
+            walk_body_forward(body.statements.iter(), scope, initial_ctx);
+        }
+    }
+
+    // ── Re-walk iterations (only if types changed) ──────────────
+    for iteration in 0..assignment_depth.saturating_sub(1) {
+        // Check for changes BEFORE re-walking: compare post-walk
+        // scope against the pre-loop scope.  If no variable has a
+        // type that differs from what was known before the loop,
+        // there's nothing new to propagate — skip the re-walk.
+        if !scope_has_changes(&pre_loop_scope, scope) {
+            break;
+        }
+
+        // Merge discovered types back into the pre-loop scope and
+        // re-bind foreach variables for the next iteration.
+        let mut next_scope = pre_loop_scope.clone();
+        next_scope.merge_branch(scope);
+        match &foreach.target {
+            ForeachTarget::Value(val) => {
+                bind_foreach_value(val.value, &iter_type, &mut next_scope, ctx);
+            }
+            ForeachTarget::KeyValue(kv) => {
+                bind_foreach_key(kv.key, &iter_type, &mut next_scope, ctx);
+                bind_foreach_value(kv.value, &iter_type, &mut next_scope, ctx);
+            }
+        }
+        *scope = next_scope;
+
+        // Use the real context on the final iteration so diagnostic
+        // snapshots and cursor handling are correct.
+        let is_final = iteration + 1 >= assignment_depth.saturating_sub(1);
+        let walk_ctx = if is_final { ctx } else { &discovery_ctx };
 
         match &foreach.body {
             ForeachBody::Statement(inner) => {
@@ -5146,28 +5232,6 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
             ForeachBody::ColonDelimited(body) => {
                 walk_body_forward(body.statements.iter(), scope, walk_ctx);
             }
-        }
-
-        // Fixed-point: stop if scope did not change.
-        if scopes_equal(scope, &scope_before) {
-            break;
-        }
-
-        // Prepare for the next iteration: merge discovered types back
-        // into the pre-loop scope and re-bind foreach variables.
-        if iteration + 1 < max_iterations {
-            let mut next_scope = pre_loop_scope.clone();
-            next_scope.merge_branch(scope);
-            match &foreach.target {
-                ForeachTarget::Value(val) => {
-                    bind_foreach_value(val.value, &iter_type, &mut next_scope, ctx);
-                }
-                ForeachTarget::KeyValue(kv) => {
-                    bind_foreach_key(kv.key, &iter_type, &mut next_scope, ctx);
-                    bind_foreach_value(kv.value, &iter_type, &mut next_scope, ctx);
-                }
-            }
-            *scope = next_scope;
         }
     }
 
@@ -5633,15 +5697,34 @@ fn process_while<'b>(while_stmt: &'b While<'b>, scope: &mut ScopeState, ctx: &Fo
         WhileBody::Statement(inner) => vec![*inner],
         WhileBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let max_iterations = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignment_depth = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    for iteration in 0..max_iterations {
-        let scope_before = scope.clone();
-        let walk_ctx = if iteration + 1 < max_iterations {
-            &discovery_ctx
-        } else {
-            ctx
-        };
+    // ── Initial walk (always performed) ─────────────────────────
+    let initial_ctx = if assignment_depth > 1 { &discovery_ctx } else { ctx };
+    match &while_stmt.body {
+        WhileBody::Statement(inner) => {
+            walk_body_forward(std::iter::once(*inner), scope, initial_ctx);
+        }
+        WhileBody::ColonDelimited(body) => {
+            walk_body_forward(body.statements.iter(), scope, initial_ctx);
+        }
+    }
+
+    // ── Re-walk iterations (only if types changed) ──────────────
+    for iteration in 0..assignment_depth.saturating_sub(1) {
+        if !scope_has_changes(&pre_loop_scope, scope) {
+            break;
+        }
+
+        let mut next_scope = pre_loop_scope.clone();
+        next_scope.merge_branch(scope);
+        apply_condition_narrowing(while_stmt.condition, &mut next_scope, ctx);
+        process_condition_assignment(while_stmt.condition, &mut next_scope, ctx);
+        seed_pass_by_ref_in_condition(while_stmt.condition, &mut next_scope, ctx);
+        *scope = next_scope;
+
+        let is_final = iteration + 1 >= assignment_depth.saturating_sub(1);
+        let walk_ctx = if is_final { ctx } else { &discovery_ctx };
 
         match &while_stmt.body {
             WhileBody::Statement(inner) => {
@@ -5650,22 +5733,6 @@ fn process_while<'b>(while_stmt: &'b While<'b>, scope: &mut ScopeState, ctx: &Fo
             WhileBody::ColonDelimited(body) => {
                 walk_body_forward(body.statements.iter(), scope, walk_ctx);
             }
-        }
-
-        // Fixed-point: stop if scope did not change.
-        if scopes_equal(scope, &scope_before) {
-            break;
-        }
-
-        // Prepare for the next iteration: merge discovered types back
-        // into the pre-loop scope and re-apply condition processing.
-        if iteration + 1 < max_iterations {
-            let mut next_scope = pre_loop_scope.clone();
-            next_scope.merge_branch(scope);
-            apply_condition_narrowing(while_stmt.condition, &mut next_scope, ctx);
-            process_condition_assignment(while_stmt.condition, &mut next_scope, ctx);
-            seed_pass_by_ref_in_condition(while_stmt.condition, &mut next_scope, ctx);
-            *scope = next_scope;
         }
     }
 
@@ -5734,15 +5801,34 @@ fn process_for<'b>(for_stmt: &'b For<'b>, scope: &mut ScopeState, ctx: &ForwardW
         ForBody::Statement(inner) => vec![*inner],
         ForBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let max_iterations = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignment_depth = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    for iteration in 0..max_iterations {
-        let scope_before = scope.clone();
-        let walk_ctx = if iteration + 1 < max_iterations {
-            &discovery_ctx
-        } else {
-            ctx
-        };
+    // ── Initial walk (always performed) ─────────────────────────
+    let initial_ctx = if assignment_depth > 1 { &discovery_ctx } else { ctx };
+    match &for_stmt.body {
+        ForBody::Statement(inner) => {
+            walk_body_forward(std::iter::once(*inner), scope, initial_ctx);
+        }
+        ForBody::ColonDelimited(body) => {
+            walk_body_forward(body.statements.iter(), scope, initial_ctx);
+        }
+    }
+
+    // ── Re-walk iterations (only if types changed) ──────────────
+    for iteration in 0..assignment_depth.saturating_sub(1) {
+        if !scope_has_changes(&pre_loop_scope, scope) {
+            break;
+        }
+
+        let mut next_scope = pre_loop_scope.clone();
+        next_scope.merge_branch(scope);
+        for init_expr in for_stmt.initializations.iter() {
+            process_assignment_expr(init_expr, &mut next_scope, ctx);
+        }
+        *scope = next_scope;
+
+        let is_final = iteration + 1 >= assignment_depth.saturating_sub(1);
+        let walk_ctx = if is_final { ctx } else { &discovery_ctx };
 
         match &for_stmt.body {
             ForBody::Statement(inner) => {
@@ -5751,22 +5837,6 @@ fn process_for<'b>(for_stmt: &'b For<'b>, scope: &mut ScopeState, ctx: &ForwardW
             ForBody::ColonDelimited(body) => {
                 walk_body_forward(body.statements.iter(), scope, walk_ctx);
             }
-        }
-
-        // Fixed-point: stop if scope did not change.
-        if scopes_equal(scope, &scope_before) {
-            break;
-        }
-
-        // Prepare for the next iteration: merge discovered types back
-        // into the pre-loop scope and re-apply initializers.
-        if iteration + 1 < max_iterations {
-            let mut next_scope = pre_loop_scope.clone();
-            next_scope.merge_branch(scope);
-            for init_expr in for_stmt.initializations.iter() {
-                process_assignment_expr(init_expr, &mut next_scope, ctx);
-            }
-            *scope = next_scope;
         }
     }
 
@@ -5800,29 +5870,24 @@ fn process_do_while<'b>(dw: &'b DoWhile<'b>, scope: &mut ScopeState, ctx: &Forwa
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = vec![dw.statement];
-    let max_iterations = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignment_depth = clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
-    for iteration in 0..max_iterations {
-        let scope_before = scope.clone();
+    // ── Initial walk (always performed) ─────────────────────────
+    walk_body_forward(std::iter::once(dw.statement), scope, ctx);
 
-        walk_body_forward(std::iter::once(dw.statement), scope, ctx);
-
-        // Fixed-point: stop if scope did not change.
-        if scopes_equal(scope, &scope_before) {
+    // ── Re-walk iterations (only if types changed) ──────────────
+    for _iteration in 0..assignment_depth.saturating_sub(1) {
+        if !scope_has_changes(&pre_loop_scope, scope) {
             break;
         }
 
-        // Prepare for the next iteration: merge discovered types back
-        // into the pre-loop scope and process the condition (evaluated
-        // after the body, so assignments and pass-by-ref seeding from
-        // it should be visible on iteration >= 2).
-        if iteration + 1 < max_iterations {
-            let mut next_scope = pre_loop_scope.clone();
-            next_scope.merge_branch(scope);
-            process_condition_assignment(dw.condition, &mut next_scope, ctx);
-            seed_pass_by_ref_in_condition(dw.condition, &mut next_scope, ctx);
-            *scope = next_scope;
-        }
+        let mut next_scope = pre_loop_scope.clone();
+        next_scope.merge_branch(scope);
+        process_condition_assignment(dw.condition, &mut next_scope, ctx);
+        seed_pass_by_ref_in_condition(dw.condition, &mut next_scope, ctx);
+        *scope = next_scope;
+
+        walk_body_forward(std::iter::once(dw.statement), scope, ctx);
     }
 
     leave_loop(loop_depth);

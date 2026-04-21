@@ -1921,3 +1921,135 @@ async fn time_diagnostics_warm_cache_phpstan() {
         warm_count, cold_count
     );
 }
+
+/// Fluent method chains on classes whose methods return `self` (e.g.
+/// `Decimal::sub()->div()`) must resolve through the entire chain.
+/// The forward walker stores `$var` as the class type; the diagnostic
+/// collector then resolves `$var->sub($x)` to the same class (via the
+/// `self` return type) and verifies that `->div()` exists on it.
+///
+/// Regression: the scope cache stored the variable correctly, but the
+/// intermediate chain `$var->sub($x)` was not resolved because the
+/// subject resolution pipeline lost the type mid-chain.
+#[test]
+fn self_returning_method_chain_no_false_positive() {
+    let php = r#"<?php
+class Decimal {
+    public function add(int|self|string $value): self { return $this; }
+    public function sub(int|self|string $value): self { return $this; }
+    public function mul(int|self|string $value): self { return $this; }
+    public function div(int|self|string $value): self { return $this; }
+    public function isZero(): bool { return true; }
+    public function toInt(): int { return 0; }
+}
+
+class Calculator {
+    public function compute(Decimal $net, Decimal $supplierPrice): Decimal {
+        $denominator = $net->mul(100);
+        if ($denominator->isZero()) {
+            return new Decimal();
+        }
+        return $denominator->sub($supplierPrice)->div($denominator);
+    }
+
+    public static function staticCompute(Decimal $a, Decimal $b): int {
+        $result = $a->mul(100)->div($b->add(100));
+        if ($result->isZero()) {
+            return 0;
+        }
+        return $a->sub($b)->div($a)->mul(100)->toInt();
+    }
+}
+"#;
+
+    let uri = "file:///test/decimal_chain.php";
+    let backend = create_test_backend_with_full_stubs();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+
+    let mut out = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, php, &mut out);
+
+    assert!(
+        out.is_empty(),
+        "Expected no diagnostics for self-returning method chains, got {}: {:?}",
+        out.len(),
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Cross-file variant: when `Decimal` lives in a separate PSR-4 file,
+/// the method chain `$var->sub($x)->div($y)` must still resolve through
+/// the `self` return type.  This is the pattern that caused false
+/// positives in the real codebase (`Monetary.php`, `ProductRedLineService.php`,
+/// `ProductTranslation.php`).
+#[test]
+fn self_returning_method_chain_cross_file_no_false_positive() {
+    let decimal_php = r#"<?php
+namespace App\Decimal;
+
+class Decimal {
+    public function add(int|self|string $value): self { return $this; }
+    public function sub(int|self|string $value): self { return $this; }
+    public function mul(int|self|string $value): self { return $this; }
+    public function div(int|self|string $value): self { return $this; }
+    public function isZero(): bool { return true; }
+    public function toInt(): int { return 0; }
+}
+"#;
+
+    let calculator_php = r#"<?php
+namespace App\Calculator;
+
+use App\Decimal\Decimal;
+
+class Calculator {
+    public function compute(Decimal $net, Decimal $supplierPrice): Decimal {
+        $denominator = $net->mul(100);
+        if ($denominator->isZero()) {
+            return new Decimal();
+        }
+        return $denominator->sub($supplierPrice)->div($denominator);
+    }
+
+    public static function staticCompute(Decimal $a, Decimal $b): int {
+        $result = $a->mul(100)->div($b->add(100));
+        if ($result->isZero()) {
+            return 0;
+        }
+        return $a->sub($b)->div($a)->mul(100)->toInt();
+    }
+}
+"#;
+
+    let composer = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
+    let (backend, _dir) = create_psr4_workspace(
+        composer,
+        &[
+            ("src/Decimal/Decimal.php", decimal_php),
+            ("src/Calculator/Calculator.php", calculator_php),
+        ],
+    );
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+
+    let uri = "file:///test/src/Calculator/Calculator.php";
+    backend.update_ast(uri, calculator_php);
+
+    let mut out = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, calculator_php, &mut out);
+
+    assert!(
+        out.is_empty(),
+        "Expected no diagnostics for cross-file self-returning method chains, got {}: {:?}",
+        out.len(),
+        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
