@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776696721081,
+  "lastUpdate": 1776731105954,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3467,6 +3467,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 45.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "cdcd493d1c1f61d1d02758a3bde659c71a639fe7",
+          "message": "Guard forward walker against exponential blowup on deep loop nesting",
+          "timestamp": "2026-04-21T02:14:21+02:00",
+          "tree_id": "4d184dea23400dbef210cc8578df75826691f205",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/cdcd493d1c1f61d1d02758a3bde659c71a639fe7"
+        },
+        "date": 1776731104873,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 42.8,
             "unit": "MiB"
           }
         ]
