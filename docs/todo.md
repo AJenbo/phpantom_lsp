@@ -25,6 +25,7 @@ within the same impact tier.
 
 | #   | Item                                                                                                                                                                | Impact   | Effort      |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------- |
+| P20 | [Forward walker: Mago-style assignment-depth-bounded loop iteration](todo/performance.md#p20-forward-walker-mago-style-assignment-depth-bounded-loop-iteration)      | High     | Medium      |
 | ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5--mago-style-separated-metadata) (pre-populated immutable codebase, O(1) method resolution)             | High     | High        |
 | P9  | [`resolved_class_cache` generic-arg specialisation](todo/performance.md#p9-resolved_class_cache-generic-arg-specialisation)                                         | Medium   | Medium      |
 | P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                  | Medium | Low         |

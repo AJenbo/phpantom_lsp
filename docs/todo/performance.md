@@ -772,6 +772,51 @@ resolution pipeline. See
 
 ---
 
+## P20. Forward walker: Mago-style assignment-depth-bounded loop iteration
+
+The forward walker's two-pass loop strategy (walk body once to
+discover assignments, merge, walk again) interacts multiplicatively
+with if-branch merging. Currently a `LOOP_DEPTH` counter hard-caps
+re-walks at depth 4 and bails out entirely at depth 8. This
+prevents hangs but sacrifices accuracy on deeply nested code.
+
+Mago (`references/mago/crates/analyzer/src/statement/loop/`) solves
+this properly with bounded iteration:
+
+1. **Assignment map.** Before analyzing a loop body, a cheap AST
+   walk (no type resolution) builds a map of which variables depend
+   on which other variables. The loop body is re-walked at most
+   `assignment_depth` times (typically 1–3), not proportional to
+   nesting depth.
+
+2. **Fixed-point early exit.** After each re-walk, check whether any
+   variable's type actually changed. If types have stabilized, stop.
+
+3. **Type widening.** Integer bounds widen (e.g. `int<0,5>` →
+   `int<0,max>`) to ensure convergence in few iterations.
+
+4. **Single-pass branch merging.** If/elseif/else branches are each
+   walked exactly once. Results are merged via type union into an
+   accumulator. Nesting an if inside a foreach does not multiply
+   walks.
+
+### Fix
+
+- Replace the `LOOP_DEPTH` hard cap with assignment-dependency-depth
+  counting.
+- Add fixed-point detection: compare scope before/after a re-walk
+  and stop when no types changed.
+- Consider type widening for integer literal types inside loops.
+
+### When to implement
+
+After the forward walker stabilizes (it is less than a week old).
+The current `LOOP_DEPTH` guard is sufficient to prevent hangs; this
+item improves accuracy on deeply nested loops without risking
+exponential blowup.
+
+---
+
 ## Appendix: Profiling
 
 ### Commands

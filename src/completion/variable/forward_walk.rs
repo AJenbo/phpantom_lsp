@@ -1767,6 +1767,33 @@ thread_local! {
 // nests beyond 10-15 levels; 50 is a generous safety margin.
 const MAX_WALK_DEPTH: u32 = 50;
 
+thread_local! {
+    /// Tracks the current loop nesting depth (foreach, while, for,
+    /// do-while).  The interaction of the two-pass loop strategy with
+    /// if-branch merging (which walks each branch independently via
+    /// `walk_body_forward`) causes exponential blowup on files with
+    /// deeply nested loops inside if statements.  Beyond a threshold
+    /// we skip the second pass and bail out of foreach entirely.
+    ///
+    /// This guard applies uniformly to ALL code paths (diagnostics,
+    /// completion, hover) — never gate performance fixes on
+    /// `is_diagnostic_scope_active()` alone, as that just moves the
+    /// hang from one feature to another (see B27, ARCHITECTURE.md).
+    static LOOP_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Maximum loop nesting depth at which the two-pass strategy is used.
+/// Beyond this depth, loops use a single pass only.  Normal PHP code
+/// rarely nests loops beyond 4–5 levels; deeper nesting with the
+/// two-pass strategy causes exponential blowup from if-branch merging
+/// re-walking inner loop bodies (B27).
+const MAX_TWO_PASS_LOOP_DEPTH: u32 = 4;
+
+/// Maximum loop nesting depth before foreach bails out entirely
+/// (skipping even the single-pass body walk).  This is the hard
+/// safety net for truly pathological nesting.
+const MAX_LOOP_DEPTH: u32 = 8;
+
 /// Walk a sequence of statements top-to-bottom, updating `scope` at
 /// each step.  Stops when a statement's start offset reaches or exceeds
 /// `ctx.cursor_offset`.
@@ -4700,6 +4727,20 @@ fn process_if_colon_body<'b>(
 
 /// Process a `foreach` statement.
 fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let loop_depth = LOOP_DEPTH.with(|c| {
+        let v = c.get() + 1;
+        c.set(v);
+        v
+    });
+
+    // Hard limit: when the loop depth exceeds the threshold, bail out
+    // entirely.  The two-pass loop strategy combined with if-branch
+    // merging causes exponential blowup on deeply nested loops (B27).
+    if loop_depth > MAX_LOOP_DEPTH {
+        LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
+        return;
+    }
+
     // Resolve the iterable expression's type.
     let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);
 
@@ -4797,62 +4838,87 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
     // (the first pass runs with a temporary scope that is
     // discarded after merging).
 
-    // ── Pass 1: discover types assigned in the loop body ────
-    // Use a temporary scope so the first pass does not record
-    // diagnostic snapshots that would be overwritten by pass 2.
-    let pass1_active = is_diagnostic_scope_active();
-    if pass1_active {
-        // Temporarily deactivate snapshot recording for pass 1.
-        // We do this by NOT calling walk_body_for_diagnostics;
-        // instead we use walk_body_forward which only records
-        // snapshots when the cache is active AND record_snapshots
-        // is true.  Since walk_body_forward checks
-        // is_diagnostic_scope_active() itself, we rely on the
-        // fact that walk_body_forward records snapshots — but
-        // those will be overwritten by pass 2 at the same offsets.
-    }
-    match &foreach.body {
-        ForeachBody::Statement(inner) => {
-            walk_body_forward(std::iter::once(*inner), scope, &pass1_ctx);
+    // Use the two-pass strategy only when loop nesting is shallow.
+    // Beyond MAX_TWO_PASS_LOOP_DEPTH, a single pass avoids the
+    // exponential blowup from if-branch merging re-walking inner
+    // loops (B27).  This applies uniformly to all code paths.
+    let use_two_pass = loop_depth <= MAX_TWO_PASS_LOOP_DEPTH;
+
+    if use_two_pass {
+        // ── Pass 1: discover types assigned in the loop body ────
+        // Use a temporary scope so the first pass does not record
+        // diagnostic snapshots that would be overwritten by pass 2.
+        let pass1_active = is_diagnostic_scope_active();
+        if pass1_active {
+            // Temporarily deactivate snapshot recording for pass 1.
+            // We do this by NOT calling walk_body_for_diagnostics;
+            // instead we use walk_body_forward which only records
+            // snapshots when the cache is active AND record_snapshots
+            // is true.  Since walk_body_forward checks
+            // is_diagnostic_scope_active() itself, we rely on the
+            // fact that walk_body_forward records snapshots — but
+            // those will be overwritten by pass 2 at the same offsets.
         }
-        ForeachBody::ColonDelimited(body) => {
-            walk_body_forward(body.statements.iter(), scope, &pass1_ctx);
+        match &foreach.body {
+            ForeachBody::Statement(inner) => {
+                walk_body_forward(std::iter::once(*inner), scope, &pass1_ctx);
+            }
+            ForeachBody::ColonDelimited(body) => {
+                walk_body_forward(body.statements.iter(), scope, &pass1_ctx);
+            }
         }
+
+        // ── Merge pass-1 types into the pre-loop scope ──────────
+        // Variables assigned in pass 1 get their types merged with
+        // the pre-loop scope, so pass 2 sees them at every point.
+        let mut pass2_scope = pre_loop_scope.clone();
+        pass2_scope.merge_branch(scope);
+
+        // Re-bind foreach target variables on the merged scope so
+        // the foreach value/key types are present for pass 2.
+        match &foreach.target {
+            ForeachTarget::Value(val) => {
+                bind_foreach_value(val.value, &iter_type, &mut pass2_scope, ctx);
+            }
+            ForeachTarget::KeyValue(kv) => {
+                bind_foreach_key(kv.key, &iter_type, &mut pass2_scope, ctx);
+                bind_foreach_value(kv.value, &iter_type, &mut pass2_scope, ctx);
+            }
+        }
+
+        // ── Pass 2: re-walk with the merged types ───────────────
+        match &foreach.body {
+            ForeachBody::Statement(inner) => {
+                walk_body_forward(std::iter::once(*inner), &mut pass2_scope, ctx);
+            }
+            ForeachBody::ColonDelimited(body) => {
+                walk_body_forward(body.statements.iter(), &mut pass2_scope, ctx);
+            }
+        }
+
+        // Use the pass-2 scope as the final scope, merged with the
+        // pre-loop scope (the iterable might be empty, so the loop
+        // body might not execute at all).
+        *scope = pre_loop_scope;
+        scope.merge_branch(&pass2_scope);
+    } else {
+        // Single-pass fallback for deeply nested foreach loops.
+        match &foreach.body {
+            ForeachBody::Statement(inner) => {
+                walk_body_forward(std::iter::once(*inner), scope, &pass1_ctx);
+            }
+            ForeachBody::ColonDelimited(body) => {
+                walk_body_forward(body.statements.iter(), scope, &pass1_ctx);
+            }
+        }
+
+        // Merge with the pre-loop scope (loop body might not execute).
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
     }
 
-    // ── Merge pass-1 types into the pre-loop scope ──────────
-    // Variables assigned in pass 1 get their types merged with
-    // the pre-loop scope, so pass 2 sees them at every point.
-    let mut pass2_scope = pre_loop_scope.clone();
-    pass2_scope.merge_branch(scope);
-
-    // Re-bind foreach target variables on the merged scope so
-    // the foreach value/key types are present for pass 2.
-    match &foreach.target {
-        ForeachTarget::Value(val) => {
-            bind_foreach_value(val.value, &iter_type, &mut pass2_scope, ctx);
-        }
-        ForeachTarget::KeyValue(kv) => {
-            bind_foreach_key(kv.key, &iter_type, &mut pass2_scope, ctx);
-            bind_foreach_value(kv.value, &iter_type, &mut pass2_scope, ctx);
-        }
-    }
-
-    // ── Pass 2: re-walk with the merged types ───────────────
-    match &foreach.body {
-        ForeachBody::Statement(inner) => {
-            walk_body_forward(std::iter::once(*inner), &mut pass2_scope, ctx);
-        }
-        ForeachBody::ColonDelimited(body) => {
-            walk_body_forward(body.statements.iter(), &mut pass2_scope, ctx);
-        }
-    }
-
-    // Use the pass-2 scope as the final scope, merged with the
-    // pre-loop scope (the iterable might be empty, so the loop
-    // body might not execute at all).
-    *scope = pre_loop_scope;
-    scope.merge_branch(&pass2_scope);
+    LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
 }
 
 /// Resolve the iterable expression's type for a foreach.
@@ -5304,6 +5370,22 @@ fn process_while<'b>(while_stmt: &'b While<'b>, scope: &mut ScopeState, ctx: &Fo
         }
     }
 
+    let loop_depth = LOOP_DEPTH.with(|c| {
+        let v = c.get() + 1;
+        c.set(v);
+        v
+    });
+
+    // Skip the second pass when loop nesting is deep to avoid
+    // exponential blowup (B27).  Applies uniformly to all paths.
+    if loop_depth > MAX_TWO_PASS_LOOP_DEPTH {
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
+        LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
+        return;
+    }
+
     // ── Merge pass-1 types into the pre-loop scope ──────────
     let mut pass2_scope = pre_loop_scope.clone();
     pass2_scope.merge_branch(scope);
@@ -5323,6 +5405,8 @@ fn process_while<'b>(while_stmt: &'b While<'b>, scope: &mut ScopeState, ctx: &Fo
             walk_body_forward(body.statements.iter(), &mut pass2_scope, ctx);
         }
     }
+
+    LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
 
     // When the cursor is inside the loop body (completion path), keep
     // the pass-2 scope with condition narrowing applied.  The post-loop
@@ -5386,6 +5470,22 @@ fn process_for<'b>(for_stmt: &'b For<'b>, scope: &mut ScopeState, ctx: &ForwardW
         }
     }
 
+    let loop_depth = LOOP_DEPTH.with(|c| {
+        let v = c.get() + 1;
+        c.set(v);
+        v
+    });
+
+    // Skip the second pass when loop nesting is deep to avoid
+    // exponential blowup (B27).  Applies uniformly to all paths.
+    if loop_depth > MAX_TWO_PASS_LOOP_DEPTH {
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
+        LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
+        return;
+    }
+
     // ── Merge pass-1 types into the pre-loop scope ──────────
     let mut pass2_scope = pre_loop_scope.clone();
     pass2_scope.merge_branch(scope);
@@ -5405,6 +5505,8 @@ fn process_for<'b>(for_stmt: &'b For<'b>, scope: &mut ScopeState, ctx: &ForwardW
             walk_body_forward(body.statements.iter(), &mut pass2_scope, ctx);
         }
     }
+
+    LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
 
     // The loop body might not execute at all (condition false on
     // first check), so merge with the pre-loop scope.
@@ -5428,6 +5530,19 @@ fn process_do_while<'b>(dw: &'b DoWhile<'b>, scope: &mut ScopeState, ctx: &Forwa
     // ── Pass 1: discover types assigned in the body ─────────
     walk_body_forward(std::iter::once(dw.statement), scope, ctx);
 
+    let loop_depth = LOOP_DEPTH.with(|c| {
+        let v = c.get() + 1;
+        c.set(v);
+        v
+    });
+
+    // Skip the second pass when loop nesting is deep to avoid
+    // exponential blowup (B27).  Applies uniformly to all paths.
+    if loop_depth > MAX_TWO_PASS_LOOP_DEPTH {
+        LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
+        return;
+    }
+
     // ── Merge pass-1 types into the pre-loop scope ──────────
     let mut pass2_scope = pre_loop_scope;
     pass2_scope.merge_branch(scope);
@@ -5443,6 +5558,8 @@ fn process_do_while<'b>(dw: &'b DoWhile<'b>, scope: &mut ScopeState, ctx: &Forwa
     walk_body_forward(std::iter::once(dw.statement), &mut pass2_scope, ctx);
 
     *scope = pass2_scope;
+
+    LOOP_DEPTH.with(|c| c.set(loop_depth - 1));
 }
 
 /// Process a `try-catch-finally` statement.

@@ -1051,6 +1051,13 @@ Each worker is created during `initialized` via `clone_for_diagnostic_worker`, w
 
 Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, `vendor_dir_paths`, and `config`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds hot-reloading of `.phpantom.toml` or runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
 
+## Forward Walker
+
+The forward walker (`src/completion/variable/forward_walk.rs`) walks
+method bodies top-to-bottom, building a scope of variable types at
+each statement boundary. It is shared by diagnostics, completion,
+hover, go-to-definition, and signature help.
+
 ## Name Resolution
 
 PHP class names go through resolution at parse time (`resolve_parent_class_names`):

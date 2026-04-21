@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Import all missing classes.** A bulk code action that imports every unresolved class name in the file at once. Only names with a single unambiguous candidate are imported; ambiguous names are left for manual resolution via the single-class import action. Short-name conflicts are detected and skipped. Appears in the quick-fix menu when the cursor is on an unresolved class name and the file has two or more unresolved names.
 - **Context-aware import candidate filtering.** Import class actions now filter candidates by the syntactic context of the reference. After `implements` only interfaces are offered, after trait `use` only traits, after `extends` only classes or interfaces (as appropriate). This eliminates wrong-kind suggestions and reduces ambiguity for both single and bulk imports.
 
+### Fixed
+
+- **Analyzer and LSP no longer hang on files with deeply nested loops.** Files with multiple levels of foreach/while/for inside if-branches caused exponential blowup in the forward walker's two-pass loop strategy. A unified loop-depth guard now bounds re-walks regardless of code path (diagnostics, completion, hover), preventing hangs on previously stuck files across three test projects.
+
 ### Changed
 
 - **Rewritten variable resolver.** Variable type resolution now uses a single top-to-bottom pass through each function body on both the diagnostic and completion paths, with zero recursion and no depth limit.

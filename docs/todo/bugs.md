@@ -357,31 +357,6 @@ chosen, every URI stored in `ast_map`, `class_index`, `fqn_index`,
 absolute `file:///` URIs so that lookups and cache eviction work
 correctly regardless of how the tool was invoked.
 
-## B21 — `shared/src/database/Model/Products/Product.php` analysis hangs
-
-**Symptom:** `phpantom_lsp analyze --project-root shared -- src/database/Model/Products/Product.php`
-does not complete within 60 seconds (debug build). The other two
-baseline files (`BaseCsvProductUpdaterTemplate.php` and `Klarna.php`)
-complete in under 5 seconds. This was reproducible before and after
-the T25 backward-scanner removal, so it is not a regression from
-that work.
-
-**Likely cause:** The Product model is a large Eloquent model with
-many relations, scopes, accessors, and virtual members. The
-diagnostic pass likely triggers deep resolution chains (e.g.
-Builder generic substitution, relation return types, virtual member
-synthesis) that multiply into excessive work. A single expensive
-method body with many member-access diagnostics could account for
-the hang.
-
-**Where to fix:** Profile the analysis of this file to identify the
-hot path. Likely candidates: `resolve_target_classes` called
-repeatedly for the same subject within a single method body,
-`type_hint_to_classes` resolving the same generic type repeatedly
-without caching, or `inheritance::merge` being called redundantly
-for the same class. The `resolved_class_cache` (P9) may also help
-if generic-arg specialisation is implemented.
-
 ---
 
 ## B22 — `$this` resolves in static methods
@@ -454,3 +429,5 @@ statement. Possible causes:
 
 Once the root cause is understood, the re-entry guard can be removed
 in favour of a proper fix.
+
+
