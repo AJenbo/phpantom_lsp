@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776731105954,
+  "lastUpdate": 1776733665490,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3501,6 +3501,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 42.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "224ec967f5a4473d5ce74376686b798b7e20ec08",
+          "message": "Tighten loop-depth guard in forward walker to prevent hangs",
+          "timestamp": "2026-04-21T02:57:06+02:00",
+          "tree_id": "a13d5bbc15299c60d89c42f66d3ea0e1bb25fefb",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/224ec967f5a4473d5ce74376686b798b7e20ec08"
+        },
+        "date": 1776733664510,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 44.7,
             "unit": "MiB"
           }
         ]
