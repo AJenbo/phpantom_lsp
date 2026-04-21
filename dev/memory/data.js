@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776741490524,
+  "lastUpdate": 1776746132175,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3603,6 +3603,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 45.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "645023b0741cf2c9cad0ce2615323ac72c42cb88",
+          "message": "Remove IN_ARRAY_KEY_ASSIGN re-entry guard from forward walker",
+          "timestamp": "2026-04-21T06:24:42+02:00",
+          "tree_id": "79068c50eb671b732391102f2cd36f4fa7f7383e",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/645023b0741cf2c9cad0ce2615323ac72c42cb88"
+        },
+        "date": 1776746131163,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 43.9,
             "unit": "MiB"
           }
         ]
