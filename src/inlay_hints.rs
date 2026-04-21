@@ -3,6 +3,8 @@
 //! Displays inline annotations in the editor for:
 //! - **Parameter name hints** at call sites (e.g. `/*needle:*/ $x`).
 //! - **By-reference indicators** for arguments passed by reference (`&`).
+//! - **Return type hints** for functions, methods, closures, and arrow
+//!   functions that lack an explicit return type declaration.
 //!
 //! The handler walks precomputed [`CallSite`] entries from the
 //! [`SymbolMap`] within the requested viewport range, resolves each
@@ -63,6 +65,18 @@ impl Backend {
             }
 
             self.emit_parameter_hints(call_site, content, range, &ctx, &mut hints);
+        }
+
+        // ── Return type hints ───────────────────────────────────────
+        for site in &symbol_map.untyped_functions {
+            // Skip sites outside the requested range.
+            if site.close_paren_offset < range_start
+                || site.close_paren_offset > range_end
+            {
+                continue;
+            }
+
+            self.emit_return_type_hint(uri, content, site, &mut hints);
         }
 
         Some(hints)
@@ -213,6 +227,49 @@ impl Backend {
                 data: None,
             });
         }
+    }
+
+    /// Emit a return-type inlay hint for a function / method / closure /
+    /// arrow function that lacks an explicit return type declaration.
+    fn emit_return_type_hint(
+        &self,
+        uri: &str,
+        content: &str,
+        site: &crate::symbol_map::UntypedFunctionSite,
+        hints: &mut Vec<InlayHint>,
+    ) {
+        let inferred = match self.infer_return_type_for_function(uri, content, site.func_line) {
+            Some(i) => i,
+            None => return,
+        };
+
+        // Use the effective (richer) type when available, otherwise the
+        // native type.
+        let ty = inferred.effective.as_ref().unwrap_or(&inferred.native);
+
+        // Don't show a hint for `mixed` — it provides no useful info.
+        if ty.is_mixed() {
+            return;
+        }
+
+        let type_str = ty.to_string();
+        if type_str.is_empty() {
+            return;
+        }
+
+        let hint_position =
+            offset_to_position(content, site.close_paren_offset as usize);
+
+        hints.push(InlayHint {
+            position: hint_position,
+            label: InlayHintLabel::String(format!(": {}", type_str)),
+            kind: Some(InlayHintKind::TYPE),
+            text_edits: None,
+            tooltip: None,
+            padding_left: None,
+            padding_right: None,
+            data: None,
+        });
     }
 }
 

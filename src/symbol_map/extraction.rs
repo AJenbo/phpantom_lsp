@@ -15,9 +15,14 @@ use super::docblock::{
 };
 use super::{
     CallSite, ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, SymbolSpan,
-    TemplateParamDef, VarDefKind, VarDefSite,
+    TemplateParamDef, UntypedFunctionSite, VarDefKind, VarDefSite,
 };
 use crate::util::strip_fqn_prefix;
+
+/// Convert a byte offset in `content` to a 0-based line number.
+fn offset_to_line(content: &str, offset: u32) -> usize {
+    content[..offset as usize].bytes().filter(|&b| b == b'\n').count()
+}
 
 // ─── Extraction context ─────────────────────────────────────────────────────
 
@@ -63,6 +68,8 @@ struct ExtractionCtx<'a> {
     trivias: &'a [Trivia<'a>],
     /// The full source text of the file being extracted.
     content: &'a str,
+    /// Functions/methods/closures without an explicit return type hint or `@return` docblock.
+    untyped_functions: Vec<UntypedFunctionSite>,
 }
 
 // ─── AST extraction ─────────────────────────────────────────────────────────
@@ -86,6 +93,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         switch_scopes: Vec::new(),
         trivias: program.trivia.as_slice(),
         content,
+        untyped_functions: Vec::new(),
     };
 
     for stmt in program.statements.iter() {
@@ -149,6 +157,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         breakable_scopes: ctx.breakable_scopes,
         loop_scopes: ctx.loop_scopes,
         switch_scopes: ctx.switch_scopes,
+        untyped_functions: ctx.untyped_functions,
     }
 }
 
@@ -1079,6 +1088,18 @@ fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut ExtractionCtx<'a>) 
     // Return type hint.
     if let Some(ref return_type) = method.return_type_hint {
         extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
+    } else if let MethodBody::Concrete(_) = &method.body {
+        // No return type hint and concrete body — check docblock for @return.
+        let has_docblock_return = method_docblock
+            .map(|(doc_text, _)| doc_text.contains("@return"))
+            .unwrap_or(false);
+        if !has_docblock_return {
+            ctx.untyped_functions.push(UntypedFunctionSite {
+                close_paren_offset: method.parameter_list.span().end.offset,
+                func_line: offset_to_line(ctx.content, method.span().start.offset),
+                is_closure: false,
+            });
+        }
     }
 
     // Method body.
@@ -1321,6 +1342,17 @@ fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut ExtractionCtx<'a>
     // Return type hint.
     if let Some(ref return_type) = func.return_type_hint {
         extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
+    } else {
+        let has_docblock_return = func_docblock
+            .map(|(doc_text, _)| doc_text.contains("@return"))
+            .unwrap_or(false);
+        if !has_docblock_return {
+            ctx.untyped_functions.push(UntypedFunctionSite {
+                close_paren_offset: func.parameter_list.span().end.offset,
+                func_line: offset_to_line(ctx.content, func.span().start.offset),
+                is_closure: false,
+            });
+        }
     }
 
     // Function body.
@@ -1927,6 +1959,12 @@ fn extract_from_expression<'a>(
             }
             if let Some(ref return_type) = closure.return_type_hint {
                 extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
+            } else {
+                ctx.untyped_functions.push(UntypedFunctionSite {
+                    close_paren_offset: closure.parameter_list.span().end.offset,
+                    func_line: offset_to_line(ctx.content, closure.span().start.offset),
+                    is_closure: true,
+                });
             }
             for s in closure.body.statements.iter() {
                 extract_from_statement(s, ctx, closure_scope_start);
@@ -1974,6 +2012,12 @@ fn extract_from_expression<'a>(
             }
             if let Some(ref return_type) = arrow.return_type_hint {
                 extract_from_hint_ctx(&return_type.hint, &mut ctx.spans, ClassRefContext::TypeHint);
+            } else {
+                ctx.untyped_functions.push(UntypedFunctionSite {
+                    close_paren_offset: arrow.parameter_list.span().end.offset,
+                    func_line: offset_to_line(ctx.content, arrow.span().start.offset),
+                    is_closure: true,
+                });
             }
             extract_from_expression(arrow.expression, ctx, arrow_scope_start);
         }

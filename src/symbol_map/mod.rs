@@ -293,6 +293,24 @@ pub(crate) struct VarDefSite {
     pub effective_from: u32,
 }
 
+/// A function, method, closure, or arrow function that lacks an explicit
+/// return type declaration (and has no `@return` docblock tag).
+/// Used by inlay hints to show inferred return type annotations.
+#[derive(Debug, Clone)]
+pub(crate) struct UntypedFunctionSite {
+    /// Byte offset of the closing `)` of the parameter list.
+    /// The inlay hint is placed immediately after this position.
+    pub close_paren_offset: u32,
+    /// The 0-based line number of the `function` keyword (or `fn` for arrows).
+    /// Used to call `infer_return_type_for_function`.
+    pub func_line: usize,
+    /// Whether this is a closure or arrow function (as opposed to a
+    /// named function or method).  Closures/arrows may get parameter
+    /// type hints in the future.
+    pub is_closure: bool,
+}
+
+
 /// The kind of variable definition site.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum VarDefKind {
@@ -386,6 +404,10 @@ pub(crate) struct SymbolMap {
     /// Switch body boundaries `(start_offset, end_offset)` where
     /// `case` / `default` labels are valid.
     pub switch_scopes: Vec<(u32, u32)>,
+    /// Functions, methods, closures, and arrow functions without an
+    /// explicit return type hint or `@return` docblock tag.
+    /// Used by inlay hints to show inferred return types.
+    pub untyped_functions: Vec<UntypedFunctionSite>,
 }
 
 impl SymbolMap {

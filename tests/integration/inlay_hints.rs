@@ -844,3 +844,181 @@ multi('first', ...$mid, 'last');
         lbls
     );
 }
+
+// ─── Return type inlay hints ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn return_type_hint_for_function_returning_int() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+function doubled()
+{
+    return 42;
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(
+        !type_hints.is_empty(),
+        "expected a return type hint for untyped function"
+    );
+    let label = hint_label(type_hints[0]);
+    assert!(
+        label.starts_with(": "),
+        "return type hint should start with ': ', got {:?}",
+        label
+    );
+}
+
+#[tokio::test]
+async fn return_type_hint_for_void_function() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+function doNothing()
+{
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(
+        !type_hints.is_empty(),
+        "expected a return type hint for void function"
+    );
+    assert_eq!(
+        hint_label(type_hints[0]),
+        ": void",
+        "empty function body should infer void"
+    );
+}
+
+#[tokio::test]
+async fn no_return_type_hint_when_already_typed() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+function typed(): int
+{
+    return 42;
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(
+        type_hints.is_empty(),
+        "should not show return type hint when function already has a type, got {:?}",
+        type_hints.iter().map(|h| hint_label(h)).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn no_return_type_hint_when_docblock_return_present() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+/** @return int */
+function documented()
+{
+    return 42;
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(
+        type_hints.is_empty(),
+        "should not show return type hint when @return docblock present, got {:?}",
+        type_hints.iter().map(|h| hint_label(h)).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn return_type_hint_for_method() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+class Calc {
+    public function answer()
+    {
+        return 42;
+    }
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(
+        !type_hints.is_empty(),
+        "expected a return type hint for untyped method"
+    );
+}
+
+#[tokio::test]
+async fn return_type_hint_kind_is_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+function foo()
+{
+    return 'hello';
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(
+        !type_hints.is_empty(),
+        "expected a return type hint"
+    );
+    assert_eq!(
+        type_hints[0].kind,
+        Some(InlayHintKind::TYPE),
+        "return type hint should have TYPE kind"
+    );
+}
+
+#[tokio::test]
+async fn return_type_hint_position_is_after_close_paren() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+function foo()
+{
+    return 1;
+}
+"#;
+
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let type_hints: Vec<_> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .collect();
+    assert!(!type_hints.is_empty(), "expected a return type hint");
+    // The hint should be on the same line as `function foo()` — line 1.
+    assert_eq!(
+        type_hints[0].position.line, 1,
+        "hint should be on the function declaration line"
+    );
+}
