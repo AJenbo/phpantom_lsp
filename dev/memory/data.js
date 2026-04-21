@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776750963024,
+  "lastUpdate": 1776753235806,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3671,6 +3671,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 42.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b6455ce8bbdea2ea5b752fd88cf050379659e84c",
+          "message": "Fix infinite recursion",
+          "timestamp": "2026-04-21T08:23:18+02:00",
+          "tree_id": "412c7a5c8db869de0002f10264ab84d9d6c9ec65",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b6455ce8bbdea2ea5b752fd88cf050379659e84c"
+        },
+        "date": 1776753235360,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 42.8,
             "unit": "MiB"
           }
         ]
