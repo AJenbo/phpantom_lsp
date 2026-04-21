@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776746132175,
+  "lastUpdate": 1776750963024,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3637,6 +3637,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 43.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2d446dfd14a6d7af501dc0b559581a3ac6e297b9",
+          "message": "Replace two-pass loop strategy with assignment-depth-bounded iteration",
+          "timestamp": "2026-04-21T07:45:24+02:00",
+          "tree_id": "a0205772780f5ced78ae35493350258c826c22e7",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/2d446dfd14a6d7af501dc0b559581a3ac6e297b9"
+        },
+        "date": 1776750961904,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 42.7,
             "unit": "MiB"
           }
         ]
