@@ -3423,3 +3423,62 @@ function test(): void {
         "Should not flag Fruit passed to Bag<Fruit>::put() via trait method, got: {diags:?}"
     );
 }
+
+#[test]
+fn no_false_positive_for_class_string_variable_passed_as_string() {
+    let php = r#"<?php
+class Pen {}
+class Container {
+    /**
+     * @template T
+     * @param class-string<T>|null $abstract
+     * @return ($abstract is class-string<T> ? T : static)
+     */
+    public function make(?string $abstract = null): mixed {
+        return new static();
+    }
+}
+class Demo {
+    public function run(): void {
+        $container = new Container();
+        $cls = Pen::class;
+        $pen = $container->make($cls);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag class-string variable passed to ?string param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_false_positive_for_unresolved_class_template_in_constructor() {
+    let php = r#"<?php
+/**
+ * @template T
+ */
+class Box {
+    /** @var T */
+    public $value;
+
+    /** @param T $value */
+    public function __construct(mixed $value = null) { $this->value = $value; }
+}
+
+class Gift {}
+
+class Context {
+    /** @var Box<Gift> */
+    public $chest;
+
+    public function __construct() { $this->chest = new Box(new Gift()); }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag Gift passed to unresolved @template T param in constructor, got: {diags:?}"
+    );
+}

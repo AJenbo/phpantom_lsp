@@ -461,24 +461,55 @@ impl Backend {
     /// Build a [`ResolvedCallableTarget`] for a constructor call.
     ///
     /// Loads and merges the class, then extracts `__construct` parameters.
+    /// When `args_text` is provided, class-level `@template` parameters are
+    /// resolved from the call-site argument types and substituted into the
+    /// constructor's parameter types.
+    ///
+    /// For example, given `/** @template T */ class Box { /** @param T $value */ … }`,
+    /// calling `new Box(new Gift())` resolves `T` → `Gift` and substitutes it
+    /// into the constructor parameters so that type-error diagnostics see
+    /// `Gift` instead of the raw `T`.
     fn resolve_constructor_callable(
         class_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: &crate::virtual_members::ResolvedClassCache,
+        args_text: Option<&str>,
+        rctx: &ResolutionCtx<'_>,
     ) -> Option<ResolvedCallableTarget> {
         let ci = class_loader(class_name)?;
         let merged = crate::virtual_members::resolve_class_fully_cached(&ci, class_loader, cache);
-        if let Some(ctor) = merged.get_method("__construct") {
-            Some(ResolvedCallableTarget {
-                parameters: ctor.parameters.clone(),
-                return_type: ctor.return_type.clone(),
-            })
-        } else {
-            Some(ResolvedCallableTarget {
-                parameters: vec![],
-                return_type: None,
-            })
+        let ctor = match merged.get_method("__construct") {
+            Some(c) => c.clone(),
+            None => {
+                return Some(ResolvedCallableTarget {
+                    parameters: vec![],
+                    return_type: None,
+                });
+            }
+        };
+
+        // Apply class-level template substitutions from the call-site
+        // argument types when the constructor has template bindings.
+        if let Some(at) = args_text
+            && !ctor.template_bindings.is_empty()
+        {
+            let split_args = crate::completion::types::conditional::split_text_args(at);
+            let subs =
+                Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
+            if !subs.is_empty() {
+                let mut result_ctor = ctor;
+                crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);
+                return Some(ResolvedCallableTarget {
+                    parameters: result_ctor.parameters.clone(),
+                    return_type: result_ctor.return_type.clone(),
+                });
+            }
         }
+
+        Some(ResolvedCallableTarget {
+            parameters: ctor.parameters.clone(),
+            return_type: ctor.return_type.clone(),
+        })
     }
 
     // ── Main callable target resolution ─────────────────────────────────
@@ -565,6 +596,8 @@ impl Backend {
                     &resolved_class_name,
                     &class_loader,
                     &self.resolved_class_cache,
+                    effective_args_text,
+                    &rctx,
                 )
             }
 

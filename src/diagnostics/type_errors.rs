@@ -60,6 +60,8 @@ fn is_bare_array(ty: &PhpType) -> bool {
     matches!(ty, PhpType::Named(n) if n.eq_ignore_ascii_case("array"))
 }
 
+
+
 /// Check if an argument type is compatible with a parameter type.
 ///
 /// Returns `true` if the argument type can be passed to the parameter
@@ -117,6 +119,7 @@ fn is_type_compatible(
     if matches!(arg_type, PhpType::Raw(_)) || matches!(param_type, PhpType::Raw(_)) {
         return true;
     }
+
     // Skip anonymous class arguments.  Anonymous classes are stored
     // with synthetic names (`__anonymous@<offset>`) that are not
     // indexed globally, so the class loader cannot resolve their

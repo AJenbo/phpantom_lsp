@@ -8897,3 +8897,29 @@ function demo(): void {
         text
     );
 }
+
+#[test]
+fn hover_class_string_from_class_constant() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Pen {
+    public function write(): void {}
+}
+class Service {
+    public function run(): void {
+        $cls = Pen::class;
+        $cls;
+    }
+}
+"#;
+
+    // Hover on $cls at line 7 (the standalone $cls; statement)
+    let hover = hover_at(&backend, uri, content, 7, 9).expect("expected hover on $cls");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("class-string"),
+        "should show class-string<Pen> type for Pen::class assignment, got: {}",
+        text
+    );
+}
