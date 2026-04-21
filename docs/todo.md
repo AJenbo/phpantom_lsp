@@ -25,7 +25,7 @@ within the same impact tier.
 
 | #   | Item                                                                                                                                                                | Impact      | Effort      |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| P24 | [`IN_ARRAY_KEY_ASSIGN` re-entry guard in forward walker](todo/performance.md#p24-in_array_key_assign-re-entry-guard-in-forward-walker)                              | Low         | Low         |
+
 | P20 | [Forward walker: bounded iteration and depth-cap cleanup](todo/performance.md#p20-forward-walker-bounded-iteration-and-depth-cap-cleanup)                            | High        | Medium      |
 | ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5--mago-style-separated-metadata)                                                                        | High        | High        |
 | P9  | [`resolved_class_cache` generic-arg specialisation](todo/performance.md#p9-resolved_class_cache-generic-arg-specialisation)                                         | Medium      | Medium      |

@@ -3859,24 +3859,6 @@ fn process_array_key_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Guard against infinite re-entry.  When `resolve_rhs_with_scope`
-    // triggers re-evaluation of the same array key assignment (e.g.
-    // `$a['k'] = f($a['k'])` where reading `$a['k']` re-enters
-    // through the scope resolver), bail out to break the cycle.
-    thread_local! {
-        static IN_ARRAY_KEY_ASSIGN: Cell<bool> = const { Cell::new(false) };
-    }
-    if IN_ARRAY_KEY_ASSIGN.with(|c| c.get()) {
-        return;
-    }
-    IN_ARRAY_KEY_ASSIGN.with(|c| c.set(true));
-    struct ArrayKeyAssignGuard;
-    impl Drop for ArrayKeyAssignGuard {
-        fn drop(&mut self) {
-            IN_ARRAY_KEY_ASSIGN.with(|c| c.set(false));
-        }
-    }
-    let _guard = ArrayKeyAssignGuard;
     // Delegate to the existing check_expression_for_assignment
     // infrastructure for array key assignments.  This handles
     // both string-keyed shape building and generic element tracking.

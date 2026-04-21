@@ -852,36 +852,3 @@ like:
 Most depth-cap and recursion-guard issues are addressed by P20
 (forward walker) and ER5 (class resolution). The items below are
 independent fixes that do not depend on either.
-
----
-
-## P24. `IN_ARRAY_KEY_ASSIGN` re-entry guard in forward walker
-
-**Impact: Low · Effort: Low**
-
-`forward_walk.rs` line ~3861 uses a thread-local `Cell<bool>` to
-break re-entry in `process_array_key_assignment` when
-`resolve_rhs_with_scope` triggers re-evaluation of the same array
-key (e.g. `$a['k'] = f($a['k'])`). This is a symptom of the
-forward walker calling back into expression resolution which calls
-back into the forward walker.
-
-### How Mago solves this
-
-Mago's forward pass never re-enters itself. Array key assignments
-are processed by recording the LHS target, resolving the RHS type
-in isolation (using the scope snapshot from before the assignment),
-and then updating the scope. The RHS resolution reads from an
-immutable scope snapshot, so it cannot trigger a write that would
-re-enter the assignment handler.
-
-### Fix
-
-When processing `$a['k'] = expr`, snapshot the scope before the
-assignment, resolve `expr` against the snapshot (read-only), then
-apply the result to the live scope. This eliminates the re-entry
-path entirely and the `IN_ARRAY_KEY_ASSIGN` guard can be removed.
-
----
-
-
