@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776827326051,
+  "lastUpdate": 1776857201094,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3875,6 +3875,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 42.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "66dd9cc5f5f5d41555cda24e3347ebf10d31397c",
+          "message": "Add Mago proxy diagnostics for lint and analyze",
+          "timestamp": "2026-04-22T13:15:21+02:00",
+          "tree_id": "2777e7141110d1b881746802eff6aabe4e4a8a07",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/66dd9cc5f5f5d41555cda24e3347ebf10d31397c"
+        },
+        "date": 1776857200732,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 45.8,
             "unit": "MiB"
           }
         ]
