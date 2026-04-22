@@ -251,6 +251,10 @@ impl Backend {
                     }
                 },
 
+                SymbolKind::NamespaceDeclaration { .. } => {
+                    (TT_NAMESPACE, TM_DECLARATION)
+                }
+
                 SymbolKind::ConstantReference { name: _ } => {
                     // Check if this is a PHP attribute name (starts after `#[`).
                     let is_attr = span.start >= 2

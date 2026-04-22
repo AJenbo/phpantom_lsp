@@ -124,7 +124,8 @@ impl Backend {
 
             SymbolKind::ClassDeclaration { .. }
             | SymbolKind::MemberDeclaration { .. }
-            | SymbolKind::ConstantReference { .. } => {
+            | SymbolKind::ConstantReference { .. }
+            | SymbolKind::NamespaceDeclaration { .. } => {
                 // No meaningful type definition target for these.
                 Vec::new()
             }

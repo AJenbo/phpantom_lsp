@@ -166,6 +166,19 @@ fn extract_from_statement<'a>(
 ) {
     match stmt {
         Statement::Namespace(ns) => {
+            // Emit a span for the namespace name itself so rename can target it.
+            if let Some(ref ident) = ns.name {
+                let name = ident.value().to_string();
+                if !name.is_empty() {
+                    ctx.spans.push(SymbolSpan {
+                        start: ident.span().start.offset,
+                        end: ident.span().end.offset,
+                        kind: SymbolKind::NamespaceDeclaration {
+                            name,
+                        },
+                    });
+                }
+            }
             for inner in ns.statements().iter() {
                 extract_from_statement(inner, ctx, scope_start);
             }

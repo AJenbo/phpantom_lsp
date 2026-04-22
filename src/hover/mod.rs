@@ -729,7 +729,7 @@ impl Backend {
                 self.hover_class_reference(name, uri, content, &class_loader, cursor_offset)
             }
 
-            SymbolKind::ClassDeclaration { .. } | SymbolKind::MemberDeclaration { .. } => {
+            SymbolKind::ClassDeclaration { .. } | SymbolKind::MemberDeclaration { .. } | SymbolKind::NamespaceDeclaration { .. } => {
                 // The user is already at the definition site — showing
                 // hover here would just repeat what they can already see.
                 None

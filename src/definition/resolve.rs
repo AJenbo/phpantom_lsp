@@ -246,7 +246,7 @@ impl Backend {
                 self.resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
             }
 
-            SymbolKind::ClassDeclaration { name } | SymbolKind::MemberDeclaration { name, .. } => {
+            SymbolKind::ClassDeclaration { name } | SymbolKind::MemberDeclaration { name, .. } | SymbolKind::NamespaceDeclaration { name } => {
                 // The cursor is on a declaration name.  Return the
                 // symbol's own location so that editors can detect
                 // "definition == current position" and fall back to

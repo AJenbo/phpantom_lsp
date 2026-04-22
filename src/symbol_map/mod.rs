@@ -167,6 +167,12 @@ pub(crate) enum SymbolKind {
         /// or class constant — constants are always accessed statically).
         is_static: bool,
     },
+    /// A namespace name at its declaration site (`namespace App\Models;`).
+    /// Used by the rename handler to support namespace renaming.
+    NamespaceDeclaration {
+        /// The full namespace name (e.g. `"App\\Models"`).
+        name: String,
+    },
 }
 
 // ─── Template parameter definition site structures ──────────────────────────

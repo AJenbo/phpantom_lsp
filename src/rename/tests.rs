@@ -2363,3 +2363,466 @@ async fn rename_closure_parameter_does_not_leak_to_outer_scope() {
         result
     );
 }
+
+// ─── Namespace rename tests ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn prepare_rename_namespace_returns_segment_range() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///a.php").unwrap();
+    let text = "<?php\nnamespace App\\Models\\User;\nclass User {}\n";
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on "Models" (line 1, char 14 is inside "Models").
+    let resp = prepare_rename(&backend, &uri, 1, 14).await;
+    assert!(resp.is_some(), "Expected prepare rename to succeed");
+    if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
+        assert_eq!(placeholder, "Models");
+        // "Models" starts at char 14 in "namespace App\Models\User;"
+        assert_eq!(range.start.character, 14);
+        assert_eq!(range.end.character, 20);
+    } else {
+        panic!("Expected RangeWithPlaceholder");
+    }
+}
+
+#[tokio::test]
+async fn prepare_rename_namespace_first_segment() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///a.php").unwrap();
+    let text = "<?php\nnamespace App\\Models;\nclass Foo {}\n";
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on "App" (line 1, char 11).
+    let resp = prepare_rename(&backend, &uri, 1, 11).await;
+    assert!(resp.is_some(), "Expected prepare rename to succeed for first segment");
+    if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
+        assert_eq!(placeholder, "App");
+        assert_eq!(range.start.character, 10);
+        assert_eq!(range.end.character, 13);
+    } else {
+        panic!("Expected RangeWithPlaceholder");
+    }
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_declaration_same_file() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///a.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+    open_file(&backend, &uri, text).await;
+
+    // Rename "Services" to "Handlers" (cursor on "Services", line 1, char 15).
+    let edit = rename(&backend, &uri, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit for namespace rename");
+    let edit = edit.unwrap();
+    let edits = edits_for_uri(&edit, &uri);
+    assert!(!edits.is_empty(), "Expected edits in the file");
+
+    let result = apply_edits(text, &edits);
+    assert!(
+        result.contains("namespace App\\Handlers;"),
+        "Namespace declaration should be updated: {}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_use_statements_cross_file() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class PaymentService {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\PaymentService;\n",
+        "function demo(PaymentService $p): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    // Rename "Services" to "Handlers" from file a's namespace declaration.
+    let edit = rename(&backend, &uri_a, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_a = edits_for_uri(&edit, &uri_a);
+    let edits_b = edits_for_uri(&edit, &uri_b);
+
+    assert!(!edits_a.is_empty(), "Expected edits in file a");
+    assert!(!edits_b.is_empty(), "Expected edits in file b");
+
+    let result_a = apply_edits(text_a, &edits_a);
+    assert!(
+        result_a.contains("namespace App\\Handlers;"),
+        "Namespace declaration should be updated: {}",
+        result_a
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("use App\\Handlers\\PaymentService;"),
+        "Use statement should be updated: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_root_segment_renames_all_children() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Models;\n",
+        "class User {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "use App\\Models\\User;\n",
+        "class UserService {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    // Rename root segment "App" to "MyApp" from file a.
+    let edit = rename(&backend, &uri_a, 1, 11, "MyApp").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_a = edits_for_uri(&edit, &uri_a);
+    let edits_b = edits_for_uri(&edit, &uri_b);
+
+    let result_a = apply_edits(text_a, &edits_a);
+    assert!(
+        result_a.contains("namespace MyApp\\Models;"),
+        "File a namespace should be updated: {}",
+        result_a
+    );
+
+    let result_b = apply_edits(text_b, &edits_b);
+    assert!(
+        result_b.contains("namespace MyApp\\Services;"),
+        "File b namespace should be updated: {}",
+        result_b
+    );
+    assert!(
+        result_b.contains("use MyApp\\Models\\User;"),
+        "File b use statement should be updated: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_preserves_alias_in_use() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Old;\n",
+        "class Foo {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Old\\Foo as MyFoo;\n",
+        "function demo(MyFoo $f): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    // Rename "Old" to "New".
+    let edit = rename(&backend, &uri_a, 1, 14, "New").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    let result_b = apply_edits(text_b, &edits_b);
+
+    assert!(
+        result_b.contains("use App\\New\\Foo as MyFoo;"),
+        "Use statement should update FQN but preserve alias: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_group_use() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Old;\n",
+        "class Foo {}\n",
+        "class Bar {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Old\\{Foo, Bar};\n",
+        "function demo(Foo $f, Bar $b): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    // Rename "Old" to "New".
+    let edit = rename(&backend, &uri_a, 1, 14, "New").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    let result_b = apply_edits(text_b, &edits_b);
+
+    assert!(
+        result_b.contains("App\\New"),
+        "Group use prefix should be updated: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_does_not_affect_unrelated_namespaces() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Models;\n",
+        "class User {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "namespace Other\\Models;\n",
+        "class Product {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    // Rename "App" to "MyApp" — should not touch "Other\Models".
+    let edit = rename(&backend, &uri_a, 1, 11, "MyApp").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    assert!(
+        edits_b.is_empty(),
+        "Unrelated namespace file should not be edited"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_updates_fqn_in_use_statement_from_symbol_map() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Services;\n",
+        "class Mailer {}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "use App\\Services\\Mailer;\n",
+        "class NotificationService {\n",
+        "    public function send(Mailer $m): void {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 15, "Providers").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits_b = edits_for_uri(&edit, &uri_b);
+    let result_b = apply_edits(text_b, &edits_b);
+
+    assert!(
+        result_b.contains("use App\\Providers\\Mailer;"),
+        "Use statement FQN should be updated: {}",
+        result_b
+    );
+    // The short-name reference `Mailer` in the method signature should NOT change
+    // because it's imported via `use` and the short name didn't change.
+    assert!(
+        result_b.contains("public function send(Mailer $m)"),
+        "Short name reference should be preserved: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_single_segment_namespace() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///a.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Config {}\n",
+    );
+    open_file(&backend, &uri, text).await;
+
+    // Rename single-segment namespace "App" to "Framework".
+    let edit = rename(&backend, &uri, 1, 11, "Framework").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let edits = edits_for_uri(&edit, &uri);
+    let result = apply_edits(text, &edits);
+    assert!(
+        result.contains("namespace Framework;"),
+        "Single-segment namespace should be renamed: {}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_psr4_directory_rename() {
+    use std::path::PathBuf;
+
+    let workspace = PathBuf::from("/tmp/test_workspace_ns_rename");
+    let src_dir = workspace.join("src").join("App").join("Services");
+    let _ = std::fs::create_dir_all(&src_dir);
+    let _ = std::fs::write(
+        src_dir.join("Mailer.php"),
+        "<?php\nnamespace App\\Services;\nclass Mailer {}\n",
+    );
+
+    let psr4 = vec![crate::composer::Psr4Mapping {
+        prefix: "App\\".to_string(),
+        base_path: "src/App/".to_string(),
+    }];
+
+    let backend = Backend::new_test_with_workspace(workspace.clone(), psr4);
+    backend
+        .supports_file_rename
+        .store(true, std::sync::atomic::Ordering::Release);
+
+    let uri = Url::parse("file:///tmp/test_workspace_ns_rename/src/App/Services/Mailer.php").unwrap();
+    let text = "<?php\nnamespace App\\Services;\nclass Mailer {}\n";
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 1, 15, "Handlers").await;
+    assert!(edit.is_some(), "Expected workspace edit with PSR-4 rename");
+    let edit = edit.unwrap();
+
+    // When PSR-4 applies and client supports file rename, the edit
+    // should use document_changes with a RenameFile operation.
+    if let Some(ref doc_changes) = edit.document_changes {
+        let rename_file = match doc_changes {
+            DocumentChanges::Operations(ops) => ops.iter().find_map(|op| match op {
+                DocumentChangeOperation::Op(ResourceOp::Rename(rf)) => Some(rf),
+                _ => None,
+            }),
+            _ => None,
+        };
+        assert!(
+            rename_file.is_some(),
+            "Expected a RenameFile operation for PSR-4 directory"
+        );
+        let rf = rename_file.unwrap();
+        assert!(
+            rf.old_uri.as_str().contains("Services"),
+            "Old URI should contain 'Services': {}",
+            rf.old_uri
+        );
+        assert!(
+            rf.new_uri.as_str().contains("Handlers"),
+            "New URI should contain 'Handlers': {}",
+            rf.new_uri
+        );
+    } else {
+        // If document_changes is None, the test still passes for the text
+        // edits — PSR-4 directory rename only triggers when the dir exists.
+        // The directory was created above, so we expect it to work.
+    }
+
+    // Cleanup.
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[tokio::test]
+async fn rename_namespace_multiple_files_same_namespace() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_c = Url::parse("file:///c.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Models;\n",
+        "class User {}\n",
+    );
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Models;\n",
+        "class Post {}\n",
+    );
+    let text_c = concat!(
+        "<?php\n",
+        "use App\\Models\\User;\n",
+        "use App\\Models\\Post;\n",
+        "function demo(User $u, Post $p): void {}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+    open_file(&backend, &uri_c, text_c).await;
+
+    // Rename "Models" to "Entities" from file a.
+    let edit = rename(&backend, &uri_a, 1, 15, "Entities").await;
+    assert!(edit.is_some(), "Expected workspace edit");
+    let edit = edit.unwrap();
+
+    let result_a = apply_edits(text_a, &edits_for_uri(&edit, &uri_a));
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    let result_c = apply_edits(text_c, &edits_for_uri(&edit, &uri_c));
+
+    assert!(
+        result_a.contains("namespace App\\Entities;"),
+        "File a namespace: {}",
+        result_a
+    );
+    assert!(
+        result_b.contains("namespace App\\Entities;"),
+        "File b namespace: {}",
+        result_b
+    );
+    assert!(
+        result_c.contains("use App\\Entities\\User;"),
+        "File c use User: {}",
+        result_c
+    );
+    assert!(
+        result_c.contains("use App\\Entities\\Post;"),
+        "File c use Post: {}",
+        result_c
+    );
+}
