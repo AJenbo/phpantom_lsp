@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776816240545,
+  "lastUpdate": 1776820345502,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3807,6 +3807,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fc102d162b3d91aaffd8b73da8d39414cf24a7d2",
+          "message": "Fix duplicate diagnostics in pull-diagnostic editors and closure/callable type error",
+          "timestamp": "2026-04-22T03:01:15+02:00",
+          "tree_id": "ff482ae414d52aabb1db25f6c2102707f455f796",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/fc102d162b3d91aaffd8b73da8d39414cf24a7d2"
+        },
+        "date": 1776820344426,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 46.5,
             "unit": "MiB"
           }
         ]
