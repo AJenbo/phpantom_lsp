@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776791429324,
+  "lastUpdate": 1776816240545,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3773,6 +3773,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ba6f94b984d45a7f92293a4f28c96e5beeb57fec",
+          "message": "Emit closure inlay hints with call-site argument text",
+          "timestamp": "2026-04-22T01:53:06+02:00",
+          "tree_id": "ab1658bdbeaff3c3fc8ba0ca6c725db5cbc0a9f5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/ba6f94b984d45a7f92293a4f28c96e5beeb57fec"
+        },
+        "date": 1776816239487,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 46,
             "unit": "MiB"
           }
         ]
