@@ -73,6 +73,7 @@
 //! diagnostic from the cache and pushes updated diagnostics.
 
 mod change_visibility;
+mod convert_to_instance_variable;
 pub(crate) mod cursor_context;
 mod extract_constant;
 mod extract_function;
@@ -218,8 +219,11 @@ impl Backend {
         // ── Extract function / method (deferred) ────────────────────────
         self.collect_extract_function_actions(uri, content, params, &mut actions);
 
-        // ── Inline variable (deferred) ──────────────────────────────────
+        // ── Inline variable (deferred) ──────────────────────────────
         self.collect_inline_variable_actions(uri, content, params, &mut actions);
+
+        // ── Convert to instance variable (deferred) ─────────────────
+        self.collect_convert_to_instance_variable_actions(uri, content, params, &mut actions);
 
         // ── Simplify with null coalescing / null-safe operator ──────────
         self.collect_simplify_null_actions(uri, content, params, &mut actions);
@@ -319,6 +323,9 @@ impl Backend {
             "source.importAllClasses" => self.resolve_import_all_classes(&data, &content),
             "refactor.extractFunction" => self.resolve_extract_function(&data, &content),
             "refactor.inlineVariable" => self.resolve_inline_variable(&data, &content),
+            "refactor.extractInstanceVariable" => {
+                self.resolve_convert_to_instance_variable(&data, &content)
+            }
             _ => None,
         };
 
