@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776884899905,
+  "lastUpdate": 1776886451489,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -3977,6 +3977,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 44.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "728f7602999a0a3283bf9cb0eeabb1156455210e",
+          "message": "Support namespace rename across workspace and PSR-4 directories",
+          "timestamp": "2026-04-22T21:23:21+02:00",
+          "tree_id": "1fcad41b702d784e2a35d37f0e0a79c710f702ca",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/728f7602999a0a3283bf9cb0eeabb1156455210e"
+        },
+        "date": 1776886450617,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.4,
             "unit": "MiB"
           }
         ]
