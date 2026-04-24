@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777008599915,
+  "lastUpdate": 1777017224444,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4045,6 +4045,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "85006aa2ff462a6081b6511be86001dc30d83484",
+          "message": "Add global keyword and binary expression type inference",
+          "timestamp": "2026-04-24T09:42:58+02:00",
+          "tree_id": "745c4975bef20e16ed8ba9ba222dedb6cddb0111",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/85006aa2ff462a6081b6511be86001dc30d83484"
+        },
+        "date": 1777017223418,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.3,
             "unit": "MiB"
           }
         ]
