@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777047829295,
+  "lastUpdate": 1777048536534,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4317,6 +4317,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "40d6e59272093f3ea5c6cf7adfc7beadab6ce681",
+          "message": "Fix foreach element type for nested generic array access",
+          "timestamp": "2026-04-24T18:13:35+02:00",
+          "tree_id": "15c61941354c0213e9437f7ebfbc44db15733dcb",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/40d6e59272093f3ea5c6cf7adfc7beadab6ce681"
+        },
+        "date": 1777048535886,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.4,
             "unit": "MiB"
           }
         ]
