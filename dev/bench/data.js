@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777024408816,
+  "lastUpdate": 1777029163299,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -23231,6 +23231,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.811,
             "range": "± 0.018",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b69b49dc004f59c90fb19904da302034225017ff",
+          "message": "Fix array shape key completion through conditional branches",
+          "timestamp": "2026-04-24T13:05:25+02:00",
+          "tree_id": "a4cafc39e0d4ec32a370f9dbced399d95dcec12d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b69b49dc004f59c90fb19904da302034225017ff"
+        },
+        "date": 1777029162670,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 2.605,
+            "range": "± 0.066",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.007,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.091,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.163,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.305,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.187,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.803,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.589,
+            "range": "± 0.029",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.069,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.015,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.011,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.029,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.202,
+            "range": "± 0.079",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.39,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.193,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.036,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.013,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.088,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.056,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.048,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.182,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.011,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.333,
+            "range": "± 0.022",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.02,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.027,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.026,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 47.043,
+            "range": "± 0.167",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.824,
+            "range": "± 0.013",
             "unit": "ms"
           }
         ]
