@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1776886451489,
+  "lastUpdate": 1777008599915,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4011,6 +4011,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b957ed3efc408e968d89a4969a0f8b4a4e281b6f",
+          "message": "Fix parent class resolution to prefer FQN over same-name class in\nnamespace",
+          "timestamp": "2026-04-24T07:19:30+02:00",
+          "tree_id": "26a526a61758a9c5e7b2981d2673fad68cc629c8",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b957ed3efc408e968d89a4969a0f8b4a4e281b6f"
+        },
+        "date": 1777008599281,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.9,
             "unit": "MiB"
           }
         ]
