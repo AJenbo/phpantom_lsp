@@ -517,3 +517,47 @@ This is a pure text-based operation — no AST needed. Register `}` as
 an additional `on_type_formatting_trigger_character` alongside the
 existing `\n`.
 
+## F17. Class move with reference update
+
+**Impact: Medium · Effort: Medium-High**
+
+Move a class file to a new location and update all references across
+the project (namespace declaration, `use` statements, FQN references).
+PHPantom currently supports file rename on class rename but not the
+full move-with-reference-update workflow.
+
+The operation needs to:
+
+1. Accept a source file and a destination path.
+2. Compute the new namespace from the destination path using the
+   PSR-4 autoload map.
+3. Update the namespace declaration in the moved file.
+4. Find all references to the class across the project (use
+   statements, FQN occurrences, docblock type strings).
+5. Rewrite each reference to use the new FQN, or update the `use`
+   statement and leave short names unchanged.
+
+**References:**
+- Phpactor: `MoveClass` refactoring in the class-mover package.
+
+## F18. Fix namespace/class name from PSR-4
+
+**Impact: Medium · Effort: Low**
+
+When a class's namespace or name does not match its file path per
+PSR-4 mapping, offer a code action (or command) to fix the namespace
+and/or class name. The inverse direction (rename file on class rename)
+is already supported.
+
+The code action should:
+
+1. Resolve the expected namespace and class name from the file path
+   using the PSR-4 autoload map in `composer.json`.
+2. If the current namespace differs, offer "Fix namespace to
+   `App\Models\Foo`".
+3. If the class name differs from the filename, offer "Fix class name
+   to `Foo`".
+
+**References:**
+- Phpactor: `FixNamespaceClassName` code action.
+

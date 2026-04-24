@@ -507,4 +507,35 @@ in `emit_closure_hints` (tracked in B27) completes the feature.
   template inference in `FunctionCallNode`.
 - Mago: `resolve_template_arguments` in the type checker.
 
+## T26. Globbed constant unions (`Foo::BAR_*`)
+
+**Impact: Low · Effort: Low**
+
+Resolve wildcard constant patterns like `Foo::BAR_*` to the union of
+all matching constant types on the class. PHPStan supports this syntax
+in docblock type strings:
+
+```php
+class Status {
+    const STATUS_ACTIVE = 1;
+    const STATUS_INACTIVE = 2;
+    const STATUS_PENDING = 3;
+}
+
+/** @param Status::STATUS_* $status */
+function setStatus(int $status): void { ... }
+// $status should resolve to 1|2|3
+```
+
+When the type engine encounters a constant pattern containing `*`,
+it should:
+
+1. Resolve the class (`Status`).
+2. Enumerate all constants matching the glob pattern (`STATUS_*`).
+3. Build a union of their literal types.
+
+**References:**
+- PHPStan: `ConstantWildcardType` / constant enum resolution.
+- Phpactor: `GlobbedConstantUnionType`.
+
 

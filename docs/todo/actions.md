@@ -598,3 +598,90 @@ $msg = "Total: {$order->getTotal()}";
 - Replace the entire concat expression with the interpolated string.
 
 **Code action kind:** `refactor.rewrite`.
+
+---
+
+### A40. Generate method from call
+
+**Impact: High · Effort: Medium**
+
+When invoking an undefined method (e.g. `$foo->newMethod($a, $b)`),
+offer a code action to generate a method stub on the target class
+with the correct signature inferred from the call-site arguments.
+High-impact rapid-prototyping workflow. Phpactor has this.
+
+- Resolve the type of the subject to find the target class and file.
+- Infer parameter types from the argument expressions at the call
+  site (literal types, variable types, class hints).
+- Infer return type as `void` by default; if the call is used in an
+  assignment or return context, use `mixed`.
+- Insert the generated method at the end of the class body (before
+  the closing `}`).
+- Visibility defaults to `public`; offer a choice if the call is
+  within the same class (`private`/`protected`).
+
+**Code action kind:** `quickfix`.
+**Trigger:** Unknown-member diagnostic on a method call.
+
+---
+
+### A41. Create class from non-existing name
+
+**Impact: High · Effort: Medium**
+
+When a class name cannot be resolved, offer a code action to
+generate a new class file with the correct namespace based on PSR-4
+mapping. Pairs naturally with the unknown-class diagnostic.
+Phpactor has this.
+
+- Use the PSR-4 autoload map from `composer.json` to determine the
+  file path and namespace for the new class.
+- Create the file with a minimal class skeleton (`<?php` declaration,
+  `namespace`, empty class body).
+- If the unresolved name is used in an `extends` or `implements`
+  clause, generate the appropriate `class` or `interface` keyword.
+- Add a `use` import at the call site if necessary.
+
+**Code action kind:** `quickfix`.
+**Trigger:** Unknown-class diagnostic.
+
+---
+
+### A42. Replace qualifier with import
+
+**Impact: Medium · Effort: Low**
+
+Convert an inline fully-qualified name like `\Foo\Bar\Baz` to a
+`use` import plus the short name. A standalone code action
+(auto-import on completion already exists but this covers existing
+code). Phpactor has this.
+
+- Detect any fully-qualified class reference under the cursor.
+- Add a `use Foo\Bar\Baz;` statement to the file's import block.
+- Replace the inline FQN with the short name `Baz`.
+- Handle alias conflicts: if `Baz` is already imported with a
+  different FQN, prompt for an alias or skip.
+
+**Code action kind:** `refactor.rewrite`.
+
+---
+
+### A43. Update docblock generics
+
+**Impact: Medium · Effort: Medium**
+
+Auto-update or add `@extends`/`@implements` tags to match the actual
+class hierarchy when a class extends a generic parent. Phpactor has
+this as a transformer.
+
+- Inspect the `extends` and `implements` clauses of the class under
+  the cursor.
+- For each parent/interface that declares `@template` parameters,
+  check whether the current class has a matching `@extends` or
+  `@implements` tag.
+- If the tag is missing, generate one with placeholder type
+  parameters (e.g. `@extends Collection<mixed>`).
+- If the tag exists but the template parameter count has changed,
+  update it to match.
+
+**Code action kind:** `quickfix`.

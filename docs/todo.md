@@ -92,6 +92,7 @@ unlikely to move the needle for most users.
 | T20 | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (sure/sureNot tracking, AND/OR algebra)                             | Medium-High | High        |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Low-Medium  |
 | T13 | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail)                                             | Low-Medium  | Medium      |
+| T26 | [Globbed constant unions (`Foo::BAR_*`)](todo/type-inference.md#t26-globbed-constant-unions-foobar_)                                                                         | Low-Medium  | Medium      |
 | T4  | Non-empty-\* type narrowing and propagation                                                                                                                                 | Low         | Low         |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Low         |
 | T9  | [Dead-code elimination after `never`-returning calls](todo/type-inference.md#t9-dead-code-elimination-after-never-returning-calls)                                          | Low         | Low-Medium  |
@@ -102,6 +103,9 @@ unlikely to move the needle for most users.
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
+| A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
+| A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
+| A42 | [Replace qualifier with import](todo/actions.md#a42-replace-qualifier-with-import)                                                                                          | Medium      | Low         |
 | A8  | [Update docblock to match signature](todo/actions.md#a8-update-docblock-to-match-signature)                                                                                 | Medium      | Medium      |
 | A16 | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Low-Medium  |
 | A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos--str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Low         |
@@ -112,6 +116,7 @@ unlikely to move the needle for most users.
 | A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with---nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium      |
 | A38 | [Convert if/elseif chain to switch](todo/actions.md#a38-convert-ifelseif-chain-to-switch)                                                                                   | Low-Medium  | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
+| A43 | [Update docblock generics](todo/actions.md#a43-update-docblock-generics)                                                                                                    | Low         | Low-Medium  |
 |     | **[PHPStan Code Actions](todo/phpstan-actions.md)**                                                                                                                         |             |             |
 | H4  | `assign.byRefForeachExpr` — unset by-reference foreach variable                                                                                                             | Medium      | Medium      |
 | H13 | `property.notFound` — declare missing property (same-class)                                                                                                                 | Medium      | Medium      |
@@ -130,6 +135,8 @@ unlikely to move the needle for most users.
 | FX6 | [`phpstan.generics.callSiteVarianceRedundant` — remove redundant variance](todo/fix-cli.md#fx6-phpstangenericscallsitevarianceredundant--remove-redundant-variance)         | Low         | Low         |
 | FX7 | [`add_return_type` — generate `@return` docblocks from function bodies](todo/fix-cli.md#fx7-add_return_type--generate-return-docblocks-from-function-bodies)                | Medium-High | Medium      |
 |     | **[LSP Features](todo/lsp-features.md)**                                                                                                                                    |             |             |
+| F17 | [Class move with reference update](todo/lsp-features.md#f17-class-move-with-reference-update)                                                                               | Medium      | Medium-High |
+| F18 | [Fix namespace/class name from PSR-4](todo/lsp-features.md#f18-fix-namespaceclass-name-from-psr-4)                                                                          | Medium      | Medium      |
 | F5  | [Call hierarchy](todo/lsp-features.md#f5-call-hierarchy) (incoming/outgoing calls)                                                                                          | Medium      | Medium      |
 | F2  | [Partial result streaming via `$/progress`](todo/lsp-features.md#f2-partial-result-streaming-via-progress)                                                                  | Medium      | Medium-High |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
@@ -181,6 +188,4 @@ unlikely to move the needle for most users.
 | N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | High        |
 | N2  | N-gram prediction from PHP corpus                                                                                                                                           | Medium      | Very High   |
 | N3  | Fine-tuned GGUF sidecar model                                                                                                                                               | Medium      | Very High   |
-|     | **[Phpactor Test Parity](todo/phpactor-test-parity.md)**                                                                                                                    |             |             |
-| Q16 | Variable-variable `${$bar}` resolution                                                                                                                                      | Low         | Low-Medium  |
-| Q22 | Postfix increment / decrement literal types                                                                                                                                 | Low         | Low         |
+
