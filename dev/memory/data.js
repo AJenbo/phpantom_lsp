@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777031381757,
+  "lastUpdate": 1777039191022,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4181,6 +4181,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c2d78cde28046f40a615cadadee3ad21d147ce14",
+          "message": "Add generic @mixin and class-string<T> inference, falsy guard narrowing",
+          "timestamp": "2026-04-24T15:48:58+02:00",
+          "tree_id": "8c1eb4a42e96db695cd82f8bfa91b75cacc39c11",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/c2d78cde28046f40a615cadadee3ad21d147ce14"
+        },
+        "date": 1777039190532,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.9,
             "unit": "MiB"
           }
         ]
