@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777048536534,
+  "lastUpdate": 1777050388653,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4351,6 +4351,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6714db0be7920231cac63b1eb2f1e7872b3d389f",
+          "message": "Fix method-level template resolution through generic wrappers",
+          "timestamp": "2026-04-24T18:55:28+02:00",
+          "tree_id": "8f70fb927887ecc7e7629e7fd9270f830179cb73",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6714db0be7920231cac63b1eb2f1e7872b3d389f"
+        },
+        "date": 1777050387552,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.7,
             "unit": "MiB"
           }
         ]
