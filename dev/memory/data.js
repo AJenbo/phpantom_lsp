@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777024614655,
+  "lastUpdate": 1777029368179,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4113,6 +4113,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b69b49dc004f59c90fb19904da302034225017ff",
+          "message": "Fix array shape key completion through conditional branches",
+          "timestamp": "2026-04-24T13:05:25+02:00",
+          "tree_id": "a4cafc39e0d4ec32a370f9dbced399d95dcec12d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b69b49dc004f59c90fb19904da302034225017ff"
+        },
+        "date": 1777029367104,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.8,
             "unit": "MiB"
           }
         ]
