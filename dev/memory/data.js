@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777050388653,
+  "lastUpdate": 1777092735703,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4385,6 +4385,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "aa7eb86a9182f6dce746cf8ec7359ddac5cc7907",
+          "message": "Use-imported classes take priority over global stubs",
+          "timestamp": "2026-04-25T06:41:27+02:00",
+          "tree_id": "f324ca1e5229eecf64c6e71f088bf1357572b7d5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/aa7eb86a9182f6dce746cf8ec7359ddac5cc7907"
+        },
+        "date": 1777092734714,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.6,
             "unit": "MiB"
           }
         ]
