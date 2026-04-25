@@ -788,8 +788,22 @@ impl Backend {
         namespace: &'a Option<String>,
     ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
         move |name: &str| {
-            // Try a direct FQN lookup first.  Names that arrive here
-            // are often already-resolved FQNs (e.g. `parent_class`,
+            // For unqualified names (no `\`), check the use-map first.
+            // A `use Illuminate\Support\Facades\Event;` import must
+            // take priority over a global-namespace stub class named
+            // `Event` (e.g. the PECL event extension).  Without this
+            // check, `find_or_load_class("Event")` would find the stub
+            // and short-circuit, never consulting the use-map.
+            let stripped = name.strip_prefix('\\').unwrap_or(name);
+            if !stripped.contains('\\')
+                && let Some(fqn) = use_map.get(stripped)
+                && let Some(cls) = self.find_or_load_class(fqn)
+            {
+                return Some(cls);
+            }
+
+            // Try a direct FQN lookup.  Names that arrive here are
+            // often already-resolved FQNs (e.g. `parent_class`,
             // `used_traits`, `interfaces` — all canonicalised by
             // `resolve_parent_class_names`).  Passing a bare global
             // name like `Exception` through namespace-aware resolution
@@ -801,7 +815,6 @@ impl Backend {
             // that should resolve via namespace context, the direct
             // lookup will miss (no global class with that name) and
             // we fall through to full resolution.
-            let stripped = name.strip_prefix('\\').unwrap_or(name);
             if let Some(cls) = self.find_or_load_class(stripped) {
                 return Some(cls);
             }

@@ -4777,3 +4777,63 @@ class Consumer {
         diags
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Use-map import must take priority over global-namespace stub class
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// When a file has `use Some\Namespaced\Event;` and calls `Event::listen()`,
+/// the `@method static` on the imported class must be found — not shadowed
+/// by a global-namespace stub class with the same short name (e.g. the PECL
+/// `Event` extension stub).
+#[test]
+fn use_import_takes_priority_over_global_stub_with_same_short_name() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Facades/Event.php",
+            r#"<?php
+namespace App\Facades;
+
+/**
+ * @method static void listen(string $event, callable $listener)
+ * @method static void dispatch(string $event)
+ */
+class Event {
+    public static function __callStatic(string $name, array $arguments): mixed { return null; }
+}
+"#,
+        )],
+    );
+
+    // Register a global-namespace class named "Event" (simulating a stub
+    // like the PECL event extension) that does NOT have `listen`/`dispatch`.
+    let stub_uri = "file:///stub_event.php";
+    let stub_text = r#"<?php
+class Event {
+    public function fd(): int { return 0; }
+}
+"#;
+    backend.update_ast(stub_uri, stub_text);
+
+    // The user file imports the Facade and calls a @method static method.
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App\Services;
+
+use App\Facades\Event;
+
+class MyService {
+    public function run(): void {
+        Event::listen('foo', function () {});
+        Event::dispatch('bar');
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Use-imported Facade @method static should resolve, not shadow by global stub. Got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
