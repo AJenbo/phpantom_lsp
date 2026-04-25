@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777108069723,
+  "lastUpdate": 1777108905086,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4453,6 +4453,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "27e9a1aa06c59f35ee43f49b6aa09da49abf02b7",
+          "message": "Optimize top-level scope walk to only run if file uses global",
+          "timestamp": "2026-04-25T11:10:55+02:00",
+          "tree_id": "21ed0e5c43ae9a017ffdbcf9f37ae4cf56441d07",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/27e9a1aa06c59f35ee43f49b6aa09da49abf02b7"
+        },
+        "date": 1777108904516,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 45.6,
             "unit": "MiB"
           }
         ]
