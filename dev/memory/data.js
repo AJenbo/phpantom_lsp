@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777092735703,
+  "lastUpdate": 1777108069723,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4419,6 +4419,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "35b910d70f8cb10fd8377d06fea5b068f1334c6d",
+          "message": "Eliminate non-deterministic diagnostics from generic class cache",
+          "timestamp": "2026-04-25T10:57:07+02:00",
+          "tree_id": "949bede1fc42994baedbf882cf54c59fe0897374",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/35b910d70f8cb10fd8377d06fea5b068f1334c6d"
+        },
+        "date": 1777108068791,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 55.6,
             "unit": "MiB"
           }
         ]
