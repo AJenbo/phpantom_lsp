@@ -201,7 +201,10 @@ pub(in crate::completion) fn resolve_variable_in_statements<'b>(
 
     // Pre-compute top-level variable scope so that `global $x` inside
     // function bodies can look up `$x`'s type from the file's top level.
-    let top_level_scope = if ctx.top_level_scope.is_none() {
+    // Only do the expensive walk when the file actually contains a `global`
+    // keyword — the vast majority of PHP files don't use it.
+    let file_has_global_keyword = ctx.content.contains("global ");
+    let top_level_scope = if ctx.top_level_scope.is_none() && file_has_global_keyword {
         let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
             current_class: ctx.current_class,
             all_classes: ctx.all_classes,
