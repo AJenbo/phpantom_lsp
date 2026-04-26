@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Laravel config and env key navigation.** "Go to Definition" and "Find All References" now work for string-literal config keys and env variables. Ctrl-clicking `config('app.name')`, `Config::get('app.name')`, or `Config::set('app.name')` jumps to the matching key declaration in `config/app.php`. Ctrl-clicking `env('APP_KEY')` jumps to the corresponding line in `.env`. "Find All References" on a config key lists every `config()`, `Config::get()`, and `Config::set()` call site plus the declaration in `config/*.php`.
+
 - **Generics.** `@mixin` tags that reference a template parameter (e.g. `@template T of Node` combined with `@mixin T`) now resolve through the template bound, enabling completion and diagnostics for mixin-forwarded methods on generic wrapper classes.
 - **Generics.** `new $var()` where `$var` is typed as `class-string<T>` now resolves to `T`, enabling completion on dynamically instantiated objects.
 - **Return type inference from method bodies.** Methods without a declared return type or `@return` docblock now have their return type inferred by scanning the method body for `return` statements, improving completion, hover, and diagnostics for untyped code.

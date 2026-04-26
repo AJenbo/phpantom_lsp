@@ -2508,3 +2508,170 @@ return [
     // 'secret' is on line 2 (0-indexed)
     assert_eq!(definition_line(&result), 2);
 }
+
+// ─── env() go-to-definition ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_goto_definition_laravel_env_basic() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $key = env('APP_KEY');
+    }
+}
+";
+    // APP_KEY is on line 1 (0-indexed)
+    let dot_env = "APP_NAME=Laravel\nAPP_KEY=base64:abc123\nDB_HOST=127.0.0.1\n";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        (".env", dot_env),
+    ]);
+
+    // Cursor on "APP_KEY" in env('APP_KEY') — line 4, char 20.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        20,
+    )
+    .await;
+
+    let result = result.expect("Go-to-definition on env('APP_KEY') should resolve to .env");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri.as_str().ends_with("/.env"),
+        "Should jump to .env, got: {}",
+        target_uri
+    );
+    assert_eq!(
+        definition_line(&result),
+        1,
+        "APP_KEY is on line 1 (0-indexed) in .env"
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_env_with_default() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $host = env('DB_HOST', 'localhost');
+    }
+}
+";
+    // DB_HOST is on line 2 (0-indexed)
+    let dot_env = "APP_NAME=Laravel\nAPP_KEY=base64:abc123\nDB_HOST=127.0.0.1\n";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        (".env", dot_env),
+    ]);
+
+    // Cursor on "DB_HOST" in env('DB_HOST', 'localhost') — line 4, char 21.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        21,
+    )
+    .await;
+
+    let result =
+        result.expect("Go-to-definition on env() with default should still resolve to .env");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri.as_str().ends_with("/.env"),
+        "Should jump to .env, got: {}",
+        target_uri
+    );
+    assert_eq!(
+        definition_line(&result),
+        2,
+        "DB_HOST is on line 2 (0-indexed) in .env"
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_env_missing_key_falls_back_to_line_zero() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $v = env('UNDEFINED_KEY');
+    }
+}
+";
+    let dot_env = "APP_NAME=Laravel\nAPP_KEY=base64:abc123\n";
+
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        (".env", dot_env),
+    ]);
+
+    // Cursor on "UNDEFINED_KEY" — line 4, char 18.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        18,
+    )
+    .await;
+
+    // A result is still returned (pointing to .env line 0) so the editor
+    // opens the file even when the key is absent.
+    let result = result.expect("Should still return a location pointing to .env line 0");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri.as_str().ends_with("/.env"),
+        "Should jump to .env, got: {}",
+        target_uri
+    );
+    assert_eq!(
+        definition_line(&result),
+        0,
+        "Unknown key falls back to line 0"
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_env_no_dotenv_file_returns_none() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $key = env('APP_KEY');
+    }
+}
+";
+    // No .env file in the workspace.
+    let (backend, dir) = make_workspace(&[("src/Services/Service.php", service_php)]);
+
+    // Cursor on "APP_KEY" — line 4, char 20.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        20,
+    )
+    .await;
+
+    assert!(
+        result.is_none(),
+        "Should return None when .env does not exist"
+    );
+}
