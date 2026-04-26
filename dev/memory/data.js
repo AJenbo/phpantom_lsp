@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777108905086,
+  "lastUpdate": 1777247422540,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4487,6 +4487,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 45.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4724051ba829b41f95990385158be80e92b84528",
+          "message": "Import assertType test runner and generic/guard clause fixes",
+          "timestamp": "2026-04-27T01:39:13+02:00",
+          "tree_id": "d1f83fe3cc7ac822e9f0b3ff049bda418378ba20",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/4724051ba829b41f95990385158be80e92b84528"
+        },
+        "date": 1777247421140,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 46.4,
             "unit": "MiB"
           }
         ]
