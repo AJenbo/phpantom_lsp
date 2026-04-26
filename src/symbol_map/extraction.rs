@@ -1591,10 +1591,17 @@ fn extract_from_expression<'a>(
                             start: ident.span().start.offset,
                             end: ident.span().end.offset,
                             kind: SymbolKind::FunctionCall {
-                                name: name_clean,
+                                name: name_clean.clone(),
                                 is_definition: false,
                             },
                         });
+                        if name_clean.eq_ignore_ascii_case("config") {
+                            try_emit_config_key_span(
+                                &func_call.argument_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
                     }
                     _ => {
                         extract_from_expression(func_call.function, ctx, scope_start);
@@ -1685,13 +1692,26 @@ fn extract_from_expression<'a>(
                         start: ident.span.start.offset,
                         end: ident.span.end.offset,
                         kind: SymbolKind::MemberAccess {
-                            subject_text,
-                            member_name,
+                            subject_text: subject_text.clone(),
+                            member_name: member_name.clone(),
                             is_static: true,
                             is_method_call: true,
                             is_docblock_reference: false,
                         },
                     });
+                    let clean_subject = strip_fqn_prefix(&subject_text);
+                    if (clean_subject.eq_ignore_ascii_case("Config")
+                        || clean_subject
+                            .eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
+                        && (member_name.eq_ignore_ascii_case("get")
+                            || member_name.eq_ignore_ascii_case("set"))
+                    {
+                        try_emit_config_key_span(
+                            &static_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                 }
                 extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
             }
@@ -2865,6 +2885,45 @@ fn is_assert_instanceof(expr: &Expression<'_>) -> bool {
         }
     }
     false
+}
+
+/// If the first argument of `argument_list` is a non-empty, non-interpolated
+/// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
+/// string content (inside the quotes) onto `spans`.
+///
+/// Called by the `config()` function-call extractor and the
+/// `Config::get()` / `Config::set()` static-call extractor so that
+/// find-references and go-to-definition for Laravel config keys can use
+/// the pre-built symbol map instead of re-parsing every file on demand.
+fn try_emit_config_key_span(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let key = &content[inner_start as usize..inner_end as usize];
+    if key.is_empty() || !key.contains('.') {
+        // Require at least one dot: bare keys like 'app' are not valid config paths.
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::LaravelStringKey {
+            kind: crate::symbol_map::LaravelStringKind::Config,
+            key: key.to_string(),
+        },
+    });
 }
 
 /// Recursively check whether an expression contains an `instanceof` operator.

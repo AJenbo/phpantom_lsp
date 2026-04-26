@@ -35,8 +35,9 @@ use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{
     build_fqn, collect_php_files_gitignore, find_class_at_offset, offset_to_position,
-    position_to_offset, strip_fqn_prefix,
+    position_to_offset, push_unique_location, strip_fqn_prefix,
 };
+use crate::virtual_members::laravel;
 
 impl Backend {
     /// Entry point for `textDocument/references`.
@@ -64,11 +65,20 @@ impl Backend {
                 sym.start,
                 include_declaration,
             );
-            return if locations.is_empty() {
-                None
-            } else {
-                Some(locations)
-            };
+            if !locations.is_empty() {
+                return Some(locations);
+            }
+        }
+
+        // Fallback for declaration sites in config/*.php, where array keys are
+        // not in the symbol map and lookup_symbol_at_position returns None.
+        // Also handles cases where the cursor is on a string literal that was
+        // indexed as a ClassReference (e.g. 'User' => ...) but the user
+        // actually wants config references.
+        if let Some(locations) =
+            laravel::find_config_references(self, uri, content, position, include_declaration)
+        {
+            return Some(locations);
         }
 
         None
@@ -193,7 +203,19 @@ impl Backend {
                     Vec::new()
                 }
             }
+
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
+
+            SymbolKind::LaravelStringKey { kind, key } => {
+                let snapshot = self.user_file_symbol_maps();
+                laravel::find_laravel_string_key_references(
+                    self,
+                    kind,
+                    key,
+                    &snapshot,
+                    include_declaration,
+                )
+            }
         }
     }
 
@@ -371,7 +393,7 @@ impl Backend {
     /// snapshot of every symbol map whose URI does not fall under the
     /// vendor directory or the internal stub scheme.  All four cross-file
     /// reference scanners use this to restrict results to user code.
-    fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
+    pub(crate) fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
         self.ensure_workspace_indexed();
 
         let vendor_prefixes = self.vendor_uri_prefixes.lock().clone();
@@ -860,7 +882,7 @@ impl Backend {
     ///
     /// This is a lightweight resolution path used during reference scanning.
     /// It handles the common cases (`self`, `static`, `$this`, `parent`,
-    /// bare class names for static access, and typed `$variable` parameters)
+    /// bare class name for static access, and typed `$variable` parameters)
     /// without the full weight of the completion resolver.
     fn resolve_subject_to_fqns(
         &self,
@@ -1389,21 +1411,6 @@ fn class_names_match(resolved: &str, target: &str, target_short: &str) -> bool {
         return resolved == target_short;
     }
     false
-}
-
-/// Push a location only if it is not already present (deduplication).
-fn push_unique_location(locations: &mut Vec<Location>, uri: &Url, start: Position, end: Position) {
-    let already_present = locations.iter().any(|l| {
-        l.uri == *uri
-            && l.range.start.line == start.line
-            && l.range.start.character == start.character
-    });
-    if !already_present {
-        locations.push(Location {
-            uri: uri.clone(),
-            range: Range { start, end },
-        });
-    }
 }
 
 #[cfg(test)]

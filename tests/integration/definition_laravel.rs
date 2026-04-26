@@ -2095,3 +2095,416 @@ class Brand extends Model {
         line
     );
 }
+
+#[tokio::test]
+async fn test_goto_definition_laravel_config_usage_to_config_file_key() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $name = config('app.name');
+        $same = \\Config::get('app.name');
+    }
+}
+";
+    let config_app_php = "\
+<?php
+return [
+    'name' => env('APP_NAME', 'Laravel'),
+    'timezone' => 'UTC',
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    // Cursor on "app.name" in config('app.name').
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        24,
+    )
+    .await;
+
+    assert!(
+        result.is_some(),
+        "Go-to-definition on config('app.name') should resolve to config/app.php key"
+    );
+
+    let response = result.unwrap();
+    let target_uri = definition_uri(&response);
+    assert!(
+        target_uri.as_str().ends_with("/config/app.php"),
+        "Should jump to config/app.php, got: {}",
+        target_uri
+    );
+    let line = definition_line(&response);
+    assert_eq!(
+        line, 2,
+        "'name' key in config/app.php is on line 2 (0-indexed), got: {}",
+        line
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_config_nested_key() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $from = config('app.mail.from.address');
+    }
+}
+";
+    let config_app_php = "\
+<?php
+return [
+    'mail' => [
+        'from' => [
+            'address' => 'noreply@example.com',
+        ],
+    ],
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    // Cursor on "app.mail.from.address".
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        24,
+    )
+    .await;
+
+    assert!(
+        result.is_some(),
+        "Go-to-definition on nested config key should resolve to config/app.php nested key"
+    );
+
+    let response = result.unwrap();
+    let target_uri = definition_uri(&response);
+    assert!(
+        target_uri.as_str().ends_with("/config/app.php"),
+        "Should jump to config/app.php, got: {}",
+        target_uri
+    );
+    let line = definition_line(&response);
+    assert_eq!(
+        line, 4,
+        "'address' key should be on line 4 (0-indexed), got: {}",
+        line
+    );
+}
+
+// ─── Laravel config Find All References ─────────────────────────────────────
+
+/// Open `relative_path` via `did_open` and call `find_references` at the given position.
+async fn find_references_at(
+    backend: &phpantom_lsp::Backend,
+    dir: &tempfile::TempDir,
+    relative_path: &str,
+    content: &str,
+    line: u32,
+    character: u32,
+    include_declaration: bool,
+) -> Option<Vec<tower_lsp::lsp_types::Location>> {
+    let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: content.to_string(),
+            },
+        })
+        .await;
+
+    backend.find_references(
+        uri.as_str(),
+        content,
+        Position { line, character },
+        include_declaration,
+    )
+}
+
+#[tokio::test]
+async fn test_find_references_laravel_config_from_usage_site() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $name = config('app.name');
+        $same = \\Config::get('app.name');
+        \\Config::set('app.name', 'NewApp');
+    }
+}
+";
+    // config/app.php — 'name' is on line 2 (0-indexed)
+    let config_app_php = "\
+<?php
+return [
+    'name' => 'Laravel',
+    'timezone' => 'UTC',
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    // Cursor on "app.name" in config('app.name') — line 4, char 24.
+    let results = find_references_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        24,
+        true,
+    )
+    .await;
+
+    let results = results.expect("find_references should return locations for config key");
+
+    // 3 usages (config(), Config::get(), Config::set()) + 1 declaration in config/app.php
+    assert_eq!(
+        results.len(),
+        4,
+        "Expected 3 usages + 1 declaration = 4, got {}: {:#?}",
+        results.len(),
+        results
+    );
+
+    let has_declaration = results
+        .iter()
+        .any(|l| l.uri.as_str().ends_with("/config/app.php"));
+    assert!(
+        has_declaration,
+        "Expected a reference pointing to config/app.php"
+    );
+}
+
+#[tokio::test]
+async fn test_find_references_laravel_config_exclude_declaration() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $name = config('app.name');
+        $same = \\Config::get('app.name');
+        \\Config::set('app.name', 'NewApp');
+    }
+}
+";
+    let config_app_php = "\
+<?php
+return [
+    'name' => 'Laravel',
+    'timezone' => 'UTC',
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    // include_declaration = false: should return 3 usages only.
+    let results = find_references_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        24,
+        false,
+    )
+    .await;
+
+    let results = results.expect("find_references should return locations");
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 usages only (no declaration), got {}: {:#?}",
+        results.len(),
+        results
+    );
+
+    let has_config_file = results
+        .iter()
+        .any(|l| l.uri.as_str().ends_with("/config/app.php"));
+    assert!(
+        !has_config_file,
+        "Should not include config/app.php when include_declaration=false"
+    );
+}
+
+#[tokio::test]
+async fn test_find_references_laravel_config_from_declaration_site() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $name = config('app.name');
+        $same = \\Config::get('app.name');
+        \\Config::set('app.name', 'NewApp');
+    }
+}
+";
+    // 'name' key is on line 2, char 5 (inside quotes).
+    let config_app_php = "\
+<?php
+return [
+    'name' => 'Laravel',
+    'timezone' => 'UTC',
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    // Open service.php so it is indexed before querying from config/app.php.
+    let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: service_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: service_php.to_string(),
+            },
+        })
+        .await;
+
+    // Cursor on "name" key inside config/app.php — line 2, char 5.
+    let results =
+        find_references_at(&backend, &dir, "config/app.php", config_app_php, 2, 5, true).await;
+
+    let results = results.expect("find_references from declaration site should return locations");
+
+    // 3 usages + 1 declaration
+    assert_eq!(
+        results.len(),
+        4,
+        "Expected 3 usages + 1 declaration = 4 from declaration site, got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[tokio::test]
+async fn test_find_references_laravel_config_nested() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $key = config('api.keys.secret');
+    }
+}
+";
+    // config/api/keys.php
+    let config_api_keys_php = "\
+<?php
+return [
+    'secret' => 'top-secret',
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/api/keys.php", config_api_keys_php),
+    ]);
+
+    // Open service.php so it is indexed.
+    let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: service_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: service_php.to_string(),
+            },
+        })
+        .await;
+
+    // Cursor on \"secret\" key inside config/api/keys.php — line 2, char 5.
+    let results = find_references_at(
+        &backend,
+        &dir,
+        "config/api/keys.php",
+        config_api_keys_php,
+        2,
+        5,
+        true,
+    )
+    .await;
+
+    let results = results.expect("find_references from nested config should return locations");
+
+    // 1 usage + 1 declaration
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 1 usage + 1 declaration = 2 from nested config, got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_laravel_config_nested() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $key = config('api.keys.secret');
+    }
+}
+";
+    // config/api/keys.php
+    let config_api_keys_php = "\
+<?php
+return [
+    'secret' => 'top-secret',
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/api/keys.php", config_api_keys_php),
+    ]);
+
+    // Cursor on "api.keys.secret" — line 4, char 24.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        24,
+    )
+    .await;
+
+    let result = result.expect("Should find definition for nested config key");
+    let target_uri = definition_uri(&result);
+    assert!(target_uri.as_str().ends_with("/config/api/keys.php"));
+    // 'secret' is on line 2 (0-indexed)
+    assert_eq!(definition_line(&result), 2);
+}

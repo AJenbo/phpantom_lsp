@@ -2064,6 +2064,34 @@ class SignatureHelpDemo
 }
 
 
+// ── Laravel Config & Env Navigation ─────────────────────────────────────────
+
+class LaravelConfigEnvDemo
+{
+    /**
+     * "Go to Definition" and "Find All References" for config keys and env vars.
+     *
+     * Try:
+     *  1. Ctrl+Click "app.name" to jump to config/app.php (mocked in tests).
+     *  2. Ctrl+Click "APP_KEY" to jump to .env (mocked in tests).
+     *  3. "Find All References" on "app.name" to see all usage sites.
+     */
+    public function demo(): void
+    {
+        // Global helper
+        config('app.name');
+
+        // Facade methods
+        \Config::get('app.name');
+        \Illuminate\Support\Facades\Config::set('app.env', 'production');
+
+        // Env helper
+        env('APP_KEY');
+        env('DB_PASSWORD', 'secret');
+    }
+}
+
+
 // ── Callable Snippet Insertion ──────────────────────────────────────────────
 
 class SnippetInsertionDemo
@@ -6518,7 +6546,26 @@ function runDemoAssertions(): void
     $pen = $demo->getPens()->current();
     assert($pen instanceof Pen, 'ArrayIterator<int, Pen>::current() must return Pen');
 
+    // ── Laravel Config ────────────────────────────────────────────────
+    assert(config('app.name', 'Default') === 'Default', 'config() should return default');
+    assert(\Config::get('app.name', 'Default') === 'Default', 'Config::get() should return default');
+
     echo "All assertions passed.\n";
+}
+
+// ── Laravel Config (definition & references) ────────────────────────────────
+// Try: Ctrl+Click 'app.name' or 'database.default' to jump to the declaration
+// in config/app.php or config/database.php.
+// Try: "Find All References" on 'app.name' to find other usages.
+
+class LaravelConfigDemo
+{
+    public function demo(): void
+    {
+        config('app.name');
+        \Config::get('database.default');
+        \Config::set('app.timezone', 'UTC');
+    }
 }
 
 runDemoAssertions();
@@ -6529,6 +6576,24 @@ runDemoAssertions();
 // Minimal stubs matching real Laravel classes so that the Eloquent demo models
 // above resolve Builder methods, relationship properties, and scope forwarding
 // without requiring a real Laravel installation.
+
+namespace {
+    /**
+     * Get / set the specified configuration value.
+     *
+     * @param  array|string|null  $key
+     * @param  mixed  $default
+     * @return mixed
+     */
+    function config($key = null, $default = null) { return $default; }
+
+    class Config {
+        /** @return mixed */
+        public static function get(string $key, $default = null) { return $default; }
+        /** @return void */
+        public static function set(string $key, $value = null) {}
+    }
+}
 
 namespace Illuminate\Database\Eloquent {
 

@@ -808,6 +808,8 @@ impl Backend {
                     None => None,
                 }
             }
+
+            SymbolKind::LaravelStringKey { .. } => None,
         }
     }
 
