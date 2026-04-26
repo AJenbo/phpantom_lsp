@@ -183,6 +183,272 @@ pub(crate) fn accessor_method_candidates(property_name: &str) -> Vec<String> {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
+// ─── Shared PHP AST walker ───────────────────────────────────────────────────
+
+use bumpalo::Bump;
+use mago_database::file::FileId;
+use mago_syntax::ast::*;
+
+/// Parse `content` as PHP and call `visitor` for every expression node
+/// (pre-order, depth-first).  Used by navigation modules to find specific
+/// function and static-method call patterns without duplicating the full
+/// statement-walker boilerplate.
+pub(crate) fn walk_all_php_expressions(content: &str, visitor: &mut impl FnMut(&Expression<'_>)) {
+    let arena = Bump::new();
+    let file_id = FileId::new("input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content);
+    for stmt in program.statements.iter() {
+        walk_stmt_exprs(stmt, visitor);
+    }
+}
+
+/// Extract the raw string value and inner byte offsets from a PHP string
+/// literal expression.  Returns `(value, inner_start, inner_end)` where
+/// `content[inner_start..inner_end]` is the string content without quotes.
+pub(crate) fn extract_string_literal<'c>(
+    expr: &Expression<'_>,
+    content: &'c str,
+) -> Option<(&'c str, usize, usize)> {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return None;
+    };
+    let start = s.span.start.offset as usize + 1;
+    let end = s.span.end.offset as usize - 1;
+    if start >= end || end > content.len() {
+        return None;
+    }
+    Some((&content[start..end], start, end))
+}
+
+fn walk_stmt_exprs(stmt: &Statement<'_>, f: &mut impl FnMut(&Expression<'_>)) {
+    match stmt {
+        Statement::Expression(e) => walk_expr_depth(e.expression, f),
+        Statement::Return(r) => {
+            if let Some(v) = r.value {
+                walk_expr_depth(v, f);
+            }
+        }
+        Statement::Echo(e) => {
+            for v in e.values.iter() {
+                walk_expr_depth(v, f);
+            }
+        }
+        Statement::Namespace(ns) => {
+            for s in ns.statements().iter() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Statement::Block(b) => {
+            for s in b.statements.iter() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Statement::If(if_stmt) => {
+            walk_expr_depth(if_stmt.condition, f);
+            for s in if_stmt.body.statements() {
+                walk_stmt_exprs(s, f);
+            }
+            for stmts in if_stmt.body.else_if_statements() {
+                for s in stmts {
+                    walk_stmt_exprs(s, f);
+                }
+            }
+            if let Some(else_stmts) = if_stmt.body.else_statements() {
+                for s in else_stmts {
+                    walk_stmt_exprs(s, f);
+                }
+            }
+        }
+        Statement::While(w) => {
+            walk_expr_depth(w.condition, f);
+            for s in w.body.statements() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Statement::DoWhile(dw) => {
+            walk_expr_depth(dw.condition, f);
+            walk_stmt_exprs(dw.statement, f);
+        }
+        Statement::For(fs) => {
+            for s in fs.body.statements() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Statement::Foreach(fe) => {
+            walk_expr_depth(fe.expression, f);
+            for s in fe.body.statements() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Statement::Try(t) => {
+            for s in t.block.statements.iter() {
+                walk_stmt_exprs(s, f);
+            }
+            for catch in t.catch_clauses.iter() {
+                for s in catch.block.statements.iter() {
+                    walk_stmt_exprs(s, f);
+                }
+            }
+            if let Some(ref fin) = t.finally_clause {
+                for s in fin.block.statements.iter() {
+                    walk_stmt_exprs(s, f);
+                }
+            }
+        }
+        Statement::Switch(sw) => {
+            walk_expr_depth(sw.expression, f);
+            for case in sw.body.cases().iter() {
+                match case {
+                    SwitchCase::Expression(c) => {
+                        walk_expr_depth(c.expression, f);
+                        for s in c.statements.iter() {
+                            walk_stmt_exprs(s, f);
+                        }
+                    }
+                    SwitchCase::Default(c) => {
+                        for s in c.statements.iter() {
+                            walk_stmt_exprs(s, f);
+                        }
+                    }
+                }
+            }
+        }
+        Statement::Function(func) => {
+            for s in func.body.statements.iter() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Statement::Class(class) => {
+            for member in class.members.iter() {
+                walk_class_member_exprs(member, f);
+            }
+        }
+        Statement::Interface(iface) => {
+            for member in iface.members.iter() {
+                walk_class_member_exprs(member, f);
+            }
+        }
+        Statement::Trait(t) => {
+            for member in t.members.iter() {
+                walk_class_member_exprs(member, f);
+            }
+        }
+        Statement::Enum(e) => {
+            for member in e.members.iter() {
+                walk_class_member_exprs(member, f);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_class_member_exprs(member: &ClassLikeMember<'_>, f: &mut impl FnMut(&Expression<'_>)) {
+    if let ClassLikeMember::Method(method) = member
+        && let MethodBody::Concrete(body) = &method.body
+    {
+        for s in body.statements.iter() {
+            walk_stmt_exprs(s, f);
+        }
+    }
+}
+
+fn walk_expr_depth(expr: &Expression<'_>, f: &mut impl FnMut(&Expression<'_>)) {
+    f(expr);
+    match expr {
+        Expression::Call(call) => match call {
+            Call::Function(fc) => {
+                walk_expr_depth(fc.function, f);
+                for arg in fc.argument_list.arguments.iter() {
+                    walk_expr_depth(arg.value(), f);
+                }
+            }
+            Call::StaticMethod(sc) => {
+                for arg in sc.argument_list.arguments.iter() {
+                    walk_expr_depth(arg.value(), f);
+                }
+            }
+            Call::Method(mc) => {
+                walk_expr_depth(mc.object, f);
+                for arg in mc.argument_list.arguments.iter() {
+                    walk_expr_depth(arg.value(), f);
+                }
+            }
+            Call::NullSafeMethod(mc) => {
+                walk_expr_depth(mc.object, f);
+                for arg in mc.argument_list.arguments.iter() {
+                    walk_expr_depth(arg.value(), f);
+                }
+            }
+        },
+        Expression::Binary(b) => {
+            walk_expr_depth(b.lhs, f);
+            walk_expr_depth(b.rhs, f);
+        }
+        Expression::UnaryPrefix(u) => walk_expr_depth(u.operand, f),
+        Expression::UnaryPostfix(u) => walk_expr_depth(u.operand, f),
+        Expression::Parenthesized(p) => walk_expr_depth(p.expression, f),
+        Expression::Assignment(a) => {
+            walk_expr_depth(a.lhs, f);
+            walk_expr_depth(a.rhs, f);
+        }
+        Expression::Conditional(c) => {
+            walk_expr_depth(c.condition, f);
+            if let Some(then) = c.then {
+                walk_expr_depth(then, f);
+            }
+            walk_expr_depth(c.r#else, f);
+        }
+        Expression::Array(arr) => {
+            for el in arr.elements.iter() {
+                walk_array_el_depth(el, f);
+            }
+        }
+        Expression::LegacyArray(arr) => {
+            for el in arr.elements.iter() {
+                walk_array_el_depth(el, f);
+            }
+        }
+        Expression::ArrayAccess(a) => {
+            walk_expr_depth(a.array, f);
+            walk_expr_depth(a.index, f);
+        }
+        Expression::Closure(c) => {
+            for s in c.body.statements.iter() {
+                walk_stmt_exprs(s, f);
+            }
+        }
+        Expression::ArrowFunction(af) => walk_expr_depth(af.expression, f),
+        Expression::Match(m) => {
+            walk_expr_depth(m.expression, f);
+            for arm in m.arms.iter() {
+                match arm {
+                    MatchArm::Expression(ea) => {
+                        for cond in ea.conditions.iter() {
+                            walk_expr_depth(cond, f);
+                        }
+                        walk_expr_depth(ea.expression, f);
+                    }
+                    MatchArm::Default(da) => walk_expr_depth(da.expression, f),
+                }
+            }
+        }
+        Expression::Throw(t) => walk_expr_depth(t.exception, f),
+        _ => {}
+    }
+}
+
+fn walk_array_el_depth(el: &ArrayElement<'_>, f: &mut impl FnMut(&Expression<'_>)) {
+    match el {
+        ArrayElement::KeyValue(kv) => {
+            walk_expr_depth(kv.key, f);
+            walk_expr_depth(kv.value, f);
+        }
+        ArrayElement::Value(v) => walk_expr_depth(v.value, f),
+        ArrayElement::Variadic(v) => walk_expr_depth(v.value, f),
+        ArrayElement::Missing(_) => {}
+    }
+}
+
 #[cfg(test)]
 #[path = "helpers_tests.rs"]
 mod tests;
