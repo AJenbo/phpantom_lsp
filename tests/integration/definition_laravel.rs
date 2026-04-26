@@ -2525,10 +2525,8 @@ class Service {
     // APP_KEY is on line 1 (0-indexed)
     let dot_env = "APP_NAME=Laravel\nAPP_KEY=base64:abc123\nDB_HOST=127.0.0.1\n";
 
-    let (backend, dir) = make_workspace(&[
-        ("src/Services/Service.php", service_php),
-        (".env", dot_env),
-    ]);
+    let (backend, dir) =
+        make_workspace(&[("src/Services/Service.php", service_php), (".env", dot_env)]);
 
     // Cursor on "APP_KEY" in env('APP_KEY') — line 4, char 20.
     let result = goto_definition_at(
@@ -2569,10 +2567,8 @@ class Service {
     // DB_HOST is on line 2 (0-indexed)
     let dot_env = "APP_NAME=Laravel\nAPP_KEY=base64:abc123\nDB_HOST=127.0.0.1\n";
 
-    let (backend, dir) = make_workspace(&[
-        ("src/Services/Service.php", service_php),
-        (".env", dot_env),
-    ]);
+    let (backend, dir) =
+        make_workspace(&[("src/Services/Service.php", service_php), (".env", dot_env)]);
 
     // Cursor on "DB_HOST" in env('DB_HOST', 'localhost') — line 4, char 21.
     let result = goto_definition_at(
@@ -2613,10 +2609,8 @@ class Service {
 ";
     let dot_env = "APP_NAME=Laravel\nAPP_KEY=base64:abc123\n";
 
-    let (backend, dir) = make_workspace(&[
-        ("src/Services/Service.php", service_php),
-        (".env", dot_env),
-    ]);
+    let (backend, dir) =
+        make_workspace(&[("src/Services/Service.php", service_php), (".env", dot_env)]);
 
     // Cursor on "UNDEFINED_KEY" — line 4, char 18.
     let result = goto_definition_at(
