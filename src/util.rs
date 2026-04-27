@@ -87,6 +87,19 @@ pub(crate) fn resolve_name_via_loader(
         .unwrap_or_else(|| name.to_string())
 }
 
+/// Resolve all class names inside a [`PhpType`] to their fully-qualified
+/// forms using the class loader.  Scalar/keyword types are left untouched.
+///
+/// This should be called on any `PhpType` that originates from raw source
+/// text (docblock annotations, AST identifiers) before it is stored in a
+/// [`ResolvedType`](crate::types::ResolvedType).
+pub(crate) fn resolve_php_type_names(
+    ty: &crate::php_type::PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader))
+}
+
 /// Check whether two LSP ranges overlap (share at least one character
 /// position).
 ///

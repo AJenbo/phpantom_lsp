@@ -641,7 +641,11 @@ fn resolve_rhs_instantiation(
         _ => None,
     };
     if let Some(name) = class_name {
-        let parsed_name = PhpType::Named(name.to_string());
+        let fqn = match name {
+            "self" | "static" => ctx.current_class.name.to_string(),
+            other => crate::util::resolve_name_via_loader(other, ctx.class_loader),
+        };
+        let parsed_name = PhpType::Named(fqn);
         let classes = crate::completion::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
             &ctx.current_class.name,
@@ -1153,6 +1157,7 @@ fn resolve_rhs_array_access<'b>(
         if let Expression::Variable(Variable::Direct(base_dv)) = current_expr {
             let base_var = base_dv.name.to_string();
             docblock::find_iterable_raw_type_in_source(ctx.content, access_offset, &base_var)
+                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
                 .or_else(|| {
                     let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
                     if resolved.is_empty() {
@@ -1490,7 +1495,9 @@ fn resolve_arg_variable_raw_type(
         rctx.content,
         rctx.cursor_offset as usize,
         var_name,
-    ) {
+    )
+    .map(|t| crate::util::resolve_php_type_names(&t, rctx.class_loader))
+    {
         return Some(raw);
     }
 
@@ -1847,6 +1854,7 @@ fn resolve_rhs_function_call<'b>(
         //    `@param callable(int): Response $fn`
         if let Some(raw_type) =
             crate::docblock::find_iterable_raw_type_in_source(content, offset, &var_name)
+                .map(|t| crate::util::resolve_php_type_names(&t, class_loader))
             && let Some(ret_type) = raw_type.callable_return_type()
         {
             let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(

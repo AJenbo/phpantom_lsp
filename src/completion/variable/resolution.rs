@@ -1392,7 +1392,8 @@ pub(in crate::completion) fn resolve_arg_raw_type<'b>(
         let var_text = dv.name.to_string();
         let offset = arg_expr.span().start.offset as usize;
         let from_docblock =
-            docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text);
+            docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
+                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
         if let Some(raw) = from_docblock {
             return Some(raw);
         }

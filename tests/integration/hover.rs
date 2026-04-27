@@ -9898,3 +9898,121 @@ function test($value): void {
         text
     );
 }
+
+/// Inline `@var` with a use-imported short name must resolve to FQN in hover.
+#[test]
+fn hover_inline_var_docblock_resolves_short_name_to_fqn() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": { "App\\": "src/" }
+            }
+        }"#,
+        &[
+            (
+                "src/Models/Order.php",
+                r#"<?php
+namespace App\Models;
+class Order {
+    public string $id;
+}
+"#,
+            ),
+            (
+                "src/Service.php",
+                r#"<?php
+namespace App;
+use App\Models\Order;
+class Service {
+    public function run(): void {
+        /** @var Order $order */
+        $order = $this->fetchOrder();
+        $order->id;
+    }
+    private function fetchOrder(): mixed { return null; }
+}
+"#,
+            ),
+        ],
+    );
+
+    let order_uri = format!(
+        "file://{}",
+        _dir.path().join("src/Models/Order.php").display()
+    );
+    let order_content = std::fs::read_to_string(_dir.path().join("src/Models/Order.php")).unwrap();
+    backend.update_ast(&order_uri, &order_content);
+
+    let service_uri = format!("file://{}", _dir.path().join("src/Service.php").display());
+    let service_content = std::fs::read_to_string(_dir.path().join("src/Service.php")).unwrap();
+
+    // Hover on `$order` usage at line 7 (`$order->id`, 0-indexed)
+    let hover =
+        hover_at(&backend, &service_uri, &service_content, 7, 9).expect("expected hover on $order");
+    let text = hover_text(&hover);
+    // The type must be resolved: the namespace line shows where the class
+    // lives and the short name is used for display.  Before the fix, the
+    // namespace line was missing because the type was never resolved to FQN.
+    assert!(
+        text.contains("App\\Models") && text.contains("Order"),
+        "inline @var should resolve short name to FQN (namespace + short name), got: {}",
+        text
+    );
+}
+
+/// `new ClassName()` with a use-imported short name must show FQN in hover.
+#[test]
+fn hover_instantiation_resolves_short_name_to_fqn() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": { "App\\": "src/" }
+            }
+        }"#,
+        &[
+            (
+                "src/Models/Invoice.php",
+                r#"<?php
+namespace App\Models;
+class Invoice {
+    public string $number;
+}
+"#,
+            ),
+            (
+                "src/Handler.php",
+                r#"<?php
+namespace App;
+use App\Models\Invoice;
+class Handler {
+    public function handle(): void {
+        $inv = new Invoice();
+        $inv->number;
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let invoice_uri = format!(
+        "file://{}",
+        _dir.path().join("src/Models/Invoice.php").display()
+    );
+    let invoice_content =
+        std::fs::read_to_string(_dir.path().join("src/Models/Invoice.php")).unwrap();
+    backend.update_ast(&invoice_uri, &invoice_content);
+
+    let handler_uri = format!("file://{}", _dir.path().join("src/Handler.php").display());
+    let handler_content = std::fs::read_to_string(_dir.path().join("src/Handler.php")).unwrap();
+
+    // Hover on `$inv` usage at line 6 (`$inv->number`, 0-indexed)
+    let hover =
+        hover_at(&backend, &handler_uri, &handler_content, 6, 9).expect("expected hover on $inv");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("App\\Models") && text.contains("Invoice"),
+        "new ClassName() should resolve short name to FQN (namespace + short name), got: {}",
+        text
+    );
+}

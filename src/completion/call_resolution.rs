@@ -1160,7 +1160,9 @@ impl Backend {
                     content,
                     cursor_offset as usize,
                     var_name,
-                ) && let Some(ret_type) = raw_type.callable_return_type()
+                )
+                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+                    && let Some(ret_type) = raw_type.callable_return_type()
                 {
                     let classes: Vec<Arc<ClassInfo>> =
                         super::type_resolution::type_hint_to_classes_typed(
@@ -2369,7 +2371,9 @@ impl Backend {
                 ctx.content,
                 ctx.cursor_offset as usize,
                 arg_text,
-            ) {
+            )
+            .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+            {
                 return Some(raw);
             }
             // Fall back to the unified variable resolution pipeline.

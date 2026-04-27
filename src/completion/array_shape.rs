@@ -512,14 +512,14 @@ impl Backend {
         file_ctx: &FileContext,
     ) -> Option<PhpType> {
         // 1. Direct @var / @param annotation on the variable.
+        let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset as u32);
+        let class_loader = self.class_loader(file_ctx);
+
         if let Some(raw) =
             docblock::find_iterable_raw_type_in_source(content, cursor_offset, var_name)
         {
-            return Some(raw);
+            return Some(crate::util::resolve_php_type_names(&raw, &class_loader));
         }
-
-        let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset as u32);
-        let class_loader = self.class_loader(file_ctx);
 
         // 2. Unified variable resolver — handles array literals with
         //    incremental key assignments, push-style assignments, and

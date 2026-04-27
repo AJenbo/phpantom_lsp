@@ -7,45 +7,7 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.
 
-## B2 — Variable resolution pipeline produces short names instead of FQN
 
-**Root cause:** The variable resolution pipeline returns
-`ResolvedType` values whose `type_string` field contains short
-class names taken verbatim from docblock text or AST identifiers.
-The pipeline never resolves these names through the use-map or
-class loader before storing them.
-
-**Where to fix:** Every code path that produces a `ResolvedType`
-from raw source text must resolve names to FQN before returning.
-The fix belongs in the resolution pipeline itself, not in each
-downstream consumer. Specifically:
-
-- `try_inline_var_override` in `completion/variable/resolution.rs`
-  gets a `PhpType` from `find_inline_var_docblock` and passes it
-  to `from_type_string` or `from_classes_with_hint` without
-  resolving names through the use-map. It must resolve first.
-- `resolve_rhs_instantiation` in `completion/variable/rhs_resolution.rs`
-  constructs `PhpType::Named(name.to_string())` from the raw AST
-  identifier (short name). It must resolve the name to FQN before
-  wrapping it.
-- `try_standalone_var_docblock` in `closure_resolution.rs` has the
-  same pattern as `try_inline_var_override`.
-- `find_iterable_raw_type_in_source` and `find_var_raw_type_in_source`
-  in `docblock/tags.rs` return raw docblock types. Every caller
-  that stores them in a `ResolvedType` must resolve names first.
-
-Current mitigation: `collect_type_error_diagnostics` applies
-`resolve_names` with the class loader on every resolved argument
-type before comparison. This papers over the problem for one
-consumer but leaves others broken (hover type display, definition
-matching, etc.).
-
-The proper fix is to always store FQN in `type_string` at the
-point of creation and shorten at display time (the way
-`implement_methods.rs` already does with `shorten_type`).
-Consumers that need short names for user-facing output (e.g.
-PHPDoc generation code actions) should shorten on the way out,
-not expect short names from the pipeline.
 
 ## B3 — Array access on bare `array` returns empty instead of `mixed`
 

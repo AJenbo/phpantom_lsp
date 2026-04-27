@@ -716,7 +716,8 @@ fn seed_closure_params(
             fn_span_start as usize,
             &pname,
         )
-        .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize));
+        .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize))
+        .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
 
         let effective_type = crate::docblock::resolve_effective_type_typed(
             native_type.as_ref(),
@@ -2272,6 +2273,7 @@ fn seed_params<'b>(
             if let Some((var_type, _name)) =
                 crate::docblock::find_inline_var_docblock(ctx.content, param_offset)
             {
+                let var_type = crate::util::resolve_php_type_names(&var_type, ctx.class_loader);
                 let effective = crate::docblock::resolve_effective_type_typed(
                     native_type.as_ref(),
                     Some(&var_type),
@@ -2359,7 +2361,8 @@ pub(super) fn resolve_param_type(
         ctx.content,
         method_span_start as usize,
         pname,
-    );
+    )
+    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
 
     // Pick the effective type: docblock overrides native when it is
     // a compatible refinement.  Use the enriched type (e.g.
@@ -3967,7 +3970,7 @@ fn process_destructuring_assignment<'b>(
     let stmt_offset = assignment.span().start.offset as usize;
     let raw_type: Option<PhpType> =
         crate::docblock::find_inline_var_docblock(ctx.content, stmt_offset)
-            .map(|(vt, _)| vt)
+            .map(|(vt, _)| crate::util::resolve_php_type_names(&vt, ctx.class_loader))
             .or_else(|| {
                 super::foreach_resolution::resolve_expression_type(assignment.rhs, &var_ctx)
             });
@@ -5427,7 +5430,9 @@ fn resolve_foreach_iterable_type<'b>(
             ctx.content,
             foreach_offset,
             &var_name,
-        ) {
+        )
+        .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+        {
             // Expand type aliases on the docblock result too.
             let expanded = crate::completion::type_resolution::resolve_type_alias_typed(
                 &docblock_type,
@@ -6796,7 +6801,8 @@ fn resolve_in_array_element_type_fw(
         // Fall back to docblock annotation.
         let offset = haystack_expr.span().start.offset as usize;
         let from_docblock =
-            crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_name);
+            crate::docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_name)
+                .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
         if let Some(raw) = from_docblock
             && let Some(elem) = raw.extract_element_type()
         {

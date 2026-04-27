@@ -708,7 +708,8 @@ fn resolve_target_classes_expr_inner_impl(
                 ctx.content,
                 ctx.cursor_offset as usize,
                 &base_var,
-            );
+            )
+            .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
             // resolve_variable_types is designed for bare `$variable` names;
             // property chains like `$this->query->joins` are handled by the
             // property_raw_type strategy above.  Skip this strategy for

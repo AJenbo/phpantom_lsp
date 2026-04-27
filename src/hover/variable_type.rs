@@ -97,7 +97,7 @@ pub(crate) fn resolve_variable_type(
         docblock::find_var_raw_type_in_source(content, cursor_offset as usize, var_name)
         && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, var_name)
     {
-        return Some(var_type);
+        return Some(crate::util::resolve_php_type_names(&var_type, class_loader));
     }
 
     // 2–4. AST-based: parameter, foreach, catch

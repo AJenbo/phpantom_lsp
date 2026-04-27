@@ -129,7 +129,7 @@ fn infer_element_type<'b>(
             if let Some(t) =
                 docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
             {
-                return Some(t);
+                return Some(crate::util::resolve_php_type_names(&t, ctx.class_loader));
             }
             // When a scope variable resolver is available (i.e. we are
             // inside the forward walker), read the variable's type
