@@ -268,6 +268,8 @@ impl Backend {
                         (TT_ENUM_MEMBER, TM_READONLY)
                     }
                 }
+
+                SymbolKind::LaravelStringKey { .. } => continue,
             };
 
             if let Some(abs) =

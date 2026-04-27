@@ -1925,6 +1925,26 @@ pub(crate) fn find_enclosing_method_block_in_members<'a>(
     None
 }
 
+/// Push a location only if it is not already present (deduplication).
+pub fn push_unique_location(
+    locations: &mut Vec<Location>,
+    uri: &Url,
+    start: Position,
+    end: Position,
+) {
+    let already_present = locations.iter().any(|l| {
+        l.uri == *uri
+            && l.range.start.line == start.line
+            && l.range.start.character == start.character
+    });
+    if !already_present {
+        locations.push(Location {
+            uri: uri.clone(),
+            range: Range { start, end },
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

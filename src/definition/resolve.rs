@@ -24,6 +24,7 @@ use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::{AccessKind, ClassInfo};
 use crate::util::{find_class_at_offset, position_to_offset, short_name};
+use crate::virtual_members::laravel;
 
 impl Backend {
     /// Handle a "go to definition" request.
@@ -40,9 +41,22 @@ impl Backend {
         // Consult precomputed symbol map (retries one byte earlier for
         // end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);
-        symbol
-            .as_ref()
-            .and_then(|s| self.resolve_from_symbol(&s.kind, uri, content, position, s.start))
+        if let Some(ref s) = symbol
+            && let Some(resolved) =
+                self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
+        {
+            return Some(resolved);
+        }
+
+        // Laravel config fallback: declaration sites in config/*.php
+        if let Some(loc) =
+            laravel::resolve_config_key_definition_fallback(self, uri, content, position)
+        {
+            return Some(loc);
+        }
+
+        // env() fallback: not yet indexed in the symbol map.
+        laravel::resolve_env_definition(self, content, position)
     }
 
     /// Look up the symbol at the given byte offset in the precomputed
@@ -291,6 +305,10 @@ impl Backend {
                 // handles standalone `define()` constants and bare constant
                 // references only.
                 self.resolve_constant_definition(&candidates)
+            }
+
+            SymbolKind::LaravelStringKey { kind, key } => {
+                laravel::resolve_laravel_string_key(self, kind, key)
             }
         }
     }

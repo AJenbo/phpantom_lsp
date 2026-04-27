@@ -78,12 +78,57 @@
 mod accessors;
 mod builder;
 mod casts;
+mod config_keys;
+mod env_vars;
 mod factory;
 mod helpers;
 pub(crate) mod patches;
 mod relationships;
 mod scopes;
 mod where_property;
+
+pub(crate) use config_keys::find_config_references;
+pub(crate) use config_keys::{
+    find_all_config_references, resolve_config_key_declaration,
+    resolve_config_key_definition_fallback,
+};
+pub(crate) use env_vars::resolve_env_definition;
+
+/// Unified go-to-definition entry point for all Laravel string-key spans.
+///
+/// Dispatches on [`crate::symbol_map::LaravelStringKind`] so callers in
+/// `definition/resolve.rs` only need one import and one call site.  Adding a
+/// new Laravel navigation feature only requires a new match arm here, not a
+/// new `pub(crate) use` in this file.
+pub(crate) fn resolve_laravel_string_key(
+    backend: &crate::Backend,
+    kind: &crate::symbol_map::LaravelStringKind,
+    key: &str,
+) -> Option<tower_lsp::lsp_types::Location> {
+    use crate::symbol_map::LaravelStringKind;
+    match kind {
+        LaravelStringKind::Config => resolve_config_key_declaration(backend, key),
+    }
+}
+
+/// Unified find-references entry point for all Laravel string-key spans.
+///
+/// Dispatches on [`crate::symbol_map::LaravelStringKind`] — see
+/// [`resolve_laravel_string_key`] for the same rationale.
+pub(crate) fn find_laravel_string_key_references(
+    backend: &crate::Backend,
+    kind: &crate::symbol_map::LaravelStringKind,
+    key: &str,
+    snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
+    include_declaration: bool,
+) -> Vec<tower_lsp::lsp_types::Location> {
+    use crate::symbol_map::LaravelStringKind;
+    match kind {
+        LaravelStringKind::Config => {
+            find_all_config_references(backend, key, snapshot, include_declaration)
+        }
+    }
+}
 
 pub use helpers::extends_eloquent_model;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};

@@ -539,6 +539,7 @@ impl Backend {
             SymbolKind::ConstantReference { name } => Some((name.clone(), range)),
             SymbolKind::NamespaceDeclaration { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
+            SymbolKind::LaravelStringKey { .. } => None,
         }
     }
 

@@ -167,12 +167,39 @@ pub(crate) enum SymbolKind {
         /// or class constant — constants are always accessed statically).
         is_static: bool,
     },
+
     /// A namespace name at its declaration site (`namespace App\Models;`).
     /// Used by the rename handler to support namespace renaming.
     NamespaceDeclaration {
         /// The full namespace name (e.g. `"App\\Models"`).
         name: String,
     },
+
+    /// A Laravel string-key literal (config key, route name, view name, etc.)
+    /// inside a framework helper call such as `config()`, `route()`, `view()`,
+    /// `Config::get()`, or `Config::set()`.
+    ///
+    /// The span covers the string content *inside* the quotes so that
+    /// go-to-definition and find-references can work without re-parsing
+    /// the file at request time.
+    LaravelStringKey {
+        /// The category of the key (e.g. `Config`, `Route`, `View`).
+        kind: LaravelStringKind,
+        /// The key value, e.g. `"app.name"` or `"users.index"`.
+        key: String,
+    },
+}
+
+/// Identifies the category of a [`SymbolKind::LaravelStringKey`] span.
+///
+/// Adding a new Laravel navigation feature only requires adding a variant
+/// here and updating the extraction and dispatch paths — the exhaustive
+/// match arms in `highlight`, `hover`, `rename`, `semantic_tokens`, and
+/// `type_definition` do not need to change.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum LaravelStringKind {
+    /// A `config('dot.key')` or `Config::get('dot.key')` call.
+    Config,
 }
 
 // ─── Template parameter definition site structures ──────────────────────────
