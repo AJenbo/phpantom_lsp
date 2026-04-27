@@ -2469,6 +2469,187 @@ return [
 }
 
 #[tokio::test]
+async fn test_goto_definition_laravel_config_typed_accessors() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $a = \\Config::string('app.name');
+        $b = \\Config::has('app.timezone');
+        $c = \\Config::integer('app.retry');
+        $d = \\Config::boolean('app.debug');
+        $e = \\Config::float('app.rate');
+        $f = \\Config::array('app.providers');
+        $g = \\Config::collection('app.providers');
+        $h = \\Config::prepend('app.providers', 'X');
+        $i = \\Config::push('app.providers', 'Y');
+    }
+}
+";
+    let config_app_php = "\
+<?php
+return [
+    'name' => 'Laravel',
+    'timezone' => 'UTC',
+    'retry' => 3,
+    'debug' => true,
+    'rate' => 1.5,
+    'providers' => [],
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    // Config::string('app.name') — cursor on "app.name"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        4,
+        35,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::string('app.name') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(definition_line(&response), 2, "Config::string → 'name' key");
+
+    // Config::has('app.timezone') — cursor on "app.timezone"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        5,
+        30,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::has('app.timezone') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        3,
+        "Config::has → 'timezone' key"
+    );
+
+    // Config::integer('app.retry') — cursor on "app.retry"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        6,
+        36,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::integer('app.retry') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        4,
+        "Config::integer → 'retry' key"
+    );
+
+    // Config::boolean('app.debug') — cursor on "app.debug"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        7,
+        36,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::boolean('app.debug') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        5,
+        "Config::boolean → 'debug' key"
+    );
+
+    // Config::float('app.rate') — cursor on "app.rate"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        8,
+        33,
+    )
+    .await;
+    assert!(result.is_some(), "Config::float('app.rate') should resolve");
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(definition_line(&response), 6, "Config::float → 'rate' key");
+
+    // Config::array('app.providers') — cursor on "app.providers"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        9,
+        33,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::array('app.providers') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        7,
+        "Config::array → 'providers' key"
+    );
+}
+
+#[tokio::test]
 async fn test_goto_definition_laravel_config_nested() {
     let service_php = "\
 <?php

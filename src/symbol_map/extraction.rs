@@ -1703,8 +1703,20 @@ fn extract_from_expression<'a>(
                     if (clean_subject.eq_ignore_ascii_case("Config")
                         || clean_subject
                             .eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
-                        && (member_name.eq_ignore_ascii_case("get")
-                            || member_name.eq_ignore_ascii_case("set"))
+                        && matches!(
+                            member_name.to_ascii_lowercase().as_str(),
+                            "has"
+                                | "get"
+                                | "string"
+                                | "integer"
+                                | "float"
+                                | "boolean"
+                                | "array"
+                                | "collection"
+                                | "set"
+                                | "prepend"
+                                | "push"
+                        )
                     {
                         try_emit_config_key_span(
                             &static_call.argument_list,
