@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777317873573,
+  "lastUpdate": 1777319609619,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4657,6 +4657,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fa1e31534c53f02c6d4916be9f88f1463bd83781",
+          "message": "Preserve class-level template parameters through chained method calls",
+          "timestamp": "2026-04-27T21:42:18+02:00",
+          "tree_id": "ca5a5c92d68b14a8d7f1d9bc44ec90811d1cf0c0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/fa1e31534c53f02c6d4916be9f88f1463bd83781"
+        },
+        "date": 1777319608597,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.1,
             "unit": "MiB"
           }
         ]
