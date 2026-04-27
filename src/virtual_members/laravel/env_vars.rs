@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use mago_syntax::ast::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
@@ -36,15 +38,14 @@ pub(crate) fn resolve_env_definition(
 fn find_env_usage_at_cursor(content: &str, cursor_offset: usize) -> Option<String> {
     let mut found: Option<String> = None;
     walk_all_php_expressions(content, &mut |expr| {
-        if found.is_some() {
-            return;
-        }
         if let Some((key, s, e)) = try_env_call(expr, content)
             && cursor_offset >= s
             && cursor_offset <= e
         {
             found = Some(key.to_string());
+            return ControlFlow::Break(());
         }
+        ControlFlow::Continue(())
     });
     found
 }
