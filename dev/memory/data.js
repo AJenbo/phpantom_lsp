@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777247422540,
+  "lastUpdate": 1777291946361,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4521,6 +4521,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6fb55294b2859db83dcde69108cfcadc7df1bfc0",
+          "message": "Fix vendor function/constant indexing for type keyword-named imports",
+          "timestamp": "2026-04-27T14:01:34+02:00",
+          "tree_id": "62796fe948b50d1c66522b08d7a6dca04a5d235a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6fb55294b2859db83dcde69108cfcadc7df1bfc0"
+        },
+        "date": 1777291945913,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.6,
             "unit": "MiB"
           }
         ]
