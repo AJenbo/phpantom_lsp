@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777319609619,
+  "lastUpdate": 1777320475096,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4691,6 +4691,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f04fc9dc4f52cb9d476d0f65ba6d950ce95c11b3",
+          "message": "Recognize closure literals as Closure for method-level template\nsubstitution",
+          "timestamp": "2026-04-27T21:57:06+02:00",
+          "tree_id": "8da762d5c5a33a9e6d11dbefafa10e53686a8721",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/f04fc9dc4f52cb9d476d0f65ba6d950ce95c11b3"
+        },
+        "date": 1777320474172,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.9,
             "unit": "MiB"
           }
         ]
