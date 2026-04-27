@@ -2530,6 +2530,35 @@ greet('World');
 }
 
 #[test]
+fn hover_function_param_union_type_on_assignment_lhs() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {}
+class Bar {}
+
+/**
+ * @param Foo|Bar $x
+ */
+function doFoo($x)
+{
+    $y = $x;
+}
+"#;
+
+    // Hover on `$y` at line 9 — on the LHS of the assignment itself.
+    // This mirrors the assertType runner pattern where the hover is
+    // on the variable at the assignment line.
+    let hover = hover_at(&backend, uri, content, 9, 5).expect("expected hover on $y at assignment");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Foo") && text.contains("Bar"),
+        "should resolve union param on assignment LHS to Foo|Bar, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_param_shown_when_type_differs_but_no_description() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -8920,6 +8949,952 @@ class Service {
     assert!(
         text.contains("class-string"),
         "should show class-string<Pen> type for Pen::class assignment, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_int_narrows_union_to_int() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(int|string $x): void {
+    if (is_int($x)) {
+        return;
+    }
+    $x;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 5, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("int|string"),
+        "should not contain int|string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_string_narrows_union_to_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(int|string $x): void {
+    if (is_string($x)) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("int|string"),
+        "should not contain int|string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_bool_narrows_union() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(string|bool $x): void {
+    if (is_bool($x)) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("bool"), "should contain bool, got: {}", text);
+    assert!(
+        !text.contains("string"),
+        "should not contain string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_float_narrows_int_float_union() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(int|float $x): void {
+    if (is_float($x)) {
+        return;
+    }
+    $x;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 5, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("int"), "should contain int, got: {}", text);
+    assert!(
+        !text.contains("float"),
+        "should not contain float, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_instanceof_interface_narrows_object() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface Loggable {
+    public function log(): void;
+}
+function test(object $x): void {
+    if (!$x instanceof Loggable) {
+        return;
+    }
+    $x;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 8, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Loggable"),
+        "should contain Loggable, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_ternary_is_int_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(int|string $a): void {
+    $b = is_int($a) ? $a : strlen($a);
+    $b;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 3, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("int"), "should contain int, got: {}", text);
+}
+
+#[test]
+fn hover_nullsafe_chain_short_circuits_to_nullable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Template {
+    public function getName(): string { return ''; }
+}
+class Configuration {
+    public function getTemplate(): Template { return new Template(); }
+}
+class FormItem {
+    public readonly ?Configuration $configuration;
+}
+function test(FormItem $item): void {
+    $result = $item->configuration?->getTemplate()->getName();
+    $result;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 12, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_null_check_on_getter_return_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Account {
+    public function getType(): ?string { return null; }
+}
+function test(Account $account): void {
+    $type = $account->getType();
+    if ($type === null) {
+        return;
+    }
+    $type;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 9, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("null"),
+        "should not contain null, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_null_coalescing_on_nullable_method_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class ApiResponse {
+    /** @return array<string, string>|null */
+    public function getHeaders(): ?array { return null; }
+}
+function test(ApiResponse $response): void {
+    $headers = $response->getHeaders() ?? [];
+    $headers;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 7, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array"),
+        "should contain array, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("null"),
+        "should not contain null, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_docblock_var_override_changes_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class A {
+    public function aMethod(): void {}
+}
+class B {
+    public function bMethod(): void {}
+}
+function test(): void {
+    $a = new B();
+    /** @var A $a */
+    $a;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 10, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("A"), "should contain A, got: {}", text);
+}
+
+#[test]
+fn hover_multi_branch_narrowing_null_then_is_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function test(int|string|null $value): void {
+    if ($value === null) {
+        return;
+    }
+    if (is_string($value)) {
+        return;
+    }
+    $value;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 8, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("int"), "should contain int, got: {}", text);
+    assert!(
+        !text.contains("string"),
+        "should not contain string, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("null"),
+        "should not contain null, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_nullsafe_method_chain_with_non_nullable_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class X {
+    public function nonNullable(): X { return $this; }
+    public function getName(): string { return ''; }
+}
+function test(?X $a): void {
+    $result = $a?->nonNullable()->getName();
+    $result;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 7, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_isset_guard_narrows_nullable_property() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class X {
+    public ?string $a = null;
+}
+function test(X $x): void {
+    if (!isset($x->a)) {
+        return;
+    }
+    $val = $x->a;
+    $val;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 9, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_template_narrowed_by_is_string() {
+    let backend = create_test_backend();
+    let uri = "file:///template_narrowed.php";
+    let content = r#"<?php
+/**
+ * @template K of array-key
+ * @param K $key
+ */
+function test(int|string $key): void {
+    if (is_string($key)) {
+        $key;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 7, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "should contain string after is_string narrowing, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_interface_template_substitution_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///interface_template_sub.php";
+    let content = r#"<?php
+class User {
+    public function getName(): string { return ''; }
+}
+/**
+ * @template K
+ * @template V
+ */
+interface Collection {
+    /** @return V|null */
+    public function get(mixed $key): mixed;
+}
+/**
+ * @implements Collection<string, User>
+ */
+class UserCollection implements Collection {
+    public function get(mixed $key): mixed { return null; }
+}
+function test(): void {
+    $coll = new UserCollection();
+    $result = $coll->get('foo');
+    $result;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 21, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User"),
+        "should contain User from interface template substitution, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_nested_interface_template_substitution() {
+    let backend = create_test_backend();
+    let uri = "file:///nested_interface_template.php";
+    let content = r#"<?php
+/**
+ * @template T
+ */
+interface Container {
+    /** @return T */
+    public function value(): mixed;
+}
+/**
+ * @template U
+ * @implements Container<array<U>>
+ */
+interface ListContainer extends Container {
+    /** @return array<U> */
+    public function value(): mixed;
+}
+/**
+ * @implements ListContainer<string>
+ */
+class StringList implements ListContainer {
+    public function value(): mixed { return []; }
+}
+function test(): void {
+    $list = new StringList();
+    $result = $list->value();
+    $result;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 25, 4).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array"),
+        "should contain array from nested interface template substitution, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_inheritdoc_inherits_parent_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class ParentClass {
+    /**
+     * @return array<int, string> List of items
+     */
+    public function getItems(): array { return []; }
+}
+class ChildClass extends ParentClass {
+    /** @inheritDoc */
+    public function getItems(): array { return []; }
+}
+class Svc {
+    public function test(ChildClass $child): void {
+        $child->getItems();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 17)
+        .expect("should return hover for inherited method call");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array"),
+        "inherited return type should contain 'array', got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_inheritdoc_inherits_param_descriptions() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Base {
+    /**
+     * Process the input.
+     * @param string $name The user's name
+     * @return bool True if ok
+     */
+    public function process(string $name): bool { return true; }
+}
+class Child extends Base {
+    /** @inheritDoc */
+    public function process(string $name): bool { return false; }
+}
+class Svc {
+    public function test(Child $c): void {
+        $c->process('hi');
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 15, 12)
+        .expect("should return hover for inherited method call");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Process the input") || text.contains("name"),
+        "inherited docs should contain description or param name, got: {}",
+        text
+    );
+}
+
+// ─── Mago-inspired type inference tests ─────────────────────────────────────
+
+#[test]
+fn hover_array_key_coalesce_removes_null() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** @param array{name?: string, age: int} $item */
+function test(array $item): void {
+    $name = $item['name'] ?? 'Unknown';
+    $name;
+}
+"#;
+
+    // Hover on `$name` at line 4, character 4
+    let hover = hover_at(&backend, uri, content, 4, 4).expect("expected hover on $name");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "null-coalesced optional array key should resolve to string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_spread_into_variadic_does_not_lose_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Number {
+    public function getValue(): int { return 0; }
+}
+class Calculator {
+    public static function sum(Number $first, Number ...$rest): Number {
+        return new Number();
+    }
+}
+function test(): void {
+    $a = new Number();
+    $b = new Number();
+    $result = Calculator::sum($a, ...[$b]);
+    $result;
+}
+"#;
+
+    // Hover on `$result` at line 13, character 4
+    let hover = hover_at(&backend, uri, content, 13, 4).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Number"),
+        "spread into variadic should preserve return type Number, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_list_element_type_from_generic_array() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class User {
+    public function getName(): string { return ''; }
+}
+/** @param list<User> $users */
+function test(array $users): void {
+    $first = $users[0];
+    $first;
+}
+"#;
+
+    // Hover on `$first` at line 7, character 4
+    let hover = hover_at(&backend, uri, content, 7, 4).expect("expected hover on $first");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("User"),
+        "indexing into list<User> should resolve element to User, got: {}",
+        text
+    );
+}
+
+// ─── Chain assignments ($a = $b = expr) ─────────────────────────────────────
+
+#[test]
+fn hover_chain_assignment_first_var() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_assign.php";
+    let content = r#"<?php
+class Foo {
+    public function bar(): string { return ''; }
+}
+function test(): void {
+    $a = $b = new Foo();
+    $a;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 4).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Foo"),
+        "chain assignment: $a should resolve to Foo, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_chain_assignment_second_var() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_assign2.php";
+    let content = r#"<?php
+class Foo {
+    public function bar(): string { return ''; }
+}
+function test(): void {
+    $a = $b = new Foo();
+    $b;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 4).expect("expected hover on $b");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Foo"),
+        "chain assignment: $b should resolve to Foo, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_chain_assignment_three_vars() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_assign3.php";
+    let content = r#"<?php
+class Baz {
+    public function hello(): int { return 0; }
+}
+function test(): void {
+    $a = $b = $c = new Baz();
+    $a;
+    $b;
+    $c;
+}
+"#;
+
+    for (line, var) in [(6, "$a"), (7, "$b"), (8, "$c")] {
+        let hover = hover_at(&backend, uri, content, line, 4)
+            .unwrap_or_else(|| panic!("expected hover on {var}"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("Baz"),
+            "triple chain assignment: {var} should resolve to Baz, got: {text}",
+        );
+    }
+}
+
+#[test]
+fn hover_chain_assignment_function_call_rhs() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_assign_fn.php";
+    let content = r#"<?php
+class Widget {
+    public function render(): string { return ''; }
+}
+function makeWidget(): Widget { return new Widget(); }
+function test(): void {
+    $a = $b = makeWidget();
+    $a;
+    $b;
+}
+"#;
+
+    for (line, var) in [(7, "$a"), (8, "$b")] {
+        let hover = hover_at(&backend, uri, content, line, 4)
+            .unwrap_or_else(|| panic!("expected hover on {var}"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("Widget"),
+            "chain assignment with function call: {var} should resolve to Widget, got: {text}",
+        );
+    }
+}
+
+// ─── Inherited class constants via self:: (B37) ─────────────────────────────
+
+#[test]
+fn hover_inherited_constant_via_self() {
+    let backend = create_test_backend();
+    let uri = "file:///inherited_const.php";
+    let content = r#"<?php
+class ParentClass {
+    const FOO = 42;
+}
+class ChildClass extends ParentClass {
+    public function test(): void {
+        $x = self::FOO;
+        $x;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 8).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "inherited constant via self:: should resolve to int, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_own_constant_via_self() {
+    let backend = create_test_backend();
+    let uri = "file:///own_const.php";
+    let content = r#"<?php
+class MyClass {
+    const BAR = 'hello';
+    public function test(): void {
+        $x = self::BAR;
+        $x;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 5, 8).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "own constant via self:: should resolve to string, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_grandparent_constant_via_self() {
+    let backend = create_test_backend();
+    let uri = "file:///grandparent_const.php";
+    let content = r#"<?php
+class GrandParent_ {
+    const LEVEL = 3;
+}
+class Parent_ extends GrandParent_ {}
+class Child extends Parent_ {
+    public function test(): void {
+        $x = self::LEVEL;
+        $x;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 8, 8).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "grandparent constant via self:: should resolve to int, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_inherited_constant_via_class_name() {
+    let backend = create_test_backend();
+    let uri = "file:///inherited_const_classname.php";
+    let content = r#"<?php
+class Base {
+    const STATUS = 'active';
+}
+class Derived extends Base {}
+function test(): void {
+    $x = Derived::STATUS;
+    $x;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 4).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "inherited constant via class name should resolve to string, got: {}",
+        text
+    );
+}
+
+// ─── instanceof on nullable strips null (B31) ───────────────────────────────
+
+#[test]
+fn hover_instanceof_strips_null_from_nullable() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_nullable.php";
+    let content = r#"<?php
+class Foo {
+    public function fooMethod(): string { return ''; }
+}
+/** @param Foo|null $x */
+function test(?Foo $x): void {
+    if ($x instanceof Foo) {
+        $x;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 8).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        !text.contains("null") && text.contains("Foo"),
+        "instanceof should strip null from ?Foo, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_instanceof_strips_null_from_union_with_null() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_union_null.php";
+    let content = r#"<?php
+class Bar {
+    public function barMethod(): int { return 0; }
+}
+class Baz {
+    public function bazMethod(): float { return 0.0; }
+}
+/** @param Bar|Baz|null $x */
+function test(Bar|Baz|null $x): void {
+    if ($x instanceof Bar) {
+        $x;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 10, 8).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Bar") && !text.contains("null"),
+        "instanceof should narrow Bar|Baz|null to Bar, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_instanceof_non_nullable_unchanged() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_non_nullable.php";
+    let content = r#"<?php
+class Animal {
+    public function speak(): string { return ''; }
+}
+class Dog extends Animal {
+    public function fetch(): bool { return true; }
+}
+/** @param Animal $x */
+function test(Animal $x): void {
+    if ($x instanceof Dog) {
+        $x;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 10, 8).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Dog"),
+        "instanceof should narrow Animal to Dog, got: {}",
+        text
+    );
+}
+
+// ─── is_object() on multi-class union (B35) ─────────────────────────────────
+
+#[test]
+fn hover_is_object_narrows_multi_class_union() {
+    let backend = create_test_backend();
+    let uri = "file:///is_object_union.php";
+    let content = r#"<?php
+class Foo {
+    public function fooMethod(): void {}
+}
+class Bar {
+    public function barMethod(): void {}
+}
+/**
+ * @param Foo|Bar|int $value
+ */
+function test($value): void {
+    if (is_object($value)) {
+        $value;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 12, 8).expect("expected hover on $value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Foo") && text.contains("Bar") && !text.contains("int"),
+        "is_object should narrow Foo|Bar|int to Foo|Bar, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_object_narrows_multi_class_union_namespaced() {
+    let backend = create_test_backend();
+    let uri = "file:///is_object_union_ns.php";
+    let content = r#"<?php
+namespace TestNs;
+
+class Foo {
+    public function fooMethod(): void {}
+}
+class Bar {
+    public function barMethod(): void {}
+}
+/**
+ * @param Foo|Bar|int $value
+ */
+function test($value): void {
+    if (is_object($value)) {
+        $value;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 14, 8).expect("expected hover on $value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Foo") && text.contains("Bar") && !text.contains("int"),
+        "namespaced is_object should narrow Foo|Bar|int to Foo|Bar, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_int_narrows_class_union_to_scalar() {
+    let backend = create_test_backend();
+    let uri = "file:///is_int_union.php";
+    let content = r#"<?php
+class Foo {
+    public function fooMethod(): void {}
+}
+class Bar {
+    public function barMethod(): void {}
+}
+/**
+ * @param Foo|Bar|int $value
+ */
+function test($value): void {
+    if (is_int($value)) {
+        $value;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 12, 8).expect("expected hover on $value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int") && !text.contains("Foo") && !text.contains("Bar"),
+        "is_int should narrow Foo|Bar|int to int, got: {}",
         text
     );
 }

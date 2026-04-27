@@ -2103,14 +2103,40 @@ fn resolve_rhs_method_call_inner<'b>(
             ctx.class_loader,
             ctx.resolved_class_cache,
         );
-        let method_ref = owner
-            .get_method(&method_name)
-            .or_else(|| merged.get_method(&method_name));
+        let owner_method = owner.get_method(&method_name);
+        let merged_method = merged.get_method(&method_name);
+        // Prefer the merged method's return type when the owner's method
+        // has no docblock override (return_type == native_return_type).
+        // The merged method carries inherited types from interfaces/parents
+        // with template substitutions already applied (e.g. `V|null` →
+        // `User|null` from `@implements Collection<string, User>`).
+        let method_ref = match (owner_method, merged_method) {
+            (Some(om), Some(mm))
+                if om.return_type == om.native_return_type
+                    && mm.return_type != mm.native_return_type =>
+            {
+                Some(mm)
+            }
+            (Some(om), _) => Some(om),
+            (None, mm) => mm,
+        };
         let ret_type_string = method_ref.and_then(|m| m.return_type.as_ref()).map(|ret| {
             let substituted = if !template_subs.is_empty() {
                 ret.substitute(&template_subs)
             } else {
                 ret.clone()
+            };
+            // Resolve `parent` to the concrete parent class name before
+            // any self/static replacement so that downstream consumers
+            // see a real FQN instead of the keyword.
+            let substituted = if substituted.is_parent_ref() {
+                owner
+                    .parent_class
+                    .as_ref()
+                    .map(|p| PhpType::Named(p.to_string()))
+                    .unwrap_or(substituted)
+            } else {
+                substituted
             };
             // When the return type contains `static`/`self`/`$this`
             // and the receiver was resolved with generic parameters,
@@ -2504,7 +2530,31 @@ fn resolve_rhs_property_access(
             };
 
             if let Some(const_name) = const_name {
-                for cls in &target_classes {
+                // Search local classes first.  If the constant is not
+                // found, resolve via full inheritance merging so that
+                // constants from parent classes are visible (e.g.
+                // `self::PARENT_CONST` in a subclass).
+                let merged_classes: Vec<Arc<ClassInfo>>;
+                let all_candidates: &[Arc<ClassInfo>] = if target_classes
+                    .iter()
+                    .any(|cls| cls.constants.iter().any(|c| c.name == const_name))
+                {
+                    &target_classes
+                } else {
+                    merged_classes = target_classes
+                        .iter()
+                        .map(|cls| {
+                            crate::virtual_members::resolve_class_fully_maybe_cached(
+                                cls,
+                                class_loader,
+                                ctx.resolved_class_cache,
+                            )
+                        })
+                        .collect();
+                    &merged_classes
+                };
+
+                for cls in all_candidates {
                     // Check if the constant is an enum case — the
                     // result type is the enum class itself.
                     if let Some(c) = cls.constants.iter().find(|c| c.name == const_name) {

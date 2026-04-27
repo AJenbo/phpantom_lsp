@@ -8288,6 +8288,53 @@ class Task extends Model {
     );
 }
 
+/// Calling a void-returning scope on `$this` inside the model should
+/// resolve to a Builder, allowing `->first()` and other builder methods.
+/// Ported from Larastan `model-scopes.php` (`$this->withVoidReturn()` assertions).
+#[tokio::test]
+async fn test_void_scope_on_this_chains_to_builder() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Builder;
+class User extends Model {
+    public function scopeWithVoidReturn(Builder $query): void {
+        $query->where('active', true);
+    }
+    public function test() {
+        $this->withVoidReturn()->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    // "$this->withVoidReturn()->" at line 9, character 33
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 33).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"first"),
+        "$this->withVoidReturn()-> should offer first(), got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"get"),
+        "$this->withVoidReturn()-> should offer get(), got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"where"),
+        "$this->withVoidReturn()-> should offer where(), got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"withVoidReturn"),
+        "$this->withVoidReturn()-> should offer scope withVoidReturn(), got: {:?}",
+        methods
+    );
+}
+
 #[tokio::test]
 async fn test_scope_static_call_starts_chain() {
     // Brand::isActive()-> should resolve builder methods.
@@ -9700,6 +9747,53 @@ class Demo {
     );
 }
 
+/// Laravel requires `#[Scope]` methods to be `protected`. A public method
+/// with `#[Scope]` is silently ignored by the framework and should NOT
+/// be injected as a scope on a Builder instance.
+/// Ported from Larastan `model-scope-attribute-l12.php` (`notAScope` assertion).
+#[tokio::test]
+async fn test_public_scope_attribute_not_treated_as_scope() {
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Builder;
+use Illuminate\\Database\\Eloquent\\Attributes\\Scope;
+class User extends Model {
+    #[Scope]
+    protected function completed(Builder $query): void {}
+
+    #[Scope]
+    public function notAScope(Builder $query): void {}
+
+    public function test() {
+        User::where('id', 1)->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
+
+    // "User::where('id', 1)->" at line 13, character 30
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 13, 30).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"completed"),
+        "protected #[Scope] should be injected onto Builder, got: {:?}",
+        methods
+    );
+    assert!(
+        !methods.contains(&"notAScope"),
+        "public #[Scope] should NOT be injected onto Builder, got: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"where"),
+        "regular Builder methods should still appear, got: {:?}",
+        methods
+    );
+}
+
 /// When a model uses a trait that declares `@method` tags (e.g.
 /// `SoftDeletes` with `@method static Builder<static> withTrashed()`),
 /// those methods should be available on `Builder<Model>` instances
@@ -10691,7 +10785,7 @@ use Illuminate\\Database\\Eloquent\\Builder;
 use Illuminate\\Database\\Eloquent\\Attributes\\Scope;
 class Post extends Model {
     #[Scope]
-    public function published(Builder $query): void {}
+    protected function published(Builder $query): void {}
 }
 ";
     let blog_php = "\

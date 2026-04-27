@@ -1437,6 +1437,7 @@ pub(crate) enum TypeGuardKind {
     Object,
     Numeric,
     Callable,
+    Null,
 }
 
 /// Return the canonical `PhpType` that a type-guard narrows `mixed` to.
@@ -1455,6 +1456,7 @@ fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
         TypeGuardKind::Object => PhpType::object(),
         TypeGuardKind::Numeric => PhpType::numeric(),
         TypeGuardKind::Callable => PhpType::callable(),
+        TypeGuardKind::Null => PhpType::null(),
     }
 }
 
@@ -1488,6 +1490,7 @@ pub(crate) fn try_extract_type_guard(
                 "is_object" => TypeGuardKind::Object,
                 "is_numeric" => TypeGuardKind::Numeric,
                 "is_callable" => TypeGuardKind::Callable,
+                "is_null" => TypeGuardKind::Null,
                 _ => return None,
             };
             let args = &fc.argument_list.arguments;
@@ -1518,11 +1521,18 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
         TypeGuardKind::Array => ty.is_array_like(),
         TypeGuardKind::String => ty.is_subtype_of(&PhpType::string()),
         TypeGuardKind::Int => ty.is_subtype_of(&PhpType::int()),
-        TypeGuardKind::Float => ty.is_subtype_of(&PhpType::float()),
+        // `is_float()` returns false for integers at runtime, so use
+        // exact type identity instead of `is_subtype_of` (which treats
+        // `int` as a subtype of `float` due to PHP's type coercion).
+        TypeGuardKind::Float => matches!(ty, PhpType::Named(n) if {
+            let lower = n.to_ascii_lowercase();
+            lower == "float" || lower == "double" || lower == "real"
+        }),
         TypeGuardKind::Bool => ty.is_subtype_of(&PhpType::bool()),
         TypeGuardKind::Numeric => ty.is_subtype_of(&PhpType::numeric()),
         TypeGuardKind::Callable => ty.is_callable(),
         TypeGuardKind::Object => ty.is_object_like(),
+        TypeGuardKind::Null => ty.is_null(),
     }
 }
 
@@ -1567,6 +1577,14 @@ pub(crate) fn apply_type_guard_exclusion(kind: TypeGuardKind, results: &mut Vec<
 /// already satisfies the predicate).  Returns `Some(Named("__empty"))`
 /// when all members are filtered out.
 fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) -> Option<PhpType> {
+    // Expand compound pseudo-types into their constituent unions so
+    // that type guards can filter individual members.  For example,
+    // `array-key` → `int|string`, so `is_string()` on `array-key`
+    // correctly narrows to `string`.
+    if let Some(expanded) = expand_pseudo_type_for_guard(ty) {
+        return filter_type_by_guard(&expanded, kind, keep_matching);
+    }
+
     match ty {
         PhpType::Union(members) => {
             let filtered: Vec<PhpType> = members
@@ -1622,5 +1640,29 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
                 Some(PhpType::empty_sentinel())
             }
         }
+    }
+}
+
+/// Expand compound pseudo-types into unions of their constituent scalar
+/// types so that type guard filtering can operate on individual members.
+///
+/// - `array-key` → `int|string`
+/// - `scalar` → `int|float|string|bool`
+/// - `numeric` / `number` → `int|float`
+fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
+    let name = match ty {
+        PhpType::Named(n) => n.to_ascii_lowercase(),
+        _ => return None,
+    };
+    match name.as_str() {
+        "array-key" => Some(PhpType::Union(vec![PhpType::int(), PhpType::string()])),
+        "scalar" => Some(PhpType::Union(vec![
+            PhpType::int(),
+            PhpType::float(),
+            PhpType::string(),
+            PhpType::bool(),
+        ])),
+        "numeric" | "number" => Some(PhpType::Union(vec![PhpType::int(), PhpType::float()])),
+        _ => None,
     }
 }

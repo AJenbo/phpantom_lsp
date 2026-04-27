@@ -524,6 +524,7 @@ fn synthesizes_scope_attribute_as_both_static_and_instance() {
         )],
     );
     scope_method.has_scope_attribute = true;
+    scope_method.visibility = Visibility::Protected;
     user.methods.push(Arc::new(scope_method));
 
     let result = provider.provide(&user, &no_loader, None);
@@ -557,6 +558,7 @@ fn synthesizes_scope_attribute_with_extra_params() {
         ],
     );
     scope_method.has_scope_attribute = true;
+    scope_method.visibility = Visibility::Protected;
     user.methods.push(Arc::new(scope_method));
 
     let result = provider.provide(&user, &no_loader, None);
@@ -585,6 +587,7 @@ fn scope_attribute_and_convention_scope_coexist() {
         vec![make_param("$query", Some("Builder"), true)],
     );
     scope_method.has_scope_attribute = true;
+    scope_method.visibility = Visibility::Protected;
     user.methods.push(Arc::new(scope_method));
 
     let result = provider.provide(&user, &no_loader, None);
@@ -612,6 +615,7 @@ fn scope_attribute_and_relationship_coexist() {
         vec![make_param("$query", Some("Builder"), true)],
     );
     scope_method.has_scope_attribute = true;
+    scope_method.visibility = Visibility::Protected;
     user.methods.push(Arc::new(scope_method));
 
     let result = provider.provide(&user, &no_loader, None);
@@ -637,6 +641,7 @@ fn scope_attribute_with_custom_return_type() {
         vec![make_param("$query", Some("Builder"), true)],
     );
     scope_method.has_scope_attribute = true;
+    scope_method.visibility = Visibility::Protected;
     user.methods.push(Arc::new(scope_method));
 
     let result = provider.provide(&user, &no_loader, None);
@@ -659,6 +664,7 @@ fn scope_attribute_not_treated_as_relationship() {
         vec![make_param("$query", Some("Builder"), true)],
     );
     scope_method.has_scope_attribute = true;
+    scope_method.visibility = Visibility::Protected;
     user.methods.push(Arc::new(scope_method));
 
     let result = provider.provide(&user, &no_loader, None);

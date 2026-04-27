@@ -375,29 +375,6 @@ enclosing function has the `static` modifier.
 `this_not_seeded_in_static_method` (currently `#[ignore]`). Remove
 the `#[ignore]` attribute once fixed.
 
-## B23 — Foreach array destructuring not handled by forward walker
-
-**Symptom:** `foreach ($items as [$a, $b])` and
-`foreach ($items as list($a, $b))` do not bind `$a` and `$b` in the
-forward walker's scope. Member access on those variables produces
-false-positive "unknown member" diagnostics. Regular destructuring
-assignments (`[$a, $b] = $expr`) work correctly.
-
-**Root cause:** `forward_walk.rs` explicitly skips destructuring in
-the foreach value position (around line 4753) with a comment
-"For now, skip — this is a complex pattern." The `bind_foreach_value`
-function only handles simple variables and nested `ForeachTarget`
-patterns, not list/array destructuring.
-
-**Where to fix:** Extend `bind_foreach_value` in `forward_walk.rs`
-to handle `ListExpression` and array destructuring patterns in the
-foreach value position, reusing the existing
-`process_destructuring_assignment` logic that already works for
-standalone `[$a, $b] = $expr` assignments.
-
-**Not a regression.** The old backward scanner also did not handle
-foreach destructuring — this is a pre-existing gap carried forward.
-
 ## B26 — Re-entry root cause in `process_array_key_assignment`
 
 **Severity: Low (mitigated by guard, not root-caused)**
@@ -429,8 +406,6 @@ statement. Possible causes:
 
 Once the root cause is understood, the re-entry guard can be removed
 in favour of a proper fix.
-
-
 
 ## B27 — CallSite matching in `emit_closure_hints` fails to find the parent call for template substitution
 
@@ -474,5 +449,3 @@ inference and substitution automatically.
 parameters when the callable type contains template parameters.
 Also affects completion, hover, and signature help inside closure
 bodies through the same callable type resolution path.
-
-

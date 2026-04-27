@@ -1706,10 +1706,45 @@ impl ScopeState {
     ///   in both branches).
     /// - Present in only one: keep it with the existing types (variable
     ///   was assigned in only one branch — it *might* have those types).
+    ///
+    /// After merging, subsumed entries are removed.  When one entry's
+    /// type is a subset of another (e.g. `string|null` ⊆
+    /// `int|string|null`, or `Foo` ⊆ `mixed`), the subset entry is
+    /// dropped because the superset already covers it.  Without this,
+    /// narrowed types from non-exiting if-branches leak into the
+    /// post-merge scope and pollute subsequent narrowing operations.
     pub fn merge_branch(&mut self, other: &ScopeState) {
         for (name, other_types) in &other.locals {
             let entry = self.locals.entry(name.clone()).or_default();
             ResolvedType::extend_unique(entry, other_types.clone());
+
+            // Remove entries whose type is subsumed by a broader entry.
+            // E.g. `string|null` ⊆ `int|string|null` → drop the former.
+            if entry.len() > 1 {
+                let types: Vec<crate::php_type::PhpType> =
+                    entry.iter().map(|rt| rt.type_string.clone()).collect();
+                let mut keep = vec![true; types.len()];
+                for i in 0..types.len() {
+                    if !keep[i] {
+                        continue;
+                    }
+                    for j in 0..types.len() {
+                        if i == j || !keep[j] {
+                            continue;
+                        }
+                        // If j is a strict subset of i, drop j.
+                        if types[j] != types[i] && types[j].is_subset_of(&types[i]) {
+                            keep[j] = false;
+                        }
+                    }
+                }
+                let mut idx = 0;
+                entry.retain(|_| {
+                    let k = keep[idx];
+                    idx += 1;
+                    k
+                });
+            }
         }
     }
 }
@@ -2223,6 +2258,44 @@ fn seed_params<'b>(
         let is_variadic = param.ellipsis.is_some();
         let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
 
+        // For promoted constructor properties, check for an inline
+        // `/** @var Type */` docblock on the parameter itself.  The
+        // property parser already uses this for the property's type_hint,
+        // but the forward walker resolves parameter variables via
+        // `resolve_param_type` which only checks `@param` tags on the
+        // method docblock.  When an inline `@var` is present, resolve it
+        // directly and seed the scope, bypassing `resolve_param_type`
+        // (which would otherwise fall back to the merged class's native
+        // parameter type, losing the docblock refinement).
+        if param.is_promoted_property() {
+            let param_offset = param.span().start.offset as usize;
+            if let Some((var_type, _name)) =
+                crate::docblock::find_inline_var_docblock(ctx.content, param_offset)
+            {
+                let effective = crate::docblock::resolve_effective_type_typed(
+                    native_type.as_ref(),
+                    Some(&var_type),
+                )
+                .unwrap_or(var_type);
+
+                let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
+                    &effective,
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+
+                let results = if !resolved.is_empty() {
+                    ResolvedType::from_classes_with_hint(resolved, effective)
+                } else {
+                    vec![ResolvedType::from_type_string(effective)]
+                };
+
+                scope.seed(pname, results);
+                continue;
+            }
+        }
+
         let param_results = resolve_param_type(
             &pname,
             native_type.as_ref(),
@@ -2356,6 +2429,15 @@ pub(super) fn resolve_param_type(
                     .unwrap_or_else(PhpType::untyped)
             }),
         )
+    } else if let Some(ref eff) = effective_type
+        && raw_docblock_type.as_ref().is_some_and(|rdt| *rdt != *eff)
+    {
+        // The effective type differs from the raw docblock type, meaning
+        // template substitution produced a concrete type (e.g. `K` →
+        // `array-key`).  Use the substituted type so that downstream
+        // narrowing (type guards, instanceof) operates on the concrete
+        // type rather than the bare template parameter name.
+        vec![ResolvedType::from_type_string(eff.clone())]
     } else if let Some(ref rdt) = raw_docblock_type {
         let parsed_docblock = rdt.clone();
         let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
@@ -3464,6 +3546,13 @@ fn process_assignment_expr<'b>(
             return;
         }
 
+        // Chain assignments: `$a = $b = expr` — the RHS is itself an
+        // assignment expression.  Process it first so that the inner
+        // variable (`$b`) gets its type before we resolve the outer one.
+        if matches!(assignment.rhs, Expression::Assignment(_)) {
+            process_assignment_expr(assignment.rhs, scope, ctx);
+        }
+
         // Array destructuring: `[$a, $b] = …` / `list($a, $b) = …`
         if matches!(assignment.lhs, Expression::Array(_) | Expression::List(_)) {
             process_destructuring_assignment(assignment, scope, ctx);
@@ -3541,6 +3630,15 @@ fn resolve_rhs_with_scope<'b>(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // Chain assignment: `$a = $b = expr` — the value of an assignment
+    // expression is the value of its RHS.  Recurse into the inner RHS
+    // so that `$a` resolves to the same type as `$b`.
+    if let Expression::Assignment(assignment) = rhs
+        && assignment.operator.is_assign()
+    {
+        return resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+    }
+
     // For bare variable references, read directly from scope.
     // This is the O(1) path that replaces the recursive backward scan.
     if let Expression::Variable(Variable::Direct(dv)) = rhs {
@@ -3830,96 +3928,131 @@ fn resolve_rhs_via_subject(
 }
 
 /// Process array destructuring assignments.
+///
+/// Resolves the RHS type once, then walks the LHS pattern to assign
+/// types to each destructured variable.  Handles nested patterns like
+/// `[$a, [$b, $c]] = $nested` by recursing into inner array/list
+/// expressions.
 fn process_destructuring_assignment<'b>(
     assignment: &'b Assignment<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    // Delegate to the existing destructuring resolution.
-    // We need to resolve the RHS type and then extract element types
-    // for each destructured variable.
-    //
-    // Resolve via a `VarResolutionCtx` with a scope-based variable
-    // resolver.
-
-    // Extract all variable names from the LHS.
-    let var_names = extract_destructured_var_names(assignment.lhs);
-
     let scope_snapshot = scope.locals.clone();
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
         scope_snapshot.get(var_name).cloned().unwrap_or_default()
     };
 
-    for vname in var_names {
-        let var_ctx = VarResolutionCtx {
-            var_name: &vname,
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: assignment.span().start.offset,
-            class_loader: ctx.class_loader,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
-            top_level_scope: ctx.top_level_scope.clone(),
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
-            scope_var_resolver: Some(&scope_resolver),
-        };
-        let mut var_results: Vec<ResolvedType> = Vec::new();
-        super::foreach_resolution::try_resolve_destructured_type(
-            assignment,
-            &var_ctx,
-            &mut var_results,
-            false,
-        );
-        if !var_results.is_empty() {
-            scope.set(vname, var_results);
-        }
+    // Build a temporary VarResolutionCtx just to resolve the RHS type.
+    // The var_name doesn't matter here since we're resolving the RHS
+    // expression, not looking up a specific variable.
+    let dummy_name = String::from("$__destructuring_rhs");
+    let var_ctx = VarResolutionCtx {
+        var_name: &dummy_name,
+        current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
+        content: ctx.content,
+        cursor_offset: assignment.span().start.offset,
+        class_loader: ctx.class_loader,
+        loaders: ctx.loaders,
+        resolved_class_cache: ctx.resolved_class_cache,
+        enclosing_return_type: ctx.enclosing_return_type.clone(),
+        top_level_scope: ctx.top_level_scope.clone(),
+        branch_aware: false,
+        match_arm_narrowing: HashMap::new(),
+        scope_var_resolver: Some(&scope_resolver),
+    };
+
+    // Try inline @var docblock first, then fall back to RHS expression.
+    let stmt_offset = assignment.span().start.offset as usize;
+    let raw_type: Option<PhpType> =
+        crate::docblock::find_inline_var_docblock(ctx.content, stmt_offset)
+            .map(|(vt, _)| vt)
+            .or_else(|| {
+                super::foreach_resolution::resolve_expression_type(assignment.rhs, &var_ctx)
+            });
+
+    // Expand type aliases before shape/generic extraction.
+    let raw_type = raw_type.map(|rt| {
+        crate::completion::type_resolution::resolve_type_alias_typed(
+            &rt,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )
+        .unwrap_or(rt)
+    });
+
+    if let Some(ref rhs_type) = raw_type {
+        bind_destructured_pattern(assignment.lhs, rhs_type, scope, ctx);
     }
 }
 
-/// Extract all variable names from a destructuring LHS expression.
-fn extract_destructured_var_names(expr: &Expression<'_>) -> Vec<String> {
-    let mut names = Vec::new();
-    match expr {
-        Expression::Array(arr) => {
-            for elem in arr.elements.iter() {
-                match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        if let Expression::Variable(Variable::Direct(dv)) = kv.value {
-                            names.push(dv.name.to_string());
-                        }
-                    }
-                    ArrayElement::Value(val) => {
-                        if let Expression::Variable(Variable::Direct(dv)) = val.value {
-                            names.push(dv.name.to_string());
-                        }
-                    }
-                    ArrayElement::Variadic(_) | ArrayElement::Missing(_) => {}
+/// Recursively bind types from a destructuring LHS pattern against a
+/// resolved RHS type.  For each variable in the pattern, extracts the
+/// corresponding type from the RHS type (via shape key or positional
+/// index) and sets it in scope.  For nested array/list sub-patterns,
+/// recurses with the extracted element type.
+fn bind_destructured_pattern<'b>(
+    lhs: &'b Expression<'b>,
+    rhs_type: &PhpType,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let elements: Vec<&ArrayElement<'b>> = match lhs {
+        Expression::Array(arr) => arr.elements.iter().collect(),
+        Expression::List(list) => list.elements.iter().collect(),
+        _ => return,
+    };
+
+    let mut positional_index: usize = 0;
+    for elem in elements {
+        let (value_expr, shape_key) = match elem {
+            ArrayElement::KeyValue(kv) => {
+                let key = extract_foreach_destr_key(kv.key);
+                (kv.value, key)
+            }
+            ArrayElement::Value(val) => {
+                let key = Some(positional_index.to_string());
+                positional_index += 1;
+                (val.value, key)
+            }
+            _ => continue,
+        };
+
+        // Determine the type for this element position.
+        let elem_type: Option<PhpType> = shape_key
+            .as_ref()
+            .and_then(|k| rhs_type.shape_value_type(k).cloned())
+            .or_else(|| rhs_type.extract_value_type(false).cloned());
+
+        match value_expr {
+            // Direct variable: bind the type.
+            Expression::Variable(Variable::Direct(dv)) => {
+                if let Some(ref vt) = elem_type {
+                    let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
+                        vt,
+                        &ctx.current_class.name,
+                        ctx.all_classes,
+                        ctx.class_loader,
+                    );
+                    let resolved_types = if !resolved.is_empty() {
+                        ResolvedType::from_classes_with_hint(resolved, vt.clone())
+                    } else {
+                        vec![ResolvedType::from_type_string(vt.clone())]
+                    };
+                    scope.set(dv.name.to_string(), resolved_types);
                 }
             }
-        }
-        Expression::List(list) => {
-            for elem in list.elements.iter() {
-                match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        if let Expression::Variable(Variable::Direct(dv)) = kv.value {
-                            names.push(dv.name.to_string());
-                        }
-                    }
-                    ArrayElement::Value(val) => {
-                        if let Expression::Variable(Variable::Direct(dv)) = val.value {
-                            names.push(dv.name.to_string());
-                        }
-                    }
-                    ArrayElement::Variadic(_) | ArrayElement::Missing(_) => {}
+            // Nested pattern: recurse with the extracted element type.
+            Expression::Array(_) | Expression::List(_) => {
+                if let Some(ref vt) = elem_type {
+                    bind_destructured_pattern(value_expr, vt, scope, ctx);
                 }
             }
+            _ => {}
         }
-        _ => {}
     }
-    names
 }
 
 /// Process array key assignment: `$var['key'] = expr;`
@@ -5534,7 +5667,89 @@ fn bind_foreach_value<'b>(
         }
     } else if let Expression::Array(_) | Expression::List(_) = value_expr {
         // Array/list destructuring in foreach: `foreach ($items as [$a, $b])`
-        // For now, skip — this is a complex pattern.
+        // Extract the element type from the iterable, then resolve each
+        // destructured variable's type from that element type using shape
+        // keys or positional indices.
+        let element_type: Option<PhpType> = iter_type.as_ref().and_then(|it| {
+            // Try direct value type extraction first.
+            if let Some(vt) = it.extract_value_type(false) {
+                return Some(vt.clone());
+            }
+            // Try class-based iterable element extraction.
+            if let Some(et) = resolve_iterable_element_via_class(it, ctx)
+                && !is_unsubstituted_template_param(&et)
+            {
+                return Some(et);
+            }
+            // Try union members individually.
+            if let PhpType::Union(members) = it {
+                for member in members {
+                    if let Some(vt) = member.extract_value_type(false) {
+                        return Some(vt.clone());
+                    }
+                    if let Some(et) = resolve_iterable_element_via_class(member, ctx)
+                        && !is_unsubstituted_template_param(&et)
+                    {
+                        return Some(et);
+                    }
+                }
+            }
+            None
+        });
+
+        if let Some(ref elem_type) = element_type {
+            let elements_iter: Vec<&ArrayElement<'_>> = match value_expr {
+                Expression::Array(arr) => arr.elements.iter().collect(),
+                Expression::List(list) => list.elements.iter().collect(),
+                _ => vec![],
+            };
+
+            let mut positional_index: usize = 0;
+            for elem in elements_iter {
+                let (var_name, shape_key) = match elem {
+                    ArrayElement::KeyValue(kv) => {
+                        if let Expression::Variable(Variable::Direct(dv)) = kv.value {
+                            (dv.name.to_string(), extract_foreach_destr_key(kv.key))
+                        } else {
+                            continue;
+                        }
+                    }
+                    ArrayElement::Value(val) => {
+                        let key = Some(positional_index.to_string());
+                        positional_index += 1;
+                        if let Expression::Variable(Variable::Direct(dv)) = val.value {
+                            (dv.name.to_string(), key)
+                        } else {
+                            continue;
+                        }
+                    }
+                    _ => continue,
+                };
+
+                // Try shape key lookup first, then fall back to generic element type.
+                let resolved_type = shape_key
+                    .as_ref()
+                    .and_then(|k| elem_type.shape_value_type(k).cloned())
+                    .or_else(|| elem_type.extract_value_type(true).cloned());
+
+                if let Some(ref vt) = resolved_type {
+                    let resolved = crate::completion::type_resolution::type_hint_to_classes_typed(
+                        vt,
+                        &ctx.current_class.name,
+                        ctx.all_classes,
+                        ctx.class_loader,
+                    );
+                    if !resolved.is_empty() {
+                        scope.set(
+                            var_name,
+                            ResolvedType::from_classes_with_hint(resolved, vt.clone()),
+                        );
+                    } else {
+                        scope.set(var_name, vec![ResolvedType::from_type_string(vt.clone())]);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -5552,6 +5767,22 @@ fn extract_foreach_var_name(expr: &Expression<'_>) -> Option<String> {
         Some(dv.name.to_string())
     } else {
         None
+    }
+}
+
+/// Extract a string key from a foreach destructuring key expression.
+///
+/// Handles string literals (`'user'`, `"user"`) and integer literals.
+fn extract_foreach_destr_key(key_expr: &Expression<'_>) -> Option<String> {
+    match key_expr {
+        Expression::Literal(Literal::String(lit_str)) => {
+            lit_str.value.as_ref().map(|v| v.to_string()).or_else(|| {
+                let raw = lit_str.raw.to_string();
+                Some(raw.trim_matches('\'').trim_matches('"').to_string())
+            })
+        }
+        Expression::Literal(Literal::Integer(lit_int)) => Some(lit_int.raw.to_string()),
+        _ => None,
     }
 }
 
@@ -6170,6 +6401,9 @@ fn apply_condition_narrowing<'b>(
                             classes,
                         );
                     });
+                    // Negated instanceof exclusion does NOT eliminate
+                    // null — `!$x instanceof Foo` is true when $x is
+                    // null, so null stays in the union.  No stripping.
                     if !results.is_empty() {
                         scope.set(var_name.clone(), results);
                     }
@@ -6208,6 +6442,21 @@ fn apply_condition_narrowing<'b>(
                 // Untyped variable — instanceof provides the type.
                 scope.set(var_name, narrowed);
             } else {
+                // When the existing type is entirely `mixed` or
+                // `object`, instanceof replaces it — there is no
+                // useful information to preserve or intersect.
+                let all_broad = existing.iter().all(|rt| {
+                    rt.class_info.is_none()
+                        && matches!(
+                            rt.type_string.unwrap_nullable(),
+                            PhpType::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
+                        )
+                });
+                if all_broad {
+                    scope.set(var_name, narrowed);
+                    continue;
+                }
+
                 // Typed variable — filter the existing union to only
                 // types present in the narrowed set.  This correctly
                 // handles both single instanceof (`Dog|Cat` → `Dog`)
@@ -6224,7 +6473,9 @@ fn apply_condition_narrowing<'b>(
                     .collect();
 
                 // Try filtering: keep existing entries whose class is
-                // in the narrowed set.
+                // in the narrowed set.  Strip null from the type_string
+                // because a successful instanceof check guarantees the
+                // value is non-null (e.g. `?Foo` → `Foo`).
                 let filtered: Vec<ResolvedType> = existing
                     .iter()
                     .filter(|rt| {
@@ -6232,13 +6483,34 @@ fn apply_condition_narrowing<'b>(
                             .as_ref()
                             .is_some_and(|c| narrowed_fqns.contains(&c.fqn().to_string()))
                     })
-                    .cloned()
+                    .map(|rt| {
+                        if let Some(non_null) = rt.type_string.non_null_type() {
+                            ResolvedType {
+                                type_string: non_null,
+                                class_info: rt.class_info.clone(),
+                            }
+                        } else {
+                            rt.clone()
+                        }
+                    })
                     .collect();
 
                 if !filtered.is_empty() {
                     // Filter matched — use the filtered results
                     // (preserves richer type info from original resolution).
-                    scope.set(var_name, filtered);
+                    // Also strip bare `null` entries: a successful
+                    // instanceof check guarantees non-null, so `null`
+                    // entries added by `from_classes_with_hint` must
+                    // be removed.
+                    let filtered: Vec<ResolvedType> = filtered
+                        .into_iter()
+                        .filter(|rt| !rt.type_string.is_null())
+                        .collect();
+                    if filtered.is_empty() {
+                        scope.set(var_name, narrowed);
+                    } else {
+                        scope.set(var_name, filtered);
+                    }
                 } else {
                     // No overlap between existing and narrowed types.
                     // This is the intersection case (e.g. MockInterface
@@ -6267,6 +6539,10 @@ fn apply_condition_narrowing<'b>(
                             classes,
                         );
                     });
+                    // Instanceof guarantees non-null — strip bare
+                    // `null` entries that were preserved by
+                    // `apply_narrowing`'s `None => true` rule.
+                    results.retain(|rt| !rt.type_string.is_null());
                     if !results.is_empty() {
                         scope.set(var_name, results);
                     } else {
@@ -6339,6 +6615,8 @@ fn apply_condition_narrowing_inverse_single<'b>(
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
             let mut results = scope.get(var_name).to_vec();
             if extraction.negated {
+                // Inverse of negated instanceof → positive instanceof.
+                // Instanceof guarantees non-null, so strip null entries.
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_inclusion(
                         &extraction.class_type,
@@ -6347,7 +6625,11 @@ fn apply_condition_narrowing_inverse_single<'b>(
                         classes,
                     );
                 });
+                results.retain(|rt| !rt.type_string.is_null());
             } else {
+                // Inverse of positive instanceof → exclusion.
+                // Exclusion does NOT strip null (`!instanceof` is
+                // true for null values).
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_exclusion(
                         &extraction.class_type,
@@ -6873,6 +7155,10 @@ fn apply_null_narrowing_truthy<'b>(
     if let Some(var_name) = extract_non_null_check_var(condition) {
         strip_null_from_scope(&var_name, scope);
     }
+    // Check for `$x === null` or `$x == null` — narrow to null only.
+    if let Some(var_name) = extract_null_equality_check_var(condition) {
+        narrow_to_null_in_scope(&var_name, scope);
+    }
 }
 
 /// Apply inverse null narrowing (for guard clause: `if ($x === null) { return; }`).
@@ -6881,6 +7167,11 @@ fn apply_null_narrowing_inverse<'b>(condition: &'b Expression<'b>, scope: &mut S
     // the inverse (else/guard) means $x is NOT null.
     if let Some(var_name) = extract_null_equality_check_var(condition) {
         strip_null_from_scope(&var_name, scope);
+    }
+    // When the condition is `$x !== null`, the inverse (else/guard)
+    // means $x IS null — narrow to null only.
+    if let Some(var_name) = extract_non_null_check_var(condition) {
+        narrow_to_null_in_scope(&var_name, scope);
     }
     // When the condition is `!$x` or `empty($x)`, the inverse means
     // $x is truthy — remove null.
@@ -6999,6 +7290,32 @@ fn expr_to_var_name(expr: &Expression<'_>) -> Option<String> {
 }
 
 /// Strip `null` from a variable's type in the scope.
+/// Narrow a variable in scope to `null` only.
+///
+/// Used when a condition like `$x === null` is true: the variable must
+/// be null.  Replaces the variable's type with `null` if it currently
+/// contains a nullable type, or sets it to `null` if the variable has
+/// any type at all.
+fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+    // Check whether any existing type contains null (Nullable, Union
+    // with null member, or bare null).  `non_null_type()` returns
+    // `Some` for `?T` and `T|null` unions; `is_null()` catches bare
+    // `null`.
+    let has_null = types
+        .iter()
+        .any(|rt| rt.type_string.non_null_type().is_some() || rt.type_string.is_null());
+    if has_null {
+        scope.set(
+            var_name.to_string(),
+            vec![ResolvedType::from_type_string(PhpType::null())],
+        );
+    }
+}
+
 fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
     let types = scope.get(var_name).to_vec();
     if types.is_empty() {

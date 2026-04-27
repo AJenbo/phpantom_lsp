@@ -185,21 +185,76 @@ pub(crate) fn resolve_variable_type(
         if let Some(ref ast) = ast_result
             && !ast.equivalent(&joined)
             && ast.has_type_structure()
+            // Don't prefer the AST result when it looks like an
+            // unsubstituted template parameter (e.g. `K`, `TValue`).
+            // The forward walker substitutes template bounds and
+            // applies narrowing, so its result is more accurate.
+            && !looks_like_template_param(ast)
         {
             // Check that the extra detail is not just `|null`.
             // If the AST type without null is equivalent to the
             // joined type, the only difference is a trailing null
             // component — prefer the narrowed `joined` result.
             let only_null_diff = ast.non_null_type().is_some_and(|nn| nn.equivalent(&joined));
-            if !only_null_diff {
-                return ast_result;
+            if only_null_diff {
+                return Some(joined);
             }
+
+            // When the forward walker result is a narrowed subset of
+            // the AST result (e.g. type guard `is_null` narrowed
+            // `string|null` to `null`, or `instanceof` narrowed
+            // `Foo|Bar` to `Foo`), prefer the narrowed result.
+            // The forward walker applies branch-aware narrowing that
+            // the AST parameter lookup cannot.
+            let walker_is_subset = joined.is_subset_of(ast);
+            if walker_is_subset {
+                return Some(joined);
+            }
+
+            return ast_result;
         }
         return Some(joined);
     }
 
     // Fall back to the AST-based parameter/foreach/catch type.
     ast_result
+}
+
+/// Check whether a `PhpType` looks like an unsubstituted template
+/// parameter — a bare named type that is not a known PHP built-in,
+/// scalar, or pseudo-type.  Examples: `K`, `T`, `TKey`, `TValue`.
+///
+/// When the AST-based hover path returns a template parameter name
+/// while the forward walker returns a concrete narrowed type, we
+/// prefer the forward walker's result.
+fn looks_like_template_param(ty: &PhpType) -> bool {
+    let name = match ty {
+        PhpType::Named(n) => n.as_str(),
+        _ => return false,
+    };
+    // Must be a short, non-FQN identifier.
+    if name.contains('\\') || name.contains('-') {
+        return false;
+    }
+    // Known PHP types are never template params.
+    if crate::php_type::is_keyword_type(name) {
+        return false;
+    }
+    // Heuristic: single uppercase letter (K, T, V) or T-prefixed
+    // with second uppercase letter (TKey, TValue, TModel).
+    let bytes = name.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    // Single letter like K, T, V
+    if bytes.len() == 1 && bytes[0].is_ascii_uppercase() {
+        return true;
+    }
+    // T-prefixed: TKey, TValue, etc.
+    if bytes.len() >= 2 && bytes[0] == b'T' && bytes[1].is_ascii_uppercase() {
+        return true;
+    }
+    false
 }
 
 /// Walk top-level statements to find the scope containing the cursor

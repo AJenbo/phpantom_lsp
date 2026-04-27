@@ -916,7 +916,21 @@ impl Backend {
                                 } else {
                                     ret.clone()
                                 };
-                                **hint_out = Some(substituted);
+                                // Resolve self/static/parent keywords to
+                                // concrete class names so that downstream
+                                // consumers see real FQNs, not keywords.
+                                let resolved_hint = if substituted.is_parent_ref() {
+                                    owner
+                                        .parent_class
+                                        .as_ref()
+                                        .map(|p| PhpType::Named(p.to_string()))
+                                        .unwrap_or(substituted)
+                                } else if substituted.is_self_like() {
+                                    PhpType::Named(owner.fqn().to_string())
+                                } else {
+                                    substituted
+                                };
+                                **hint_out = Some(resolved_hint);
                             }
                             hint_captured = true;
                         }
@@ -971,7 +985,20 @@ impl Backend {
                         if let Some(m) = merged.get_method_ci(method_name)
                             && let Some(ref ret) = m.return_type
                         {
-                            **hint_out = Some(ret.clone());
+                            // Resolve self/static/parent keywords to
+                            // concrete class names (mirrors instance path).
+                            let resolved_hint = if ret.is_parent_ref() {
+                                owner
+                                    .parent_class
+                                    .as_ref()
+                                    .map(|p| PhpType::Named(p.to_string()))
+                                    .unwrap_or_else(|| ret.clone())
+                            } else if ret.is_self_like() {
+                                PhpType::Named(owner.fqn().to_string())
+                            } else {
+                                ret.clone()
+                            };
+                            **hint_out = Some(resolved_hint);
                         }
                     }
 
@@ -1349,6 +1376,22 @@ impl Backend {
 
             // Fall back to plain return type
             if let Some(ref ret) = method.return_type {
+                // When the return type is `parent`, resolve to the actual
+                // parent class rather than returning the owning class.
+                if ret.is_parent_ref() {
+                    if let Some(ref parent_name) = class_info.parent_class {
+                        let classes = super::type_resolution::type_hint_to_classes_typed(
+                            &PhpType::Named(parent_name.to_string()),
+                            &class_info.fqn(),
+                            all_classes,
+                            class_loader,
+                        );
+                        if !classes.is_empty() {
+                            return classes;
+                        }
+                    }
+                    return vec![];
+                }
                 // When the return type is `static`, `self`, or `$this`,
                 // return the owning class directly.  This avoids a lookup
                 // by short name (e.g. "Builder") which fails when the

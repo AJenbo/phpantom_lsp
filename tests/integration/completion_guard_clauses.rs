@@ -1828,3 +1828,222 @@ async fn test_guard_clause_null_coalesce_then_falsy_continue() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_guard_clause_instanceof_interface_narrows() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_instanceof_interface.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Identifiable {\n",
+        "    public function getId(): int;\n",
+        "}\n",
+        "interface Nameable {\n",
+        "    public function getName(): string;\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function test(object $obj): void {\n",
+        "        if (!$obj instanceof Identifiable) {\n",
+        "            return;\n",
+        "        }\n",
+        "        $obj->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 12,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getId"),
+                "Should include 'getId' after negated instanceof guard, got: {:?}",
+                method_names
+            );
+            assert!(
+                !method_names.contains(&"getName"),
+                "Should NOT include 'getName' (not narrowed to Nameable), got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_guard_clause_instanceof_interface_positive_branch() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_instanceof_iface_positive.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Identifiable {\n",
+        "    public function getId(): int;\n",
+        "}\n",
+        "interface Nameable {\n",
+        "    public function getName(): string;\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function test(object $obj): void {\n",
+        "        if ($obj instanceof Nameable) {\n",
+        "            $obj->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 18,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName' inside positive instanceof branch, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
+#[tokio::test]
+async fn test_guard_clause_sequential_instanceof_interfaces() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///guard_sequential_instanceof.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Identifiable {\n",
+        "    public function getId(): int;\n",
+        "}\n",
+        "interface Nameable {\n",
+        "    public function getName(): string;\n",
+        "}\n",
+        "class Svc {\n",
+        "    public function test(object $obj): void {\n",
+        "        if (!$obj instanceof Identifiable) {\n",
+        "            return;\n",
+        "        }\n",
+        "        if (!$obj instanceof Nameable) {\n",
+        "            return;\n",
+        "        }\n",
+        "        $obj->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 15,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Should return completions");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"getId"),
+                "Should include 'getId' after sequential instanceof guards, got: {:?}",
+                method_names
+            );
+            assert!(
+                method_names.contains(&"getName"),
+                "Should include 'getName' after sequential instanceof guards, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}

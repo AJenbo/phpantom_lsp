@@ -917,6 +917,21 @@ impl PhpType {
     /// `self`, `static`, `$this`, or `parent` (case-insensitive).
     ///
     /// Also returns `true` when the type is nullable (e.g. `?static`).
+    /// Returns `true` when this type refers to the `parent` keyword
+    /// (bare, nullable, or in a union with null).
+    pub fn is_parent_ref(&self) -> bool {
+        match self {
+            PhpType::Named(s) => s.eq_ignore_ascii_case("parent"),
+            PhpType::Generic(name, _) => name.eq_ignore_ascii_case("parent"),
+            PhpType::Nullable(inner) => inner.is_parent_ref(),
+            PhpType::Union(members) => {
+                let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
+                !non_null.is_empty() && non_null.iter().all(|m| m.is_parent_ref())
+            }
+            _ => false,
+        }
+    }
+
     pub fn is_self_like(&self) -> bool {
         match self {
             PhpType::Named(s) => self.is_self_ref() || s.eq_ignore_ascii_case("parent"),
@@ -1517,6 +1532,41 @@ impl PhpType {
         match self {
             PhpType::Nullable(inner) => inner.as_ref(),
             _ => self,
+        }
+    }
+
+    /// Whether every atomic member of `self` also appears in `other`.
+    ///
+    /// Used to detect when a forward-walker narrowing result is a strict
+    /// subset of the AST-based parameter type (e.g. `null` ⊆ `string|null`,
+    /// `Foo` ⊆ `Foo|Bar|null`).  Only checks shallow structural equality
+    /// of union/nullable members — does not consider class hierarchy.
+    pub fn is_subset_of(&self, other: &PhpType) -> bool {
+        // `mixed` is the top type — everything is a subset of it.
+        if other.is_mixed() && !self.is_mixed() {
+            return true;
+        }
+        let self_members = self.atomic_members();
+        let other_members = other.atomic_members();
+        if self_members.is_empty() {
+            return false;
+        }
+        self_members
+            .iter()
+            .all(|s| other_members.iter().any(|o| s.equivalent(o)))
+    }
+
+    /// Collect the atomic (leaf) type members of a type.
+    ///
+    /// `Foo|Bar|null` → `[Foo, Bar, null]`, `?Foo` → `[Foo, null]`,
+    /// `Foo` → `[Foo]`.
+    fn atomic_members(&self) -> Vec<PhpType> {
+        match self {
+            PhpType::Union(members) => members.clone(),
+            PhpType::Nullable(inner) => {
+                vec![inner.as_ref().clone(), PhpType::null()]
+            }
+            _ => vec![self.clone()],
         }
     }
 
@@ -3558,6 +3608,46 @@ fn is_class_like_name(name: &str) -> bool {
 /// `class-string`, `Some("array")` for `list`, etc.  Returns `None`
 /// for names that have no single native PHP type (`scalar`, `numeric`,
 /// `array-key`, `number`).  Class names pass through unchanged.
+/// Normalize keyword type casing and PHP aliases to their canonical forms.
+///
+/// Unlike [`native_scalar_name`], this does **not** collapse PHPStan
+/// refinement types (`non-empty-string`, `positive-int`, etc.) to their
+/// base PHP types.  It only handles:
+///
+/// - PHP aliases: `integer` → `int`, `boolean` → `bool`, `double` → `float`
+/// - Case normalization: `NULL` → `null`, `TRUE` → `true`, `aRray` → `array`
+///
+/// Class names and unrecognised identifiers pass through unchanged.
+fn normalize_keyword_casing(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    match lower.as_str() {
+        // PHP aliases that map to a different canonical name.
+        "integer" => "int".to_string(),
+        "boolean" => "bool".to_string(),
+        "double" => "float".to_string(),
+        "no-return" | "noreturn" | "never-return" | "never-returns" => "never".to_string(),
+        // Known keywords — return the lowercased form.
+        "int" | "float" | "string" | "bool" | "void" | "never" | "null" | "false" | "true"
+        | "mixed" | "object" | "array" | "callable" | "iterable" | "resource" | "self"
+        | "static" | "parent"
+        // PHPStan refinement types — lowercase but do NOT collapse.
+        | "positive-int" | "negative-int" | "non-positive-int" | "non-negative-int"
+        | "non-zero-int"
+        | "non-empty-string" | "numeric-string" | "class-string" | "interface-string"
+        | "literal-string" | "callable-string" | "truthy-string" | "non-falsy-string"
+        | "trait-string" | "enum-string" | "lowercase-string" | "uppercase-string"
+        | "non-empty-lowercase-string" | "non-empty-uppercase-string"
+        | "non-empty-literal-string"
+        | "non-empty-array" | "non-empty-list" | "non-empty-mixed" | "associative-array"
+        | "closed-resource" | "open-resource" | "callable-object" | "callable-array"
+        | "stringable-object"
+        | "array-key" | "scalar" | "numeric" | "number" => lower,
+        // Not a keyword — return the original name unchanged
+        // (preserving class name casing).
+        _ => name.to_string(),
+    }
+}
+
 fn native_scalar_name(name: &str) -> Option<&str> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
@@ -3830,7 +3920,9 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         | ast::Type::UnspecifiedLiteralInt(k)
         | ast::Type::UnspecifiedLiteralString(k)
         | ast::Type::UnspecifiedLiteralFloat(k)
-        | ast::Type::NonEmptyUnspecifiedLiteralString(k) => PhpType::Named(k.value.to_string()),
+        | ast::Type::NonEmptyUnspecifiedLiteralString(k) => {
+            PhpType::Named(normalize_keyword_casing(k.value))
+        }
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------
         other => PhpType::Raw(other.to_string()),
@@ -3844,12 +3936,13 @@ fn convert_keyword_with_optional_generics(
     keyword: &str,
     parameters: &Option<ast::GenericParameters<'_>>,
 ) -> PhpType {
+    let canonical = normalize_keyword_casing(keyword);
     match parameters {
         Some(params) => {
             let args: Vec<PhpType> = params.entries.iter().map(|e| convert(&e.inner)).collect();
-            PhpType::Generic(keyword.to_string(), args)
+            PhpType::Generic(canonical, args)
         }
-        None => PhpType::Named(keyword.to_string()),
+        None => PhpType::Named(canonical),
     }
 }
 
@@ -3926,7 +4019,13 @@ impl fmt::Display for PhpType {
                 write!(f, ">")
             }
 
-            PhpType::Array(inner) => write!(f, "{inner}[]"),
+            PhpType::Array(inner) => {
+                if inner.is_mixed() {
+                    write!(f, "array")
+                } else {
+                    write!(f, "array<{inner}>")
+                }
+            }
 
             PhpType::ArrayShape(entries) => {
                 write!(f, "array{{")?;
@@ -4327,7 +4426,8 @@ mod tests {
 
     #[test]
     fn round_trip_slice() {
-        assert_round_trip("Foo[]");
+        // `Foo[]` is parsed as `PhpType::Array(Foo)` which displays as `array<Foo>`.
+        assert_round_trip_expected("Foo[]", "array<Foo>");
     }
 
     #[test]
@@ -5665,7 +5765,7 @@ mod tests {
         let ty = PhpType::parse("TValue[]");
         let subs = make_subs(&[("TValue", "User")]);
         let result = ty.substitute(&subs);
-        assert_eq!(result.to_string(), "User[]");
+        assert_eq!(result.to_string(), "array<User>");
     }
 
     #[test]

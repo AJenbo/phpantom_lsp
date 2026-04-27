@@ -34,7 +34,12 @@ fn default_scope_return_type() -> PhpType {
 /// Also returns `true` for methods decorated with `#[Scope]`
 /// (Laravel 11+), regardless of their name.
 pub(super) fn is_scope_method(method: &MethodInfo) -> bool {
-    method.has_scope_attribute || (method.name.starts_with("scope") && method.name.len() > 5)
+    // Laravel requires #[Scope] methods to be protected; public methods
+    // with the attribute are silently ignored by the framework.
+    if method.has_scope_attribute {
+        return method.visibility != crate::types::Visibility::Public;
+    }
+    method.name.starts_with("scope") && method.name.len() > 5
 }
 
 /// Returns `true` when the method uses the `#[Scope]` attribute

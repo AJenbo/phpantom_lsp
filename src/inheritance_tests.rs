@@ -72,7 +72,7 @@ fn test_apply_substitution_nested_generic() {
 fn test_apply_substitution_array_shorthand() {
     let subs = make_subs(&[("TValue", "User")]);
 
-    assert_eq!(apply_substitution("TValue[]", &subs), "User[]");
+    assert_eq!(apply_substitution("TValue[]", &subs), "array<User>");
 }
 
 #[test]

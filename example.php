@@ -1427,6 +1427,30 @@ class IterationDemo
         // Destructuring
         [$first, $second] = $src->allPens();
         $first->write();                  // destructured element type
+
+        // Foreach destructuring
+        /** @var array<int, array{string, int}> $rows */
+        $rows = [['Alice', 30], ['Bob', 25]];
+        foreach ($rows as [$name, $age]) {
+            strlen($name);                // string from positional shape
+            abs($age);                    // int from positional shape
+        }
+
+        // Foreach keyed shape destructuring
+        /** @var array<int, array{tool: Pen, count: int}> $inv */
+        $inv = [];
+        foreach ($inv as ['tool' => $tool, 'count' => $count]) {
+            $tool->write();               // Pen from keyed shape
+            abs($count);                  // int from keyed shape
+        }
+
+        // Nested destructuring
+        /** @var array{string, array{Pen, Pencil}} $nested */
+        $nested = ['label', [new Pen(), new Pencil()]];
+        [$label, [$nestedPen, $nestedPencil]] = $nested;
+        strlen($label);                   // string from outer position 0
+        $nestedPen->write();              // Pen from inner position 0
+        $nestedPencil->sketch();          // Pencil from inner position 1
     }
 }
 
@@ -6253,6 +6277,22 @@ function runDemoAssertions(): void
     ['pen' => $dPen, 'pencil' => $dPencil] = $shapeSource;
     assert($dPen instanceof Pen, 'Named destructured pen must be Pen');
     assert($dPencil instanceof Pencil, 'Named destructured pencil must be Pencil');
+
+    // ── Nested destructuring ────────────────────────────────────────────
+    /** @var array{string, array{Pen, Pencil}} $nestedDestr */
+    $nestedDestr = ['label', [new Pen(), new Pencil()]];
+    [$nLabel, [$nPen, $nPencil]] = $nestedDestr;
+    assert(is_string($nLabel), 'Nested destructured label must be string');
+    assert($nPen instanceof Pen, 'Nested destructured pen must be Pen');
+    assert($nPencil instanceof Pencil, 'Nested destructured pencil must be Pencil');
+
+    // ── Foreach destructuring ───────────────────────────────────────────
+    /** @var array<int, array{tool: Pen, count: int}> $foreachDestrInv */
+    $foreachDestrInv = [['tool' => new Pen(), 'count' => 5]];
+    foreach ($foreachDestrInv as ['tool' => $fTool, 'count' => $fCount]) {
+        assert($fTool instanceof Pen, 'Foreach destructured tool must be Pen');
+        assert(is_int($fCount), 'Foreach destructured count must be int');
+    }
 
     // ── Ambiguous variables ─────────────────────────────────────────────
     if (rand(0, 1)) {

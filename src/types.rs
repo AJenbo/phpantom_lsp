@@ -2053,7 +2053,46 @@ impl ResolvedType {
                 .map(|c| ResolvedType::from_both_arc(type_hint.clone(), c))
                 .collect()
         } else {
-            classes.into_iter().map(ResolvedType::from_arc).collect()
+            let mut results: Vec<ResolvedType> =
+                classes.into_iter().map(ResolvedType::from_arc).collect();
+
+            // When the original type hint is a union or nullable,
+            // preserve non-class members (scalars like `int`, `string`,
+            // `null`) as explicit `ResolvedType` entries so that type
+            // guard narrowing (e.g. `is_object()`, `is_int()`,
+            // `is_null()`) can filter them like any other union member.
+            // Without this, `int` in `Foo|Bar|int` or `null` in
+            // `Foo|null` would be silently dropped because they have
+            // no ClassInfo.
+            let class_fqns: Vec<String> = results
+                .iter()
+                .filter_map(|rt| rt.class_info.as_ref().map(|c| c.fqn().to_string()))
+                .collect();
+            let extra_members: Vec<PhpType> = match &type_hint {
+                PhpType::Nullable(_) => vec![PhpType::null()],
+                PhpType::Union(members) => members
+                    .iter()
+                    .filter(|m| {
+                        // Keep members that were not resolved to a class.
+                        match m {
+                            PhpType::Named(n) => {
+                                let stripped = n.strip_prefix('\\').unwrap_or(n);
+                                !class_fqns.iter().any(|fqn| {
+                                    fqn == stripped || crate::util::short_name(fqn) == stripped
+                                })
+                            }
+                            _ => true,
+                        }
+                    })
+                    .cloned()
+                    .collect(),
+                _ => vec![],
+            };
+            for member in extra_members {
+                results.push(ResolvedType::from_type_string(member));
+            }
+
+            results
         }
     }
 

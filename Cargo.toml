@@ -48,6 +48,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "fixture_runner"
 harness = false
 
+[[test]]
+name = "assert_type_runner"
+harness = false
+
 [[bench]]
 name = "completion"
 harness = false

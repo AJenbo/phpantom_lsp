@@ -417,6 +417,22 @@ pub(crate) fn resolve_class_with_inheritance(
             }
         }
 
+        // ── Template bound fallback ─────────────────────────────
+        // When a subclass extends a generic parent without providing
+        // explicit `@extends` generics and no convention-based
+        // substitution filled the map, fall back to the template
+        // parameter bounds (e.g. `@template T of object` → `object`)
+        // so that inherited methods don't leak raw template names.
+        if !parent.template_params.is_empty() {
+            for param_name in &parent.template_params {
+                if !level_subs.contains_key(param_name.to_string().as_str())
+                    && let Some(bound) = parent.template_param_bounds.get(param_name)
+                {
+                    level_subs.insert(param_name.to_string(), bound.clone());
+                }
+            }
+        }
+
         // Merge traits used by the parent class as well, so that
         // grandparent-level trait members are visible.
         // Apply the current level's template substitutions to the
@@ -533,6 +549,26 @@ pub(crate) fn resolve_class_with_inheritance(
         current = ClassRef::Owned(parent);
     }
 
+    // Refine the `value` property on backed enums.  The `BackedEnum`
+    // interface declares `public readonly int|string $value`, but each
+    // concrete backed enum knows its specific backing type.  Replace
+    // the generic union with the precise type so that hover, completion,
+    // and diagnostics see `string` or `int` instead of `int|string`.
+    if let Some(ref backed) = merged.backed_type {
+        let specific_type = match backed {
+            crate::types::BackedEnumType::String => PhpType::Named("string".to_string()),
+            crate::types::BackedEnumType::Int => PhpType::Named("int".to_string()),
+        };
+        if let Some(prop) = merged
+            .properties
+            .make_mut()
+            .iter_mut()
+            .find(|p| p.name == "value")
+        {
+            prop.type_hint = Some(specific_type);
+        }
+    }
+
     merged
 }
 
@@ -587,7 +623,9 @@ pub(crate) fn resolve_property_type_hint(
 ) -> Option<PhpType> {
     // Try the class directly first — it may already have the property
     // with generic substitutions applied.
-    if let Some(p) = class.properties.iter().find(|p| p.name == prop_name) {
+    if let Some(p) = class.properties.iter().find(|p| p.name == prop_name)
+        && p.type_hint.is_some()
+    {
         return p.type_hint.clone();
     }
     let cache = crate::virtual_members::active_resolved_class_cache();
@@ -657,6 +695,21 @@ fn merge_traits_into(
             if class_loader(&factory_fqn).is_some() {
                 for param in &trait_info.template_params {
                     trait_subs.insert(param.to_string(), PhpType::Named(factory_fqn.clone()));
+                }
+            }
+        }
+
+        // ── Template bound fallback ─────────────────────────────
+        // When a class uses a generic trait without `@use` generics
+        // and no convention-based provider filled the map, fall back
+        // to the template parameter bounds (e.g. `@template T of object`
+        // → `object`) so inherited methods don't leak raw template names.
+        if !trait_info.template_params.is_empty() {
+            for param_name in &trait_info.template_params {
+                if !trait_subs.contains_key(param_name.to_string().as_str())
+                    && let Some(bound) = trait_info.template_param_bounds.get(param_name)
+                {
+                    trait_subs.insert(param_name.to_string(), bound.clone());
                 }
             }
         }

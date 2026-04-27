@@ -411,3 +411,106 @@ fn test_extract_bounds_contravariant_with_bound() {
         vec![("TInput".to_string(), Some(PhpType::parse("Comparable")))]
     );
 }
+
+// ─── Trait template bound fallback (B39) ────────────────────────────────────
+
+/// When a class uses a generic trait without `@use` generics, template
+/// parameters in trait methods should fall back to their declared bound.
+#[tokio::test]
+async fn test_trait_template_bound_fallback_without_use_annotation() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///trait_tpl_bound.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class BaseObj {\n",
+        "    public function baseMethod(): string { return ''; }\n",
+        "}\n",
+        "/**\n",
+        " * @template T of BaseObj\n",
+        " */\n",
+        "trait MyTrait {\n",
+        "    /** @return T */\n",
+        "    public function doFoo() {}\n",
+        "}\n",
+        "class User {\n",
+        "    use MyTrait;\n",
+        "}\n",
+        "function testIt(User $u) {\n",
+        "    $u->doFoo()->\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 15, 19).await;
+    assert!(
+        items.iter().any(|i| i.starts_with("baseMethod")),
+        "Expected 'baseMethod' from bound type BaseObj, got: {:?}",
+        items
+    );
+}
+
+/// When a class uses a generic trait WITH `@use` generics, the explicit
+/// type arguments should be used instead of the bound.
+#[tokio::test]
+async fn test_trait_template_with_use_annotation_overrides_bound() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///trait_tpl_explicit.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class BaseObj {\n",
+        "    public function baseMethod(): string { return ''; }\n",
+        "}\n",
+        "class SpecialObj extends BaseObj {\n",
+        "    public function specialMethod(): int { return 0; }\n",
+        "}\n",
+        "/**\n",
+        " * @template T of BaseObj\n",
+        " */\n",
+        "trait MyTrait {\n",
+        "    /** @return T */\n",
+        "    public function doFoo() {}\n",
+        "}\n",
+        "/** @use MyTrait<SpecialObj> */\n",
+        "class User {\n",
+        "    use MyTrait;\n",
+        "}\n",
+        "function testIt(User $u) {\n",
+        "    $u->doFoo()->\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, text, 19, 19).await;
+    assert!(
+        items.iter().any(|i| i.starts_with("specialMethod")),
+        "Expected 'specialMethod' from explicit SpecialObj, got: {:?}",
+        items
+    );
+}
+
+/// When a trait template has no bound, the fallback should not inject
+/// anything (no crash, no wrong type).
+#[tokio::test]
+async fn test_trait_template_no_bound_no_crash() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///trait_tpl_no_bound.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template T\n",
+        " */\n",
+        "trait MyTrait {\n",
+        "    /** @return T */\n",
+        "    public function doFoo() {}\n",
+        "}\n",
+        "class User {\n",
+        "    use MyTrait;\n",
+        "}\n",
+        "function testIt(User $u) {\n",
+        "    $u->doFoo()->\n",
+        "}\n",
+    );
+
+    // Should not crash; no completions expected since T has no bound.
+    let items = complete_at(&backend, &uri, text, 12, 19).await;
+    // Just verify it didn't panic — items may be empty or contain mixed members.
+    let _ = items;
+}

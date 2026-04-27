@@ -1216,7 +1216,7 @@ impl Backend {
                         template_param_bounds: AtomMap::default(),
                         template_param_defaults: AtomMap::default(),
                         extends_generics: vec![],
-                        implements_generics: vec![],
+                        implements_generics: doc_info.implements_generics,
                         use_generics: vec![],
                         type_aliases: AtomMap::default(),
                         trait_precedences: vec![],

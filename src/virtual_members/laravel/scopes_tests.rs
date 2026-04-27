@@ -9,6 +9,7 @@ use std::sync::Arc;
 fn make_scope_attr_method(name: &str, return_type: Option<&str>) -> MethodInfo {
     MethodInfo {
         has_scope_attribute: true,
+        visibility: Visibility::Protected,
         ..make_method(name, return_type)
     }
 }
@@ -22,8 +23,28 @@ fn make_scope_attr_method_with_params(
 ) -> MethodInfo {
     MethodInfo {
         has_scope_attribute: true,
+        visibility: Visibility::Protected,
         ..make_method_with_params(name, return_type, params)
     }
+}
+
+// ── public #[Scope] excluded ────────────────────────────────────────
+
+#[test]
+fn public_scope_attribute_not_treated_as_scope() {
+    // Laravel silently ignores #[Scope] on public methods.
+    let method = MethodInfo {
+        has_scope_attribute: true,
+        visibility: Visibility::Public,
+        ..make_method("notAScope", Some("void"))
+    };
+    assert!(!is_scope_method(&method));
+}
+
+#[test]
+fn protected_scope_attribute_treated_as_scope() {
+    let method = make_scope_attr_method("completed", Some("void"));
+    assert!(is_scope_method(&method));
 }
 
 // ── is_scope_method ─────────────────────────────────────────────────
