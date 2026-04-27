@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777315153868,
+  "lastUpdate": 1777317873573,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4623,6 +4623,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "97e71201865a37723302efdeb01ea4279229c408",
+          "message": "Fix cross-file hover cache invalidation and skip scalar type lookupse",
+          "timestamp": "2026-04-27T20:55:39+02:00",
+          "tree_id": "96c8e738057363f852fda7de6e9e1009518ba0dd",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/97e71201865a37723302efdeb01ea4279229c408"
+        },
+        "date": 1777317873158,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.8,
             "unit": "MiB"
           }
         ]
