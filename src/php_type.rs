@@ -3498,6 +3498,65 @@ pub(crate) fn is_primitive_scalar_name(name: &str) -> bool {
     )
 }
 
+/// Returns `true` when `name` is a built-in type keyword (case-sensitive) that
+/// can never be a class name.  Covers PHP scalar/pseudo types and PHPStan
+/// refinement types.
+///
+/// Only matches exact lowercase forms.  PHP allows classes named `Resource`,
+/// `String`, `Object`, etc. (capitalised), so a case-insensitive check would
+/// produce false positives.
+///
+/// Used by class resolution to short-circuit lookups for namespace-qualified
+/// type hints like `Tests\Feature\int`, and by type resolution to skip class
+/// loading for names that are obviously not classes.
+pub(crate) fn is_builtin_non_class_type(name: &str) -> bool {
+    matches!(
+        name,
+        "int"
+            | "float"
+            | "string"
+            | "bool"
+            | "array"
+            | "object"
+            | "null"
+            | "void"
+            | "never"
+            | "mixed"
+            | "true"
+            | "false"
+            | "callable"
+            | "iterable"
+            | "resource"
+            | "numeric"
+            | "scalar"
+            | "positive-int"
+            | "negative-int"
+            | "non-negative-int"
+            | "non-positive-int"
+            | "non-zero-int"
+            | "numeric-string"
+            | "non-empty-string"
+            | "non-falsy-string"
+            | "truthy-string"
+            | "literal-string"
+            | "class-string"
+            | "interface-string"
+            | "array-key"
+            | "list"
+            | "non-empty-list"
+            | "non-empty-array"
+            | "empty"
+            | "no-return"
+            | "never-return"
+            | "never-returns"
+            | "number"
+            | "double"
+            | "boolean"
+            | "integer"
+            | "real"
+    )
+}
+
 /// Returns `true` for type names that represent array-like types in PHP.
 pub fn is_array_like_name(name: &str) -> bool {
     matches!(

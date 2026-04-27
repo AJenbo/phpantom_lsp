@@ -41,7 +41,7 @@ use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::composer;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, is_builtin_non_class_type};
 use crate::types::{ClassInfo, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
 
@@ -77,6 +77,15 @@ impl Backend {
         // The class name stored in ClassInfo is just the short name (e.g. "Customer"),
         // so we match against the last segment of the namespace-qualified name.
         let last_segment = short_name(class_name);
+
+        // ── Short-circuit: scalar/built-in type keywords are never classes ──
+        // The name resolver or variable resolution pipeline sometimes
+        // namespace-qualifies bare type keywords (e.g. `Tests\Feature\int`).
+        // These can never resolve to a class, so bail out immediately to
+        // avoid thousands of wasted lookups per analysis run.
+        if is_builtin_non_class_type(last_segment) {
+            return None;
+        }
 
         // Extract the expected namespace prefix (if any).
         // For "Demo\\PDO" → expected_ns = Some("Demo")

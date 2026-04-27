@@ -585,10 +585,10 @@ pub struct MethodInfo {
 impl MethodInfo {
     /// Compare two methods by signature-relevant fields only.
     ///
-    /// Ignores fields that change on every keystroke (byte offsets) and
-    /// fields that are display-only (descriptions, links).  Everything
-    /// else affects type resolution, inheritance, or virtual member
-    /// injection and must trigger cache eviction when it changes.
+    /// Ignores fields that change on every keystroke (byte offsets).
+    /// Everything else — including descriptions and links — affects
+    /// either type resolution or hover display and must trigger cache
+    /// eviction when it changes.
     ///
     /// Parameters are compared in order (not as sets) because parameter
     /// order matters for signature help and call resolution.
@@ -599,6 +599,10 @@ impl MethodInfo {
             && self.return_type == other.return_type
             && self.native_return_type == other.native_return_type
             && self.conditional_return == other.conditional_return
+            && self.description == other.description
+            && self.return_description == other.return_description
+            && self.links == other.links
+            && self.see_refs == other.see_refs
             && self.deprecation_message == other.deprecation_message
             && self.deprecated_replacement == other.deprecated_replacement
             && self.template_params == other.template_params
@@ -771,14 +775,15 @@ pub struct PropertyInfo {
 impl PropertyInfo {
     /// Compare two properties by signature-relevant fields only.
     ///
-    /// Ignores `name_offset` (changes on every keystroke) and
-    /// `description` (display-only).  Everything else affects type
-    /// resolution and must trigger cache eviction when it changes.
+    /// Ignores `name_offset` (changes on every keystroke).  Everything
+    /// else — including description — affects type resolution or hover
+    /// display and must trigger cache eviction when it changes.
     pub fn signature_eq(&self, other: &PropertyInfo) -> bool {
         self.name == other.name
             && self.type_hint == other.type_hint
             && self.visibility == other.visibility
             && self.is_static == other.is_static
+            && self.description == other.description
             && self.deprecation_message == other.deprecation_message
             && self.deprecated_replacement == other.deprecated_replacement
             && self.is_virtual == other.is_virtual
@@ -2496,29 +2501,38 @@ mod tests {
     }
 
     #[test]
-    fn method_signature_eq_ignores_description() {
+    fn method_signature_eq_detects_description_change() {
         let mut a = method("foo");
         a.description = Some("Does stuff".to_string());
         let mut b = method("foo");
         b.description = Some("Different description".to_string());
-        assert!(a.signature_eq(&b));
+        assert!(
+            !a.signature_eq(&b),
+            "Description changes must break signature_eq (B12)"
+        );
     }
 
     #[test]
-    fn method_signature_eq_ignores_return_description() {
+    fn method_signature_eq_detects_return_description_change() {
         let mut a = method("foo");
         a.return_description = Some("The result".to_string());
         let mut b = method("foo");
         b.return_description = None;
-        assert!(a.signature_eq(&b));
+        assert!(
+            !a.signature_eq(&b),
+            "Return description changes must break signature_eq (B12)"
+        );
     }
 
     #[test]
-    fn method_signature_eq_ignores_link() {
+    fn method_signature_eq_detects_link_change() {
         let mut a = method("foo");
         a.links = vec!["https://example.com".to_string()];
         let b = method("foo");
-        assert!(a.signature_eq(&b));
+        assert!(
+            !a.signature_eq(&b),
+            "Link changes must break signature_eq (B12)"
+        );
     }
 
     #[test]
@@ -2602,11 +2616,14 @@ mod tests {
     }
 
     #[test]
-    fn prop_signature_eq_ignores_description() {
+    fn prop_signature_eq_detects_description_change() {
         let mut a = prop("name", "string");
         a.description = Some("The user's name".to_string());
         let b = prop("name", "string");
-        assert!(a.signature_eq(&b));
+        assert!(
+            !a.signature_eq(&b),
+            "Property description changes must break signature_eq (B12)"
+        );
     }
 
     #[test]
@@ -3032,20 +3049,21 @@ mod tests {
     }
 
     /// Body-only changes (offsets shift, descriptions change) must not
-    /// trigger eviction.
+    /// Changing only byte offsets must NOT trigger eviction.
+    /// Descriptions and links DO trigger eviction (they affect hover).
     #[test]
     fn class_signature_eq_body_only_change() {
         let mut m_a = method("doWork");
         m_a.name_offset = 100;
-        m_a.description = Some("Old description".to_string());
-        m_a.return_description = Some("Old return desc".to_string());
-        m_a.links = vec!["https://old.example.com".to_string()];
+        m_a.description = Some("Same description".to_string());
+        m_a.return_description = Some("Same return desc".to_string());
+        m_a.links = vec!["https://same.example.com".to_string()];
         let mut p_a = prop("name", "string");
         p_a.name_offset = 200;
-        p_a.description = Some("Old prop desc".to_string());
+        p_a.description = Some("Same prop desc".to_string());
         let mut c_a = constant("MAX");
         c_a.name_offset = 300;
-        c_a.description = Some("Old const desc".to_string());
+        c_a.description = Some("Same const desc".to_string());
 
         let a = ClassInfo {
             name: crate::atom::atom("Foo"),
@@ -3055,21 +3073,21 @@ mod tests {
             methods: vec![Arc::new(m_a)].into(),
             properties: vec![p_a].into(),
             constants: vec![c_a].into(),
-            links: vec!["https://old.example.com".to_string()],
+            links: vec!["https://same.example.com".to_string()],
             ..Default::default()
         };
 
         let mut m_b = method("doWork");
-        m_b.name_offset = 150;
-        m_b.description = Some("New description".to_string());
-        m_b.return_description = Some("New return desc".to_string());
-        m_b.links = vec!["https://new.example.com".to_string()];
+        m_b.name_offset = 150; // offset changed
+        m_b.description = Some("Same description".to_string());
+        m_b.return_description = Some("Same return desc".to_string());
+        m_b.links = vec!["https://same.example.com".to_string()];
         let mut p_b = prop("name", "string");
-        p_b.name_offset = 250;
-        p_b.description = Some("New prop desc".to_string());
+        p_b.name_offset = 250; // offset changed
+        p_b.description = Some("Same prop desc".to_string());
         let mut c_b = constant("MAX");
-        c_b.name_offset = 350;
-        c_b.description = Some("New const desc".to_string());
+        c_b.name_offset = 350; // offset changed
+        c_b.description = Some("Same const desc".to_string());
 
         let b = ClassInfo {
             name: crate::atom::atom("Foo"),
@@ -3079,13 +3097,64 @@ mod tests {
             methods: vec![Arc::new(m_b)].into(),
             properties: vec![p_b].into(),
             constants: vec![c_b].into(),
-            links: vec!["https://new.example.com".to_string()],
+            links: vec!["https://same.example.com".to_string()],
             ..Default::default()
         };
 
         assert!(
             a.signature_eq(&b),
-            "Body-only changes (offsets, descriptions, links) must not break signature_eq"
+            "Offset-only changes must not break signature_eq"
+        );
+    }
+
+    /// Changing descriptions or links MUST trigger eviction so that
+    /// hover shows updated content after cross-file edits (B12).
+    #[test]
+    fn class_signature_eq_description_change_triggers_eviction() {
+        let mut m_a = method("doWork");
+        m_a.description = Some("Old description".to_string());
+        let a = ClassInfo {
+            name: crate::atom::atom("Foo"),
+            methods: vec![Arc::new(m_a)].into(),
+            ..Default::default()
+        };
+
+        let mut m_b = method("doWork");
+        m_b.description = Some("New description".to_string());
+        let b = ClassInfo {
+            name: crate::atom::atom("Foo"),
+            methods: vec![Arc::new(m_b)].into(),
+            ..Default::default()
+        };
+
+        assert!(
+            !a.signature_eq(&b),
+            "Description changes must break signature_eq to invalidate hover cache"
+        );
+    }
+
+    /// Changing a property description MUST trigger eviction (B12).
+    #[test]
+    fn class_signature_eq_property_description_change_triggers_eviction() {
+        let mut p_a = prop("name", "string");
+        p_a.description = Some("Old prop desc".to_string());
+        let a = ClassInfo {
+            name: crate::atom::atom("Foo"),
+            properties: vec![p_a].into(),
+            ..Default::default()
+        };
+
+        let mut p_b = prop("name", "string");
+        p_b.description = Some("New prop desc".to_string());
+        let b = ClassInfo {
+            name: crate::atom::atom("Foo"),
+            properties: vec![p_b].into(),
+            ..Default::default()
+        };
+
+        assert!(
+            !a.signature_eq(&b),
+            "Property description changes must break signature_eq"
         );
     }
 

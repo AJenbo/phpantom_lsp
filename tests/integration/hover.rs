@@ -1255,6 +1255,160 @@ class Handler {
     assert!(text.contains("Item"), "should show owner class: {}", text);
 }
 
+// ─── Cross-file cache invalidation ─────────────────────────────────────────
+
+#[test]
+fn hover_cross_file_docblock_updated_after_edit() {
+    // B12: When a cross-file class is loaded via PSR-4 and its docblock is
+    // later edited (simulated via update_ast), hover should show the NEW
+    // description, not the stale cached version.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": { "App\\": "src/" }
+            }
+        }"#,
+        &[
+            (
+                "src/Job.php",
+                r#"<?php
+namespace App;
+class Job {
+    /** Original description. */
+    public function run(): void {}
+}
+"#,
+            ),
+            (
+                "src/Worker.php",
+                r#"<?php
+namespace App;
+class Worker {
+    public function execute(): void {
+        $j = new Job();
+        $j->run();
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let job_uri = format!("file://{}", _dir.path().join("src/Job.php").display());
+    let job_content_v1 = std::fs::read_to_string(_dir.path().join("src/Job.php")).unwrap();
+    backend.update_ast(&job_uri, &job_content_v1);
+
+    let worker_uri = format!("file://{}", _dir.path().join("src/Worker.php").display());
+    let worker_content = std::fs::read_to_string(_dir.path().join("src/Worker.php")).unwrap();
+
+    // Initial hover shows the original description.
+    let hover =
+        hover_at(&backend, &worker_uri, &worker_content, 5, 13).expect("expected hover on run()");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Original description"),
+        "initial hover should show original docblock, got: {}",
+        text
+    );
+
+    // Simulate editing Job.php: change the docblock description.
+    let job_content_v2 = r#"<?php
+namespace App;
+class Job {
+    /** Updated description after edit. */
+    public function run(): void {}
+}
+"#;
+    backend.update_ast(&job_uri, job_content_v2);
+
+    // Hover again — should show the updated description.
+    let hover = hover_at(&backend, &worker_uri, &worker_content, 5, 13)
+        .expect("expected hover on run() after edit");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Updated description after edit"),
+        "hover should show updated docblock after edit, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_cross_file_property_type_updated_after_edit() {
+    // B12: When a cross-file class @property type changes, hover on a
+    // variable accessing that property should reflect the new type.
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": { "App\\": "src/" }
+            }
+        }"#,
+        &[
+            (
+                "src/Config.php",
+                r#"<?php
+namespace App;
+class Config {
+    public string $value = '';
+}
+"#,
+            ),
+            (
+                "src/Reader.php",
+                r#"<?php
+namespace App;
+class Reader {
+    public function read(): void {
+        $c = new Config();
+        $c->value;
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let config_uri = format!("file://{}", _dir.path().join("src/Config.php").display());
+    let config_v1 = std::fs::read_to_string(_dir.path().join("src/Config.php")).unwrap();
+    backend.update_ast(&config_uri, &config_v1);
+
+    let reader_uri = format!("file://{}", _dir.path().join("src/Reader.php").display());
+    let reader_content = std::fs::read_to_string(_dir.path().join("src/Reader.php")).unwrap();
+
+    // Initial hover on $c->value shows string type.
+    let hover =
+        hover_at(&backend, &reader_uri, &reader_content, 5, 13).expect("expected hover on value");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "initial hover should show string type, got: {}",
+        text
+    );
+
+    // Edit Config.php: change property type from string to int.
+    let config_v2 = r#"<?php
+namespace App;
+class Config {
+    public int $value = 0;
+}
+"#;
+    backend.update_ast(&config_uri, config_v2);
+
+    // Hover again — should show int, not string.
+    let hover = hover_at(&backend, &reader_uri, &reader_content, 5, 13)
+        .expect("expected hover on value after edit");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "hover should show updated type after edit, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("string"),
+        "hover should NOT show stale string type, got: {}",
+        text
+    );
+}
+
 // ─── Enum hover ─────────────────────────────────────────────────────────────
 
 #[test]

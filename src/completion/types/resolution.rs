@@ -437,58 +437,7 @@ fn resolve_named_type(
 ///
 /// Pass an empty `owning_class_name` to search all classes without
 /// priority (used by the array-key completion path).
-/// Returns `true` for type names that are PHP built-in scalar or
-/// pseudo types which can never be class names or type aliases.
-/// This allows skipping the expensive alias/class lookup for the
-/// most common return types.
-#[inline]
-fn is_builtin_non_class_type(name: &str) -> bool {
-    matches!(
-        name,
-        "int"
-            | "float"
-            | "string"
-            | "bool"
-            | "array"
-            | "object"
-            | "null"
-            | "void"
-            | "never"
-            | "mixed"
-            | "true"
-            | "false"
-            | "callable"
-            | "iterable"
-            | "resource"
-            | "numeric"
-            | "scalar"
-            | "positive-int"
-            | "negative-int"
-            | "non-negative-int"
-            | "non-positive-int"
-            | "non-zero-int"
-            | "numeric-string"
-            | "non-empty-string"
-            | "non-falsy-string"
-            | "truthy-string"
-            | "literal-string"
-            | "class-string"
-            | "interface-string"
-            | "array-key"
-            | "list"
-            | "non-empty-list"
-            | "non-empty-array"
-            | "empty"
-            | "no-return"
-            | "never-return"
-            | "never-returns"
-            | "number"
-            | "double"
-            | "boolean"
-            | "integer"
-            | "real"
-    )
-}
+use crate::php_type::is_builtin_non_class_type;
 
 pub(crate) fn resolve_type_alias_typed(
     ty: &PhpType,

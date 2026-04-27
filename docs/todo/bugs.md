@@ -230,57 +230,6 @@ function test(): void {
 }
 ```
 
-## B12 — Hover cross-file property docblock cache invalidation fails after edits
-
-**Root cause:** When a class is loaded from a cross-file source
-(PSR-4 or classmap) and its docblock is later edited, hover
-continues to show the stale docblock content instead of the updated
-version. The parsed `ClassInfo` cached in `ast_map` and/or
-`fqn_index` is not invalidated when the dependency file changes.
-
-**Tests:** Six integration tests covering this bug were removed
-because they were committed in a failing state. The fix must
-include new passing tests for at least these scenarios:
-
-- PSR-4 lazy-loaded class, then docblock edited (`did_change`)
-- Dependent child class inheriting a changed `@property`
-- `@var`-annotated variable accessing a cross-file property
-- Method-chain access (`$this->getJob()->class_name`)
-- Cache warm → edit → hover (eviction path)
-- Child class with Model parent (Laravel `@property` interaction)
-
-**Where to fix:** The cache layer that stores cross-file
-`ClassInfo` results must be invalidated (or re-parsed) when
-`didChange` or `didSave` fires for the dependency file. The
-`resolved_class_cache` and/or `fqn_index` entries for the changed
-URI must be evicted so that the next hover request re-parses the
-file and picks up the new docblock content.
-
-## B19 — Namespace-qualified scalar types hit class resolution
-
-**Root cause:** When `find_or_load_class` is called with names like
-`Tests\Feature\BusinessCentral\int`, `Tests\Support\array`, or
-`Tests\Unit\Customers\bool`, these are scalar type hints that were
-namespace-qualified by the name resolver (or the variable resolution
-pipeline) instead of being recognised as built-in types. The class
-resolution pipeline then walks through `fqn_index`, `class_index`,
-`classmap`, and PSR-4 for each one before giving up and caching
-a negative result. In the analyse pipeline this adds thousands of
-wasted lookups per run.
-
-**Where to fix:** Two complementary fixes:
-
-1. The callers that produce these names (variable resolution,
-   type-hint resolution) should recognise bare scalar keywords
-   (`int`, `float`, `string`, `bool`, `array`, `object`, `mixed`,
-   `void`, `null`, `never`, `true`, `false`, `callable`, `iterable`,
-   `self`, `static`, `parent`) and never pass them to class
-   resolution — even when they carry a namespace prefix. A type
-   whose last segment is a scalar keyword is never a class.
-
-2. As a safety net, `find_or_load_class_inner` could short-circuit
-   on names whose last segment is a known scalar keyword, avoiding
-   the multi-phase search entirely.
 
 
 
