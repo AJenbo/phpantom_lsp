@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777320475096,
+  "lastUpdate": 1777323424290,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4725,6 +4725,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3afffe2c03daf8c6572a09b1b74c7956d8ad770a",
+          "message": "Fix false positives for parent::__construct with @extends generics and\narray access on bare array",
+          "timestamp": "2026-04-27T22:46:17+02:00",
+          "tree_id": "f2880f4c27c7ad9d61e2085696e66a623f584084",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3afffe2c03daf8c6572a09b1b74c7956d8ad770a"
+        },
+        "date": 1777323423562,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.1,
             "unit": "MiB"
           }
         ]
