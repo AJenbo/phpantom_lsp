@@ -2939,6 +2939,8 @@ fn try_emit_config_key_span(
     });
 }
 
+/// Returns `true` if `name` is a method on Laravel's `Repository` config contract
+/// that accepts a config key as its first argument.
 fn is_config_repository_method(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -2956,6 +2958,8 @@ fn is_config_repository_method(name: &str) -> bool {
     )
 }
 
+/// Returns `true` if `object` is a `config()` (or `\config()`) helper call and
+/// `member_name` is a config-key-accepting method, e.g. `config()->get('app.name')`.
 fn is_laravel_config_repository_call(object: &Expression<'_>, member_name: &str) -> bool {
     if !is_config_repository_method(member_name) {
         return false;
