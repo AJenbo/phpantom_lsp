@@ -2647,6 +2647,84 @@ return [
         7,
         "Config::array → 'providers' key"
     );
+
+    // Config::collection('app.providers') — cursor on "app.providers"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        10,
+        34,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::collection('app.providers') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        7,
+        "Config::collection → 'providers' key"
+    );
+
+    // Config::prepend('app.providers', 'X') — cursor on "app.providers"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        11,
+        31,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::prepend('app.providers') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        7,
+        "Config::prepend → 'providers' key"
+    );
+
+    // Config::push('app.providers', 'Y') — cursor on "app.providers"
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        12,
+        28,
+    )
+    .await;
+    assert!(
+        result.is_some(),
+        "Config::push('app.providers') should resolve"
+    );
+    let response = result.unwrap();
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        7,
+        "Config::push → 'providers' key"
+    );
 }
 
 #[tokio::test]
@@ -2666,6 +2744,7 @@ class Service {
         $i = config()->set('app.name', 'X');
         $j = config()->prepend('app.providers', 'X');
         $k = config()->push('app.providers', 'Y');
+        $l = \\config()->get('app.name');
     }
 }
 ";
@@ -2686,70 +2765,136 @@ return [
     ]);
 
     // config()->get('app.name') — cursor on "app.name"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 3, 28).await;
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 3, 28).await;
     assert!(result.is_some(), "config()->get('app.name') should resolve");
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
     assert_eq!(definition_line(&response), 2, "config()->get → 'name' key");
 
     // config()->has('app.timezone') — cursor on "app.timezone"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 4, 28).await;
-    assert!(result.is_some(), "config()->has('app.timezone') should resolve");
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 4, 28).await;
+    assert!(
+        result.is_some(),
+        "config()->has('app.timezone') should resolve"
+    );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
-    assert_eq!(definition_line(&response), 3, "config()->has → 'timezone' key");
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        3,
+        "config()->has → 'timezone' key"
+    );
 
     // config()->string('app.name') — cursor on "app.name"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 5, 31).await;
-    assert!(result.is_some(), "config()->string('app.name') should resolve");
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 5, 31).await;
+    assert!(
+        result.is_some(),
+        "config()->string('app.name') should resolve"
+    );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
-    assert_eq!(definition_line(&response), 2, "config()->string → 'name' key");
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        2,
+        "config()->string → 'name' key"
+    );
 
     // config()->integer('app.retry') — cursor on "app.retry"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 6, 32).await;
-    assert!(result.is_some(), "config()->integer('app.retry') should resolve");
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 6, 32).await;
+    assert!(
+        result.is_some(),
+        "config()->integer('app.retry') should resolve"
+    );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
-    assert_eq!(definition_line(&response), 4, "config()->integer → 'retry' key");
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        4,
+        "config()->integer → 'retry' key"
+    );
 
     // config()->float('app.rate') — cursor on "app.rate"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 7, 30).await;
-    assert!(result.is_some(), "config()->float('app.rate') should resolve");
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 7, 30).await;
+    assert!(
+        result.is_some(),
+        "config()->float('app.rate') should resolve"
+    );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
-    assert_eq!(definition_line(&response), 6, "config()->float → 'rate' key");
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        6,
+        "config()->float → 'rate' key"
+    );
 
     // config()->boolean('app.debug') — cursor on "app.debug"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 8, 32).await;
-    assert!(result.is_some(), "config()->boolean('app.debug') should resolve");
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 8, 32).await;
+    assert!(
+        result.is_some(),
+        "config()->boolean('app.debug') should resolve"
+    );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
-    assert_eq!(definition_line(&response), 5, "config()->boolean → 'debug' key");
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        5,
+        "config()->boolean → 'debug' key"
+    );
 
     // config()->array('app.providers') — cursor on "app.providers"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 9, 30).await;
-    assert!(result.is_some(), "config()->array('app.providers') should resolve");
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 9, 30).await;
+    assert!(
+        result.is_some(),
+        "config()->array('app.providers') should resolve"
+    );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
-    assert_eq!(definition_line(&response), 7, "config()->array → 'providers' key");
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
+    assert_eq!(
+        definition_line(&response),
+        7,
+        "config()->array → 'providers' key"
+    );
 
     // config()->collection('app.providers') — cursor on "app.providers"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 10, 35).await;
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 10, 35).await;
     assert!(
         result.is_some(),
         "config()->collection('app.providers') should resolve"
     );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
     assert_eq!(
         definition_line(&response),
         7,
@@ -2757,41 +2902,50 @@ return [
     );
 
     // config()->set('app.name', 'X') — cursor on "app.name"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 11, 28).await;
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 11, 28).await;
     assert!(result.is_some(), "config()->set('app.name') should resolve");
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
     assert_eq!(definition_line(&response), 2, "config()->set → 'name' key");
 
     // config()->prepend('app.providers', 'X') — cursor on "app.providers"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 12, 32).await;
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 12, 32).await;
     assert!(
         result.is_some(),
         "config()->prepend('app.providers') should resolve"
     );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
     assert_eq!(
         definition_line(&response),
         7,
         "config()->prepend → 'providers' key"
     );
 
-    // config()->push('app.providers', 'Y') — cursor on "app.providers"
-    let result =
-        goto_definition_at(&backend, &dir, "src/Service.php", service_php, 13, 29).await;
+    // \config()->get('app.name') — cursor on "app.name"
+    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 14, 29).await;
     assert!(
         result.is_some(),
-        "config()->push('app.providers') should resolve"
+        "\\config()->get('app.name') should resolve"
     );
     let response = result.unwrap();
-    assert!(definition_uri(&response).as_str().ends_with("/config/app.php"));
+    assert!(
+        definition_uri(&response)
+            .as_str()
+            .ends_with("/config/app.php")
+    );
     assert_eq!(
         definition_line(&response),
-        7,
-        "config()->push → 'providers' key"
+        2,
+        "\\config()->get → 'name' key"
     );
 }
 

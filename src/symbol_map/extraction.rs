@@ -1717,20 +1717,7 @@ fn extract_from_expression<'a>(
                     if (clean_subject.eq_ignore_ascii_case("Config")
                         || clean_subject
                             .eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
-                        && matches!(
-                            member_name.to_ascii_lowercase().as_str(),
-                            "has"
-                                | "get"
-                                | "string"
-                                | "integer"
-                                | "float"
-                                | "boolean"
-                                | "array"
-                                | "collection"
-                                | "set"
-                                | "prepend"
-                                | "push"
-                        )
+                        && is_config_repository_method(&member_name)
                     {
                         try_emit_config_key_span(
                             &static_call.argument_list,
@@ -2952,9 +2939,9 @@ fn try_emit_config_key_span(
     });
 }
 
-fn is_laravel_config_repository_call(object: &Expression<'_>, member_name: &str) -> bool {
-    if !matches!(
-        member_name.to_ascii_lowercase().as_str(),
+fn is_config_repository_method(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
         "has"
             | "get"
             | "string"
@@ -2966,13 +2953,19 @@ fn is_laravel_config_repository_call(object: &Expression<'_>, member_name: &str)
             | "set"
             | "prepend"
             | "push"
-    ) {
+    )
+}
+
+fn is_laravel_config_repository_call(object: &Expression<'_>, member_name: &str) -> bool {
+    if !is_config_repository_method(member_name) {
         return false;
     }
 
     match object {
         Expression::Call(Call::Function(func_call)) => match func_call.function {
-            Expression::Identifier(ident) => ident.value().eq_ignore_ascii_case("config"),
+            Expression::Identifier(ident) => {
+                strip_fqn_prefix(ident.value()).eq_ignore_ascii_case("config")
+            }
             _ => false,
         },
         _ => false,
