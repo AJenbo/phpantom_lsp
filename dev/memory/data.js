@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777381692432,
+  "lastUpdate": 1777407347760,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4861,6 +4861,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d2f751d35bd3f167929aaec3ec97f694d7f6a0d2",
+          "message": "Implement first-class callable immediate invocation and precise binary\nexpression type inference",
+          "timestamp": "2026-04-28T22:04:23+02:00",
+          "tree_id": "3f7d3e320b1ce2527c01a098e07b63ab418cb3e9",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/d2f751d35bd3f167929aaec3ec97f694d7f6a0d2"
+        },
+        "date": 1777407347030,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.6,
             "unit": "MiB"
           }
         ]
