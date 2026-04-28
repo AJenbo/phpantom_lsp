@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777410016801,
+  "lastUpdate": 1777410819115,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4929,6 +4929,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "MingJen@users.noreply.github.com",
+            "name": "Teemo",
+            "username": "MingJen"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "73bdea0a93bda4e0b342ef3c75645eaccea2196a",
+          "message": "feat: complete Laravel config navigation with config() helper and typed accessors\n\nCo-authored-by: Anders Jenbo <anders@jenbo.dk>",
+          "timestamp": "2026-04-28T23:02:36+02:00",
+          "tree_id": "924e0eace3c0c9d9c239fd708395760acf7fab53",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/73bdea0a93bda4e0b342ef3c75645eaccea2196a"
+        },
+        "date": 1777410818435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.4,
             "unit": "MiB"
           }
         ]
