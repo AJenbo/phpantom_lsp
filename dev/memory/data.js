@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777366535926,
+  "lastUpdate": 1777381692432,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4827,6 +4827,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ac62fed739153acc617f4f69abc43759c57dead5",
+          "message": "Fix isset() narrowing and hover performance on large files",
+          "timestamp": "2026-04-28T14:57:01+02:00",
+          "tree_id": "69d108041752d91d457fa5f137884749a12d1d64",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/ac62fed739153acc617f4f69abc43759c57dead5"
+        },
+        "date": 1777381691257,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.3,
             "unit": "MiB"
           }
         ]
