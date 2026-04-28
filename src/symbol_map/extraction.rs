@@ -1625,6 +1625,13 @@ fn extract_from_expression<'a>(
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                     let member_name = ident.value.to_string();
+                    if is_laravel_config_repository_call(method_call.object, &member_name) {
+                        try_emit_config_key_span(
+                            &method_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     // Emit call site for method call: `$subject->method(...)`
                     emit_call_site(
                         format!("{}->{}", &subject_text, &member_name),
@@ -1652,6 +1659,13 @@ fn extract_from_expression<'a>(
 
                 if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
                     let member_name = ident.value.to_string();
+                    if is_laravel_config_repository_call(method_call.object, &member_name) {
+                        try_emit_config_key_span(
+                            &method_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     // Emit call site for null-safe method call.
                     // Use `->` so resolve_callable handles it the same
                     // as regular method calls.
@@ -2936,6 +2950,33 @@ fn try_emit_config_key_span(
             key: key.to_string(),
         },
     });
+}
+
+fn is_laravel_config_repository_call(object: &Expression<'_>, member_name: &str) -> bool {
+    if !matches!(
+        member_name.to_ascii_lowercase().as_str(),
+        "has"
+            | "get"
+            | "string"
+            | "integer"
+            | "float"
+            | "boolean"
+            | "array"
+            | "collection"
+            | "set"
+            | "prepend"
+            | "push"
+    ) {
+        return false;
+    }
+
+    match object {
+        Expression::Call(Call::Function(func_call)) => match func_call.function {
+            Expression::Identifier(ident) => ident.value().eq_ignore_ascii_case("config"),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// Recursively check whether an expression contains an `instanceof` operator.
