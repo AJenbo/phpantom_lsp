@@ -7391,4 +7391,38 @@ mod tests {
             assert!(!PhpType::Named("int".to_owned()).is_int_literal());
         }
     }
+
+    // ─── Parenthesized type parsing ─────────────────────────────────────
+
+    #[test]
+    fn parse_grouped_union_array() {
+        // `(string|int)[]` should parse as Array(Union(string, int))
+        let ty = PhpType::parse("(string|int)[]");
+        assert!(
+            matches!(&ty, PhpType::Array(inner) if matches!(inner.as_ref(), PhpType::Union(_))),
+            "expected Array(Union(...)), got: {:?}",
+            ty
+        );
+    }
+
+    #[test]
+    fn parse_parenthesized_callable() {
+        // `(callable(): string)` should parse and unwrap the parens
+        let ty = PhpType::parse("(callable(): string)");
+        assert!(
+            matches!(&ty, PhpType::Callable { .. }),
+            "expected Callable, got: {:?}",
+            ty
+        );
+    }
+
+    #[test]
+    fn parse_callable_return_string() {
+        let ty = PhpType::parse("callable():string");
+        assert!(
+            matches!(&ty, PhpType::Callable { .. }),
+            "expected Callable, got: {:?}",
+            ty
+        );
+    }
 }

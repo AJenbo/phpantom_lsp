@@ -282,11 +282,17 @@ impl VirtualMemberProvider for PHPDocProvider {
         // `resolve_class_with_inheritance`, but virtual members from
         // docblock tags are not — they only exist as text in the parent's
         // `class_docblock`.  Walk the parent chain and collect them.
-        // Use a cheap handle instead of cloning ClassInfo at each level.
+        //
+        // Template substitutions from `@extends` annotations are applied
+        // so that `@method T get()` on a parent with `@template T` is
+        // resolved to the concrete type when the child declares
+        // `@extends Parent<ConcreteType>`.
         {
-            let mut current_parent = class.parent_class;
+            let mut current: ClassRef<'_> = ClassRef::Borrowed(class);
+            let mut active_subs: HashMap<String, PhpType> = HashMap::new();
             let mut depth = 0u32;
-            while let Some(ref parent_name) = current_parent {
+
+            while let Some(ref parent_name) = current.parent_class {
                 depth += 1;
                 if depth > MAX_INHERITANCE_DEPTH {
                     break;
@@ -297,21 +303,33 @@ impl VirtualMemberProvider for PHPDocProvider {
                     break;
                 };
 
+                // Build a substitution map for this parent level from
+                // the child's `@extends` generics.
+                let level_subs = build_mixin_substitution_map(&current, &parent, &active_subs);
+
                 if let Some(doc_text) = parent.class_docblock.as_deref()
                     && !doc_text.is_empty()
                 {
-                    for m in docblock::extract_method_tags(doc_text) {
+                    for mut m in docblock::extract_method_tags(doc_text) {
                         if seen_methods.insert(m.name.to_string()) {
+                            if !level_subs.is_empty() {
+                                inheritance::apply_substitution_to_method(&mut m, &level_subs);
+                            }
                             methods.push(m);
                         }
                     }
 
                     for (name, type_hint) in docblock::extract_property_tags(doc_text) {
                         if seen_props.insert(name.clone()) {
+                            let resolved_type = if !level_subs.is_empty() {
+                                type_hint.map(|t| t.substitute(&level_subs))
+                            } else {
+                                type_hint
+                            };
                             properties.push(PropertyInfo {
                                 name: atom(&name),
                                 name_offset: 0,
-                                type_hint,
+                                type_hint: resolved_type,
                                 native_type_hint: None,
                                 description: None,
                                 is_static: false,
@@ -325,7 +343,89 @@ impl VirtualMemberProvider for PHPDocProvider {
                     }
                 }
 
-                current_parent = parent.parent_class;
+                active_subs = level_subs;
+                current = ClassRef::Owned(parent);
+            }
+        }
+
+        // ── Phase 1d: @method and @property tags from implemented interfaces ─
+        //
+        // When a class implements an interface that declares `@method` or
+        // `@property` tags, those virtual members should be visible on the
+        // implementing class.  Template substitutions from `@implements`
+        // annotations are applied so that `@method E get()` on an interface
+        // with `@template E` is resolved to the concrete type when the class
+        // declares `@implements I<ConcreteType>`.
+        //
+        // We also walk each interface's parent interfaces (via `interfaces`
+        // field, which stores `extends` for interfaces).
+        {
+            let mut iface_queue: Vec<(Atom, HashMap<String, PhpType>)> = Vec::new();
+
+            // Seed with the class's own interfaces, building substitution
+            // maps from `@implements` generics.
+            for iface_name in &class.interfaces {
+                if let Some(iface) = class_loader(iface_name) {
+                    let subs = build_interface_substitution_map(class, &iface);
+                    iface_queue.push((*iface_name, subs));
+                }
+            }
+
+            let mut visited: HashSet<Atom> = HashSet::new();
+            while let Some((iface_name, subs)) = iface_queue.pop() {
+                if !visited.insert(iface_name) {
+                    continue;
+                }
+                let iface = if let Some(i) = class_loader(&iface_name) {
+                    i
+                } else {
+                    continue;
+                };
+
+                if let Some(doc_text) = iface.class_docblock.as_deref()
+                    && !doc_text.is_empty()
+                {
+                    for mut m in docblock::extract_method_tags(doc_text) {
+                        if seen_methods.insert(m.name.to_string()) {
+                            if !subs.is_empty() {
+                                inheritance::apply_substitution_to_method(&mut m, &subs);
+                            }
+                            methods.push(m);
+                        }
+                    }
+
+                    for (name, type_hint) in docblock::extract_property_tags(doc_text) {
+                        if seen_props.insert(name.clone()) {
+                            let resolved_type = if !subs.is_empty() {
+                                type_hint.map(|t| t.substitute(&subs))
+                            } else {
+                                type_hint
+                            };
+                            properties.push(PropertyInfo {
+                                name: atom(&name),
+                                name_offset: 0,
+                                type_hint: resolved_type,
+                                native_type_hint: None,
+                                description: None,
+                                is_static: false,
+                                visibility: Visibility::Public,
+                                deprecation_message: None,
+                                deprecated_replacement: None,
+                                see_refs: Vec::new(),
+                                is_virtual: true,
+                            });
+                        }
+                    }
+                }
+
+                // Walk parent interfaces (interface extends).
+                for parent_iface_name in &iface.interfaces {
+                    if let Some(parent_iface) = class_loader(parent_iface_name) {
+                        let parent_subs =
+                            build_interface_extends_substitution_map(&iface, &parent_iface, &subs);
+                        iface_queue.push((*parent_iface_name, parent_subs));
+                    }
+                }
             }
         }
 
@@ -698,8 +798,81 @@ pub fn resolve_template_param_mixins(
 
 /// Build a substitution map for mixin generic resolution by zipping the
 /// parent class's `@template` parameters with the type arguments provided
-/// by the child's `@extends` / `@implements` generics.
+/// Build a substitution map for a directly implemented interface.
 ///
+/// Maps the interface's template parameters to the concrete types provided
+/// in the class's `@implements` generics.
+fn build_interface_substitution_map(
+    class: &ClassInfo,
+    iface: &ClassInfo,
+) -> HashMap<String, PhpType> {
+    if iface.template_params.is_empty() {
+        return HashMap::new();
+    }
+
+    let iface_short = short_name(&iface.name);
+
+    let type_args = class
+        .implements_generics
+        .iter()
+        .find(|(name, _)| short_name(name) == iface_short)
+        .map(|(_, args)| args);
+
+    let type_args = match type_args {
+        Some(args) => args,
+        None => return HashMap::new(),
+    };
+
+    let mut map = HashMap::new();
+    for (i, param_name) in iface.template_params.iter().enumerate() {
+        if let Some(arg) = type_args.get(i) {
+            map.insert(param_name.to_string(), arg.clone());
+        }
+    }
+    map
+}
+
+/// Build a substitution map for an interface's parent interface (interface extends).
+///
+/// Maps the parent interface's template parameters to concrete types by
+/// resolving through the child interface's `@extends` generics and applying
+/// the already-accumulated substitutions.
+fn build_interface_extends_substitution_map(
+    child_iface: &ClassInfo,
+    parent_iface: &ClassInfo,
+    active_subs: &HashMap<String, PhpType>,
+) -> HashMap<String, PhpType> {
+    if parent_iface.template_params.is_empty() {
+        return active_subs.clone();
+    }
+
+    let parent_short = short_name(&parent_iface.name);
+
+    let type_args = child_iface
+        .extends_generics
+        .iter()
+        .find(|(name, _)| short_name(name) == parent_short)
+        .map(|(_, args)| args);
+
+    let type_args = match type_args {
+        Some(args) => args,
+        None => return active_subs.clone(),
+    };
+
+    let mut map = HashMap::new();
+    for (i, param_name) in parent_iface.template_params.iter().enumerate() {
+        if let Some(arg) = type_args.get(i) {
+            let resolved = if active_subs.is_empty() {
+                arg.clone()
+            } else {
+                arg.substitute(active_subs)
+            };
+            map.insert(param_name.to_string(), resolved);
+        }
+    }
+    map
+}
+
 /// This mirrors [`crate::inheritance::build_substitution_map`] but is
 /// scoped to the virtual-member provider so it does not need to be public
 /// on the inheritance module.

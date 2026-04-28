@@ -10252,3 +10252,298 @@ function process(): void {
         text
     );
 }
+
+// ─── Virtual method: colon return type syntax ───────────────────────────────
+
+#[test]
+fn hover_virtual_method_colon_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @method getBool(string $foo) : bool some description
+ */
+class Child {
+    public function __call(string $name, array $args) {}
+}
+class Demo {
+    public function test(): void {
+        $child = new Child();
+        $result = $child->getBool("hello");
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("bool"),
+        "colon return type @method should resolve to bool, got: {}",
+        text
+    );
+}
+
+// ─── Virtual method: grouped union array return type ────────────────────────
+
+#[test]
+fn hover_virtual_method_grouped_union_array_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @method (string|int)[] getArray() description
+ */
+class Child {
+    public function __call(string $name, array $args) {}
+}
+class Demo {
+    public function test(): void {
+        $child = new Child();
+        $result = $child->getArray();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string") || text.contains("int") || text.contains("array"),
+        "grouped union array should resolve, got: {}",
+        text
+    );
+}
+
+// ─── Virtual method: callable return type ───────────────────────────────────
+
+#[test]
+fn hover_virtual_method_callable_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @method (callable(): string) getCallable() desc
+ */
+class Child {
+    public function __call(string $name, array $args) {}
+}
+class Demo {
+    public function test(): void {
+        $child = new Child();
+        $result = $child->getCallable();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 11, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("callable"),
+        "callable return type should resolve, got: {}",
+        text
+    );
+}
+
+// ─── Virtual method: `static` return type on instance ───────────────────────
+
+#[test]
+fn hover_virtual_method_returning_static_on_instance() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** @method static getStatic() */
+class C {
+    public function __call(string $name, array $args) {}
+}
+class Demo {
+    public function test(): void {
+        $c = (new C)->getStatic();
+        $c;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 8, 9).expect("expected hover on $c");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("C"),
+        "virtual @method returning static should resolve to class C, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_virtual_method_returning_static_on_subclass() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** @method static getStatic() */
+class C {
+    public function __call(string $name, array $args) {}
+}
+class D extends C {}
+class Demo {
+    public function test(): void {
+        $d = (new D)->getStatic();
+        $d;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 9, 9).expect("expected hover on $d");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("D"),
+        "virtual @method returning static on subclass should resolve to D, got: {}",
+        text
+    );
+}
+
+// ─── Virtual method: duplicate calls to same method ─────────────────────────
+
+#[test]
+fn hover_virtual_method_duplicate_calls_both_resolve() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @method setBool(string $foo, string|bool $bar): bool
+ */
+class Child {
+    public function __call(string $name, array $args) {}
+}
+class Demo {
+    public function test(): void {
+        $child = new Child();
+        $b = $child->setBool("hello", true);
+        $c = $child->setBool("hello", "true");
+        $b;
+        $c;
+    }
+}
+"#;
+
+    let hover_b = hover_at(&backend, uri, content, 12, 9).expect("expected hover on $b");
+    let text_b = hover_text(&hover_b);
+    assert!(
+        text_b.contains("bool"),
+        "first call to virtual method should resolve to bool, got: {}",
+        text_b
+    );
+
+    let hover_c = hover_at(&backend, uri, content, 13, 9).expect("expected hover on $c");
+    let text_c = hover_text(&hover_c);
+    assert!(
+        text_c.contains("bool"),
+        "second call to same virtual method should also resolve to bool, got: {}",
+        text_c
+    );
+}
+
+// ─── Virtual method: static call returning static ───────────────────────────
+
+#[test]
+fn hover_static_virtual_method_call_returning_static() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @method static static getInstance()
+ */
+class Child {
+    public static function __callStatic(string $name, array $args) {}
+}
+class Demo {
+    public function test(): void {
+        $f = Child::getInstance();
+        $f;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 10, 9).expect("expected hover on $f");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Child"),
+        "static virtual @method returning static should resolve to Child, got: {}",
+        text
+    );
+}
+
+// ─── Virtual method: generic substitution through @extends ──────────────────
+
+#[test]
+fn hover_virtual_method_generic_substitution_through_extends() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @template T
+ * @method T get()
+ */
+class ParentBox {
+    public function __call(string $name, array $args) {}
+}
+
+/**
+ * @extends ParentBox<string>
+ */
+class StringBox extends ParentBox {}
+
+class Demo {
+    public function test(): void {
+        $box = new StringBox();
+        $result = $box->get();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 18, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "@method generic T should be substituted to string through @extends, got: {}",
+        text
+    );
+}
+
+// ─── Virtual method: generic substitution through @implements ────────────────
+
+#[test]
+fn hover_virtual_method_generic_substitution_through_implements() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @template T
+ * @method T get()
+ */
+interface Container {}
+
+/**
+ * @implements Container<string>
+ */
+class StringContainer implements Container {
+    public function __call(string $name, array $args) {}
+}
+
+class Demo {
+    public function test(): void {
+        $c = new StringContainer();
+        $result = $c->get();
+        $result;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 18, 9).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "@method generic T should be substituted to string through @implements, got: {}",
+        text
+    );
+}

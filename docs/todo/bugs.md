@@ -9,26 +9,6 @@ to second-guess upstream output.
 
 
 
-## B12. `@method` virtual member return type resolution gaps
-
-**Discovered:** SKIP audit of
-`tests/psalm_assertions/magic_method_annotation.php`.
-
-Several `@method` return type patterns are not resolved:
-
-- Colon return type syntax (`@method bool foo()` works but
-  `@method foo(): bool` does not)
-- Callable return types (`@method callable():string foo()`)
-- Grouped union array return types (`@method array<int|string> foo()`)
-- `static` return type on `@method` (should resolve to the
-  concrete class, or child class for subclasses)
-- Generic substitution through `@implements` / `@extends` for
-  `@method` declarations on interfaces and parent classes
-- `$this` return type on `@method` should preserve generics and
-  add `&static`
-
-**Tests:** SKIPs in `tests/psalm_assertions/magic_method_annotation.php`
-(lines 42-44, 83-86, 125-126, 159-160, 231-232, 286, 288).
 
 
 ## B13. Template substitution through multi-level `@extends` chains

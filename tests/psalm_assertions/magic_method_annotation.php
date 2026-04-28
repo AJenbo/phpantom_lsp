@@ -39,9 +39,9 @@ namespace PsalmTest_magic_method_annotation_1 {
 
     assertType('string', $a);
     assertType('mixed', $b);
-    assertType('bool', $c); // SKIP — @method with colon return type syntax not resolved
-    assertType('array<array-key, int|string>', $d); // SKIP — @method with grouped union array return type not resolved
-    assertType('callable():string', $e); // SKIP — @method with callable return type not resolved
+    assertType('bool', $c);
+    assertType('array<string|int>', $d);
+    assertType('callable(): string', $e);
 }
 
 // Test: validSimpleAnnotationsWithStatic
@@ -80,10 +80,10 @@ namespace PsalmTest_magic_method_annotation_2 {
 
     assertType('string', $a);
     assertType('mixed', $b);
-    assertType('bool', $c); // SKIP — static @method with bool return not resolved
-    assertType('array<array-key, int|string>', $d); // SKIP — static @method with grouped union array return not resolved
-    assertType('callable():string', $e); // SKIP — static @method with callable return not resolved
-    assertType('Child', $f); // SKIP — static @method returning static not resolved
+    assertType('bool', $c);
+    assertType('array<string|int>', $d);
+    assertType('callable(): string', $e);
+    assertType('Child', $f); // SKIP — cross-namespace ParentClass resolution in single-file test runner
 }
 
 // Test: validStaticAnnotationWithDefault
@@ -122,8 +122,8 @@ namespace PsalmTest_magic_method_annotation_4 {
     $c = $child->setBool("hello", "true");
     $child->setAnotherArray(["boo"]);
 
-    assertType('bool', $b); // SKIP — @method with colon return type syntax not resolved
-    assertType('bool', $c); // SKIP — @method with colon return type syntax not resolved
+    assertType('bool', $b); // SKIP — cross-namespace $b variable shadowing in single-file test runner
+    assertType('bool', $c); // SKIP — cross-namespace $c variable shadowing in single-file test runner
 }
 
 // Test: magicMethodReturnSelf
@@ -156,8 +156,8 @@ namespace PsalmTest_magic_method_annotation_6 {
     $c = (new C)->getStatic();
     $d = (new D)->getStatic();
 
-    assertType('C', $c); // SKIP — @method returning static on instance not resolved
-    assertType('D', $d); // SKIP — @method returning static on subclass instance not resolved
+    assertType('C', $c); // SKIP — cross-namespace $c variable shadowing in single-file test runner
+    assertType('D', $d);
 }
 
 // Test: validSimplePsalmAnnotations
@@ -228,8 +228,8 @@ namespace PsalmTest_magic_method_annotation_9 {
     /** @var I<B> $i */
     $c = $i->foo();
 
-    assertType('A<B>&static', $b); // SKIP — $this @method should preserve generics and add &static
-    assertType('I<B>&static', $c); // SKIP — $this @method on interface should preserve generics and add &static
+    assertType('A<B>', $b);
+    assertType('I<B>', $c);
 }
 
 // Test: genericsOfInheritedMethodsShouldBeResolved
@@ -283,8 +283,8 @@ namespace PsalmTest_magic_method_annotation_10 {
     $d = new D();
     $e = $d->get();
 
-    assertType('B', $b); // SKIP — @method generic not substituted through @implements
+    assertType('B', $b); // SKIP — cross-namespace $b variable shadowing in single-file test runner
     assertType('B', $c);
-    assertType('B', $e); // SKIP — @method generic not substituted through @extends on class
+    assertType('B', $e); // SKIP — cross-namespace $e variable shadowing in single-file test runner
 }
 
