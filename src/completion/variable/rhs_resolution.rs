@@ -1177,7 +1177,11 @@ fn build_constructor_template_subs(
                 // `@param T[] $items` — resolve individual array elements.
                 if arg_text.starts_with('[') && arg_text.ends_with(']') {
                     let inner = arg_text[1..arg_text.len() - 1].trim();
-                    if !inner.is_empty() {
+                    if inner.is_empty() {
+                        // Empty array `[]` → element type is `never`
+                        // (an empty collection has no elements).
+                        subs.insert(tpl_name.to_string(), PhpType::never());
+                    } else {
                         let first_elem =
                             crate::completion::conditional_resolution::split_text_args(inner);
                         if let Some(elem) = first_elem.first()
@@ -1206,9 +1210,20 @@ fn build_constructor_template_subs(
                 }
             }
             TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
-                // `@param Wrapper<T> $a` — resolve the wrapper's constructor
-                // template params to find the concrete type for T.
-                if let Some(concrete) = resolve_generic_wrapper_template(
+                // `@param array<TKey, T> $items` with `[]` → `never`.
+                // An empty array literal has no keys or values, so all
+                // generic type args of array-like wrappers are `never`.
+                let is_array_like = matches!(
+                    wrapper_name.as_str(),
+                    "array" | "list" | "non-empty-array" | "non-empty-list"
+                );
+                if is_array_like
+                    && arg_text.starts_with('[')
+                    && arg_text.ends_with(']')
+                    && arg_text[1..arg_text.len() - 1].trim().is_empty()
+                {
+                    subs.insert(tpl_name.to_string(), PhpType::never());
+                } else if let Some(concrete) = resolve_generic_wrapper_template(
                     &wrapper_name,
                     tpl_position,
                     arg_text,
@@ -1685,9 +1700,13 @@ pub(crate) fn build_function_template_subs(
             }
             TemplateBindingMode::ArrayElement => {
                 // `@param T[] $items` — resolve individual array elements.
+                // Empty array `[]` → element type is `never`.
                 if arg_text.starts_with('[') && arg_text.ends_with(']') {
                     let inner = arg_text[1..arg_text.len() - 1].trim();
-                    if !inner.is_empty() {
+                    if inner.is_empty() {
+                        // Empty array `[]` → element type is `never`.
+                        subs.insert(tpl_name.to_string(), PhpType::never());
+                    } else {
                         let first_elem =
                             crate::completion::conditional_resolution::split_text_args(inner);
                         if let Some(elem) = first_elem.first()
@@ -1735,7 +1754,11 @@ pub(crate) fn build_function_template_subs(
                     && arg_text.ends_with(']')
                 {
                     let inner = arg_text[1..arg_text.len() - 1].trim();
-                    if !inner.is_empty() {
+                    if inner.is_empty() {
+                        // Empty array `[]` → element type is `never`.
+                        subs.insert(tpl_name.to_string(), PhpType::never());
+                        continue;
+                    } else {
                         let elems =
                             crate::completion::conditional_resolution::split_text_args(inner);
                         // For `array<T>` (position 0 with 1 generic arg) or
@@ -2510,6 +2533,19 @@ fn resolve_rhs_method_call_inner<'b>(
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);
 
+    // ── Expand union generic receivers ──────────────────────────
+    // When the receiver is a union type like `C<A>|C<B>`, the variable
+    // resolution pipeline returns a single ResolvedType with a Union
+    // type_string and one class_info.  To resolve the method on each
+    // branch separately (so `->get()` yields `A|B` not just `A`),
+    // expand the union into separate owner entries with per-branch
+    // generic substitutions applied.
+    let (owner_classes, receiver_resolved) =
+        expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
+
+    let is_union = owner_classes.len() > 1;
+    let mut union_results: Vec<ResolvedType> = Vec::new();
+
     for owner in &owner_classes {
         let template_subs =
             Backend::build_method_template_subs(owner, &method_name, &arg_refs, &rctx);
@@ -2612,10 +2648,15 @@ fn resolve_rhs_method_call_inner<'b>(
             } else {
                 ret_type_string
             };
-            return match effective_hint {
+            let owner_results = match effective_hint {
                 Some(hint) => ResolvedType::from_classes_with_hint(classes, hint),
                 None => ResolvedType::from_classes(classes),
             };
+            if !is_union {
+                return owner_results;
+            }
+            ResolvedType::extend_unique(&mut union_results, owner_results);
+            continue;
         }
 
         // The method has a return type string but `type_hint_to_classes_typed`
@@ -2643,14 +2684,24 @@ fn resolve_rhs_method_call_inner<'b>(
                 None => hint.clone(),
             };
             if parsed_effective == PhpType::void() {
-                return vec![ResolvedType::from_type_string(PhpType::null())];
+                let owner_results = vec![ResolvedType::from_type_string(PhpType::null())];
+                if !is_union {
+                    return owner_results;
+                }
+                ResolvedType::extend_unique(&mut union_results, owner_results);
+                continue;
             }
-            return vec![resolved_type_with_lookup(
+            let owner_results = vec![resolved_type_with_lookup(
                 parsed_effective,
                 &ctx.current_class.name,
                 ctx.all_classes,
                 ctx.class_loader,
             )];
+            if !is_union {
+                return owner_results;
+            }
+            ResolvedType::extend_unique(&mut union_results, owner_results);
+            continue;
         }
 
         // Body return type inference fallback: when the method has no
@@ -2667,15 +2718,103 @@ fn resolve_rhs_method_call_inner<'b>(
             && !inferred.is_void()
             && !inferred.is_mixed()
         {
-            return vec![resolved_type_with_lookup(
+            let owner_results = vec![resolved_type_with_lookup(
                 inferred,
                 &ctx.current_class.name,
                 ctx.all_classes,
                 ctx.class_loader,
             )];
+            if !is_union {
+                return owner_results;
+            }
+            ResolvedType::extend_unique(&mut union_results, owner_results);
+            continue;
         }
     }
-    vec![]
+    union_results
+}
+
+/// Expand union generic receiver types into separate owner entries.
+///
+/// When a variable has type `C<A>|C<B>`, the resolution pipeline produces
+/// a single `ResolvedType` with `type_string = Union(Generic("C",[A]), Generic("C",[B]))`
+/// and one `class_info` (the base class `C`).  Calling a method on such
+/// a union should resolve each branch independently: `->get()` on
+/// `C<A>|C<B>` where `get()` returns `T` should yield `A|B`.
+///
+/// This function detects such union-of-generics patterns and expands them
+/// into separate owner classes, each with the appropriate template
+/// substitutions applied.
+fn expand_union_generic_owners(
+    owner_classes: Vec<Arc<ClassInfo>>,
+    receiver_resolved: Vec<ResolvedType>,
+    ctx: &VarResolutionCtx<'_>,
+) -> (Vec<Arc<ClassInfo>>, Vec<ResolvedType>) {
+    // Only expand when we have exactly one owner and the type_string
+    // is a union with generic branches referencing the same base class.
+    if owner_classes.len() != 1 || receiver_resolved.len() != 1 {
+        return (owner_classes, receiver_resolved);
+    }
+    let rt = &receiver_resolved[0];
+    let union_members = match &rt.type_string {
+        PhpType::Union(members) => members,
+        _ => return (owner_classes, receiver_resolved),
+    };
+
+    // Check that at least two branches are generic types of the same
+    // base class, and the class has template parameters.
+    let base_cls = &owner_classes[0];
+    if base_cls.template_params.is_empty() {
+        return (owner_classes, receiver_resolved);
+    }
+
+    let base_fqn = base_cls.fqn();
+    let base_short = base_cls.name.as_str();
+    let is_same_base = |name: &str| -> bool {
+        name == base_short
+            || name == base_fqn.as_str()
+            || crate::util::short_name(name) == base_short
+    };
+    let generic_branches: Vec<&PhpType> = union_members
+        .iter()
+        .filter(|m| matches!(m, PhpType::Generic(name, _) if is_same_base(name)))
+        .collect();
+    if generic_branches.len() < 2 {
+        return (owner_classes, receiver_resolved);
+    }
+
+    // Expand: for each generic branch, apply the type args to produce
+    // a substituted ClassInfo.
+    let mut expanded_owners: Vec<Arc<ClassInfo>> = Vec::new();
+    let mut expanded_resolved: Vec<ResolvedType> = Vec::new();
+
+    let resolved_base = crate::virtual_members::resolve_class_fully_maybe_cached(
+        base_cls,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+
+    for member in union_members {
+        match member {
+            PhpType::Generic(name, args) if is_same_base(name) => {
+                let substituted = crate::inheritance::apply_generic_args(&resolved_base, args);
+                let arc = Arc::new(substituted);
+                expanded_resolved.push(ResolvedType::from_both_arc(
+                    member.clone(),
+                    Arc::clone(&arc),
+                ));
+                expanded_owners.push(arc);
+            }
+            // Non-generic union members (e.g. scalars in `C<A>|int`)
+            // are kept as type-string-only entries in receiver_resolved
+            // but don't contribute an owner class.
+            other => {
+                expanded_resolved.push(ResolvedType::from_type_string(other.clone()));
+            }
+        }
+    }
+
+    (expanded_owners, expanded_resolved)
 }
 
 /// Find the receiver's type string that matches the given owner class name.

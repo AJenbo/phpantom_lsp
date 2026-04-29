@@ -52,16 +52,19 @@ Several template resolution patterns fail:
 - `@property` virtual members with unresolved templates
 - `__get` with template return type not resolved
 - Intersection types with template interfaces
-- `never` type not inferred for empty collections
-  (`new ArrayCollection([])` → `ArrayCollection<never, never>`)
 - Method-level template on static method returning generic
-- Union of generic types from function return
-  (`C<A>|C<B>` → element type `A|B`)
 - `WeakReference::create` generic resolution
+
+Many of these fail in the multi-namespace Psalm test file because
+`FileContext.namespace` stores only the first namespace, so the
+class loader resolves bare names (e.g. `Foo`) against the wrong
+namespace. Items that work correctly in single-namespace contexts
+(template bound defaults, static method-level templates) are blocked
+only by this infrastructure limitation.
 
 **Tests:** SKIPs in `tests/psalm_assertions/template_class_template.php`
 (lines 16-17, 29, 41, 56, 68, 122, 191-192, 286-287, 451, 487,
-565, 602, 640, 667, 701, 710, 752, 788, 800).
+640, 667, 701, 710, 788, 800).
 
 
 ## B15. Loop exit type narrowing

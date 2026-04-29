@@ -396,10 +396,10 @@ impl LanguageServer for Backend {
         // diagnostics.  The full set (including slow diagnostics) is
         // now cached in `diag_last_full`.  Send a refresh so the
         // editor re-pulls and receives the complete diagnostics.
-        if self.supports_pull_diagnostics.load(Ordering::Acquire) {
-            if let Some(ref client) = self.client {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
+        if self.supports_pull_diagnostics.load(Ordering::Acquire)
+            && let Some(ref client) = self.client
+        {
+            let _ = client.workspace_diagnostic_refresh().await;
         }
     }
 
