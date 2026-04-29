@@ -102,36 +102,40 @@
 //!
 //! ## Publishing strategy
 //!
-//! Fast diagnostics are **always pushed** immediately via
-//! `textDocument/publishDiagnostics`, merged with cached slow,
-//! PHPStan, PHPCS, and Mago results so the editor never shows a gap.
-//! This gives instant feedback (strikethrough, dimming) regardless of
-//! client capabilities.
+//! Each diagnostic source has its own per-URI cache:
 //!
-//! Slow diagnostics are then computed by the background worker:
+//! | Cache                    | Source             |
+//! | ------------------------ | ------------------ |
+//! | `diag_last_fast`         | syntax, unused use |
+//! | `diag_last_slow`         | type resolution    |
+//! | `phpstan_last_diags`     | PHPStan            |
+//! | `phpcs_last_diags`       | PHPCS              |
+//! | `mago_lint_last_diags`   | Mago lint          |
+//! | `mago_analyze_last_diags`| Mago analyze       |
 //!
-//! - **Pull mode** — the worker caches the full result (fast + fresh
-//!   slow + cached PHPStan + cached PHPCS + cached Mago) and sends
-//!   `workspace/diagnostic/refresh`.  The editor re-pulls and gets
-//!   the complete set.  No second push is needed.
+//! When any source finishes, [`Backend::assemble_and_push`] reads all
+//! per-source caches for the URI, merges them into a single set,
+//! deduplicates, and filters suppressions.
 //!
-//! - **Push mode** (fallback) — the worker pushes the full result
-//!   (fast + fresh slow + cached PHPStan + cached PHPCS + cached Mago)
-//!   via `publishDiagnostics`, replacing the Phase 1 snapshot.
+//! **Push mode:** The merged set is published via
+//! `textDocument/publishDiagnostics`.  As each source finishes, its
+//! cache is updated and the full assembled set is pushed.  The user
+//! sees results incrementally: fast diagnostics first, then slow,
+//! then PHPStan/PHPCS/Mago as each completes.
 //!
-//! - **PHPStan / PHPCS / Mago workers** — each caches its results and
-//!   triggers a re-deliver (refresh in pull mode, full re-publish in
-//!   push mode).
+//! **Pull mode:** Only fast diagnostics (syntax errors, unused
+//! imports, unused variables) are pushed via `publishDiagnostics` so
+//! the editor sees them instantly.  The full merged set is cached in
+//! `diag_last_full` with a bumped `resultId`.  The pull handler
+//! (`textDocument/diagnostic`) returns this cached set.  If the
+//! cache is missing (e.g. the file was just opened), the pull
+//! handler triggers computation directly instead of returning empty
+//! results.  Pushing the full set in pull mode would duplicate every
+//! slow and external diagnostic because editors merge pushed and
+//! pulled sets additively.
 //!
-//! Diagnostics are published **asynchronously** via [`Backend::schedule_diagnostics`].
-//! On every `did_change` event a version counter is bumped and the
-//! diagnostic worker is notified.  The worker debounces rapid edits
-//! (waits [`DIAGNOSTIC_DEBOUNCE_MS`] after the last notification) and
-//! then runs a single diagnostic pass.  At most one pass runs at a time;
-//! if new edits arrive while a pass is in flight, a single follow-up
-//! pass is scheduled once the current one finishes.  This two-slot
-//! design (one running, one pending) ensures diagnostics never block
-//! completion, hover, or other latency-sensitive requests.
+//! External tool workers (PHPStan, PHPCS, Mago) use their own
+//! debounce timers in both modes because they are expensive.
 
 mod argument_count;
 mod deprecated;
@@ -250,70 +254,6 @@ impl Backend {
         self.collect_deprecated_diagnostics(uri_str, content, out);
         self.collect_undefined_variable_diagnostics(uri_str, content, out);
         self.collect_invalid_class_kind_diagnostics(uri_str, content, out);
-    }
-
-    /// Build a merged diagnostic set from fresh fast diagnostics,
-    /// cached slow diagnostics, cached PHPStan diagnostics, and
-    /// cached PHPCS diagnostics.
-    ///
-    /// Stale PHPStan diagnostics are eagerly pruned when the current
-    /// file content no longer matches the condition that triggered
-    /// them.  This gives instant visual feedback after applying a
-    /// code action without waiting for the next PHPStan run:
-    ///
-    /// - `throws.*` diagnostics are pruned when the `@throws` tag
-    ///   they reference has been added or removed.
-    /// - Any PHPStan diagnostic is pruned when its line now contains
-    ///   a `@phpstan-ignore` comment that covers the identifier.
-    fn merge_fast_with_cached(&self, uri_str: &str, fast: &[Diagnostic]) -> Vec<Diagnostic> {
-        let mut merged = fast.to_vec();
-        {
-            let cache = self.diag_last_slow.lock();
-            if let Some(prev_slow) = cache.get(uri_str) {
-                merged.extend(prev_slow.iter().cloned());
-            }
-        }
-        {
-            let content: Option<Arc<String>> = self.open_files.read().get(uri_str).cloned();
-            let mut cache = self.phpstan_last_diags.lock();
-            if let Some(prev_phpstan) = cache.get(uri_str) {
-                let filtered: Vec<Diagnostic> = prev_phpstan
-                    .iter()
-                    .filter(|d| {
-                        if let Some(ref text) = content {
-                            !is_stale_phpstan_diagnostic(d, text)
-                        } else {
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
-                if filtered.len() != prev_phpstan.len() {
-                    cache.insert(uri_str.to_string(), filtered.clone());
-                }
-                merged.extend(filtered);
-            }
-        }
-        {
-            let cache = self.phpcs_last_diags.lock();
-            if let Some(prev_phpcs) = cache.get(uri_str) {
-                merged.extend(prev_phpcs.iter().cloned());
-            }
-        }
-        {
-            let cache = self.mago_lint_last_diags.lock();
-            if let Some(prev) = cache.get(uri_str) {
-                merged.extend(prev.iter().cloned());
-            }
-        }
-        {
-            let cache = self.mago_analyze_last_diags.lock();
-            if let Some(prev) = cache.get(uri_str) {
-                merged.extend(prev.iter().cloned());
-            }
-        }
-        deduplicate_diagnostics(&mut merged);
-        merged
     }
 }
 
@@ -694,48 +634,25 @@ impl Backend {
     ///   push the full set (fast + fresh slow + cached PHPStan),
     ///   replacing the Phase 1 snapshot.
     pub(crate) async fn publish_diagnostics_for_file(&self, uri_str: &str, content: &str) {
-        let client = match &self.client {
-            Some(c) => c,
-            None => return,
-        };
-
         if self.should_skip_diagnostics(uri_str) {
             return;
         }
 
-        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
-
-        // ── Phase 1: push fast diagnostics immediately ──────────────
-        // In push mode, merge fresh fast with cached slow + PHPStan so
-        // the editor never shows a gap where those diagnostics vanish
-        // then reappear.
-        //
-        // In pull mode, push ONLY fast diagnostics.  Slow diagnostics
-        // are delivered via pull after workspace/diagnostic/refresh.
-        // Merging cached slow here would duplicate them: the editor
-        // shows both the pushed set and the pulled set additively.
+        // ── Phase 1: collect and cache fast diagnostics ─────────────
         let mut fast_diagnostics = Vec::new();
         self.collect_fast_diagnostics(uri_str, content, &mut fast_diagnostics);
 
-        let phase1 = if pull_mode {
-            let mut p = fast_diagnostics.clone();
-            deduplicate_diagnostics(&mut p);
-            p
-        } else {
-            self.merge_fast_with_cached(uri_str, &fast_diagnostics)
-        };
+        {
+            let mut cache = self.diag_last_fast.lock();
+            cache.insert(uri_str.to_string(), fast_diagnostics.clone());
+        }
 
-        // Filter out any diagnostics that were eagerly suppressed by
-        // a `codeAction/resolve` handler (e.g. unused-import removal).
-        let phase1 = self.filter_suppressed(phase1);
+        // Push assembled diagnostics immediately so the editor sees
+        // fast results (strikethrough, dimming) merged with whatever
+        // slow / external results are already cached.
+        self.assemble_and_push(uri_str).await;
 
-        let uri = match uri_str.parse::<Url>() {
-            Ok(u) => u,
-            Err(_) => return,
-        };
-        client.publish_diagnostics(uri.clone(), phase1, None).await;
-
-        // ── Phase 2: compute slow diagnostics ───────────────────────
+        // ── Phase 2: compute and cache slow diagnostics ─────────────
         // The resolved-class cache guard must not cross an `.await`
         // point (it contains a raw pointer and is !Send).  Scope it
         // tightly around the synchronous diagnostic collection.
@@ -748,23 +665,87 @@ impl Backend {
             self.collect_slow_diagnostics(uri_str, content, &mut slow_diagnostics);
         }
 
-        // Cache fresh slow diagnostics for the next Phase 1 merge.
         {
             let mut cache = self.diag_last_slow.lock();
-            cache.insert(uri_str.to_string(), slow_diagnostics.clone());
+            cache.insert(uri_str.to_string(), slow_diagnostics);
         }
 
-        // Build the full set: fast + fresh slow + cached PHPStan + cached PHPCS + cached Mago.
-        let mut full = fast_diagnostics;
-        full.extend(slow_diagnostics);
+        // Push again with fresh slow results merged in.
+        self.assemble_and_push(uri_str).await;
+    }
+
+    /// Assemble diagnostics from all per-source caches for a URI and
+    /// deliver them to the editor.
+    ///
+    /// Every source (fast, slow, PHPStan, PHPCS, Mago lint, Mago
+    /// analyze) caches its results independently.  This helper merges
+    /// them into one set, deduplicates, and filters suppressions.
+    ///
+    /// **Push mode:** The merged set is published via
+    /// `textDocument/publishDiagnostics`.
+    ///
+    /// **Pull mode:** Only fast diagnostics (syntax errors, unused
+    /// imports, unused variables) are pushed so the editor sees them
+    /// instantly.  The full merged set is cached in `diag_last_full`
+    /// with a bumped `resultId` so the next pull response returns it.
+    /// Editors that support pull diagnostics merge pushed and pulled
+    /// sets additively, so pushing the full set would duplicate every
+    /// slow and external diagnostic.
+    pub(crate) async fn assemble_and_push(&self, uri_str: &str) {
+        let client = match &self.client {
+            Some(c) => c,
+            None => return,
+        };
+
+        let uri = match uri_str.parse::<Url>() {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+
+        // ── Read all per-source caches ──────────────────────────────
+        let mut full = Vec::new();
+
+        {
+            let cache = self.diag_last_fast.lock();
+            if let Some(fast) = cache.get(uri_str) {
+                full.extend(fast.iter().cloned());
+            }
+        }
+        {
+            let cache = self.diag_last_slow.lock();
+            if let Some(slow) = cache.get(uri_str) {
+                full.extend(slow.iter().cloned());
+            }
+        }
+
         let phpstan_before: Vec<Diagnostic> = {
             let cache = self.phpstan_last_diags.lock();
-            match cache.get(uri_str) {
-                Some(diags) => diags.clone(),
-                None => Vec::new(),
-            }
+            cache.get(uri_str).cloned().unwrap_or_default()
         };
-        full.extend(phpstan_before.iter().cloned());
+
+        // Eagerly prune stale PHPStan diagnostics against current
+        // file content (e.g. @throws tag added/removed, @phpstan-ignore
+        // comment added).
+        if !phpstan_before.is_empty() {
+            let content: Option<Arc<String>> = self.open_files.read().get(uri_str).cloned();
+            let filtered: Vec<Diagnostic> = phpstan_before
+                .iter()
+                .filter(|d| {
+                    if let Some(ref text) = content {
+                        !is_stale_phpstan_diagnostic(d, text)
+                    } else {
+                        true
+                    }
+                })
+                .cloned()
+                .collect();
+            if filtered.len() != phpstan_before.len() {
+                let mut cache = self.phpstan_last_diags.lock();
+                cache.insert(uri_str.to_string(), filtered.clone());
+            }
+            full.extend(filtered);
+        }
+
         {
             let cache = self.phpcs_last_diags.lock();
             if let Some(phpcs_diags) = cache.get(uri_str) {
@@ -783,18 +764,14 @@ impl Backend {
                 full.extend(mago_diags.iter().cloned());
             }
         }
-        deduplicate_diagnostics(&mut full);
 
-        // Filter out any diagnostics suppressed by codeAction/resolve.
+        // ── Suppress imprecise overlaps and filter ──────────────────
+        suppress_imprecise_overlaps(&mut full);
         let full = self.filter_suppressed(full);
 
-        // If deduplication suppressed any full-line PHPStan diagnostics
+        // If suppression removed any full-line PHPStan diagnostics
         // (because a precise native diagnostic covers the same line),
-        // prune them from the PHPStan cache too.  Without this, the
-        // next Phase 1 merge would resurrect the stale full-line
-        // diagnostic as soon as the user fixes the precise error (the
-        // precise diagnostic disappears from the slow cache, so the
-        // full-line one would no longer be suppressed).
+        // prune them from the PHPStan cache too so they don't resurface.
         if !phpstan_before.is_empty() {
             let pruned: Vec<Diagnostic> = phpstan_before
                 .into_iter()
@@ -804,8 +781,21 @@ impl Backend {
             cache.insert(uri_str.to_string(), pruned);
         }
 
+        let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
+
         if pull_mode {
-            // Cache for pull handlers, bump resultId, signal refresh.
+            // ── Pull mode ───────────────────────────────────────────
+            // Push only fast diagnostics so the editor sees syntax
+            // errors and unused-import warnings instantly.  The full
+            // set (fast + slow + external) is cached in `diag_last_full`
+            // for the next pull response.
+            let fast_only = {
+                let cache = self.diag_last_fast.lock();
+                cache.get(uri_str).cloned().unwrap_or_default()
+            };
+            let fast_only = self.filter_suppressed(fast_only);
+            client.publish_diagnostics(uri, fast_only, None).await;
+
             {
                 let mut cache = self.diag_last_full.lock();
                 cache.insert(uri_str.to_string(), full);
@@ -815,45 +805,64 @@ impl Backend {
                 let id = ids.entry(uri_str.to_string()).or_insert(0);
                 *id += 1;
             }
-            let _ = client.workspace_diagnostic_refresh().await;
         } else {
-            // Push the full set, replacing the Phase 1 snapshot.
+            // ── Push mode ───────────────────────────────────────────
             client.publish_diagnostics(uri, full, None).await;
         }
     }
 
     /// Notify the diagnostic system that a file needs fresh diagnostics.
     ///
-    /// Queues the file for the background diagnostic worker.  In pull
-    /// mode, also invalidates the cached full diagnostics so the worker
-    /// recomputes them.  The pull handlers only ever return cached data,
-    /// so they never block the LSP request thread.
+    /// **Push mode:** Queues the file for the debounced background
+    /// diagnostic worker and schedules external tool runs.
+    ///
+    /// **Pull mode:** Only schedules external tool runs (PHPStan,
+    /// PHPCS, Mago).  Native diagnostic computation is deferred until
+    /// the editor sends a `textDocument/diagnostic` pull request, which
+    /// triggers [`trigger_diagnostics_for_pull`].
     ///
     /// This returns immediately — all diagnostic computation happens
     /// in the background so that completion, hover, and signature help
     /// are never blocked.
     pub(crate) fn schedule_diagnostics(&self, uri: String) {
+        // Don't schedule diagnostics before initialization is complete.
+        // Files opened during startup will be diagnosed once
+        // `initialized` sets `init_complete` and re-schedules them.
+        if !self.init_complete.load(Ordering::Acquire) {
+            return;
+        }
+
         let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
 
         if pull_mode {
-            // Invalidate the cached full diagnostics so the worker
-            // knows this file needs recomputation.
+            // Invalidate the cached full diagnostics so the next pull
+            // triggers a fresh computation instead of returning stale
+            // results.  Do NOT remove the resultId — removing it resets
+            // the ID to 0 (via unwrap_or), which can match a stale
+            // previousResultId sent by the client and cause the pull
+            // handler to return "unchanged" with outdated diagnostics.
+            // The resultId is bumped naturally when assemble_and_push
+            // caches new results.
             self.diag_last_full.lock().remove(&uri);
         }
 
-        // In both modes, queue for the background worker.
+        // Both modes: queue for the debounced background worker.
+        // In push mode the worker pushes the full assembled set.
+        // In pull mode the worker pushes only fast diagnostics and
+        // caches the full set in `diag_last_full` for pull responses.
         {
             let mut pending = self.diag_pending_uris.lock();
             if !pending.contains(&uri) {
                 pending.push(uri.clone());
             }
         }
-        // Bump version so the worker knows there is fresh work.
         self.diag_version.fetch_add(1, Ordering::Release);
-        // Wake the worker (no-op if it is already awake).
         self.diag_notify.notify_one();
 
-        // Also schedule PHPStan, PHPCS, and Mago runs for this file.
+        // Both modes: schedule external tool runs.  In pull mode the
+        // external tools still use their own debounce timers because
+        // they are expensive and the IDE may send many pulls in
+        // quick succession.
         self.schedule_phpstan(uri.clone());
         self.schedule_phpcs(uri.clone());
         self.schedule_mago_lint(uri.clone());
@@ -867,10 +876,15 @@ impl Backend {
     /// deprecated usage) may depend on the changed class.  The edited
     /// file itself is excluded (it is already scheduled by the caller).
     ///
-    /// Queues all open files for the background worker.  In pull mode,
-    /// also invalidates the cached full diagnostics so the worker
-    /// recomputes them.
+    /// **Push mode:** Queues all open files for the background worker.
+    ///
+    /// **Pull mode:** Invalidates cached full diagnostics and sends
+    /// `workspace/diagnostic/refresh` so the editor re-pulls.
     pub(crate) fn schedule_diagnostics_for_open_files(&self, exclude_uri: &str) {
+        if !self.init_complete.load(Ordering::Acquire) {
+            return;
+        }
+
         let pull_mode = self.supports_pull_diagnostics.load(Ordering::Acquire);
 
         let uris: Vec<String> = self
@@ -885,15 +899,19 @@ impl Backend {
         }
 
         if pull_mode {
-            // Invalidate cached full diagnostics so the worker
-            // recomputes them.
+            // Invalidate cached full diagnostics so the next pull
+            // triggers a fresh computation.  Do NOT remove resultIds —
+            // see the comment in schedule_diagnostics for why.
             let mut cache = self.diag_last_full.lock();
             for uri in &uris {
                 cache.remove(uri);
             }
         }
 
-        // In both modes, queue all files for the background worker.
+        // Both modes: queue all files for the debounced background worker.
+        // In push mode the worker pushes the full assembled set.
+        // In pull mode the worker pushes only fast diagnostics and
+        // caches the full set in `diag_last_full` for pull responses.
         {
             let mut pending = self.diag_pending_uris.lock();
             for uri in uris {
@@ -906,7 +924,45 @@ impl Backend {
         self.diag_notify.notify_one();
     }
 
+    /// Compute native diagnostics for a single file (pull-mode path).
+    ///
+    /// Called directly from the pull handler (`textDocument/diagnostic`)
+    /// when the cached full diagnostics are stale or missing.  Runs
+    /// both fast and slow collectors synchronously (no debounce) and
+    /// caches the results.  The pull handler reads `diag_last_full`
+    /// after this returns.
+    pub(crate) async fn trigger_diagnostics_for_pull(&self, uri_str: &str) {
+        // Don't compute diagnostics before initialization is complete.
+        // The pull handler will return empty results; once `initialized`
+        // finishes it schedules all open files which populates the cache.
+        if !self.init_complete.load(Ordering::Acquire) {
+            return;
+        }
+
+        if self.should_skip_diagnostics(uri_str) {
+            return;
+        }
+
+        let content = {
+            let files = self.open_files.read();
+            match files.get(uri_str) {
+                Some(c) => c.clone(),
+                None => return,
+            }
+        };
+
+        // Run the full native diagnostic pipeline (fast + slow),
+        // cache per-source results, and push assembled diagnostics.
+        self.publish_diagnostics_for_file(uri_str, &content).await;
+    }
+
     /// Long-lived background task that processes diagnostic requests.
+    ///
+    /// Active in both push and pull modes.  In push mode, the worker
+    /// pushes the full assembled diagnostic set via
+    /// `publishDiagnostics`.  In pull mode, it pushes only fast
+    /// diagnostics and caches the full set in `diag_last_full` for
+    /// the next pull response (see [`assemble_and_push`]).
     ///
     /// Spawned once during `initialized`.  Loops forever, waiting for
     /// [`schedule_diagnostics`](Self::schedule_diagnostics) to signal
@@ -1139,28 +1195,26 @@ impl Backend {
             };
 
             // ── Step 6: cache results and re-publish ────────────────
-            // Read the file content and verify the file is still open
-            // *before* writing to the cache.  If the file was closed
-            // while PHPStan was running, `clear_diagnostics_for_file`
-            // already purged the cache entry — writing it back would
-            // leave stale diagnostics that resurface on the next
-            // `did_open`.
-            let content = {
+            // Verify the file is still open *before* writing to the
+            // cache.  If the file was closed while PHPStan was running,
+            // `clear_diagnostics_for_file` already purged the cache
+            // entry — writing it back would leave stale diagnostics
+            // that resurface on the next `did_open`.
+            {
                 let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
+                if !files.contains_key(&uri) {
+                    continue;
                 }
-            };
+            }
 
             {
                 let mut cache = self.phpstan_last_diags.lock();
                 cache.insert(uri.clone(), phpstan_diags);
             }
 
-            // Re-deliver diagnostics for this file so the editor sees
-            // the fresh PHPStan results merged with native diagnostics.
-            self.publish_diagnostics_for_file(&uri, &content).await;
+            // Assemble and push so the editor sees fresh PHPStan
+            // results merged with cached native diagnostics.
+            self.assemble_and_push(&uri).await;
         }
     }
 
@@ -1311,22 +1365,21 @@ impl Backend {
             // ── Step 6: cache results and re-publish ────────────────
             // Verify the file is still open before caching (same
             // rationale as the PHPStan worker).
-            let content = {
+            {
                 let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
+                if !files.contains_key(&uri) {
+                    continue;
                 }
-            };
+            }
 
             {
                 let mut cache = self.phpcs_last_diags.lock();
                 cache.insert(uri.clone(), phpcs_diags);
             }
 
-            // Re-deliver diagnostics for this file so the editor sees
-            // the fresh PHPCS results merged with native diagnostics.
-            self.publish_diagnostics_for_file(&uri, &content).await;
+            // Assemble and push so the editor sees fresh PHPCS
+            // results merged with cached native diagnostics.
+            self.assemble_and_push(&uri).await;
         }
     }
 
@@ -1450,20 +1503,19 @@ impl Backend {
             };
 
             // ── Step 6: cache results and re-publish ────────────────
-            let content = {
+            {
                 let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
+                if !files.contains_key(&uri) {
+                    continue;
                 }
-            };
+            }
 
             {
                 let mut cache = self.mago_lint_last_diags.lock();
                 cache.insert(uri.clone(), mago_diags);
             }
 
-            self.publish_diagnostics_for_file(&uri, &content).await;
+            self.assemble_and_push(&uri).await;
         }
     }
 
@@ -1590,26 +1642,26 @@ impl Backend {
             };
 
             // ── Step 6: cache results and re-publish ────────────────
-            let content = {
+            {
                 let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
+                if !files.contains_key(&uri) {
+                    continue;
                 }
-            };
+            }
 
             {
                 let mut cache = self.mago_analyze_last_diags.lock();
                 cache.insert(uri.clone(), mago_diags);
             }
 
-            self.publish_diagnostics_for_file(&uri, &content).await;
+            self.assemble_and_push(&uri).await;
         }
     }
 
     /// Clear diagnostics for a file (e.g. on `did_close`).
     pub(crate) async fn clear_diagnostics_for_file(&self, uri_str: &str) {
-        // Remove cached slow diagnostics so we don't leak memory.
+        // Remove all per-source caches so we don't leak memory.
+        self.diag_last_fast.lock().remove(uri_str);
         self.diag_last_slow.lock().remove(uri_str);
         // Remove cached PHPStan, PHPCS, and Mago diagnostics too.
         self.phpstan_last_diags.lock().remove(uri_str);
@@ -1676,8 +1728,8 @@ impl Backend {
     /// Remove diagnostics that were eagerly suppressed by a
     /// `codeAction/resolve` handler and drain the suppression list.
     ///
-    /// This is called during `publish_diagnostics_for_file` so that
-    /// the squiggly line disappears before the text edit is applied.
+    /// This is called during `assemble_and_push` so that the squiggly
+    /// line disappears before the text edit is applied.
     fn filter_suppressed(&self, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         let mut suppressed = self.diag_suppressed.lock();
         if suppressed.is_empty() {
@@ -1693,7 +1745,29 @@ impl Backend {
     }
 }
 
-fn deduplicate_diagnostics(diagnostics: &mut Vec<Diagnostic>) {
+/// Remove diagnostics that are redundant given more precise or
+/// higher-priority diagnostics on the same line or range.
+///
+/// Two suppression rules:
+///
+/// 1. **`unresolved_member_access` vs priority diagnostics.**  When a
+///    priority diagnostic (`unknown_class`, `unknown_member`,
+///    `scalar_member_access`, `unknown_function`) overlaps an
+///    `unresolved_member_access` hint, the hint is dropped because the
+///    root cause is already surfaced by the priority diagnostic.
+///
+/// 2. **Full-line vs precise diagnostics.**  External tools (PHPStan,
+///    PHPCS, Mago) sometimes report only a line number, producing a
+///    diagnostic that spans the entire line (`char 0..1000+`).  When
+///    any precise (sub-line) diagnostic exists on the same line, the
+///    full-line diagnostic is suppressed because it obscures the more
+///    useful precise marker.  Once the precise diagnostic is fixed,
+///    the full-line one reappears on the next external tool run.
+///
+/// This is **not** deduplication in the traditional sense (removing
+/// identical entries).  Each diagnostic source fully replaces its own
+/// cache on every run, so true duplicates across sources do not occur.
+fn suppress_imprecise_overlaps(diagnostics: &mut Vec<Diagnostic>) {
     if diagnostics.is_empty() {
         return;
     }
@@ -1882,7 +1956,7 @@ mod tests {
         assert!(ranges_overlap(&inner, &outer));
     }
 
-    // ── deduplicate_diagnostics ─────────────────────────────────────
+    // ── suppress_imprecise_overlaps ─────────────────────────────────
 
     #[test]
     fn suppresses_unresolved_member_when_unknown_class_overlaps() {
@@ -1901,7 +1975,7 @@ mod tests {
                 "Unresolved member access on X",
             ),
         ];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
@@ -1926,7 +2000,7 @@ mod tests {
                 "Unresolved member access",
             ),
         ];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
@@ -1952,7 +2026,7 @@ mod tests {
                 "Unresolved member access",
             ),
         ];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
@@ -1969,7 +2043,7 @@ mod tests {
             "unresolved_member_access",
             "Unresolved member access",
         )];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
     }
 
@@ -1989,7 +2063,7 @@ mod tests {
                 "Unresolved member access on Y",
             ),
         ];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 2);
     }
 
@@ -2022,7 +2096,7 @@ mod tests {
                 "Unresolved 3 (different range)",
             ),
         ];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         // Only the unknown_class + the one on a different range should survive.
         assert_eq!(diags.len(), 2);
     }
@@ -2030,7 +2104,7 @@ mod tests {
     #[test]
     fn no_op_when_no_diagnostics() {
         let mut diags: Vec<Diagnostic> = vec![];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert!(diags.is_empty());
     }
 
@@ -2058,7 +2132,7 @@ mod tests {
             ..Default::default()
         };
         let mut diags = vec![phpstan, precise.clone()];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].message, precise.message);
     }
@@ -2087,7 +2161,7 @@ mod tests {
             ..Default::default()
         };
         let mut diags = vec![phpstan, syntax_error.clone()];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].message, syntax_error.message);
     }
@@ -2111,7 +2185,7 @@ mod tests {
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise_other_line.clone()];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 2);
     }
 
@@ -2135,7 +2209,7 @@ mod tests {
             ..Default::default()
         };
         let mut diags = vec![phpstan_precise.clone(), native_precise.clone()];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 2);
     }
 
@@ -2166,7 +2240,7 @@ mod tests {
             ..Default::default()
         };
         let mut diags = vec![phpstan1, phpstan2, precise.clone()];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].message, precise.message);
     }
@@ -2189,7 +2263,7 @@ mod tests {
             "Method 'foo' is deprecated",
         );
         let mut diags = vec![diag1, diag2];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 2);
     }
 
@@ -2210,7 +2284,7 @@ mod tests {
             make_phpstan("return.type", "Should return int but returns string."),
             make_phpstan("missingType.return", "Method has no return type."),
         ];
-        deduplicate_diagnostics(&mut diags);
+        suppress_imprecise_overlaps(&mut diags);
         assert_eq!(diags.len(), 3);
     }
 

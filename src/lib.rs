@@ -441,6 +441,10 @@ pub struct Backend {
     /// so the editor never shows a flicker where slow diagnostics disappear
     /// and then reappear.
     pub(crate) diag_last_slow: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+    /// Last-computed fast diagnostics (syntax errors, unused imports,
+    /// unused variables) per file URI.  Used by `assemble_and_push` to
+    /// merge fast results with other source caches without recomputing.
+    pub(crate) diag_last_fast: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
     /// Notification handle used to wake the PHPStan worker task.
     ///
     /// The PHPStan worker is a dedicated background task, separate from
@@ -561,6 +565,12 @@ pub struct Backend {
     /// `run_command_with_timeout` poll loop also checks it so that a
     /// running child process is killed promptly instead of waiting up
     /// to 60 seconds.
+    /// Set to `true` once `initialized` finishes indexing (PSR-4,
+    /// classmap, stubs, vendor).  Background workers and the pull
+    /// diagnostic handler check this flag before running diagnostics
+    /// so that files opened during startup don't produce a flood of
+    /// false-positive "class not found" / "function not found" errors.
+    pub(crate) init_complete: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     // NOTE: resolved_class_cache uses parking_lot::Mutex because it is
     // frequently written (cache stores) and RwLock read→write upgrades
@@ -622,6 +632,7 @@ impl Backend {
             diag_notify: Arc::new(tokio::sync::Notify::new()),
             diag_pending_uris: Arc::new(Mutex::new(Vec::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
+            diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
             phpstan_notify: Arc::new(tokio::sync::Notify::new()),
             phpstan_pending_uri: Arc::new(Mutex::new(None)),
             phpstan_last_diags: Arc::new(Mutex::new(HashMap::new())),
@@ -636,10 +647,12 @@ impl Backend {
             mago_analyze_last_diags: Arc::new(Mutex::new(HashMap::new())),
             diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
             diag_last_full: Arc::new(Mutex::new(HashMap::new())),
+
             diag_suppressed: Arc::new(Mutex::new(Vec::new())),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
         }
@@ -688,6 +701,7 @@ impl Backend {
             diag_notify: Arc::new(tokio::sync::Notify::new()),
             diag_pending_uris: Arc::new(Mutex::new(Vec::new())),
             diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
+            diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
             phpstan_notify: Arc::new(tokio::sync::Notify::new()),
             phpstan_pending_uri: Arc::new(Mutex::new(None)),
             phpstan_last_diags: Arc::new(Mutex::new(HashMap::new())),
@@ -706,6 +720,7 @@ impl Backend {
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
         }
@@ -979,6 +994,7 @@ impl Backend {
             diag_notify: Arc::clone(&self.diag_notify),
             diag_pending_uris: Arc::clone(&self.diag_pending_uris),
             diag_last_slow: Arc::clone(&self.diag_last_slow),
+            diag_last_fast: Arc::clone(&self.diag_last_fast),
             phpstan_notify: Arc::clone(&self.phpstan_notify),
             phpstan_pending_uri: Arc::clone(&self.phpstan_pending_uri),
             phpstan_last_diags: Arc::clone(&self.phpstan_last_diags),
@@ -993,10 +1009,12 @@ impl Backend {
             mago_analyze_last_diags: Arc::clone(&self.mago_analyze_last_diags),
             diag_result_ids: Arc::clone(&self.diag_result_ids),
             diag_last_full: Arc::clone(&self.diag_last_full),
+
             diag_suppressed: Arc::clone(&self.diag_suppressed),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
+            init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             config: Mutex::new(self.config.lock().clone()),
         }

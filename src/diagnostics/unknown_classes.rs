@@ -268,6 +268,115 @@ mod tests {
         out
     }
 
+    /// B22 reproduction: when a vendor class exists in the classmap,
+    /// `collect_unknown_class_diagnostics` must NOT flag it as unknown.
+    /// This simulates the IDE scenario where the classmap is loaded
+    /// during init and then a file referencing vendor classes is opened.
+    #[test]
+    fn no_false_positive_for_classmap_vendor_class() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        // Write a vendor class file that the classmap points to.
+        let vendor_class_path = dir.path().join("vendor/filament/src/Panel.php");
+        std::fs::create_dir_all(vendor_class_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &vendor_class_path,
+            r#"<?php
+namespace Filament;
+
+class Panel {
+    public function default(): static { return $this; }
+}
+"#,
+        )
+        .unwrap();
+
+        // Create a backend with workspace root and classmap entry.
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+        backend
+            .classmap
+            .write()
+            .insert("Filament\\Panel".to_string(), vendor_class_path);
+
+        // Open a file that uses the vendor class via a use-import.
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App\Providers;
+
+use Filament\Panel;
+
+class MyProvider {
+    public function panel(Panel $panel): Panel
+    {
+        return $panel->default();
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        let unknown_class_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("not found"))
+            .collect();
+
+        assert!(
+            unknown_class_diags.is_empty(),
+            "Expected no unknown-class diagnostics for classmap vendor classes, got: {:?}",
+            unknown_class_diags
+                .iter()
+                .map(|d| &d.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// B22 regression: when `find_or_load_class` runs before the classmap
+    /// is populated (e.g. `did_open` during startup), the negative cache
+    /// gets a stale entry.  Clearing the cache after init (as the server
+    /// now does) must allow subsequent lookups to succeed.
+    #[test]
+    fn negative_cache_cleared_after_classmap_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let vendor_class_path = dir.path().join("vendor/filament/src/Panel.php");
+        std::fs::create_dir_all(vendor_class_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &vendor_class_path,
+            r#"<?php
+namespace Filament;
+
+class Panel {}
+"#,
+        )
+        .unwrap();
+
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+
+        // Lookup BEFORE classmap is loaded — fails and caches negative result.
+        assert!(backend.find_or_load_class("Filament\\Panel").is_none());
+        assert!(
+            backend
+                .class_not_found_cache
+                .read()
+                .contains("Filament\\Panel"),
+            "negative cache should contain Filament\\Panel after failed lookup"
+        );
+
+        // Simulate init completing: load the classmap, then clear the
+        // negative cache (mirrors the server.rs `initialized` handler).
+        backend
+            .classmap
+            .write()
+            .insert("Filament\\Panel".to_string(), vendor_class_path.clone());
+        backend.class_not_found_cache.write().clear();
+
+        // After the clear, the lookup must succeed.
+        let result = backend.find_or_load_class("Filament\\Panel");
+        assert!(
+            result.is_some(),
+            "Filament\\Panel should be found after classmap load + cache clear"
+        );
+    }
+
     // ── Basic detection ─────────────────────────────────────────────────
 
     #[test]

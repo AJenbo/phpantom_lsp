@@ -33,19 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **False-positive diagnostics on startup.** Files opened while the project was still indexing could produce hundreds of spurious "class not found" and "function not found" errors. Diagnostics are now deferred until initialization completes.
 - **Chained instantiation preserves constructor-inferred generics.** Expressions like `(new Box(new Product()))->get()` and `new Box(new Product())->get()` now propagate template arguments inferred from constructor parameters to subsequent method calls, so `get()` returns the concrete type instead of `mixed`.
 - **`@method` tag resolution.** Colon return type syntax (`@method foo(): bool`), parenthesised return types (`@method (callable():string) foo()`, `@method (string|int)[] bar()`), and the ambiguous single-`static` pattern (`@method static getStatic()`) are now parsed correctly. Template parameters in `@method` return types are substituted through `@extends` and `@implements` annotations (e.g. `@method T get()` on a parent class resolves to the concrete type when a child declares `@extends Parent<string>`). `$this` return types on `@method` tags preserve generic arguments (e.g. `A<B>` when the receiver is `A<B>`).
-
 - **First-class callable invocation return types.** Immediately invoking a first-class callable (`Foo::method(...)()`, `$this->method(...)()`, `self::method(...)()`, `static::method(...)()`, `parent::method(...)()`, `func(...)()`) now resolves to the underlying method or function's return type. Previously these expressions returned no type.
 - **`isset()` and `empty()` narrowing.** `isset($x)` in a condition now strips `null` from the variable's type in the truthy branch (matching `$x !== null` semantics). `!isset($x)` narrows to `null` only. `!empty($x)` strips `null` from nullable types (e.g. `string|null` narrows to `string`). Both simple variables and property access (`$obj->prop`) are supported, and multiple arguments (`isset($a, $b)`) narrow all listed variables. Guard clauses (`if (!isset($x)) { return; }`) strip null from the variable in the code that follows.
 - **Hover scales linearly on large files.** Processing many hover requests on the same file (e.g. a test suite with 80+ assertion calls) no longer takes O(n²) time. The first hover on a method body walks it once and caches scope snapshots; every subsequent hover on the same file content is an O(log n) lookup with no re-walk.
-
 - **`@return numeric` pseudo-type.** Functions annotated with `@return numeric` now resolve to the `numeric` pseudo-type instead of `string`. Arithmetic on `numeric` operands correctly infers `int|float`, and `$a++` on a `numeric` variable yields `int|float`. The underlying cause was that same-file function calls in multi-namespace files fell through to an incorrect fallback when the file-level namespace differed from the function's namespace.
 - **`parent::__construct()` with `@extends` generics.** Calling `parent::__construct($arg)` in a child class that specifies `@extends Parent<Concrete>` no longer produces false-positive type errors for the substituted parameter types.
 - **Array access on bare `array` and `mixed` types.** Accessing a key on a parameter typed as plain `array` (e.g. `$params['key']`) now resolves to `mixed` instead of an empty type, eliminating false-positive type errors downstream (e.g. `$x = $params['key'] ?? null` followed by an `is_string()` guard).
 - **Analyzer and LSP no longer hang on files with deeply nested loops.** Files with multiple levels of foreach/while/for inside if-branches no longer cause exponential blowup.
 - **Non-deterministic diagnostic counts eliminated.** Projects with heavy use of method-level `@template` no longer see spurious false positives that vary between runs due to cache contamination by concrete type arguments.
-- **Duplicate diagnostics in editors with pull-diagnostic support.** Editors like Zed that support pull-diagnostics no longer show every slow diagnostic twice.
+- **Pull-diagnostic reliability.** Editors like Zed that support pull diagnostics no longer show duplicate diagnostics, no longer get stuck with stale results after edits, and now display all diagnostics on first file open without requiring an edit to trigger them.
 - **Infinite loop on array key reassignment patterns.** Files containing `$arr['key'] = f($arr['key'])` or similar read-then-write patterns on the same array key no longer hang the analyzer.
 - **Stack overflow on large codebases and large files.** The `analyze` command and files with hundreds of class definitions no longer crash with stack overflows.
 - **`analyze` and `fix` commands run at consistent speed regardless of invocation style.** Running from within a project directory is no longer ~8x slower than using `--project-root`.
@@ -103,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Diagnostic delivery model reworked for pull/push coexistence.** Editors that support pull diagnostics now get diagnostics on first file open without waiting for a debounce timer. Each diagnostic source caches results independently, and updates from external tools no longer re-run the entire native diagnostic pipeline.
 - **Rewritten variable resolver.** Variable type resolution now uses a single top-to-bottom pass through each function body with zero recursion and no depth limit.
 - **Broader type narrowing.** `instanceof`, type-guard functions, `in_array()` strict mode, `assert()`, `@phpstan-assert-if-true`/`-if-false`, and compound `&&`/`||` conditions now narrow types in if/else branches, guard clauses, while-loop bodies, ternary expressions, and `match(true)` arms.
 - **Chain resolution cache.** The per-request chain resolution cache is now active for all LSP handlers, not just diagnostics.

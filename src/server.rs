@@ -352,6 +352,55 @@ impl LanguageServer for Backend {
                 }])
                 .await;
         }
+
+        // Clear the negative class-resolution cache.  During startup,
+        // `did_open` may have triggered `update_ast` → `find_or_load_class`
+        // before the classmap / class_index was fully populated, caching
+        // "not found" for classes that are now resolvable.  Without this
+        // clear, those stale entries cause false-positive "Class not found"
+        // diagnostics even though hover and go-to-definition (which run
+        // later) resolve the same symbols correctly.  (B22)
+        self.class_not_found_cache.write().clear();
+
+        // Mark initialization as complete so that diagnostic workers
+        // and pull handlers know the project is fully indexed.
+        self.init_complete
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        // Files opened during startup (before indexing finished) were
+        // not diagnosed because `schedule_diagnostics` skips work when
+        // `init_complete` is false.  Now that the index is ready,
+        // diagnose every open file so the user sees results without
+        // having to edit.
+        //
+        // We compute diagnostics eagerly here (via
+        // `publish_diagnostics_for_file`) so the editor sees fast
+        // diagnostics immediately.  In pull mode, slow diagnostics
+        // are cached but only pushed as fast-only; we send a
+        // `workspace/diagnostic/refresh` afterwards so the editor
+        // re-pulls and gets the full set (fast + slow).
+        {
+            let file_snapshots: Vec<(String, Arc<String>)> = self
+                .open_files
+                .read()
+                .iter()
+                .map(|(uri, content)| (uri.clone(), Arc::clone(content)))
+                .collect();
+            for (uri, content) in &file_snapshots {
+                self.schedule_diagnostics(uri.clone());
+                self.publish_diagnostics_for_file(uri, content).await;
+            }
+        }
+
+        // In pull mode the eager publish above only pushed fast
+        // diagnostics.  The full set (including slow diagnostics) is
+        // now cached in `diag_last_full`.  Send a refresh so the
+        // editor re-pulls and receives the complete diagnostics.
+        if self.supports_pull_diagnostics.load(Ordering::Acquire) {
+            if let Some(ref client) = self.client {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -581,12 +630,10 @@ impl LanguageServer for Backend {
     async fn code_action_resolve(&self, action: CodeAction) -> Result<CodeAction> {
         let (resolved, republish_uri) = self.resolve_code_action(action);
 
-        // If a PHPStan quickfix was resolved, republish diagnostics so
-        // the cleared diagnostic disappears immediately.
-        if let Some(uri_str) = republish_uri
-            && let Some(content) = self.get_file_content(&uri_str)
-        {
-            self.publish_diagnostics_for_file(&uri_str, &content).await;
+        // If a PHPStan quickfix was resolved, reassemble and push
+        // diagnostics so the cleared diagnostic disappears immediately.
+        if let Some(uri_str) = republish_uri {
+            self.assemble_and_push(&uri_str).await;
         }
 
         Ok(resolved)
@@ -885,9 +932,11 @@ impl LanguageServer for Backend {
         let uri_str = params.text_document.uri.to_string();
 
         // Check resultId — if the client sends back the same resultId we
-        // last returned, the diagnostics have not changed and we can
-        // return Unchanged immediately.
-        if let Some(prev_id) = &params.previous_result_id {
+        // last returned AND the full cache is still present (not
+        // invalidated by schedule_diagnostics), the diagnostics have not
+        // changed and we can return Unchanged immediately.
+        let cache_present = self.diag_last_full.lock().contains_key(&uri_str);
+        if cache_present && let Some(prev_id) = &params.previous_result_id {
             let ids = self.diag_result_ids.lock();
             if let Some(&current_id) = ids.get(&uri_str)
                 && prev_id == &current_id.to_string()
@@ -903,13 +952,22 @@ impl LanguageServer for Backend {
             }
         }
 
-        // Return cached diagnostics only.  The pull handler never
-        // computes diagnostics inline — that work is done by the
-        // background diagnostic worker which caches results and sends
-        // `workspace/diagnostic/refresh`.  On cache miss (e.g. the
-        // file was just opened and the worker hasn't finished yet) we
-        // return empty results; the worker will send a refresh once
-        // the real diagnostics are ready.
+        // In pull mode the pull request *triggers* native diagnostic
+        // computation (no debounce — the IDE decided "now is the time").
+        // If the full cache is missing for this URI, run the native
+        // pipeline immediately and block until it finishes.  External
+        // tool results (PHPStan, PHPCS, Mago) are delivered
+        // incrementally via publishDiagnostics as each finishes; we do
+        // not block on them here to keep the pull response fast.
+        let needs_compute = {
+            let cache = self.diag_last_full.lock();
+            !cache.contains_key(&uri_str)
+        };
+
+        if needs_compute {
+            self.trigger_diagnostics_for_pull(&uri_str).await;
+        }
+
         let (diagnostics, result_id) = {
             let cache = self.diag_last_full.lock();
             let ids = self.diag_result_ids.lock();
@@ -956,7 +1014,15 @@ impl LanguageServer for Backend {
             };
 
             // Check if the client already has up-to-date diagnostics.
-            if let Some(prev_id) = previous.get(uri_str.as_str())
+            // The resultId must match AND the full cache must be present.
+            // When `schedule_diagnostics` invalidates the cache (removing
+            // diag_last_full), the resultId is intentionally kept so it
+            // doesn't reset to 0.  But we must not return "unchanged"
+            // when the cache is missing — that means fresh computation
+            // is needed.
+            let cache_present = self.diag_last_full.lock().contains_key(uri_str.as_str());
+            if cache_present
+                && let Some(prev_id) = previous.get(uri_str.as_str())
                 && *prev_id == current_id.to_string()
             {
                 let uri = match uri_str.parse::<Url>() {
@@ -975,13 +1041,25 @@ impl LanguageServer for Backend {
                 continue;
             }
 
-            // Return cached diagnostics only — never compute inline.
-            // On cache miss the background worker hasn't finished yet;
-            // return empty results and let the worker send a refresh
-            // once the real diagnostics are ready.
+            // If the cache is missing, trigger computation (same as
+            // textDocument/diagnostic).
+            let needs_compute = {
+                let cache = self.diag_last_full.lock();
+                !cache.contains_key(uri_str.as_str())
+            };
+            if needs_compute {
+                self.trigger_diagnostics_for_pull(uri_str).await;
+            }
+
             let diagnostics = {
                 let cache = self.diag_last_full.lock();
                 cache.get(uri_str.as_str()).cloned().unwrap_or_default()
+            };
+
+            // Re-read the resultId after potential computation.
+            let current_id = {
+                let ids = self.diag_result_ids.lock();
+                ids.get(uri_str.as_str()).copied().unwrap_or(0)
             };
 
             let uri = match uri_str.parse::<Url>() {

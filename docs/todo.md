@@ -23,10 +23,10 @@ within the same impact tier.
 
 ## Sprint 5 — Polish for office adoption
 
-| #   | Item                                                                                                                    | Impact      | Effort |
+| #   | Item                                                                                                                    | Impact      | Effort      |
 | --- | ----------------------------------------------------------------------------------------------------------------------- | ----------- | ------ |
-| D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                                | Low         | Medium |
-|     | **Release 0.8.0**                                                                                                       |             |        |
+| D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                                | Low         | Medium      |
+|     | **Release 0.8.0**                                                                                                       |             |             |
 
 > **Note:** F1 (Workspace symbol search), F2 (Document symbols), A8
 > (Implement interface methods), A9 (Auto import), D1 (Unknown class
