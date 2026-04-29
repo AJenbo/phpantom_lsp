@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777491766198,
+  "lastUpdate": 1777492194385,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5031,6 +5031,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5050487ab2009a10cdbea197a987d685225a2517",
+          "message": "Track upstream stub annotation changes for generics support",
+          "timestamp": "2026-04-29T21:39:06+02:00",
+          "tree_id": "4188cbe2b83dcb98c6e0100924568fdafd478142",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/5050487ab2009a10cdbea197a987d685225a2517"
+        },
+        "date": 1777492193687,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.6,
             "unit": "MiB"
           }
         ]
