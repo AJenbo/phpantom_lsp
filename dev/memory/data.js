@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777499722576,
+  "lastUpdate": 1777507081934,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5167,6 +5167,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e23a386487fb2f4d199f186c8bf1bca94a20ff6f",
+          "message": "Implement mixin method resolution and propagate @method/@property tags",
+          "timestamp": "2026-04-30T01:47:09+02:00",
+          "tree_id": "4be5191e152c2ba94d5813e2a51092d224048d72",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/e23a386487fb2f4d199f186c8bf1bca94a20ff6f"
+        },
+        "date": 1777507081028,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.5,
             "unit": "MiB"
           }
         ]
