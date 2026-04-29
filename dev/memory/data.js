@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777492194385,
+  "lastUpdate": 1777498594756,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5065,6 +5065,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1bf66fa31345759315414113d78b2efda3de9655",
+          "message": "Fix union generic method resolution and empty array template inference",
+          "timestamp": "2026-04-29T23:25:46+02:00",
+          "tree_id": "38fa694d164b1b2924b0911ac383735b28fd3291",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/1bf66fa31345759315414113d78b2efda3de9655"
+        },
+        "date": 1777498593718,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.6,
             "unit": "MiB"
           }
         ]
