@@ -44,27 +44,6 @@
             "completion_inheritance"
           ];
 
-          passthru.updateScript = pkgs.writeShellScript "update-php-stubs.sh" ''
-            #! /usr/bin/env nix-shell
-            #! nix-shell -i bash -p bash curl gnused gnugrep nix-prefetch-git jq
-
-            file="${self}/flake.nix"
-
-            version="$(grep -oP 'version = "\K[\d\.]+' "$file")"
-            curl -O "https://raw.githubusercontent.com/AJenbo/phpantom_lsp/refs/tags/$version/stubs.lock"
-            stubsVersion="$(grep -oP 'commit = "\K[^"]+' ./stubs.lock)"
-            rm stubs.lock
-
-            stubsHash="$(
-              nix-prefetch-git --rev "$stubsVersion" "https://github.com/JetBrains/phpstorm-stubs.git" \
-                2> /dev/null \
-                | jq -r '.hash'
-            )"
-
-            sed -i 's/\(rev = "\)[^"]*/\1'"$stubsVersion"'/' "$file"
-            sed -i '/stubsSrc/,/}/ s/\(hash = "\)[^"]*/\1'"$stubsHash"'/'
-          '';
-
           postInstall = ''
             mv $out/bin/phpantom_lsp $out/bin/phpantom-lsp
             ln -s $out/bin/phpantom-lsp $out/bin/phpantom_lsp
