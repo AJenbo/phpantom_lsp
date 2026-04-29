@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777478950484,
+  "lastUpdate": 1777491766198,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -4997,6 +4997,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "0e1cf22578d707ce61068922ac0f9292aa3ea193",
+          "message": "Fix false-positive diagnostics on startup and improve pull-diagnostic\nreliability",
+          "timestamp": "2026-04-29T21:31:29+02:00",
+          "tree_id": "2314f7dc58a7436b4dc063e50adf1566f1bbd6c5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/0e1cf22578d707ce61068922ac0f9292aa3ea193"
+        },
+        "date": 1777491765001,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 46,
             "unit": "MiB"
           }
         ]
