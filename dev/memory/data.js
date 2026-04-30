@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777547250399,
+  "lastUpdate": 1777548739706,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5405,6 +5405,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1da66d82c61cabc82883c6cc46cbbfedee0de1a4",
+          "message": "Resolve __get magic method template for property access",
+          "timestamp": "2026-04-30T13:21:26+02:00",
+          "tree_id": "ba656ea6d88862780b5fb73f282d778ae3ebd783",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/1da66d82c61cabc82883c6cc46cbbfedee0de1a4"
+        },
+        "date": 1777548738901,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.9,
             "unit": "MiB"
           }
         ]
