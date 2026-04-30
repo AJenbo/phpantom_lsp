@@ -298,9 +298,25 @@ fn resolve_named_type(
     };
 
     // ── Class lookup ───────────────────────────────────────────────
-    let found = find_class_by_name(all_classes, name)
-        .map(Arc::clone)
-        .or_else(|| class_loader(name));
+    // When `name` is a short name (no backslash), prefer a class in the
+    // same namespace as the owning class.  This prevents cross-namespace
+    // contamination in multi-namespace files where multiple namespaces
+    // define a class with the same short name.
+    let found = if !name.contains('\\') && owning_class_name.contains('\\') {
+        let owning_ns = owning_class_name.rsplit_once('\\').map(|(ns, _)| ns);
+        // Try same-namespace first.
+        let same_ns = all_classes
+            .iter()
+            .find(|c| c.name == name && c.file_namespace.as_deref() == owning_ns)
+            .map(Arc::clone);
+        same_ns
+            .or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
+            .or_else(|| class_loader(name))
+    } else {
+        find_class_by_name(all_classes, name)
+            .map(Arc::clone)
+            .or_else(|| class_loader(name))
+    };
 
     match found {
         Some(cls) => {

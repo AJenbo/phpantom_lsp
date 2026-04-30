@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Multi-namespace function return type resolution.** In files with multiple `namespace { }` blocks, function return types were resolved against the first namespace instead of the function's own namespace. This caused incorrect type inference for variables assigned from function calls in later namespace blocks.
+- **Short class name resolution in type hints.** When resolving an unqualified class name from a property or return type annotation, the resolver now prefers the class in the same namespace as the owning type before falling back to first-match.
+- **Foreach narrowing with break in else.** When a foreach body contained an `if` with an `else { break; }` branch, the variable state from the break path was not included in the post-loop type, causing the merged type to be too narrow.
+- **Foreach element type from untyped arrays.** Variables bound in a `foreach` over an untyped `array` (e.g. from a function returning bare `array`) now resolve to `mixed` instead of empty, so assignments from the loop variable propagate correctly.
+- **Foreach target type after non-empty literal array.** When iterating a non-empty literal array such as `["a", "b", "c"]`, the pre-loop sentinel value of the target variable (e.g. `null` from `$tag = null`) no longer survives as a possible post-loop type.
+
 ### Changed
 
 - **Updated embedded phpstorm-stubs.** Generic annotations for `ArrayIterator`, `ArrayObject`, `SplDoublyLinkedList`, `SplQueue`, `SplStack`, `SplPriorityQueue`, `SplFixedArray`, `SplObjectStorage`, and `array_reduce` are now provided by upstream stubs directly, removing the need for runtime patches.

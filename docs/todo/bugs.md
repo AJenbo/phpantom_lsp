@@ -21,10 +21,10 @@ case-insensitive method lookup, and function-level `@template`
 inference through generic wrapper params are now fixed.
 Remaining gaps:
 
-- **Function name resolution in multi-namespace files**: bare
-  function names in namespaced code are not resolved to their FQN,
-  so function-level template inference fails in single-file tests
-  with multiple namespaces. Works correctly in real projects.
+- **Multi-namespace class shadowing in `IteratorAggregate` resolution**:
+  When a multi-namespace file defines a class like `SomeIterator` in
+  an earlier namespace, resolving `getIterator()` return type
+  `ArrayIterator<K, V>` may pick up the wrong class.
 - **Method-level `@template` with `key-of<T>` bound and `T[K]` return**:
   `key-of<T>`, `value-of<T>`, and `T[K]` now evaluate correctly after
   class-level template substitution. However, inferring a method-level
@@ -32,7 +32,7 @@ Remaining gaps:
   `T[K]` at a specific call site) is not yet supported.
 
 **Tests:** SKIPs in `tests/psalm_assertions/template_class_template_extends.php`
-(lines 177, 227, 427, 500, 682, 843 (namespace)).
+(lines 427, 500, 682, 980, 981).
 
 
 ## B14. Template/generic resolution in namespace-level and complex scenarios
@@ -63,37 +63,6 @@ only by this infrastructure limitation.
 **Tests:** SKIPs in `tests/psalm_assertions/template_class_template.php`
 (lines 16-17, 29, 41, 56, 68, 122, 191-192, 286-287, 451, 487,
 640, 667, 701, 710, 788, 800).
-
-
-## B15. Loop exit type narrowing
-
-**Discovered:** SKIP audit of `tests/psalm_assertions/loop_while.php`,
-`loop_foreach.php`.
-
-Loop exit truthiness narrowing (e.g. `while ($a) { ... }` narrowing
-`$a` to `null` after the loop) works for do-while loops but not for
-while loops when the variable is reassigned inside the loop body.
-Remaining issues:
-
-- While loop exit narrowing not applied to variables reassigned
-  inside the loop body (e.g. `$a = $a->parent` in `while ($a)`
-  should yield `null` after exit)
-- `instanceof` loop exit narrowing does not strip the matched type
-  (e.g. `while ($a instanceof A)` should narrow to `B` for `A|B`)
-- Property access on loop-narrowed variable returns no type
-- `foreach` loop variable not narrowed away from initial `null`
-  after non-empty iteration (would require tracking iterable
-  emptiness)
-- Break-in-else branch type not merged with loop variable
-- Assignment from untyped array value inside null check not
-  widened to `mixed`
-
-Related to T20 (type narrowing reconciliation engine) and T29
-(definite vs possible variable existence tracking).
-
-**Tests:** SKIPs in `loop_while.php` (lines 39, 67, 91, 115, 152),
-`loop_foreach.php` (lines 81, 128, 156, 188, 208).
-
 
 
 

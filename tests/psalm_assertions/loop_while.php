@@ -36,7 +36,7 @@ namespace PsalmTest_loop_while_2 {
         $a = $a->parent;
     }
 
-    assertType('B', $a); // SKIP — instanceof loop exit narrowing not yet stripping matched type
+    assertType('B', $a);
 }
 
 // Test: objectValueWithInstanceofProperty
@@ -64,7 +64,7 @@ namespace PsalmTest_loop_while_3 {
     $b = $a->parent;
 
     assertType('A', $a);
-    assertType('A|B', $b); // SKIP — property access on loop-narrowed variable returns no type
+    assertType('A|B', $b);
 }
 
 // Test: objectValueNullable
@@ -88,7 +88,7 @@ namespace PsalmTest_loop_while_4 {
         $a = $a->parent;
     }
 
-    assertType('null', $a); // SKIP — while loop exit truthiness narrowing not applied to reassigned variable
+    assertType('null', $a);
 }
 
 // Test: objectValueWithAnd
@@ -112,7 +112,7 @@ namespace PsalmTest_loop_while_5 {
         $a = $a->parent;
     }
 
-    assertType('A|null', $a); // SKIP — while loop exit truthiness narrowing not applied to reassigned variable
+    assertType('A|null', $a);
 }
 
 // Test: whileTrueWithBreak
@@ -149,6 +149,6 @@ namespace PsalmTest_loop_while_7 {
       $a = $a->a;
     };
 
-    assertType('null', $a); // SKIP — while loop exit truthiness narrowing not applied to reassigned variable
+    assertType('null', $a);
 }
 

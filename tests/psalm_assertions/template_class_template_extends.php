@@ -174,7 +174,7 @@ namespace PsalmTest_template_class_template_extends_3 {
 
     assertType('FooContainer', $fc);
     assertType('Foo', $f1);
-    assertType('Foo', $f2); // SKIP — function lookup by bare name fails in multi-namespace single-file test
+    assertType('Foo', $f2);
 }
 
 // Test: supportBareExtends
@@ -224,7 +224,7 @@ namespace PsalmTest_template_class_template_extends_4 {
 
     assertType('FooContainer', $fc);
     assertType('Foo', $f1);
-    assertType('Foo', $f2); // SKIP — function lookup by bare name fails in multi-namespace single-file test
+    assertType('Foo', $f2);
 }
 
 // Test: extendsWithNonTemplateWithoutImplementing
@@ -679,7 +679,7 @@ namespace PsalmTest_template_class_template_extends_16 {
     $i = $c->getIterator();
 
     assertType('C<string, int>', $c);
-    assertType('ArrayIterator<string, int>', $i); // SKIP — multi-namespace file: SomeIterator from another namespace shadows ArrayIterator resolution
+    assertType('ArrayIterator<string, int>', $i); // SKIP — multi-namespace: SomeIterator from earlier namespace shadows ArrayIterator resolution
 }
 
 // Test: keyOfClassTemplateExtended
@@ -840,7 +840,7 @@ namespace PsalmTest_template_class_template_extends_20 {
 
     $foo = (new C("foo"))->get();
 
-    assertType('string', $foo); // SKIP — multi-namespace file: bare `C` resolves to wrong class (see B13 namespace resolution gap)
+    assertType('string', $foo);
 }
 
 // Test: templateInheritedPropertyCorrectly

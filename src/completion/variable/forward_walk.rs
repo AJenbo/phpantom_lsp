@@ -5523,13 +5523,24 @@ fn process_if_statement_body<'b>(
     if !then_exits || then_exits_via_loop {
         surviving_scopes.push(&then_scope);
     }
-    for (ei_scope, ei_exits) in &elseif_scopes {
-        if !ei_exits {
+    for (idx, (ei_scope, ei_exits)) in elseif_scopes.iter().enumerate() {
+        if !ei_exits
+            || body
+                .else_if_clauses
+                .iter()
+                .nth(idx)
+                .is_some_and(|ei| exits_via_loop_control(ei.statement))
+        {
             surviving_scopes.push(ei_scope);
         }
     }
     if let Some(ref es) = else_scope {
-        if !else_exits {
+        if !else_exits
+            || body
+                .else_clause
+                .as_ref()
+                .is_some_and(|ec| exits_via_loop_control(ec.statement))
+        {
             surviving_scopes.push(es);
         }
     } else {
@@ -6074,6 +6085,7 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
         let foreach_offset = foreach.foreach.span().start.offset as usize;
         let before = &ctx.content[..foreach_offset.min(ctx.content.len())];
         let trimmed = before.trim_end();
+        let mut docblock_matched = false;
         if trimmed.ends_with("*/")
             && let Some(doc_start) = trimmed.rfind("/**")
         {
@@ -6088,7 +6100,15 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
             {
                 let resolved = resolve_type_to_resolved_types(&php_type, ctx);
                 scope.set(vn, resolved);
+                docblock_matched = true;
             }
+        }
+        // When the iterable is a bare `array` (no generic parameters)
+        // and no @var docblock provided a concrete type, the element
+        // type is `mixed`.  Seed it so that assignments from the loop
+        // variable propagate `mixed` correctly through the body.
+        if !docblock_matched && iter_type.as_ref().is_some_and(|it| it.is_bare_array()) {
+            scope.set(vn, vec![ResolvedType::from_type_string(PhpType::mixed())]);
         }
     }
 
@@ -6167,6 +6187,24 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
     let post_loop = scope.clone();
     *scope = pre_loop_scope;
     scope.merge_branch(&post_loop);
+
+    // When the iterable is a non-empty literal array (e.g. `["a", "b",
+    // "c"]`), the loop body is guaranteed to execute at least once.
+    // The pre-loop sentinel value (e.g. `null` from `$tag = null`) must
+    // not survive as a possible post-loop type for the foreach target
+    // variable — override it with the post-loop value from the body walk.
+    if is_non_empty_array_literal(foreach.expression) {
+        let target_var = match &foreach.target {
+            ForeachTarget::Value(val) => extract_foreach_var_name(val.value),
+            ForeachTarget::KeyValue(kv) => extract_foreach_var_name(kv.value),
+        };
+        if let Some(ref vn) = target_var
+            && let Some(post_val) = post_loop.locals.get(&ustr::ustr(vn.as_str()))
+            && !post_val.is_empty()
+        {
+            scope.set(vn, post_val.clone());
+        }
+    }
 
     leave_loop(loop_depth);
 }
@@ -6542,6 +6580,20 @@ fn bind_foreach_value<'b>(
                 }
             }
         }
+    }
+}
+
+/// Returns `true` when `expr` is a non-empty array literal such as
+/// `["a", "b", "c"]` or `array(1, 2, 3)`.
+///
+/// Used by `process_foreach` to detect iterables that are guaranteed to
+/// have at least one element, so that the pre-loop type of the target
+/// variable does not survive into the post-loop scope.
+fn is_non_empty_array_literal(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Array(arr) => !arr.elements.is_empty(),
+        Expression::LegacyArray(arr) => !arr.elements.is_empty(),
+        _ => false,
     }
 }
 

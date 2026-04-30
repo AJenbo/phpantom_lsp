@@ -10854,3 +10854,276 @@ function test(): void {
         text
     );
 }
+
+#[test]
+fn hover_while_loop_exit_narrows_to_null_multi_namespace() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace NS1 {
+    class A {
+        /** @var ?A */
+        public $parent;
+    }
+}
+namespace NS2 {
+    class B {}
+    class A {
+        /** @var A|B */
+        public $parent;
+    }
+}
+namespace NS3 {
+    class B {}
+    class A {
+        /** @var A|B */
+        public $parent;
+    }
+}
+namespace NS4 {
+    class A {
+        /** @var ?A */
+        public $parent;
+
+        public function __construct() {
+            $this->parent = rand(0, 1) ? new A() : null;
+        }
+    }
+
+    function makeA(): A {
+        return new A();
+    }
+
+    $a = makeA();
+
+    while ($a) {
+        $a = $a->parent;
+    }
+    $result = $a;
+}
+namespace NS5 {
+    class A {
+        /** @var ?A */
+        public $parent;
+    }
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$result = $a"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 5).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("null") && !text.contains("A"),
+        "After while($a) loop in multi-ns file, $a should be null, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_while_loop_exit_multi_ns_with_function() {
+    // Reproduce the exact psalm test structure with assertion-runner transform
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    // This mimics the assertion runner's transformed source for test 4.
+    // Preceding namespaces have class A with different property types.
+    let content = r#"<?php
+namespace PsalmTest_loop_while_1 {
+    $worked = false;
+    while (rand(0,100) === 10) {
+        $worked = true;
+    }
+    $__phpantom_assert_0 = $worked;
+}
+namespace PsalmTest_loop_while_2 {
+    class B {}
+    class A {
+        /** @var A|B */
+        public $parent;
+        public function __construct() {
+            $this->parent = rand(0, 1) ? new A() : new B();
+        }
+    }
+    function makeA(): A {
+        return new A();
+    }
+    $a = makeA();
+    while ($a instanceof A) {
+        $a = $a->parent;
+    }
+    $__phpantom_assert_1 = $a;
+}
+namespace PsalmTest_loop_while_4 {
+    class A {
+        /** @var ?A */
+        public $parent;
+        public function __construct() {
+            $this->parent = rand(0, 1) ? new A() : null;
+        }
+    }
+    function makeA(): A {
+        return new A();
+    }
+    $a = makeA();
+    while ($a) {
+        $a = $a->parent;
+    }
+    $__phpantom_assert_3 = $a;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$__phpantom_assert_3 = $a"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 5).expect("expected hover on assert var");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("null") && !text.contains("A"),
+        "After while($a) in psalm-like multi-ns, $a should be null, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_multi_namespace_function_return_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace NS1 {
+    class Foo {
+        public string $x;
+    }
+}
+namespace NS2 {
+    class Foo {
+        public int $x;
+    }
+    function makeFoo(): Foo { return new Foo(); }
+    $f = makeFoo();
+    $result = $f->x;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$result = $f->x"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 5).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "makeFoo()->x in NS2 should be int, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_multi_namespace_property_resolution() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace NS1 {
+    class Foo {
+        public string $x;
+    }
+}
+namespace NS2 {
+    class Foo {
+        public int $x;
+    }
+    $f = new Foo();
+    $result = $f->x;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$result = $f->x"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 5).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "$f->x in NS2 should be int (from NS2\\Foo), got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_while_loop_instanceof_exit_narrows_away_matched_type() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Animal {}
+class Dog extends Animal {}
+class Cat extends Animal {}
+
+/** @var Dog|Cat $a */
+$a = rand(0,1) ? new Dog() : new Cat();
+
+while ($a instanceof Dog) {
+    break;
+}
+$result = $a;
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$result = $a"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 5).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Cat") && !text.contains("Dog"),
+        "After while($a instanceof Dog), $a should be Cat, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_while_loop_exit_property_access_on_narrowed_var() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Node {
+    /** @var ?Node */
+    public $parent;
+    public string $name;
+}
+function makeNode(): Node { return new Node(); }
+
+$a = makeNode();
+while ($a) {
+    $a = $a->parent;
+}
+// $a is null here, so property access should not resolve
+$result = $a;
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$result = $a"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover =
+        hover_at(&backend, uri, content, target_line, 5).expect("expected hover on $result");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("null"),
+        "After while($a) loop, $a should be null, got: {}",
+        text
+    );
+}

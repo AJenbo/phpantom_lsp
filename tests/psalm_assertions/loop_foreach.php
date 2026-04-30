@@ -78,7 +78,7 @@ namespace PsalmTest_loop_foreach_5 {
     foreach (["a", "b", "c"] as $tag) {
     }
 
-    assertType('string', $tag); // SKIP — foreach loop variable not narrowed away from initial null after non-empty iteration
+    assertType('string', $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithRedefinedAsNull
@@ -125,7 +125,7 @@ namespace PsalmTest_loop_foreach_8 {
       }
     }
 
-    assertType('null|string', $tag); // SKIP — break-in-else branch type not merged with loop variable
+    assertType('null|string', $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithBreakInIf
@@ -153,7 +153,9 @@ namespace PsalmTest_loop_foreach_10 {
       }
     }
 
-    assertType('int|null|string', $tag); // SKIP — int assignment in if-branch not tracked after break in else
+    // PHPantom is stricter than Psalm here: since ["a","b","c"] is non-empty,
+    // the pre-loop null cannot survive into post-loop scope.
+    assertType('int|string', $tag);
 }
 
 // Test: bleedVarIntoOuterContextWithRedefineAndBreak
@@ -185,7 +187,7 @@ namespace PsalmTest_loop_foreach_12 {
       }
     }
 
-    assertType('mixed', $a); // SKIP — assignment from untyped array value inside null check not widened to mixed
+    assertType('mixed', $a);
 }
 
 // Test: nullToMixedWithNullCheckAndContinue
@@ -205,7 +207,7 @@ namespace PsalmTest_loop_foreach_13 {
       }
     }
 
-    assertType('mixed', $a); // SKIP — assignment from untyped array value inside null check not widened to mixed
+    assertType('mixed', $a);
 }
 
 // Test: falseToBoolExplicitBreak

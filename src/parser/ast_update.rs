@@ -248,7 +248,11 @@ impl Backend {
             for func in &mut functions {
                 let skip_names: Vec<String> =
                     func.template_params.iter().map(|a| a.to_string()).collect();
-                let resolver = Self::build_type_resolver(&use_map, &namespace, &skip_names);
+                // Use the function's own namespace (not the file-level one)
+                // so that multi-namespace files resolve return types
+                // against the correct namespace block.
+                let func_ns = func.namespace.clone().or_else(|| namespace.clone());
+                let resolver = Self::build_type_resolver(&use_map, &func_ns, &skip_names);
 
                 if let Some(ref ret) = func.return_type {
                     let resolved = ret.resolve_names(&resolver);
