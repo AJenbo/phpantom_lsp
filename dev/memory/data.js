@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777545617661,
+  "lastUpdate": 1777547245971,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5337,6 +5337,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "75487af7b68679591c37abe760ef9ed5135eb2e0",
+          "message": "Fix hover type narrowing after while loop exit",
+          "timestamp": "2026-04-30T12:56:21+02:00",
+          "tree_id": "4dadeb27b90abffc1a63ceeb9c398ad7701ab734",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/75487af7b68679591c37abe760ef9ed5135eb2e0"
+        },
+        "date": 1777547245294,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 45.7,
             "unit": "MiB"
           }
         ]
