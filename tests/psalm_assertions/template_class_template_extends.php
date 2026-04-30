@@ -734,8 +734,8 @@ namespace PsalmTest_template_class_template_extends_17 {
     $a = $foo->a;
     $b = $foo->b;
 
-    assertType('int', $a); // SKIP — __get magic method not applying template substitution from DataBag
-    assertType('string', $b); // SKIP — __get magic method not applying template substitution from DataBag
+    assertType('int', $a);
+    assertType('string', $b);
 }
 
 // Test: inheritTemplateParamViaConstructorSameName

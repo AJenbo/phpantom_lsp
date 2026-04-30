@@ -30,12 +30,9 @@ Remaining gaps:
   class-level template substitution. However, inferring a method-level
   template parameter `K` from a string literal argument (to resolve
   `T[K]` at a specific call site) is not yet supported.
-- **`__get` magic method template resolution**: `$foo->a` on a class
-  using `__get` with `@template K as key-of<TData>` / `@return TData[K]`
-  does not infer `K` from the property name.
 
 **Tests:** SKIPs in `tests/psalm_assertions/template_class_template_extends.php`
-(lines 177, 227, 427, 500, 682, 737-738, 843 (namespace)).
+(lines 177, 227, 427, 500, 682, 843 (namespace)).
 
 
 ## B14. Template/generic resolution in namespace-level and complex scenarios

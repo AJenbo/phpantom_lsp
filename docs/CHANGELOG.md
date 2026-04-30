@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`__get` magic method template resolution.** Property access on a class whose `__get` uses method-level `@template` with `key-of<T>` bounds and `T[K]` return types now infers the concrete type from the property name. For example, `$bag->a` on a `DataBag<array{a: int, b: string}>` resolves to `int`.
 - **Literal `true`/`false` preserved in template inference.** Passing `true` or `false` to a generic constructor now keeps the precise type as the template argument (e.g. `C<false>`) instead of widening to `bool`.
 - **Multi-namespace file resolution.** Files with multiple `namespace Foo { }` blocks now resolve class names against the correct namespace for the cursor position instead of always using the first namespace.
 

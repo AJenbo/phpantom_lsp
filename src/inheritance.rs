@@ -634,11 +634,71 @@ pub(crate) fn resolve_property_type_hint(
     let cache = crate::virtual_members::active_resolved_class_cache();
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(class, class_loader, cache);
-    merged
+    if let Some(hint) = merged
         .properties
         .iter()
         .find(|p| p.name == prop_name)
         .and_then(|p| p.type_hint.clone())
+    {
+        return Some(hint);
+    }
+
+    // Fallback: if the class has a `__get` method with method-level
+    // template parameters and an IndexAccess return type (e.g.
+    // `@template K as key-of<TData>` / `@return TData[K]`), infer K
+    // from the property name and evaluate the indexed access.
+    resolve_magic_get_return_type(&merged, prop_name)
+}
+
+/// Try to resolve a property access through a `__get` magic method that
+/// uses method-level `@template` with `key-of` bounds and `T[K]` return.
+///
+/// For example, given:
+/// ```php
+/// /** @template TData as array */
+/// abstract class DataBag {
+///     /** @template K as key-of<TData> @return TData[K] */
+///     public function __get(string $property) { ... }
+/// }
+/// /** @extends DataBag<array{a: int, b: string}> */
+/// class FooBag extends DataBag {}
+/// ```
+/// After class-level substitution, `__get` on the merged `FooBag` has
+/// return type `array{a: int, b: string}[K]`.  This function infers
+/// `K = 'a'` from the property name and evaluates to `int`.
+fn resolve_magic_get_return_type(class: &ClassInfo, prop_name: &str) -> Option<PhpType> {
+    let get_method = class
+        .methods
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case("__get"))?;
+
+    // Only proceed if __get has method-level template params and a return type.
+    if get_method.template_params.is_empty() {
+        return None;
+    }
+    let return_type = get_method.return_type.as_ref()?;
+
+    // Build a substitution map: for each method-level template parameter,
+    // try to infer its value from the property name being accessed.
+    let mut method_subs = std::collections::HashMap::new();
+    for tparam in &get_method.template_params {
+        // The template param is typically bounded by key-of<SomeShape>.
+        // After class-level substitution the bound is already concrete
+        // (e.g. key-of<array{a: int, b: string}> → 'a'|'b').
+        // We infer the template value as a literal string matching the
+        // property name.
+        method_subs.insert(tparam.to_string(), PhpType::Literal(prop_name.to_string()));
+    }
+
+    let resolved = return_type.substitute(&method_subs);
+
+    // Only return if the substitution actually resolved to something
+    // concrete (not still an IndexAccess with an unresolved key).
+    if matches!(&resolved, PhpType::IndexAccess(_, _)) {
+        return None;
+    }
+
+    Some(resolved)
 }
 
 /// Recursively merge members from the given traits into `merged`.

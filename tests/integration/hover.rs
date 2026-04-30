@@ -10797,3 +10797,60 @@ $result = $a;
         text
     );
 }
+
+// ─── __get magic method template resolution ─────────────────────────────────
+
+#[test]
+fn hover_magic_get_key_of_index_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @template TData as array
+ */
+abstract class DataBag {
+    /** @var TData */
+    protected $data;
+
+    /** @param TData $data */
+    public function __construct(array $data) {
+        $this->data = $data;
+    }
+
+    /**
+     * @template K as key-of<TData>
+     * @param K $property
+     * @return TData[K]
+     */
+    public function __get(string $property) {
+        return $this->data[$property];
+    }
+}
+
+/** @extends DataBag<array{a: int, b: string}> */
+class FooBag extends DataBag {}
+
+function test(): void {
+    $foo = new FooBag(['a' => 5, 'b' => 'hello']);
+    $a = $foo->a;
+    $b = $foo->b;
+}
+"#;
+    // $a should be int (line with `$a = $foo->a;`)
+    let hover = hover_at(&backend, uri, content, 28, 5).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "Expected $a to be int via __get template resolution, got: {}",
+        text
+    );
+
+    // $b should be string (line with `$b = $foo->b;`)
+    let hover = hover_at(&backend, uri, content, 29, 5).expect("expected hover on $b");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("string"),
+        "Expected $b to be string via __get template resolution, got: {}",
+        text
+    );
+}
