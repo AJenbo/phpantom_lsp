@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777547245971,
+  "lastUpdate": 1777547250399,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5371,6 +5371,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 45.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e7cd859fa146fb95d727dae34e41e750c34cf8a6",
+          "message": "Remove stub patches for generics now provided by upstream stubs",
+          "timestamp": "2026-04-30T12:56:46+02:00",
+          "tree_id": "5c168751147fd87d3ba67e8d796cb21dfac90fc7",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/e7cd859fa146fb95d727dae34e41e750c34cf8a6"
+        },
+        "date": 1777547249902,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.8,
             "unit": "MiB"
           }
         ]
