@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777578961666,
+  "lastUpdate": 1777580041260,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5507,6 +5507,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "0fa93858541c99dce64412e9e7ce510ffa36d142",
+          "message": "Infer object shape for (object) casts of scalars and arrays",
+          "timestamp": "2026-04-30T22:01:10+02:00",
+          "tree_id": "373db5994c7ad651a44e01e18191efb04f1c4f71",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/0fa93858541c99dce64412e9e7ce510ffa36d142"
+        },
+        "date": 1777580040219,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 46,
             "unit": "MiB"
           }
         ]
