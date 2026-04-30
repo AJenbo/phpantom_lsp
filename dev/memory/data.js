@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777507081934,
+  "lastUpdate": 1777508348894,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5201,6 +5201,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ce05023ce751b21a580d507d1eb00c0e952b4f35",
+          "message": "Apply inverse condition narrowing after while and do-while loops",
+          "timestamp": "2026-04-30T02:04:39+02:00",
+          "tree_id": "06e6c2af4dcd39b9e91c6bd1c7c01b80cefe545a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/ce05023ce751b21a580d507d1eb00c0e952b4f35"
+        },
+        "date": 1777508348209,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51,
             "unit": "MiB"
           }
         ]
