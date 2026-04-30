@@ -99,6 +99,6 @@ namespace PsalmTest_generator_4 {
 
     $iterator = new NoRewindIterator(generator());
 
-    assertType('NoRewindIterator<int, string, Generator<int, string, mixed, mixed>>', $iterator); // SKIP — hover returns no type for NoRewindIterator wrapping generator
+    assertType('NoRewindIterator<int, string, Generator<int, string, mixed, mixed>>', $iterator); // SKIP — TKey/TValue not inferred from TIterator bound
 }
 

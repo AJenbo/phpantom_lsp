@@ -109,9 +109,9 @@ Miscellaneous type resolution gaps:
   (`generics.php` line 499) — out of scope for an LSP
 - Escaped backslash in array shape key not normalized
   (`annotation.php` line 71)
-- `NoRewindIterator` wrapping generator (`generator.php` line 102)
-- Trait method returning `new static()` resolves to trait user
-  instead of trait definer (`trait.php` line 46)
+- `NoRewindIterator` wrapping generator: TIterator resolved
+  correctly but TKey/TValue not inferred from TIterator's bound
+  (`generator.php` line 102)
 - Function-level `@template` with intersection and union types
   (`template_function_class_string_template.php` lines 62, 90, 117)
 

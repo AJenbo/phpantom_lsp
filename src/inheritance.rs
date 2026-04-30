@@ -353,6 +353,7 @@ pub(crate) fn resolve_class_with_inheritance(
         class_loader,
         0,
         &mut dedup,
+        &class.fqn(),
     );
 
     // 2. Walk up the `extends` chain and merge parent members.
@@ -474,6 +475,7 @@ pub(crate) fn resolve_class_with_inheritance(
             class_loader,
             0,
             &mut dedup,
+            &parent.fqn(),
         );
 
         // Merge parent methods — skip private.
@@ -501,10 +503,31 @@ pub(crate) fn resolve_class_with_inheritance(
                 continue;
             }
             if level_subs.is_empty() {
-                merged.methods.push(Arc::clone(method));
+                // Replace bare `self` in return type with the declaring
+                // (parent) class name so that `self` resolves to the class
+                // that defines the method, not the inheriting child.
+                if method
+                    .return_type
+                    .as_ref()
+                    .is_some_and(|r| r.contains_bare_self())
+                {
+                    let mut m = (**method).clone();
+                    if let Some(ref mut rt) = m.return_type {
+                        *rt = rt.replace_bare_self(&parent.fqn());
+                    }
+                    merged.methods.push(Arc::new(m));
+                } else {
+                    merged.methods.push(Arc::clone(method));
+                }
             } else {
                 let mut ancestor_method = (**method).clone();
                 apply_substitution_to_method(&mut ancestor_method, &level_subs);
+                // Replace bare `self` after substitution.
+                if let Some(ref mut rt) = ancestor_method.return_type
+                    && rt.contains_bare_self()
+                {
+                    *rt = rt.replace_bare_self(&parent.fqn());
+                }
                 merged.methods.push(Arc::new(ancestor_method));
             }
         }
@@ -776,6 +799,7 @@ fn merge_traits_into(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u32,
     dedup: &mut MergeDedup,
+    self_class_name: &str,
 ) {
     if depth > MAX_TRAIT_DEPTH {
         return;
@@ -846,6 +870,7 @@ fn merge_traits_into(
                 class_loader,
                 depth + 1,
                 dedup,
+                self_class_name,
             );
         }
 
@@ -880,6 +905,7 @@ fn merge_traits_into(
                     class_loader,
                     parent_depth + 1,
                     dedup,
+                    self_class_name,
                 );
             }
 
@@ -960,6 +986,13 @@ fn merge_traits_into(
 
             if !trait_subs.is_empty() {
                 apply_substitution_to_method(&mut method, &trait_subs);
+            }
+            // Replace bare `self` with the using class name so that
+            // `self` resolves to the class that imports the trait.
+            if let Some(ref mut rt) = method.return_type
+                && rt.contains_bare_self()
+            {
+                *rt = rt.replace_bare_self(self_class_name);
             }
             merged.methods.push(Arc::new(method));
         }

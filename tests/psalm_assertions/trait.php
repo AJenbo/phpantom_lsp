@@ -43,6 +43,6 @@ namespace PsalmTest_trait_2 {
 
     $a = (new B)->g();
 
-    assertType('A', $a); // SKIP — hover cannot resolve trait method through parent class
+    assertType('A', $a);
 }
 

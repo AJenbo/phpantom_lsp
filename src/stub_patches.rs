@@ -82,6 +82,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
     match class.name.as_str() {
         "WeakMap" => patch_weak_map(class),
         "IteratorIterator" => patch_iterator_iterator(class),
+        "NoRewindIterator" => patch_no_rewind_iterator(class),
         _ => {}
     }
 }
@@ -144,6 +145,68 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         }
         // Update the parameter type hint from Traversable to TIterator
         // so that classify_template_binding recognises a Direct binding.
+        if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$iterator") {
+            param.type_hint = Some(PhpType::Named("TIterator".to_string()));
+        }
+        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
+    }
+}
+
+/// Add `@template TKey`, `@template TValue`,
+/// `@template TIterator of Iterator<TKey, TValue>`,
+/// `@extends IteratorIterator<TKey, TValue, TIterator>`,
+/// and constructor template binding `TIterator → $iterator`.
+///
+/// Without this patch, `new NoRewindIterator(generator())` resolves as
+/// bare `NoRewindIterator` without propagating the generator's type params.
+fn patch_no_rewind_iterator(class: &mut ClassInfo) {
+    if !class.template_params.is_empty() {
+        return;
+    }
+    add_templates(class, &[("TKey", None), ("TValue", None)]);
+    let t_iter = atom("TIterator");
+    if !class.template_params.contains(&t_iter) {
+        class.template_params.push(t_iter);
+    }
+    class
+        .template_param_bounds
+        .entry(atom("TIterator"))
+        .or_insert_with(|| {
+            PhpType::Generic(
+                "Iterator".to_string(),
+                vec![
+                    PhpType::Named("TKey".to_string()),
+                    PhpType::Named("TValue".to_string()),
+                ],
+            )
+        });
+    // Add @extends generics so inheritance resolves TKey/TValue.
+    let iter_iter_atom = atom("IteratorIterator");
+    if !class
+        .extends_generics
+        .iter()
+        .any(|(n, _)| *n == iter_iter_atom)
+    {
+        class.extends_generics.push((
+            iter_iter_atom,
+            vec![
+                PhpType::Named("TKey".to_string()),
+                PhpType::Named("TValue".to_string()),
+                PhpType::Named("TIterator".to_string()),
+            ],
+        ));
+    }
+    // Patch constructor: bind TIterator from the $iterator parameter.
+    if let Some(ctor_idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == "__construct")
+    {
+        let mut ctor = (*class.methods[ctor_idx]).clone();
+        let binding = (atom("TIterator"), atom("$iterator"));
+        if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
+            ctor.template_bindings.push(binding);
+        }
         if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$iterator") {
             param.type_hint = Some(PhpType::Named("TIterator".to_string()));
         }

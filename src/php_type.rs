@@ -1692,6 +1692,66 @@ impl PhpType {
         self.replace_self_with_type(&PhpType::Named(class_name.to_string()))
     }
 
+    /// Replace only the `self` keyword (not `static` or `$this`) with a
+    /// concrete class name.  Used during inheritance merging so that
+    /// inherited methods carry the declaring class's identity for `self`
+    /// while preserving `static` for late-static-binding resolution.
+    pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
+        match self {
+            PhpType::Named(s) if s.eq_ignore_ascii_case("self") => {
+                PhpType::Named(class_name.to_string())
+            }
+            PhpType::Named(_) | PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
+            PhpType::Nullable(inner) => {
+                PhpType::Nullable(Box::new(inner.replace_bare_self(class_name)))
+            }
+            PhpType::Union(types) => PhpType::Union(
+                types
+                    .iter()
+                    .map(|t| t.replace_bare_self(class_name))
+                    .collect(),
+            ),
+            PhpType::Intersection(types) => PhpType::Intersection(
+                types
+                    .iter()
+                    .map(|t| t.replace_bare_self(class_name))
+                    .collect(),
+            ),
+            PhpType::Generic(name, args) => {
+                let resolved_name = if name.eq_ignore_ascii_case("self") {
+                    class_name.to_string()
+                } else {
+                    name.clone()
+                };
+                PhpType::Generic(
+                    resolved_name,
+                    args.iter()
+                        .map(|a| a.replace_bare_self(class_name))
+                        .collect(),
+                )
+            }
+            PhpType::Array(inner) => PhpType::Array(Box::new(inner.replace_bare_self(class_name))),
+            _ => self.clone(),
+        }
+    }
+
+    /// Returns `true` when this type contains the bare `self` keyword
+    /// (not `static` or `$this`).
+    pub fn contains_bare_self(&self) -> bool {
+        match self {
+            PhpType::Named(s) => s.eq_ignore_ascii_case("self"),
+            PhpType::Nullable(inner) => inner.contains_bare_self(),
+            PhpType::Union(types) | PhpType::Intersection(types) => {
+                types.iter().any(|t| t.contains_bare_self())
+            }
+            PhpType::Generic(name, args) => {
+                name.eq_ignore_ascii_case("self") || args.iter().any(|a| a.contains_bare_self())
+            }
+            PhpType::Array(inner) => inner.contains_bare_self(),
+            _ => false,
+        }
+    }
+
     /// Check whether this type tree contains any `self`, `static`, or
     /// `$this` references that [`replace_self`] / [`replace_self_with_type`]
     /// would replace.
