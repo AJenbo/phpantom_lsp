@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777589594700,
+  "lastUpdate": 1777591870652,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5643,6 +5643,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 45.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "04f24ea51570d6ee87b061216e198e5e2272b6ad",
+          "message": "Resolve trait self return types and NoRewindIterator generics",
+          "timestamp": "2026-05-01T01:20:35+02:00",
+          "tree_id": "2da6bed800723e6b83df9ec12b4b752e468897ff",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/04f24ea51570d6ee87b061216e198e5e2272b6ad"
+        },
+        "date": 1777591869569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.1,
             "unit": "MiB"
           }
         ]
