@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777585035357,
+  "lastUpdate": 1777588866729,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5575,6 +5575,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2e22d8646c76a7f567b2928ac0748a413dc43e59",
+          "message": "Fix property and magic method type resolution for stubs",
+          "timestamp": "2026-05-01T00:30:14+02:00",
+          "tree_id": "5f61a96f8e99250af19aea83f9aceda10541a352",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/2e22d8646c76a7f567b2928ac0748a413dc43e59"
+        },
+        "date": 1777588865529,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.8,
             "unit": "MiB"
           }
         ]
