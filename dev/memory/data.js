@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777580041260,
+  "lastUpdate": 1777585035357,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5541,6 +5541,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 46,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2a0b12594452c2507ce1ecd89bfbfbba1531a7e5",
+          "message": "Fix template inference for stub interfaces and generic @var method calls",
+          "timestamp": "2026-04-30T23:26:24+02:00",
+          "tree_id": "a0f69933df309b0c7fb6e2fc298ed26375aa88d7",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/2a0b12594452c2507ce1ecd89bfbfbba1531a7e5"
+        },
+        "date": 1777585034637,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.3,
             "unit": "MiB"
           }
         ]
