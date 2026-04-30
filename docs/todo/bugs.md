@@ -67,17 +67,20 @@ only by this infrastructure limitation.
 
 ## B15. Loop exit type narrowing
 
-**Discovered:** SKIP audit of `tests/psalm_assertions/loop_do.php`,
-`loop_while.php`, `loop_foreach.php`.
+**Discovered:** SKIP audit of `tests/psalm_assertions/loop_while.php`,
+`loop_foreach.php`.
 
 Loop exit truthiness narrowing (e.g. `while ($a) { ... }` narrowing
-`$a` to `null` after the loop) works correctly in single-namespace
-files. Remaining issues are type inference limitations:
+`$a` to `null` after the loop) works for do-while loops but not for
+while loops when the variable is reassigned inside the loop body.
+Remaining issues:
 
-- Multi-namespace short-name ambiguity: `resolve_class_name` picks
-  the first class matching a short name regardless of namespace
-  context, causing property type resolution to fail in
-  multi-namespace test files (SKIPs in loop_do, loop_while)
+- While loop exit narrowing not applied to variables reassigned
+  inside the loop body (e.g. `$a = $a->parent` in `while ($a)`
+  should yield `null` after exit)
+- `instanceof` loop exit narrowing does not strip the matched type
+  (e.g. `while ($a instanceof A)` should narrow to `B` for `A|B`)
+- Property access on loop-narrowed variable returns no type
 - `foreach` loop variable not narrowed away from initial `null`
   after non-empty iteration (would require tracking iterable
   emptiness)
@@ -88,9 +91,9 @@ files. Remaining issues are type inference limitations:
 Related to T20 (type narrowing reconciliation engine) and T29
 (definite vs possible variable existence tracking).
 
-**Tests:** SKIPs in `tests/psalm_assertions/loop_do.php` (line 80),
-`loop_while.php` (lines 40, 67, 91, 115, 152),
+**Tests:** SKIPs in `loop_while.php` (lines 39, 67, 91, 115, 152),
 `loop_foreach.php` (lines 81, 128, 156, 188, 208).
+
 
 
 

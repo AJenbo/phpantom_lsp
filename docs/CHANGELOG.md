@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`__get` magic method template resolution.** Property access on a class whose `__get` uses method-level `@template` with `key-of<T>` bounds and `T[K]` return types now infers the concrete type from the property name. For example, `$bag->a` on a `DataBag<array{a: int, b: string}>` resolves to `int`.
 - **Literal `true`/`false` preserved in template inference.** Passing `true` or `false` to a generic constructor now keeps the precise type as the template argument (e.g. `C<false>`) instead of widening to `bool`.
-- **Multi-namespace file resolution.** Files with multiple `namespace Foo { }` blocks now resolve class names against the correct namespace for the cursor position instead of always using the first namespace.
+- **`@psalm-method` overrides `@method`.** When a class has both `@method int foo()` and `@psalm-method string foo()`, the vendor-prefixed tag now takes priority instead of using whichever appeared first in the docblock.
+- **Multi-namespace class resolution.** In files with multiple `namespace` blocks, short class names now resolve against the correct namespace for the current scope instead of picking the first same-named class in the file.
 
 - **False-positive diagnostics on startup.** Files opened while the project was still indexing could produce hundreds of spurious "class not found" and "function not found" errors. Diagnostics are now deferred until initialization completes.
 - **Chained instantiation preserves constructor-inferred generics.** Expressions like `(new Box(new Product()))->get()` and `new Box(new Product())->get()` now propagate template arguments inferred from constructor parameters to subsequent method calls, so `get()` returns the concrete type instead of `mixed`.

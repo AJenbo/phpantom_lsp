@@ -77,6 +77,6 @@ namespace PsalmTest_loop_do_4 {
         $a = $a->getParent();
     } while ($a);
 
-    assertType('null', $a); // SKIP — multi-namespace short-name ambiguity: resolve_class_name picks wrong A
+    assertType('null', $a);
 }
 

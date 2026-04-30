@@ -116,7 +116,12 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
 
     const METHOD_KINDS: &[TagKind] = &[TagKind::Method, TagKind::PsalmMethod];
 
-    let mut results = Vec::new();
+    let mut results: Vec<MethodInfo> = Vec::new();
+    // Track which method names came from vendor-prefixed tags
+    // (@psalm-method / @phpstan-method) so they can override
+    // bare @method tags with the same name.
+    let mut vendor_names: std::collections::HashSet<crate::atom::Atom> =
+        std::collections::HashSet::new();
 
     for tag in info.tags_by_kinds(METHOD_KINDS) {
         let desc = tag.description.trim();
@@ -214,8 +219,11 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             parse_method_tag_params(params_str)
         };
 
+        let method_atom = crate::atom::atom(method_name);
+        let is_vendor_tag = tag.kind == TagKind::PsalmMethod;
+
         results.push(MethodInfo {
-            name: crate::atom::atom(method_name),
+            name: method_atom,
             name_offset: 0,
             parameters,
             return_type,
@@ -238,6 +246,29 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             type_assertions: Vec::new(),
             throws: Vec::new(),
         });
+
+        if is_vendor_tag {
+            vendor_names.insert(crate::atom::atom(method_name));
+        }
+    }
+
+    // Deduplicate: if a method name has a vendor-prefixed entry
+    // (@psalm-method / @phpstan-method), remove bare @method entries
+    // with the same name. Since vendor tags come after bare tags in
+    // document order, keep the last occurrence for duplicated names.
+    if !vendor_names.is_empty() {
+        let mut seen: std::collections::HashSet<crate::atom::Atom> =
+            std::collections::HashSet::new();
+        // Iterate in reverse so that later (vendor) entries are kept.
+        results.reverse();
+        results.retain(|m| {
+            if vendor_names.contains(&m.name) {
+                seen.insert(m.name)
+            } else {
+                true
+            }
+        });
+        results.reverse();
     }
 
     results

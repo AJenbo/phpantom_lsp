@@ -687,8 +687,15 @@ impl Backend {
                 return self.find_or_load_class(fqn);
             }
             // Check local classes (same-file shortcut).
+            // In multi-namespace files, prefer the class whose
+            // file_namespace matches the current namespace context.
             let lookup = short_name(name);
-            if let Some(cls) = local_classes.iter().find(|c| c.name == lookup) {
+            let ns_atom = file_namespace.as_ref().map(|ns| crate::atom::atom(ns));
+            let local_match = local_classes
+                .iter()
+                .find(|c| c.name == lookup && c.file_namespace == ns_atom)
+                .or_else(|| local_classes.iter().find(|c| c.name == lookup));
+            if let Some(cls) = local_match {
                 return Some(Arc::clone(cls));
             }
             // In a namespace, try the namespace-qualified form first.
