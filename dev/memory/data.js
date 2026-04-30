@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777578643818,
+  "lastUpdate": 1777578961666,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5473,6 +5473,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "914d8b1734974c14d8e27c324be8b6e523dda246",
+          "message": "Fix interface method return type inheritance and global fallback",
+          "timestamp": "2026-04-30T21:44:55+02:00",
+          "tree_id": "53b636d73ba364495d5c6064c95220844ff4e3d5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/914d8b1734974c14d8e27c324be8b6e523dda246"
+        },
+        "date": 1777578960619,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51,
             "unit": "MiB"
           }
         ]
