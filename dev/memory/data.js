@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777508348894,
+  "lastUpdate": 1777508384090,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5235,6 +5235,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "58ae8ce933490cf58f1ce7930f4d7b7141d0eea6",
+          "message": "Infer array key/value generics in constructors and evaluate\nkey-of/value-of after substitution",
+          "timestamp": "2026-04-30T02:09:01+02:00",
+          "tree_id": "ffc5872fd9badb1161f057ecb04d7cbca6cda508",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/58ae8ce933490cf58f1ce7930f4d7b7141d0eea6"
+        },
+        "date": 1777508383662,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.8,
             "unit": "MiB"
           }
         ]
