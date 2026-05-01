@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777591870652,
+  "lastUpdate": 1777595561166,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5677,6 +5677,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1b2c67ac8e5871ab4f14b296d367879c63648f09",
+          "message": "Fix guard clause narrowing to preserve property key types after if/else",
+          "timestamp": "2026-05-01T02:21:13+02:00",
+          "tree_id": "879e57c72068706bf8a47a20cbfd4acf2dde5948",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/1b2c67ac8e5871ab4f14b296d367879c63648f09"
+        },
+        "date": 1777595560051,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.6,
             "unit": "MiB"
           }
         ]
