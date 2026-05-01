@@ -5191,3 +5191,40 @@ class Repo {
         "should not flag unknown member 'toResponseObject' on $row in second closure, got: {unknown_diags:?}"
     );
 }
+
+#[test]
+fn no_false_positive_foreach_over_narrowed_property_after_guard_clause() {
+    // After `if (!$this->model instanceof Order) { return; }`,
+    // `$this->model` is narrowed to `Order`.  A foreach over
+    // `$this->model->items` should resolve the element type so
+    // that member accesses on the loop variable don't fire
+    // unresolved_member_access.
+    let php = r#"<?php
+class Item {
+    public function name(): string { return ''; }
+}
+class Order {
+    /** @return Item[] */
+    public function getItems(): array { return []; }
+    /** @var Item[] */
+    public array $items;
+}
+class Svc {
+    private ?Order $model;
+    public function test(): void {
+        if (!$this->model instanceof Order) {
+            return;
+        }
+        foreach ($this->model->items as $item) {
+            $item->name();
+        }
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics after guard clause narrowing on property in foreach, got: {diags:?}",
+    );
+}

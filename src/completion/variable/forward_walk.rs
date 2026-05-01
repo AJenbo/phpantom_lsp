@@ -5610,6 +5610,16 @@ fn process_if_statement_body<'b>(
         *scope = merged;
     }
 
+    // Remove synthetic property access keys that were seeded by
+    // condition narrowing inside branches.  These represent narrowed
+    // types that only hold within specific branches, not after the
+    // if/elseif/else block.  This must run BEFORE guard clause
+    // narrowing so that guard-clause-narrowed property keys (e.g.
+    // `$this->model` narrowed to `Order` after
+    // `if (!$this->model instanceof Order) { return; }`) survive
+    // into the post-if scope.
+    strip_synthetic_property_keys(scope);
+
     // Guard clause narrowing: when the if body unconditionally exits
     // and there are no elseif/else branches, apply inverse narrowing.
     // This applies to ALL exit types (return, throw, break, continue)
@@ -5625,16 +5635,6 @@ fn process_if_statement_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
         apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
     }
-
-    // Also simplify after single-scope assignment (guard clause path
-    // may have added narrowed types that were already collapsed above,
-    // but the guard clause section may re-introduce unions).
-
-    // Remove synthetic property access keys that were seeded by
-    // condition narrowing inside branches.  These represent narrowed
-    // types that only hold within specific branches, not after the
-    // if/elseif/else block.
-    strip_synthetic_property_keys(scope);
 }
 
 /// Process if with colon-delimited body.

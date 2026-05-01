@@ -1358,6 +1358,11 @@ pub(crate) fn is_compatible_refinement_typed(doc_type: &PhpType, native_type: &P
         return !doc_type.is_scalar() || matches!(doc_type, PhpType::ObjectShape(_));
     }
     if native_type.is_self_like() {
+        // `static` and `$this` are valid refinements of `self` — they
+        // carry late-static-binding semantics the native `self` lacks.
+        if doc_type.is_self_like() {
+            return true;
+        }
         return !doc_type.is_scalar();
     }
     if native_type.is_void()
