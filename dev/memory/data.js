@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777641849774,
+  "lastUpdate": 1777642291907,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5813,6 +5813,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "23a9dbb12691c768c57744847df7c0ed84fe1c22",
+          "message": "Fix template unification for multiple class-string<T> params",
+          "timestamp": "2026-05-01T15:20:09+02:00",
+          "tree_id": "338bcbe38b12957415c7b828768b8345313b6d78",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/23a9dbb12691c768c57744847df7c0ed84fe1c22"
+        },
+        "date": 1777642290963,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.8,
             "unit": "MiB"
           }
         ]
