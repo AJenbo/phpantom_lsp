@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777643584153,
+  "lastUpdate": 1777648669867,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5881,6 +5881,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b57d55a8276cd8db9403bbb9792fb9bea8c51df6",
+          "message": "Fix multi-line @var docblock parsing with extra tags",
+          "timestamp": "2026-05-01T17:06:48+02:00",
+          "tree_id": "2fbc897879ae250f86b050b438f2690eac33a160",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b57d55a8276cd8db9403bbb9792fb9bea8c51df6"
+        },
+        "date": 1777648669327,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.2,
             "unit": "MiB"
           }
         ]
