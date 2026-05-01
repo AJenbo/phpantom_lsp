@@ -624,7 +624,18 @@ pub fn synthesize_template_conditional_from_info(
 
     // Find a `@param class-string<T> $paramName` annotation for this
     // template param, and extract the parameter name (without `$`).
-    let param_name = find_class_string_param_name_from_info(info, stripped_name)?;
+    //
+    // When the same template param appears in multiple `@param class-string<T>`
+    // annotations (e.g. `@param class-string<T> $a1, @param class-string<T> $a2`),
+    // skip the conditional synthesis.  The synthesized conditional only references
+    // one parameter, so it cannot produce a union of the concrete types from
+    // multiple arguments.  The template substitution path (`build_function_template_subs`)
+    // handles this correctly by calling `insert_or_union` for each binding.
+    let param_names = find_all_class_string_param_names_from_info(info, stripped_name);
+    if param_names.len() != 1 {
+        return None;
+    }
+    let param_name = param_names.into_iter().next()?;
 
     Some(PhpType::Conditional {
         param: format!("${param_name}"),
@@ -635,61 +646,42 @@ pub fn synthesize_template_conditional_from_info(
     })
 }
 
-/// Search a parsed docblock for a `@param class-string<T> $paramName`
-/// annotation where `T` matches the given `template_name`.
+/// Search a parsed docblock for all `@param class-string<T> $paramName`
+/// annotations where `T` matches the given `template_name`.
 ///
-/// Returns the parameter name **without** the `$` prefix, or `None` if no
-/// matching annotation is found.
-///
-/// Handles common type variants:
-///   - `class-string<T>`
-///   - `?class-string<T>` (nullable)
-///   - `class-string<T>|null` (union with null)
-fn find_class_string_param_name_from_info(
+/// Returns parameter names **without** the `$` prefix.
+/// When the result has more than one entry, the same template param
+/// is bound to multiple parameters (e.g. `@param class-string<T> $a1`,
+/// `@param class-string<T> $a2`).
+fn find_all_class_string_param_names_from_info(
     info: &DocblockInfo,
     template_name: &str,
-) -> Option<String> {
+) -> Vec<String> {
+    let mut names = Vec::new();
     for tag in info.tags_by_kinds(&[TagKind::PhpstanParam, TagKind::PsalmParam, TagKind::Param]) {
         let desc = tag.description.trim();
         if desc.is_empty() {
             continue;
         }
-
-        // Extract the full type token (respects `<…>` nesting).
         let (type_token, remainder) = split_type_token(desc);
-
-        // Parse the type token into a structured PhpType and check
-        // whether it contains `class-string<T>` for the given template
-        // name, naturally handling nullable, union-with-null, and other
-        // wrappings without manual string splitting.
         let parsed = PhpType::parse(type_token);
         if !contains_class_string_of(&parsed, template_name) {
             continue;
         }
-
-        // The next token after the type should be `$paramName`.
-        // However, `split_type_token` splits at the closing `>`,
-        // so if the type is `class-string<T>|null`, the remainder
-        // will be `|null $class`.  Skip any union continuation
-        // (`|part`) before looking for the `$` variable name.
         let mut search = remainder;
         while let Some(rest) = search.strip_prefix('|') {
-            // Skip `|unionPart` — the next whitespace-delimited
-            // token is the union type, not the variable name.
             let rest = rest.trim_start();
             let (_, after) = split_type_token(rest);
             search = after;
         }
         if let Some(var_name) = search.split_whitespace().next() {
-            // Handle both `$param` and variadic `...$param`.
             let var_name = var_name.strip_prefix("...").unwrap_or(var_name);
             if let Some(name) = var_name.strip_prefix('$') {
-                return Some(name.to_string());
+                names.push(name.to_string());
             }
         }
     }
-
-    None
+    names
 }
 
 /// Check whether a [`PhpType`] contains `class-string<T>` where the inner

@@ -82,10 +82,6 @@ Remaining minor gaps:
 
 - Escaped backslash in array shape key not normalized
   (`annotation.php` line 71)
-- Template unification across multiple `class-string<T>` params in
-  same-file function calls fails because the function loader cannot
-  find functions defined in a different namespace within the same
-  file (`template_function_class_string_template.php` line 117)
 
 **Tests:** Referenced in-line above.
 

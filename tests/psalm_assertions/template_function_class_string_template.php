@@ -114,6 +114,6 @@ namespace PsalmTest_template_function_class_string_template_4 {
 
     $b_or_c = test(B::class, C::class);
 
-    assertType('B|C', $b_or_c); // SKIP — template unification across multiple class-string params not supported
+    assertType('B|C', $b_or_c);
 }
 
