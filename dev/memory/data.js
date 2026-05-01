@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777648669867,
+  "lastUpdate": 1777649497859,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5915,6 +5915,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "27d1a5d52e21e1f90bfde17ff040b48ed721102d",
+          "message": "Add key-of<T> method template inference for string literal args",
+          "timestamp": "2026-05-01T17:20:20+02:00",
+          "tree_id": "135138ddd090f7cd1feadb09c264e9d9ed9e3300",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/27d1a5d52e21e1f90bfde17ff040b48ed721102d"
+        },
+        "date": 1777649496622,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.3,
             "unit": "MiB"
           }
         ]
