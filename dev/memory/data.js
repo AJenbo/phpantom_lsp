@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777649497859,
+  "lastUpdate": 1777650543998,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5949,6 +5949,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "55a38941c2178e79e59359ffaeafff92242be5a1",
+          "message": "Remove out-of-scope SKIP assertions from\npsalm_assertions/method_call.php",
+          "timestamp": "2026-05-01T17:38:16+02:00",
+          "tree_id": "fe0e5d738487e2650d54350b48c9cb7e187e3a10",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/55a38941c2178e79e59359ffaeafff92242be5a1"
+        },
+        "date": 1777650543519,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.8,
             "unit": "MiB"
           }
         ]
