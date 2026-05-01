@@ -91,31 +91,19 @@ handle this automatically.
 
 ## B21. Remaining static-late-binding and generics gaps
 
-**Discovered:** SKIP audit of
-`tests/phpstan_nsrt/static-late-binding.php`,
-`tests/phpstan_nsrt/generics.php`,
-`tests/psalm_assertions/annotation.php`,
-`tests/psalm_assertions/generator.php`,
-`tests/psalm_assertions/trait.php`,
-`tests/psalm_assertions/template_function_class_string_template.php`.
+**Discovered:** SKIP audit.
 
-Miscellaneous type resolution gaps:
+Remaining minor gaps:
 
-- `$variable::method()` on class-string union does not produce
-  union return type (`static-late-binding.php` lines 88, 97)
-- `static` keyword not preserved through first-class callable
-  invocation (`static-late-binding.php` lines 92-95)
-- PHPStan's `T (function traced(), argument)` display format
-  (`generics.php` line 499) — out of scope for an LSP
 - Escaped backslash in array shape key not normalized
   (`annotation.php` line 71)
-- `NoRewindIterator` wrapping generator: TIterator resolved
-  correctly but TKey/TValue not inferred from TIterator's bound
-  (`generator.php` line 102)
-- Function-level `@template` with intersection and union types
-  (`template_function_class_string_template.php` lines 62, 90, 117)
+- Template unification across multiple `class-string<T>` params in
+  same-file function calls fails because the function loader cannot
+  find functions defined in a different namespace within the same
+  file (`template_function_class_string_template.php` line 117)
 
 **Tests:** Referenced in-line above.
+
 
 
 ## Bulk un-SKIP after fixes

@@ -1424,7 +1424,7 @@ impl Backend {
                                     if let Some(resolved_type) =
                                         Backend::resolve_arg_text_to_type(arg_text, ctx)
                                     {
-                                        subs.insert(tpl_name.to_string(), resolved_type);
+                                        crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                                     }
                                 }
                                 TemplateBindingMode::ClassStringInner => {
@@ -1435,7 +1435,7 @@ impl Backend {
                                             PhpType::ClassString(Some(inner)) => *inner,
                                             _ => resolved_type,
                                         };
-                                        subs.insert(tpl_name.to_string(), unwrapped);
+                                        crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), unwrapped);
                                     }
                                 }
                                 TemplateBindingMode::ArrayElement => {
@@ -1451,7 +1451,8 @@ impl Backend {
                                                         ctx,
                                                     )
                                             {
-                                                subs.insert(
+                                                crate::completion::variable::rhs_resolution::insert_or_union(
+                                                    &mut subs,
                                                     tpl_name.to_string(),
                                                     resolved_type,
                                                 );
@@ -1460,14 +1461,20 @@ impl Backend {
                                     } else if let Some(resolved_type) =
                                         Backend::resolve_arg_text_to_type(arg_text, ctx)
                                     {
-                                        subs.insert(tpl_name.to_string(), resolved_type);
+                                        // Extract the element type from array-like types
+                                        // so we bind T to the element, not the whole array.
+                                        if let Some(elem_type) = resolved_type.extract_value_type(false) {
+                                            crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
+                                        } else {
+                                            crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                                        }
                                     }
                                 }
                                 TemplateBindingMode::CallableReturnType => {
                                     if let Some(ret_type) =
                                         crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
                                     {
-                                        subs.insert(tpl_name.to_string(), ret_type);
+                                        crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), ret_type);
                                     }
                                 }
                                 TemplateBindingMode::CallableParamType(position) => {
@@ -1476,7 +1483,7 @@ impl Backend {
                                             arg_text, position,
                                         )
                                     {
-                                        subs.insert(tpl_name.to_string(), param_type);
+                                        crate::completion::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), param_type);
                                     }
                                 }
                                 TemplateBindingMode::GenericWrapper(_, _) => {
@@ -2012,7 +2019,11 @@ impl Backend {
                         && param.default_value.as_deref().is_some_and(|d| d == "null")
                         && !subs.contains_key(tpl_name.as_str())
                     {
-                        subs.insert(tpl_name.to_string(), PhpType::null());
+                        crate::completion::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            PhpType::null(),
+                        );
                     }
                     continue;
                 }
@@ -2068,7 +2079,11 @@ impl Backend {
                                     && let Some(resolved_elem) =
                                         Self::resolve_arg_text_to_type(elem.trim(), ctx)
                                 {
-                                    subs.insert(tpl_name.to_string(), resolved_elem);
+                                    crate::completion::variable::rhs_resolution::insert_or_union(
+                                        &mut subs,
+                                        tpl_name.to_string(),
+                                        resolved_elem,
+                                    );
                                 }
                             }
                             continue;
@@ -2096,9 +2111,17 @@ impl Backend {
                                 }
                             };
                             if let Some(concrete) = concrete {
-                                subs.insert(tpl_name.to_string(), concrete);
+                                crate::completion::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    concrete,
+                                );
                             } else {
-                                subs.insert(tpl_name.to_string(), resolved_type);
+                                crate::completion::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    resolved_type,
+                                );
                             }
                         }
                         continue;
@@ -2110,7 +2133,11 @@ impl Backend {
                             && tpl_position == 0
                             && let Some(inner) = resolved_type.unwrap_class_string_inner()
                         {
-                            subs.insert(tpl_name.to_string(), inner.clone());
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                inner.clone(),
+                            );
                             continue;
                         }
 
@@ -2231,9 +2258,17 @@ impl Backend {
                         })();
 
                         if let Some(concrete) = extracted {
-                            subs.insert(tpl_name.to_string(), concrete);
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                concrete,
+                            );
                         } else {
-                            subs.insert(tpl_name.to_string(), resolved_type);
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                resolved_type,
+                            );
                         }
                     }
                 }
@@ -2243,7 +2278,11 @@ impl Backend {
                     if let Some(ret_type) =
                         super::source::helpers::extract_closure_return_type_from_text(arg_text)
                     {
-                        subs.insert(tpl_name.to_string(), ret_type);
+                        crate::completion::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            ret_type,
+                        );
                     }
                 }
                 TemplateBindingMode::CallableParamType(position) => {
@@ -2254,7 +2293,11 @@ impl Backend {
                             arg_text, position,
                         )
                     {
-                        subs.insert(tpl_name.to_string(), param_type);
+                        crate::completion::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            param_type,
+                        );
                     }
                 }
                 TemplateBindingMode::ArrayElement => {
@@ -2271,14 +2314,31 @@ impl Backend {
                                 && let Some(resolved_type) =
                                     Self::resolve_arg_text_to_type(elem.trim(), ctx)
                             {
-                                subs.insert(tpl_name.to_string(), resolved_type);
+                                crate::completion::variable::rhs_resolution::insert_or_union(
+                                    &mut subs,
+                                    tpl_name.to_string(),
+                                    resolved_type,
+                                );
                             }
                         }
                     } else if let Some(resolved_type) =
                         Self::resolve_arg_text_to_type(arg_text, ctx)
                     {
-                        // Fallback: treat as direct if not an array literal.
-                        subs.insert(tpl_name.to_string(), resolved_type);
+                        // Extract the element type from array-like types
+                        // so we bind T to the element, not the whole array.
+                        if let Some(elem_type) = resolved_type.extract_value_type(false) {
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                elem_type.clone(),
+                            );
+                        } else {
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                resolved_type,
+                            );
+                        }
                     }
                 }
                 TemplateBindingMode::ClassStringInner => {
@@ -2289,7 +2349,11 @@ impl Backend {
                             PhpType::ClassString(Some(inner)) => *inner,
                             _ => resolved_type,
                         };
-                        subs.insert(tpl_name.to_string(), unwrapped);
+                        crate::completion::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            unwrapped,
+                        );
                     }
                 }
             }

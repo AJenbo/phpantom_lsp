@@ -753,6 +753,39 @@ fn resolve_rhs_instantiation(
                         raw_subs
                     };
                     if !subs.is_empty() {
+                        // ── Infer unbound template params from bound constraints ──
+                        // When a template param has a bound like
+                        // `TIterator as Iterator<TKey, TValue>` and TIterator
+                        // has been resolved to a concrete type (e.g.
+                        // `Generator<int, string>`), match the concrete type's
+                        // generic args against the bound's args to infer the
+                        // nested template params (TKey=int, TValue=string).
+                        let mut subs = subs;
+                        for (bound_param, bound_type) in cls.template_param_bounds.iter() {
+                            let bound_param_str: &str = bound_param.as_ref();
+                            if let Some(concrete) = subs.get(bound_param_str).cloned()
+                                && let PhpType::Generic(_, bound_args) = bound_type
+                            {
+                                let concrete_args = match &concrete {
+                                    PhpType::Generic(_, args) => Some(args.as_slice()),
+                                    _ => None,
+                                };
+                                if let Some(concrete_args) = concrete_args {
+                                    for (i, bound_arg) in bound_args.iter().enumerate() {
+                                        if let PhpType::Named(tpl_name) = bound_arg
+                                            && cls
+                                                .template_params
+                                                .iter()
+                                                .any(|t| t.as_str() == tpl_name.as_str())
+                                            && !subs.contains_key(tpl_name.as_str())
+                                            && let Some(concrete_arg) = concrete_args.get(i)
+                                        {
+                                            subs.insert(tpl_name.clone(), concrete_arg.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         let type_args: Vec<PhpType> = cls
                             .template_params
                             .iter()
@@ -1194,8 +1227,13 @@ fn build_constructor_template_subs(
                 } else if let Some(resolved_type) =
                     Backend::resolve_arg_text_to_type(arg_text, rctx)
                 {
-                    // Fallback: treat as direct if not an array literal.
-                    subs.insert(tpl_name.to_string(), resolved_type);
+                    // Extract the element type from array-like types
+                    // so we bind T to the element, not the whole array.
+                    if let Some(elem_type) = resolved_type.extract_value_type(false) {
+                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
+                    } else {
+                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                    }
                 }
             }
             TemplateBindingMode::ClassStringInner => {
@@ -1206,7 +1244,7 @@ fn build_constructor_template_subs(
                         PhpType::ClassString(Some(inner)) => *inner,
                         _ => resolved_type,
                     };
-                    subs.insert(tpl_name.to_string(), unwrapped);
+                    insert_or_union(&mut subs, tpl_name.to_string(), unwrapped);
                 }
             }
             TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
@@ -1841,8 +1879,13 @@ pub(crate) fn build_function_template_subs(
                 } else if let Some(resolved_type) =
                     Backend::resolve_arg_text_to_type(arg_text, rctx)
                 {
-                    // Fallback: treat as direct if not an array literal.
-                    subs.insert(tpl_name.to_string(), resolved_type);
+                    // Extract the element type from array-like types
+                    // so we bind T to the element, not the whole array.
+                    if let Some(elem_type) = resolved_type.extract_value_type(false) {
+                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
+                    } else {
+                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                    }
                 }
             }
             TemplateBindingMode::ClassStringInner => {
@@ -2179,6 +2222,52 @@ fn resolve_rhs_function_call<'b>(
         use mago_syntax::ast::ast::partial_application::PartialApplication;
         match pa {
             PartialApplication::StaticMethod(sma) => {
+                // For first-class callable invocation through late-static-binding
+                // targets (self::, static::, parent::), preserve `static` in the
+                // return type rather than resolving to the concrete class name.
+                let is_late_static = matches!(
+                    sma.class,
+                    Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
+                );
+                if is_late_static {
+                    // Look up the method's original return type to check if
+                    // it contains static/self/$this before resolution replaces it.
+                    let method_name = match sma.method {
+                        ClassLikeMemberSelector::Identifier(ident) => ident.value.to_string(),
+                        _ => String::new(),
+                    };
+                    if !method_name.is_empty() {
+                        // Check current class first, then walk parent chain.
+                        let method_ret = ctx
+                            .current_class
+                            .get_method_ci(&method_name)
+                            .and_then(|m| m.return_type.clone());
+                        let method_ret = method_ret.or_else(|| {
+                            // Walk parent chain to find the method.
+                            let mut parent_name = ctx
+                                .current_class
+                                .parent_class
+                                .as_ref()
+                                .map(|a| a.to_string());
+                            while let Some(ref p) = parent_name {
+                                if let Some(cls) = (ctx.class_loader)(p) {
+                                    if let Some(m) = cls.get_method_ci(&method_name) {
+                                        return m.return_type.clone();
+                                    }
+                                    parent_name = cls.parent_class.as_ref().map(|a| a.to_string());
+                                } else {
+                                    break;
+                                }
+                            }
+                            None
+                        });
+                        if let Some(ref ret) = method_ret
+                            && ret.contains_self_ref()
+                        {
+                            return vec![ResolvedType::from_type_string(PhpType::static_())];
+                        }
+                    }
+                }
                 // Build a synthetic StaticMethodCall and resolve it.
                 let synthetic = mago_syntax::ast::ast::call::StaticMethodCall {
                     class: sma.class,
@@ -2189,6 +2278,47 @@ fn resolve_rhs_function_call<'b>(
                 return resolve_rhs_static_call(&synthetic, ctx);
             }
             PartialApplication::Method(ma) => {
+                let receiver_is_this = matches!(
+                    ma.object,
+                    Expression::Variable(Variable::Direct(dv)) if dv.name == "$this"
+                );
+                if receiver_is_this {
+                    // Look up the method's original return type to check if
+                    // it contains static/self/$this.
+                    let method_name = match ma.method {
+                        ClassLikeMemberSelector::Identifier(ident) => ident.value.to_string(),
+                        _ => String::new(),
+                    };
+                    if !method_name.is_empty() {
+                        let method_ret = ctx
+                            .current_class
+                            .get_method_ci(&method_name)
+                            .and_then(|m| m.return_type.clone());
+                        let method_ret = method_ret.or_else(|| {
+                            let mut parent_name = ctx
+                                .current_class
+                                .parent_class
+                                .as_ref()
+                                .map(|a| a.to_string());
+                            while let Some(ref p) = parent_name {
+                                if let Some(cls) = (ctx.class_loader)(p) {
+                                    if let Some(m) = cls.get_method_ci(&method_name) {
+                                        return m.return_type.clone();
+                                    }
+                                    parent_name = cls.parent_class.as_ref().map(|a| a.to_string());
+                                } else {
+                                    break;
+                                }
+                            }
+                            None
+                        });
+                        if let Some(ref ret) = method_ret
+                            && ret.contains_self_ref()
+                        {
+                            return vec![ResolvedType::from_type_string(PhpType::static_())];
+                        }
+                    }
+                }
                 return resolve_rhs_method_call_inner(
                     ma.object,
                     &ma.method,
@@ -3023,6 +3153,100 @@ fn resolve_rhs_static_call(
                     ctx.cursor_offset,
                     ctx.class_loader,
                 );
+            // When there are multiple possible class targets (union class-string),
+            // resolve the method return type through each and union the results.
+            if targets.len() > 1 {
+                if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
+                    let method_name_str = ident.value.to_string();
+                    let mut union_types: Vec<PhpType> = Vec::new();
+                    let mut union_classes: Vec<ResolvedType> = Vec::new();
+                    for target in &targets {
+                        let arg_texts = super::raw_type_inference::extract_arg_texts_from_ast(
+                            &static_call.argument_list,
+                            ctx.content,
+                        );
+                        let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
+                        let text_args = arg_texts.join(", ");
+                        let rctx = ctx.as_resolution_ctx();
+                        let template_subs = Backend::build_method_template_subs(
+                            target,
+                            &method_name_str,
+                            &arg_refs,
+                            &rctx,
+                        );
+                        let var_resolver = build_var_resolver_from_ctx(ctx);
+                        let mr_ctx = MethodReturnCtx {
+                            all_classes: ctx.all_classes,
+                            class_loader: ctx.class_loader,
+                            template_subs: &template_subs,
+                            var_resolver: Some(&var_resolver),
+                            cache: ctx.resolved_class_cache,
+                            calling_class_name: Some(&ctx.current_class.name),
+                            is_static: true,
+                        };
+                        // Get the method's return type string.
+                        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                            target,
+                            ctx.class_loader,
+                            ctx.resolved_class_cache,
+                        );
+                        let method_ref = target
+                            .get_method_ci(&method_name_str)
+                            .or_else(|| merged.get_method_ci(&method_name_str));
+                        if let Some(m) = method_ref {
+                            if let Some(ref ret) = m.return_type {
+                                let substituted = if !template_subs.is_empty() {
+                                    ret.substitute(&template_subs)
+                                } else {
+                                    ret.clone()
+                                };
+                                let resolved = substituted.replace_self(&target.fqn());
+                                union_types.push(resolved);
+                            }
+                        } else {
+                            // Try to resolve through resolve_method_return_types_with_args
+                            let results = Backend::resolve_method_return_types_with_args(
+                                target,
+                                &method_name_str,
+                                &text_args,
+                                &mr_ctx,
+                            );
+                            for r in results {
+                                union_classes.push(ResolvedType::from_both_arc(
+                                    PhpType::Named(r.name.to_string()),
+                                    r,
+                                ));
+                            }
+                        }
+                    }
+                    if !union_types.is_empty() || !union_classes.is_empty() {
+                        // Build a unified type from all resolved return types.
+                        let combined = if union_types.len() == 1 && union_classes.is_empty() {
+                            union_types.remove(0)
+                        } else if union_types.is_empty() && !union_classes.is_empty() {
+                            return union_classes;
+                        } else {
+                            PhpType::Union(union_types)
+                        };
+                        let resolved_classes =
+                            crate::completion::type_resolution::type_hint_to_classes_typed(
+                                &combined,
+                                current_class_name,
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                        if !resolved_classes.is_empty() {
+                            return ResolvedType::from_classes_with_hint(
+                                resolved_classes,
+                                combined,
+                            );
+                        }
+                        return vec![ResolvedType::from_type_string(combined)];
+                    }
+                }
+                // Fallback: use first target.
+                return vec![];
+            }
             if let Some(first) = targets.first() {
                 Some(first.name.to_string())
             } else {

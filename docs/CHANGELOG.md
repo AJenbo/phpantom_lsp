@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Static method calls on class-string unions.** `$variable::method()` where `$variable` holds a union of class-strings now resolves through all possible classes and unions their return types.
 - **Trait `self` return type resolution through inheritance.** When a trait method has return type `self`, calling it on a subclass now correctly resolves to the class that uses the trait (the declaring class), not the calling subclass. `static` and `$this` continue to resolve to the runtime class.
 - **`NoRewindIterator` generic resolution.** Added stub patch so `new NoRewindIterator($generator)` propagates the wrapped iterator's type parameters.
+- **Template param inference from type bounds.** When a class template parameter has a bound like `TIterator as Iterator<TKey, TValue>` and `TIterator` is resolved to a concrete generic type, the nested template params (`TKey`, `TValue`) are now inferred from the concrete type's generic arguments.
+- **`static` return type through first-class callables.** `self::method(...)()`, `static::method(...)()`, `parent::method(...)()`, and `$this->method(...)()` now preserve `static` in the return type when the underlying method declares `@return static`.
 - **Property narrowing after guard clauses.** After `if (!$this->prop instanceof Foo) { return; }`, the narrowed type of `$this->prop` was being stripped before subsequent code could use it. Member accesses on the narrowed property (e.g. in a foreach) now resolve correctly.
 
 ### Changed

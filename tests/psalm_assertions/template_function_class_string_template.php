@@ -59,7 +59,7 @@ namespace PsalmTest_template_function_class_string_template_2 {
     $x = [];
     $y = filter($x, B::class);
 
-    assertType('array<array-key, A&B>', $y); // SKIP — intersection types in generic return not resolved
+    assertType('array<A&B>', $y);
 }
 
 // Test: templateFilterWithIntersection
@@ -87,7 +87,7 @@ namespace PsalmTest_template_function_class_string_template_3 {
 
     $y = filter($x, B::class);
 
-    assertType('A&B', $y); // SKIP — intersection types in generic return not resolved
+    assertType('A&B', $y); 
 }
 
 // Test: templateFromDifferentClassStrings
