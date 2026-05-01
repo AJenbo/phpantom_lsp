@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777640948114,
+  "lastUpdate": 1777641849774,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5779,6 +5779,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e9d80719ff583ec0f4bba971d60426234d0546c0",
+          "message": "Fix linked editing region splitting for nested conditionals",
+          "timestamp": "2026-05-01T15:10:10+02:00",
+          "tree_id": "3e9cce5cf01f5f8abdfd5f564b6fd36e60d59dcd",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/e9d80719ff583ec0f4bba971d60426234d0546c0"
+        },
+        "date": 1777641848934,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.8,
             "unit": "MiB"
           }
         ]
