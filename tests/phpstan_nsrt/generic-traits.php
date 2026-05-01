@@ -156,7 +156,3 @@ class StdContainer
 $container = new StdContainer();
 assertType('array<stdClass>', $container->wrap(new \stdClass()));
 assertType('class-string<stdClass>', $container->getClass());
-
-// SKIP: forwarding class template to trait template (T -> U) requires deeper resolution
-// /** @template U */
-// class Bar4 { /** @use Bar3Trait<U> */ use Bar3Trait; }

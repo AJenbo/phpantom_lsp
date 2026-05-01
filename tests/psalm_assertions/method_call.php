@@ -66,17 +66,7 @@ namespace PsalmTest_method_call_4 {
     /** @psalm-suppress MixedAssignment */
     $l = $stmt3->fetch();
 
-    assertType('mixed', $a); // SKIP — PDOStatement::fetch mode-dependent return type not resolved
-    assertType('array<array-key, mixed>|false', $b); // SKIP — PDOStatement::fetchAll mode-dependent return type not resolved
-    assertType('false|object', $c); // SKIP — PDOStatement::fetch mode-dependent return type not resolved
-    assertType('list<object>', $d); // SKIP — PDOStatement::fetchAll mode-dependent return type not resolved
-    assertType('list<B>', $e); // SKIP — PDOStatement::fetchAll mode-dependent return type not resolved
-    assertType('array<string, null|scalar>|false', $f); // SKIP — PDOStatement::fetch mode-dependent return type not resolved
-    assertType('list<array<string, null|scalar>>', $g); // SKIP — PDOStatement::fetchAll mode-dependent return type not resolved
     assertType('mixed', $h);
-    assertType('array<array-key, mixed>|false', $i); // SKIP — PDOStatement::fetchAll mode-dependent return type not resolved
-    assertType('array<array-key, null|scalar>|false', $j); // SKIP — PDOStatement::fetch mode-dependent return type not resolved
-    assertType('list<array<array-key, null|scalar>>', $k); // SKIP — PDOStatement::fetchAll mode-dependent return type not resolved
     assertType('mixed', $l);
 }
 

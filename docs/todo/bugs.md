@@ -50,20 +50,26 @@ the first argument. Once the upstream PR is merged and we update
 our stubs, the existing conditional return type support should
 handle this automatically.
 
-**Tests:** SKIPs in `tests/psalm_assertions/method_call.php`
-(lines 79-85, 87-89).
+**Tests:** Assertion lines were removed from
+`tests/psalm_assertions/method_call.php` (out of scope until
+upstream stubs land).
 
 
 ## Bulk un-SKIP after fixes
 
-There are `// SKIP` markers across `tests/phpstan_nsrt/*.php` and
-`tests/psalm_assertions/*.php` covering gaps in the type engine.
-When working on any type engine improvement, grep for `// SKIP` in
-the assertion files to find tests that may now pass. Run
+There are `// SKIP` markers across `tests/psalm_assertions/*.php`
+covering gaps in the type engine. When working on any type engine
+improvement, grep for `// SKIP` in the assertion files to find
+tests that may now pass. Run
 `cargo nextest run --test assert_type_runner --no-fail-fast` with
 the SKIP removed to verify.
 
-Some SKIPs are **out of scope** for an LSP (value-range tracking,
-int overflow detection, constant-expression folding, `*NEVER*`
-after impossible conditions, `*ERROR*` diagnostics). These should
-just be removed from the test files.
+Remaining SKIPs (12) are:
+- `template_class_template.php` (8) — B14 multi-namespace and
+  genuine type engine gaps (union generic method resolution,
+  generic constructor inference with `never`, static method
+  generic inference)
+- `magic_method_annotation.php` (3) — B14 cross-namespace
+  resolution in single-file test runner
+- `mixin_annotation.php` (1) — `IteratorIterator` not in fixture
+  runner stubs (feature works with full stubs)

@@ -486,21 +486,6 @@ function testGenericParamResolution(): void
 }
 
 // ============================================================
-// 11. Template trace syntax (PHPantom does NOT support these)
-// ============================================================
-
-/**
- * @template T
- * @param T $a
- * @return T
- */
-function traced($a)
-{
-	assertType('T (function GenericsTest\traced(), argument)', $a); // SKIP
-	return $a;
-}
-
-// ============================================================
 // 12. Literal types (PHPantom normalizes to base types)
 // ============================================================
 
