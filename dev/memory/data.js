@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777642291907,
+  "lastUpdate": 1777643584153,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5847,6 +5847,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f675acffbc50c648d496d1e780a45cadb5698b92",
+          "message": "Quote and escape array shape keys with special characters in type\ndisplay",
+          "timestamp": "2026-05-01T15:42:04+02:00",
+          "tree_id": "daa734919ad05f4076d0e96ae2dde01ca4173045",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/f675acffbc50c648d496d1e780a45cadb5698b92"
+        },
+        "date": 1777643583701,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.8,
             "unit": "MiB"
           }
         ]
