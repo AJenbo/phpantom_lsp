@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Blade Preprocessor.** Simplified the state machine for parsing blade directive arguments and optimized directive string matching. This reduces complexity and improves theoretical performance when processing blade files.
+
 ### Fixed
 
 - **Property `self`/`static` type resolution.** Properties declared with `@var self|null` or `static` type annotations now resolve to the owning class name instead of displaying the raw `self`/`static` keyword in hover and type inference.
