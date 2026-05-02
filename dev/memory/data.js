@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777720276022,
+  "lastUpdate": 1777746208829,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6085,6 +6085,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f2cfc16e4c0a6ae038e7833629a356cfb497f831",
+          "message": "Infer range() return type and resolve scalar argument conditionals",
+          "timestamp": "2026-05-02T20:12:19+02:00",
+          "tree_id": "62d5a4fc86251772068137cde85afa2096006993",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/f2cfc16e4c0a6ae038e7833629a356cfb497f831"
+        },
+        "date": 1777746207637,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.5,
             "unit": "MiB"
           }
         ]
