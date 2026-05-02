@@ -93,6 +93,20 @@ impl LanguageServer for Backend {
         self.supports_work_done_progress
             .store(client_supports_work_done_progress, Ordering::Release);
 
+        // Detect whether the client supports dynamic registration for
+        // type hierarchy.
+        let client_supports_type_hierarchy_dynamic_registration = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.type_hierarchy.as_ref())
+            .and_then(|th| th.dynamic_registration)
+            .unwrap_or(false);
+        self.supports_type_hierarchy_dynamic_registration.store(
+            client_supports_type_hierarchy_dynamic_registration,
+            Ordering::Release,
+        );
+
         Ok(InitializeResult {
             offset_encoding: None,
             capabilities: ServerCapabilities {
@@ -343,7 +357,11 @@ impl LanguageServer for Backend {
         // lsp-types 0.94 does not expose a `type_hierarchy_provider`
         // field on `ServerCapabilities`, so we register the capability
         // dynamically via `client/registerCapability` instead.
-        if let Some(client) = &self.client {
+        if self
+            .supports_type_hierarchy_dynamic_registration
+            .load(Ordering::Acquire)
+            && let Some(client) = &self.client
+        {
             let _ = client
                 .register_capability(vec![Registration {
                     id: "type-hierarchy".to_string(),
@@ -496,8 +514,9 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("goto_definition", &uri, position, |content| {
-            self.resolve_definition(&uri, content, position)
+        self.handle_with_position("goto_definition", &uri, position, |content, pos| {
+            self.resolve_definition(&uri, content, pos)
+                .map(|loc| self.translate_location(loc))
                 .map(GotoDefinitionResponse::Scalar)
         })
     }
@@ -527,11 +546,21 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         let result = tokio::task::spawn_blocking(move || {
-            backend.handle_with_position("goto_implementation", &uri_clone, position, |content| {
-                backend
-                    .resolve_implementation(&uri_clone, content, position)
-                    .and_then(wrap_locations)
-            })
+            backend.handle_with_position(
+                "goto_implementation",
+                &uri_clone,
+                position,
+                |content, pos| {
+                    backend
+                        .resolve_implementation(&uri_clone, content, pos)
+                        .map(|locs| {
+                            locs.into_iter()
+                                .map(|l| backend.translate_location(l))
+                                .collect()
+                        })
+                        .and_then(wrap_locations)
+                },
+            )
         })
         .await
         .unwrap_or(Ok(None));
@@ -554,8 +583,13 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("goto_type_definition", &uri, position, |content| {
-            self.resolve_type_definition(&uri, content, position)
+        self.handle_with_position("goto_type_definition", &uri, position, |content, pos| {
+            self.resolve_type_definition(&uri, content, pos)
+                .map(|locs| {
+                    locs.into_iter()
+                        .map(|l| self.translate_location(l))
+                        .collect()
+                })
                 .and_then(wrap_locations)
         })
     }
@@ -568,8 +602,8 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("hover", &uri, position, |content| {
-            self.handle_hover(&uri, content, position)
+        self.handle_with_position("hover", &uri, position, |content, pos| {
+            self.handle_hover(&uri, content, pos)
         })
     }
 
@@ -600,8 +634,14 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         let result = tokio::task::spawn_blocking(move || {
-            backend.handle_with_position("references", &uri_clone, position, |content| {
-                backend.find_references(&uri_clone, content, position, include_declaration)
+            backend.handle_with_position("references", &uri_clone, position, |content, pos| {
+                backend
+                    .find_references(&uri_clone, content, pos, include_declaration)
+                    .map(|locs| {
+                        locs.into_iter()
+                            .map(|l| backend.translate_location(l))
+                            .collect()
+                    })
             })
         })
         .await
@@ -647,8 +687,8 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("signature_help", &uri, position, |content| {
-            self.handle_signature_help(&uri, content, position)
+        self.handle_with_position("signature_help", &uri, position, |content, pos| {
+            self.handle_signature_help(&uri, content, pos)
         })
     }
 
@@ -663,8 +703,19 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("document_highlight", &uri, position, |content| {
-            self.handle_document_highlight(&uri, content, position)
+        self.handle_with_position("document_highlight", &uri, position, |content, pos| {
+            self.handle_document_highlight(&uri, content, pos)
+                .map(|highlights| {
+                    highlights
+                        .into_iter()
+                        .map(|h| {
+                            let mut h = h;
+                            h.range.start = self.translate_php_to_blade(&uri, h.range.start);
+                            h.range.end = self.translate_php_to_blade(&uri, h.range.end);
+                            h
+                        })
+                        .collect()
+                })
         })
     }
 
@@ -679,8 +730,19 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("linked_editing_range", &uri, position, |content| {
-            self.handle_linked_editing_range(&uri, content, position)
+        self.handle_with_position("linked_editing_range", &uri, position, |content, pos| {
+            self.handle_linked_editing_range(&uri, content, pos)
+                .map(|mut ler| {
+                    ler.ranges = ler
+                        .ranges
+                        .into_iter()
+                        .map(|r| Range {
+                            start: self.translate_php_to_blade(&uri, r.start),
+                            end: self.translate_php_to_blade(&uri, r.end),
+                        })
+                        .collect();
+                    ler
+                })
         })
     }
 
@@ -691,18 +753,50 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
-        self.handle_with_position("prepare_rename", &uri, position, |content| {
-            self.handle_prepare_rename(&uri, content, position)
+        self.handle_with_position("prepare_rename", &uri, position, |content, pos| {
+            self.handle_prepare_rename(&uri, content, pos)
+                .map(|res| match res {
+                    PrepareRenameResponse::Range(r) => PrepareRenameResponse::Range(Range {
+                        start: self.translate_php_to_blade(&uri, r.start),
+                        end: self.translate_php_to_blade(&uri, r.end),
+                    }),
+                    PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
+                        PrepareRenameResponse::RangeWithPlaceholder {
+                            range: Range {
+                                start: self.translate_php_to_blade(&uri, range.start),
+                                end: self.translate_php_to_blade(&uri, range.end),
+                            },
+                            placeholder,
+                        }
+                    }
+                    PrepareRenameResponse::DefaultBehavior { default_behavior } => {
+                        PrepareRenameResponse::DefaultBehavior { default_behavior }
+                    }
+                })
         })
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
-        let new_name = params.new_name.clone();
-
-        self.handle_with_position("rename", &uri, position, |content| {
-            self.handle_rename(&uri, content, position, &new_name)
+        self.handle_with_position("rename", &uri, position, |content, pos| {
+            self.handle_rename(&uri, content, pos, &params.new_name)
+                .map(|mut edit| {
+                    if let Some(changes) = &mut edit.changes {
+                        for (uri, edits) in changes {
+                            let uri_str = uri.to_string();
+                            if crate::blade::is_blade_file(&uri_str) {
+                                for e in edits {
+                                    e.range.start =
+                                        self.translate_php_to_blade(&uri_str, e.range.start);
+                                    e.range.end =
+                                        self.translate_php_to_blade(&uri_str, e.range.end);
+                                }
+                            }
+                        }
+                    }
+                    edit
+                })
         })
     }
 
@@ -781,8 +875,22 @@ impl LanguageServer for Backend {
             .uri
             .to_string();
         let position = params.text_document_position_params.position;
-        self.handle_with_position("prepare_type_hierarchy", &uri, position, |content| {
-            self.prepare_type_hierarchy_impl(&uri, content, position)
+        self.handle_with_position("prepare_type_hierarchy", &uri, position, |content, pos| {
+            self.prepare_type_hierarchy_impl(&uri, content, pos)
+                .map(|items| {
+                    items
+                        .into_iter()
+                        .map(|mut item| {
+                            item.range.start = self.translate_php_to_blade(&uri, item.range.start);
+                            item.range.end = self.translate_php_to_blade(&uri, item.range.end);
+                            item.selection_range.start =
+                                self.translate_php_to_blade(&uri, item.selection_range.start);
+                            item.selection_range.end =
+                                self.translate_php_to_blade(&uri, item.selection_range.end);
+                            item
+                        })
+                        .collect()
+                })
         })
     }
 
@@ -1115,16 +1223,28 @@ impl Backend {
         handler_name: &str,
         uri: &str,
         position: Option<Position>,
-        f: impl FnOnce(&str) -> T,
+        f: impl FnOnce(&str, Option<Position>) -> T,
     ) -> Option<T> {
-        let content = self.get_file_content(uri)?;
+        let mut content = self.get_file_content(uri)?;
+        let mut pos = position;
+
+        // If this is a Blade file, use the virtual PHP content and translate the position.
+        if crate::blade::is_blade_file(uri)
+            && let Some(virtual_content) = self.blade_virtual_content.read().get(uri)
+        {
+            content = virtual_content.clone();
+            if let Some(p) = position {
+                pos = Some(self.translate_blade_to_php(uri, p));
+            }
+        }
+
         // Activate the chain resolution cache so that shared chain prefixes
         // (e.g. `$model->where(...)` in `$model->where(...)->orderBy(...)`)
         // are resolved once and reused across all LSP handlers, not just
         // diagnostics.  The guard is re-entrant safe: if a diagnostic pass
         // already activated the cache, this is a no-op.
         let _chain_guard = crate::completion::resolver::with_chain_resolution_cache();
-        crate::util::catch_panic_unwind_safe(handler_name, uri, position, || f(&content))
+        crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 
     /// Position-based handler helper. Extracts the URI and position from
@@ -1138,10 +1258,12 @@ impl Backend {
         handler_name: &str,
         uri: &str,
         position: Position,
-        f: impl FnOnce(&str) -> Option<T>,
+        f: impl FnOnce(&str, Position) -> Option<T>,
     ) -> Result<Option<T>> {
         Ok(self
-            .with_file_content(handler_name, uri, Some(position), f)
+            .with_file_content(handler_name, uri, Some(position), |content, pos| {
+                f(content, pos.unwrap())
+            })
             .flatten())
     }
 
@@ -1153,7 +1275,9 @@ impl Backend {
         uri: &str,
         f: impl FnOnce(&str) -> Option<T>,
     ) -> Result<Option<T>> {
-        Ok(self.with_file_content(handler_name, uri, None, f).flatten())
+        Ok(self
+            .with_file_content(handler_name, uri, None, |content, _| f(content))
+            .flatten())
     }
 
     // ── Initialization helpers ───────────────────────────────────────────

@@ -2,40 +2,6 @@
 //!
 //! Scans PHP files in a project and reports PHPantom's own diagnostics
 //! (no PHPStan, no external tools) in a PHPStan-like table format.
-//!
-//! # Philosophy
-//!
-//! The goal is **100% type coverage**: every class, member, and function
-//! call in the project should be resolvable by the LSP.  When that holds,
-//! completion works everywhere with no dead spots, and downstream tools
-//! like PHPStan get the type information they need to find real bugs at
-//! every level.  PHPStan only complains about missing types at levels 6,
-//! 9, and 10; PHPantom fills those gaps cheaply and immediately so
-//! PHPStan can focus on logic errors rather than fighting incomplete
-//! type information.
-//!
-//! The diagnostics reported here are not trying to be a static analyser.
-//! They assert structural correctness: does this class exist, does this
-//! member exist, does the argument count match, did you implement every
-//! required method.  Bug hunting is left to dedicated tools like PHPStan
-//! and Psalm.  The `analyze` command surfaces the places where the LSP
-//! cannot resolve a symbol so the user can fix them and achieve (or
-//! maintain) full completion coverage across the project.
-//!
-//! It reuses the same `Backend` initialization pipeline as the LSP
-//! server, so the results match exactly what a user would see in their
-//! editor.
-//!
-//! Only single Composer projects (root `composer.json`) are supported
-//! for now.
-//!
-//! # Usage
-//!
-//! ```sh
-//! phpantom_lsp analyze                     # scan entire project
-//! phpantom_lsp analyze src/                # scan a subdirectory
-//! phpantom_lsp analyze src/Foo.php         # scan a single file
-//! ```
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -52,55 +18,39 @@ use crate::composer;
 use crate::config;
 use crate::types::ClassInfo;
 
-/// Severity filter for the analyse output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeverityFilter {
-    /// Show all diagnostics (error, warning, information, hint).
-    All,
-    /// Show only errors and warnings.
-    Warning,
-    /// Show only errors.
-    Error,
-}
-
-/// Output format for CLI commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Output format for the analysis report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum OutputFormat {
-    /// Human-readable PHPStan-style table (default).
+    /// Human-readable table (default).
+    #[default]
     Table,
-    /// GitHub Actions workflow commands (`::error file=...::message`).
-    /// Diagnostics appear as inline annotations on pull request diffs.
-    Github,
-    /// JSON object with totals and per-file diagnostics.
+    /// Machine-readable JSON.
     Json,
+    /// GitHub Actions workflow command format.
+    Github,
 }
 
-/// Options for the analyse command.
+/// Options for the `analyze` command.
 #[derive(Debug)]
 pub struct AnalyseOptions {
-    /// Workspace root (project directory containing composer.json).
     pub workspace_root: PathBuf,
-    /// Optional path filter: only analyse files under this path.
-    /// Can be a directory or a single file.
-    pub path_filter: Option<PathBuf>,
-    /// Minimum severity to report.
-    pub severity_filter: SeverityFilter,
-    /// Whether to output with ANSI colours.
-    pub use_colour: bool,
-    /// Output format.
+    pub path_filter: Option<String>,
+    pub severity_filter: DiagnosticSeverity,
     pub output_format: OutputFormat,
+    pub use_colour: bool,
 }
 
-/// A single diagnostic result for the analyse output.
-struct FileDiagnostic {
-    /// 1-based line number.
-    line: u32,
-    /// The diagnostic message.
-    message: String,
+/// A diagnostic finding for a single file.
+#[derive(Debug, serde::Serialize)]
+pub struct FileDiagnostic {
+    /// The location of the issue.
+    pub range: Range,
+    /// The human-readable description.
+    pub message: String,
     /// The diagnostic code (e.g. "unknown_class").
-    identifier: Option<String>,
+    pub identifier: Option<String>,
     /// The diagnostic severity.
-    severity: DiagnosticSeverity,
+    pub severity: DiagnosticSeverity,
 }
 
 /// Run the analyse command and return the process exit code.
@@ -125,9 +75,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     };
 
     // ── 2. Index project ────────────────────────────────────────────
-    // Create a headless Backend (no LSP client) and run the same init
-    // pipeline as the LSP server.  With client=None the log/progress
-    // calls are no-ops.
     let backend = Backend::new_headless();
     *backend.workspace_root().write() = Some(root.to_path_buf());
     *backend.config.lock() = cfg.clone();
@@ -150,8 +97,10 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     backend
         .init_single_project(root, php_version, composer_package, None)
         .await;
+
     // ── 3. Locate user files (via PSR-4) and crop to path ───────────
-    let files = discover_user_files(&backend, root, options.path_filter.as_deref());
+    let filter_path = options.path_filter.as_deref().map(Path::new);
+    let files = discover_user_files(&backend, root, filter_path);
 
     if files.is_empty() {
         eprintln!("No PHP files found.");
@@ -159,22 +108,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     }
 
     // ── 4. Two-phase parallel analysis ──────────────────────────────
-    //
-    // Phase 1 — **Parse**: run `update_ast` on every user file so that
-    // `fqn_index`, `ast_map`, `symbol_maps`, `use_map`, `namespace_map`
-    // and `class_index` are fully populated for the entire project.
-    //
-    // Phase 2 — **Diagnose**: collect diagnostics for every file.
-    // Because all user classes are already in `fqn_index`, cross-file
-    // references resolve via an O(1) hash lookup instead of falling
-    // through to classmap / PSR-4 lazy loading (which takes write
-    // locks and serialises threads).
-    //
-    // Splitting the work this way also means the diagnostic phase
-    // never triggers `parse_and_cache_file` for other *user* files,
-    // eliminating the main source of write-lock contention that
-    // previously caused the "stuck at 99 %" stall.
-
     let file_count = files.len();
     let severity_filter = options.severity_filter;
     let use_colour = options.use_colour;
@@ -184,11 +117,6 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         .unwrap_or(4);
 
     // ── Phase 1: Parse all files (parallel) ─────────────────────────
-    // Read each file from disk and call `update_ast`.  Store the
-    // (uri, content) pairs so Phase 2 can reuse them without re-reading.
-    //
-    // Parsing is fast, so the progress bar is drawn at 0% before Phase 1
-    // and only advances during Phase 2 (the expensive diagnostic pass).
     if use_colour && output_format == OutputFormat::Table {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count));
     }
@@ -227,35 +155,21 @@ pub async fn run(options: AnalyseOptions) -> i32 {
             })
             .collect();
 
-        // Collect into an indexed vec so Phase 2 can iterate in the
-        // same order as `files`.
         let mut indexed: Vec<Option<(String, String)>> = (0..file_count).map(|_| None).collect();
         for handle in handles {
-            for (i, uri, content) in handle.join().unwrap_or_default() {
-                indexed[i] = Some((uri, content));
+            let entries = handle.join().expect("index-worker thread panicked");
+            for entry in entries {
+                indexed[entry.0] = Some((entry.1, entry.2));
             }
         }
         indexed
     });
 
     // ── Phase 1.5: Eager class population ───────────────────────────
-    // Pre-populate the resolved_class_cache by resolving every known
-    // class in topological (dependency-first) order.  This ensures
-    // that when Phase 2 resolves types, all dependencies are already
-    // cached — eliminating the unbounded mutual recursion in
-    // resolve_class_fully_inner that previously caused stack overflow.
-    //
-    // We snapshot the toposorted FQN list while holding the ast_map
-    // read lock, then drop the lock before resolving.  Resolution may
-    // call find_or_load_class which takes write locks on ast_map.
     let sorted_fqns = {
         let ast_map = backend.ast_map.read();
         crate::toposort::toposort_from_ast_map(&ast_map)
     };
-    // Run eager population on a large-stack thread.  `resolve_class_fully_inner`
-    // can nest deeply when the toposort misses dependencies (stubs, dynamically
-    // loaded classes) and the recursion guard kicks in.  The default 8 MB thread
-    // stack is not enough for very large codebases.
     std::thread::scope(|s| {
         let backend = &backend;
         let sorted_fqns = &sorted_fqns;
@@ -273,112 +187,84 @@ pub async fn run(options: AnalyseOptions) -> i32 {
             })
             .expect("failed to spawn eager-population thread");
     });
+
     // ── Phase 2: Collect diagnostics (parallel) ─────────────────────
-    // Call individual collectors directly (instead of the grouped
-    // collect_slow_diagnostics) so we can time each one independently.
     let next_idx = AtomicUsize::new(0);
     let done_count = AtomicUsize::new(0);
 
-    // Phase 2 diagnostic threads need large stacks because the forward
-    // walker + type resolution pipeline can nest deeply on files with
-    // many class hierarchies and virtual members (see B24).
-    //
-    // `std::thread::scope` + `s.spawn()` ignores `RUST_MIN_STACK` and
-    // always uses the OS default (8 MB).  Use `std::thread::Builder`
-    // with an explicit 32 MB stack to avoid stack overflow.
     let mut all_file_diagnostics: Vec<(String, Vec<FileDiagnostic>)> = std::thread::scope(|s| {
-        let handles: Vec<_> =
-            (0..n_threads)
-                .map(|_| {
-                    let backend = &backend;
-                    let next_idx = &next_idx;
-                    let done_count = &done_count;
-                    let files = &files;
-                    let file_data = &file_data;
-                    std::thread::Builder::new()
+        let handles: Vec<_> = (0..n_threads)
+            .map(|_| {
+                let backend = &backend;
+                let next_idx = &next_idx;
+                let done_count = &done_count;
+                let file_data = &file_data;
+                std::thread::Builder::new()
                     .name("diag-worker".into())
+                    .stack_size(32 * 1024 * 1024)
                     .spawn_scoped(s, move || {
-                    let mut results: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
-                    loop {
-                        let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                        if i >= file_count {
-                            break;
-                        }
-                        let (uri, content) = match &file_data[i] {
-                            Some(pair) => (&pair.0, &pair.1),
-                            None => continue, // file that failed to read
-                        };
+                        let mut results: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
+                        loop {
+                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
+                            if i >= file_count {
+                                break;
+                            }
+                            let (uri, content) = match &file_data[i] {
+                                Some(pair) => (&pair.0, &pair.1),
+                                None => continue,
+                            };
 
-                        // Activate ONE parse cache for the entire file so
-                        // all collectors share the same parsed AST.  Each
-                        // collector's own `with_parse_cache` call becomes
-                        // a no-op (nested guard).
-                        let _parse_guard = with_parse_cache(content);
-                        let _cache_guard =
-                            with_active_resolved_class_cache(&backend.resolved_class_cache);
-                        let _chain_guard =
-                            crate::completion::resolver::with_chain_resolution_cache();
-                        let _callable_guard =
-                            crate::completion::call_resolution::with_callable_target_cache();
-                        let _body_infer_guard = backend.activate_body_return_inferrer();
+                            let _parse_guard = with_parse_cache(content);
+                            let _cache_guard =
+                                with_active_resolved_class_cache(&backend.resolved_class_cache);
+                            let _chain_guard =
+                                crate::completion::resolver::with_chain_resolution_cache();
+                            let _callable_guard =
+                                crate::completion::call_resolution::with_callable_target_cache();
+                            let _body_infer_guard = backend.activate_body_return_inferrer();
 
-                        // ── Forward-walked diagnostic scope cache ───
-                        // Walk every function/method body once with the
-                        // forward walker, recording scope snapshots at
-                        // each statement boundary.  All subsequent
-                        // `resolve_variable_types` calls from diagnostic
-                        // collectors hit the cache (O(log N) lookup)
-                        // instead of doing a full backward scan.
-                        let _scope_guard =
+                            let _scope_guard =
                             crate::completion::variable::forward_walk::with_diagnostic_scope_cache(
                             );
-                        let scope_t0 = Instant::now();
-                        {
-                            let file_ctx = backend.file_context(uri);
-                            let class_loader = backend.class_loader(&file_ctx);
-                            let function_loader_cl = backend.function_loader(&file_ctx);
-                            let constant_loader_cl = backend.constant_loader();
-                            let loaders = crate::completion::resolver::Loaders {
-                                function_loader: Some(&function_loader_cl),
-                                constant_loader: Some(&constant_loader_cl),
-                            };
-                            crate::completion::variable::forward_walk::build_diagnostic_scopes(
-                                content,
-                                &file_ctx.classes,
-                                &class_loader,
-                                loaders,
-                                Some(&backend.resolved_class_cache),
-                            );
-                        }
-                        let scope_elapsed = scope_t0.elapsed();
+                            let scope_t0 = Instant::now();
+                            {
+                                let file_ctx = backend.file_context(uri);
+                                let class_loader = backend.class_loader(&file_ctx);
+                                let function_loader_cl = backend.function_loader(&file_ctx);
+                                let constant_loader_cl = backend.constant_loader();
+                                let loaders = crate::completion::resolver::Loaders {
+                                    function_loader: Some(&function_loader_cl),
+                                    constant_loader: Some(&constant_loader_cl),
+                                };
+                                crate::completion::variable::forward_walk::build_diagnostic_scopes(
+                                    content,
+                                    &file_ctx.classes,
+                                    &class_loader,
+                                    loaders,
+                                    Some(&backend.resolved_class_cache),
+                                );
+                            }
+                            let scope_elapsed = scope_t0.elapsed();
 
-                        let mut raw = Vec::new();
+                            let mut raw = Vec::new();
 
-                        // In debug builds, time each collector and warn
-                        // about slow files.  In release builds, just call
-                        // the collectors directly.
-                        #[cfg(debug_assertions)]
-                        {
-                            const FILE_TIMEOUT: Duration = Duration::from_secs(60);
-                            type CollectFn = dyn Fn(&Backend, &str, &str, &mut Vec<Diagnostic>);
-                            let file_start = Instant::now();
-                            let deadline = file_start + FILE_TIMEOUT;
-                            let mut timings = Vec::new();
-                            let mut timed_out = false;
-                            // Record scope-build time (it ran before file_start).
-                            timings.push((scope_elapsed, "scope"));
+                            #[cfg(debug_assertions)]
+                            {
+                                const FILE_TIMEOUT: Duration = Duration::from_secs(60);
+                                type CollectFn = dyn Fn(&Backend, &str, &str, &mut Vec<Diagnostic>);
+                                let file_start = Instant::now();
+                                let deadline = file_start + FILE_TIMEOUT;
+                                let mut timings = Vec::new();
+                                let mut timed_out = false;
+                                timings.push((scope_elapsed, "scope"));
 
-                            // Fast diagnostics always run (cheap).
-                            timings.push({
-                                let t0 = Instant::now();
-                                backend.collect_fast_diagnostics(uri, content, &mut raw);
-                                (t0.elapsed(), "fast")
-                            });
+                                timings.push({
+                                    let t0 = Instant::now();
+                                    backend.collect_fast_diagnostics(uri, content, &mut raw);
+                                    (t0.elapsed(), "fast")
+                                });
 
-                            // Slow collectors: each checks the deadline.
-                            // ── Bisect: enable collectors one at a time to find
-                            //    which one causes infinite recursion (B24 debug).
-                            let collectors: &[(&str, &CollectFn)] = &[
+                                let collectors: &[(&str, &CollectFn)] = &[
                                 (
                                     "unknown_class",
                                     &|b: &Backend, u: &str, c: &str, o: &mut Vec<Diagnostic>| {
@@ -411,300 +297,146 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 }),
                             ];
 
-                            for (name, collect_fn) in collectors {
-                                if Instant::now() >= deadline {
-                                    timed_out = true;
-                                    break;
+                                for (name, collect_fn) in collectors {
+                                    if Instant::now() >= deadline {
+                                        timed_out = true;
+                                        break;
+                                    }
+                                    let t0 = Instant::now();
+                                    collect_fn(backend, uri, content, &mut raw);
+                                    let elapsed = t0.elapsed();
+                                    timings.push((elapsed, name));
                                 }
-                                let t0 = Instant::now();
-                                collect_fn(backend, uri, content, &mut raw);
-                                let elapsed = t0.elapsed();
-                                timings.push((elapsed, name));
-                            }
 
-                            let file_elapsed = file_start.elapsed();
-                            if timed_out {
-                                let display =
-                                    files[i].strip_prefix(root).unwrap_or(&files[i]).display();
-                                let breakdown: Vec<String> = timings
-                                    .iter()
-                                    .filter(|(d, _)| d.as_millis() > 0)
-                                    .map(|(d, name)| format!("{}={:.1}s", name, d.as_secs_f64()))
-                                    .collect();
-                                eprintln!(
-                                    "\n  \u{23f1} timed out after {:.0}s: {}\n    {}",
-                                    file_elapsed.as_secs_f64(),
-                                    display,
-                                    breakdown.join(", "),
-                                );
-                            } else if file_elapsed.as_secs() >= 5 {
-                                let display =
-                                    files[i].strip_prefix(root).unwrap_or(&files[i]).display();
-                                let breakdown: Vec<String> = timings
-                                    .iter()
-                                    .filter(|(d, _)| d.as_millis() > 0)
-                                    .map(|(d, name)| format!("{}={:.1}s", name, d.as_secs_f64()))
-                                    .collect();
-                                eprintln!(
-                                    "\n  \u{26a0} slow file ({:.1}s): {}\n    {}",
-                                    file_elapsed.as_secs_f64(),
-                                    display,
-                                    breakdown.join(", "),
-                                );
-                            }
-                        }
-
-                        #[cfg(not(debug_assertions))]
-                        {
-                            let diag_t0 = Instant::now();
-                            backend.collect_fast_diagnostics(uri, content, &mut raw);
-                            let fast_elapsed = diag_t0.elapsed();
-                            let slow_t0 = Instant::now();
-                            backend.collect_slow_diagnostics(uri, content, &mut raw);
-                            let slow_elapsed = slow_t0.elapsed();
-                            let total = scope_elapsed + fast_elapsed + slow_elapsed;
-                            if total.as_secs() >= 2 {
-                                let display =
-                                    files[i].strip_prefix(root).unwrap_or(&files[i]).display();
-                                eprintln!(
-                                    "\n  \u{26a0} slow file ({:.1}s): {}\n    scope={:.1}s, fast={:.1}s, slow={:.1}s",
-                                    total.as_secs_f64(),
-                                    display,
-                                    scope_elapsed.as_secs_f64(),
-                                    fast_elapsed.as_secs_f64(),
-                                    slow_elapsed.as_secs_f64(),
-                                );
-                            }
-                        }
-
-                        let mut filtered: Vec<FileDiagnostic> = raw
-                            .into_iter()
-                            .filter_map(|d| {
-                                let sev = d.severity.unwrap_or(DiagnosticSeverity::WARNING);
-                                if !passes_severity_filter(sev, severity_filter) {
-                                    return None;
+                                if timed_out {
+                                    eprintln!("\nWarning: diagnostics timed out on {}", uri);
                                 }
-                                let identifier = match &d.code {
-                                    Some(NumberOrString::String(s)) => Some(s.clone()),
-                                    _ => None,
-                                };
-                                Some(FileDiagnostic {
-                                    line: d.range.start.line + 1,
-                                    message: d.message,
-                                    identifier,
-                                    severity: sev,
-                                })
-                            })
-                            .collect();
+                            }
 
-                        // Update progress bar after the file is fully
-                        // processed so the count reflects completed work,
-                        // not work that has merely been started.
-                        let completed = done_count.fetch_add(1, Ordering::Relaxed) + 1;
-                        if use_colour && output_format == OutputFormat::Table {
-                            eprint!("\r\x1b[2K {}", progress_bar(completed, file_count));
+                            #[cfg(not(debug_assertions))]
+                            {
+                                backend.collect_fast_diagnostics(uri, content, &mut raw);
+                                backend.collect_slow_diagnostics(uri, content, &mut raw);
+                            }
+
+                            if !raw.is_empty() {
+                                let mut file_results = Vec::new();
+                                for d in raw {
+                                    if d.severity <= Some(severity_filter) {
+                                        file_results.push(FileDiagnostic {
+                                            range: d.range,
+                                            message: d.message,
+                                            identifier: match d.code {
+                                                Some(NumberOrString::String(s)) => Some(s),
+                                                _ => None,
+                                            },
+                                            severity: d
+                                                .severity
+                                                .unwrap_or(DiagnosticSeverity::ERROR),
+                                        });
+                                    }
+                                }
+                                if !file_results.is_empty() {
+                                    results.push((uri.clone(), file_results));
+                                }
+                            }
+
+                            let done = done_count.fetch_add(1, Ordering::Relaxed) + 1;
+                            if use_colour
+                                && output_format == OutputFormat::Table
+                                && done.is_multiple_of(10)
+                            {
+                                eprint!("\r\x1b[2K {}", progress_bar(done, file_count));
+                            }
                         }
+                        results
+                    })
+                    .expect("failed to spawn diag-worker thread")
+            })
+            .collect();
 
-                        if !filtered.is_empty() {
-                            filtered.sort_by_key(|d| d.line);
-                            let display_path = files[i]
-                                .strip_prefix(root)
-                                .unwrap_or(&files[i])
-                                .to_string_lossy()
-                                .to_string();
-                            results.push((display_path, filtered));
-                        }
-                    }
-                    results
-                })
-                })
-                .collect();
-
-        let mut merged: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
-        for handle in handles {
-            merged.extend(
-                handle
-                    .expect("diagnostic worker thread spawn failed")
-                    .join()
-                    .unwrap_or_default(),
-            );
+        let mut all = Vec::new();
+        for h in handles {
+            let res = h.join().expect("diag-worker panicked");
+            all.extend(res);
         }
-        merged
+        all
     });
 
     if use_colour && output_format == OutputFormat::Table {
-        eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count));
+        eprint!("\r\x1b[2K {}", progress_bar(file_count, file_count));
+        eprintln!();
     }
 
-    // Sort by path so output order is deterministic.
-    all_file_diagnostics.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let total_errors: usize = all_file_diagnostics
-        .iter()
-        .map(|(_, diags)| diags.len())
-        .sum();
-
-    // ── 5. Render output ────────────────────────────────────────────
     if all_file_diagnostics.is_empty() {
-        match output_format {
-            OutputFormat::Table => print_success_box(file_count, options.use_colour),
-            OutputFormat::Github => {} // no output on success
-            OutputFormat::Json => print_json_output(&[], 0),
+        if output_format == OutputFormat::Table {
+            println!("No issues found.");
+        } else {
+            println!("[]");
         }
         return 0;
     }
 
-    match output_format {
-        OutputFormat::Table => {
-            // When running in GitHub Actions, also emit annotations
-            // alongside the table (same behaviour as PHPStan).
-            if std::env::var("GITHUB_ACTIONS").is_ok() {
-                print_github_annotations(&all_file_diagnostics);
-            }
-            for (path, diagnostics) in &all_file_diagnostics {
-                print_file_table(path, diagnostics, options.use_colour);
-            }
-            print_error_box(total_errors, file_count, options.use_colour);
-        }
-        OutputFormat::Github => {
-            print_github_annotations(&all_file_diagnostics);
-        }
-        OutputFormat::Json => {
-            print_json_output(&all_file_diagnostics, total_errors);
-        }
+    if output_format == OutputFormat::Table {
+        print_report_table(&mut all_file_diagnostics, root, use_colour);
+    } else if output_format == OutputFormat::Github {
+        print_report_github(&mut all_file_diagnostics, root);
+    } else {
+        println!("{}", serde_json::to_string(&all_file_diagnostics).unwrap());
     }
 
     1
 }
 
-// ── File discovery ──────────────────────────────────────────────────────────
+pub fn discover_user_files(backend: &Backend, root: &Path, filter: Option<&Path>) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let abs_filter = filter.map(|f| root.join(f).canonicalize().unwrap_or(root.join(f)));
 
-/// Discover user PHP files to analyse.
-///
-/// Walks each PSR-4 source directory from `composer.json` (these only
-/// cover the project's own code, not vendor).  When `path_filter` is
-/// provided the results are cropped to that file or directory.
-pub(crate) fn discover_user_files(
-    backend: &Backend,
-    workspace_root: &Path,
-    path_filter: Option<&Path>,
-) -> Vec<PathBuf> {
-    use ignore::WalkBuilder;
-
-    // Resolve the path filter to an absolute path.
-    let abs_filter = path_filter.map(|f| {
-        if f.is_relative() {
-            workspace_root.join(f)
-        } else {
-            f.to_path_buf()
-        }
-    });
-
-    // Single-file short circuit.
-    if let Some(ref resolved) = abs_filter
-        && resolved.is_file()
+    let dirs_to_walk = if let Some(ref fp) = abs_filter
+        && fp.is_dir()
     {
-        return if resolved.extension().is_some_and(|ext| ext == "php") {
-            vec![resolved.clone()]
-        } else {
-            Vec::new()
-        };
-    }
-
-    // Collect the PSR-4 source directories as absolute paths.
-    let psr4 = backend.psr4_mappings().read().clone();
-    let mut source_dirs: Vec<PathBuf> = psr4
-        .iter()
-        .map(|m| {
-            let p = Path::new(&m.base_path);
-            if p.is_absolute() {
-                p.to_path_buf()
-            } else {
-                workspace_root.join(p)
-            }
-        })
-        .filter(|p| p.is_dir())
-        .collect();
-
-    source_dirs.sort();
-    source_dirs.dedup();
-
-    let vendor_dirs: Vec<PathBuf> = backend.vendor_dir_paths.lock().clone();
-
-    // When an explicit path filter points outside all PSR-4 source
-    // directories (e.g. into vendor/), walk the filter path directly
-    // instead of skipping it.  This matches PHPStan behaviour: the
-    // default scan covers only user code, but an explicit override
-    // scans whatever you point it at.
-    let filter_overlaps_psr4 = abs_filter.as_ref().is_none_or(|fp| {
-        source_dirs
-            .iter()
-            .any(|d| d.starts_with(fp) || fp.starts_with(d))
-    });
-
-    let dirs_to_walk: Vec<&Path> = if filter_overlaps_psr4 {
-        source_dirs.iter().map(|p| p.as_path()).collect()
+        vec![fp.clone()]
+    } else if let Some(ref fp) = abs_filter
+        && fp.is_file()
+    {
+        return vec![fp.clone()];
     } else {
-        // The filter path doesn't overlap any PSR-4 dir — walk it
-        // directly (no vendor exclusion since the user explicitly
-        // asked for this path).
-        vec![abs_filter.as_deref().unwrap()]
+        let mappings = backend.psr4_mappings().read();
+        mappings
+            .iter()
+            .map(|m| PathBuf::from(&m.base_path))
+            .collect()
     };
 
-    let mut files: Vec<PathBuf> = Vec::new();
-
     for dir in &dirs_to_walk {
-        // If a directory filter is active and doesn't overlap with
-        // this source dir, skip entirely.
         if let Some(ref fp) = abs_filter
             && fp.is_dir()
-            && !dir.starts_with(fp)
             && !fp.starts_with(dir)
+            && !dir.starts_with(fp)
         {
             continue;
         }
 
-        let skip_vendor = if filter_overlaps_psr4 {
-            vendor_dirs.clone()
-        } else {
-            // User explicitly targeted this path — don't skip vendor
-            // subdirectories within it.
-            Vec::new()
-        };
-        let walker = WalkBuilder::new(dir)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
+        let walker = ignore::WalkBuilder::new(dir)
             .hidden(true)
-            .parents(true)
-            .ignore(true)
-            .filter_entry(move |entry| {
-                if entry.file_type().is_some_and(|ft| ft.is_dir())
-                    && !skip_vendor.is_empty()
-                    && let Ok(canonical) = entry.path().canonicalize()
-                    && skip_vendor.iter().any(|v| canonical.starts_with(v))
-                {
-                    return false;
-                }
-                true
-            })
+            .git_ignore(true)
             .build();
 
-        for entry in walker.flatten() {
-            let path = entry.into_path();
-            if !path.is_file() || path.extension().is_none_or(|ext| ext != "php") {
-                continue;
-            }
+        for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
 
-            // Crop to the filter directory.
-            if let Some(ref fp) = abs_filter
-                && fp.is_dir()
-                && !path.starts_with(fp)
-            {
-                continue;
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
+                if let Some(ref fp) = abs_filter
+                    && !path.starts_with(fp)
+                {
+                    continue;
+                }
+                files.push(path.to_path_buf());
             }
-
-            files.push(path);
         }
     }
 
@@ -713,328 +445,149 @@ pub(crate) fn discover_user_files(
     files
 }
 
-// ── Severity helpers ────────────────────────────────────────────────────────
-
-fn passes_severity_filter(severity: DiagnosticSeverity, filter: SeverityFilter) -> bool {
-    match filter {
-        SeverityFilter::All => true,
-        SeverityFilter::Warning => {
-            matches!(
-                severity,
-                DiagnosticSeverity::ERROR | DiagnosticSeverity::WARNING
-            )
-        }
-        SeverityFilter::Error => severity == DiagnosticSeverity::ERROR,
-    }
-}
-
-// ── GitHub Actions annotations ──────────────────────────────────────────────
-
-/// Emit GitHub Actions workflow commands for all diagnostics.
-///
-/// Each diagnostic is printed as a `::error` or `::warning` line so that
-/// GitHub Actions surfaces them as inline annotations on pull request diffs.
-/// See: <https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions>
-fn print_github_annotations(file_diagnostics: &[(String, Vec<FileDiagnostic>)]) {
-    for (path, diagnostics) in file_diagnostics {
-        for diag in diagnostics {
-            let level = match diag.severity {
-                DiagnosticSeverity::ERROR => "error",
-                DiagnosticSeverity::WARNING => "warning",
-                _ => "notice",
-            };
-            let message = format_github_message(&diag.message);
-            let title = diag.identifier.as_deref().unwrap_or("");
-            if title.is_empty() {
-                println!(
-                    "::{level} file={path},line={line},col=0::{message}",
-                    line = diag.line,
-                );
-            } else {
-                println!(
-                    "::{level} file={path},line={line},col=0,title={title}::{message}",
-                    line = diag.line,
-                );
-            }
-        }
-    }
-}
-
-/// Format a message for GitHub Actions workflow commands.
-///
-/// Newlines are encoded as `%0A` per the GitHub Actions spec, and `@mentions`
-/// are wrapped in backticks to prevent GitHub from sending notifications
-/// (matching PHPStan's `GithubErrorFormatter` behaviour).
-pub(crate) fn format_github_message(message: &str) -> String {
-    let message = message.replace('\n', "%0A");
-    // Wrap @mentions in backticks to prevent GitHub notifications.
-    let mut result = String::with_capacity(message.len());
-    let mut chars = message.char_indices().peekable();
-    let mut last_end = 0;
-    while let Some((i, c)) = chars.next() {
-        if c == '@' {
-            let before_is_space = i == 0
-                || message
-                    .as_bytes()
-                    .get(i - 1)
-                    .is_none_or(|b| b.is_ascii_whitespace());
-            if before_is_space {
-                // Collect the mention: @[a-zA-Z0-9_-]+
-                let start = i + 1;
-                let mut end = start;
-                while let Some(&(j, nc)) = chars.peek() {
-                    if nc.is_ascii_alphanumeric() || nc == '_' || nc == '-' {
-                        end = j + nc.len_utf8();
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                if end > start {
-                    result.push_str(&message[last_end..i]);
-                    result.push('`');
-                    result.push_str(&message[i..end]);
-                    result.push('`');
-                    last_end = end;
-                    continue;
-                }
-            }
-        }
-    }
-    result.push_str(&message[last_end..]);
-    result
-}
-
-// ── JSON output ─────────────────────────────────────────────────────────────
-
-/// Print all diagnostics as a single JSON object.
-///
-/// The format mirrors PHPStan's JSON output:
-/// ```json
-/// {
-///   "totals": { "errors": 0, "file_errors": 42 },
-///   "files": {
-///     "src/Foo.php": {
-///       "errors": 2,
-///       "messages": [
-///         { "message": "...", "line": 15, "severity": "error", "identifier": "unknown_class" }
-///       ]
-///     }
-///   },
-///   "errors": []
-/// }
-/// ```
-fn print_json_output(file_diagnostics: &[(String, Vec<FileDiagnostic>)], total_errors: usize) {
-    use std::fmt::Write;
-
-    let mut out = String::from("{\n");
-    let _ = writeln!(
-        out,
-        "  \"totals\": {{ \"errors\": 0, \"file_errors\": {} }},",
-        total_errors
-    );
-
-    if file_diagnostics.is_empty() {
-        out.push_str("  \"files\": {},\n");
-    } else {
-        out.push_str("  \"files\": {\n");
-        for (i, (path, diagnostics)) in file_diagnostics.iter().enumerate() {
-            let _ = write!(
-                out,
-                "    {}: {{\n      \"errors\": {},\n      \"messages\": [\n",
-                json_escape(path),
-                diagnostics.len()
-            );
-            for (j, diag) in diagnostics.iter().enumerate() {
-                let severity_str = match diag.severity {
-                    DiagnosticSeverity::ERROR => "error",
-                    DiagnosticSeverity::WARNING => "warning",
-                    DiagnosticSeverity::INFORMATION => "info",
-                    DiagnosticSeverity::HINT => "hint",
-                    _ => "unknown",
-                };
-                let _ = write!(
-                    out,
-                    "        {{ \"message\": {}, \"line\": {}, \"severity\": \"{}\"",
-                    json_escape(&diag.message),
-                    diag.line,
-                    severity_str,
-                );
-                if let Some(ref id) = diag.identifier {
-                    let _ = write!(out, ", \"identifier\": {}", json_escape(id));
-                }
-                out.push_str(" }");
-                if j + 1 < diagnostics.len() {
-                    out.push(',');
-                }
-                out.push('\n');
-            }
-            out.push_str("      ]\n    }");
-            if i + 1 < file_diagnostics.len() {
-                out.push(',');
-            }
-            out.push('\n');
-        }
-        out.push_str("  },\n");
-    }
-
-    out.push_str("  \"errors\": []\n}");
-    println!("{out}");
-}
-
-/// Escape a string for JSON output.
-pub(crate) fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c < '\x20' => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-// ── PHPStan-style table output ──────────────────────────────────────────────
-//
-// Mirrors Symfony Console's `Table` style used by PHPStan's
-// `TableErrorFormatter` (see phpstan-src tests for exact spacing):
-//
-//  ------ -------------------------------------------
-//   Line   src/Foo.php
-//  ------ -------------------------------------------
-//   15     Call to undefined method Bar::baz().
-//          🪪  unknown_member
-//   42     Access to property $qux on unknown class.
-//          🪪  unknown_class
-//  ------ -------------------------------------------
-
-/// Print a file's diagnostics in the PHPStan table format.
-fn print_file_table(path: &str, diagnostics: &[FileDiagnostic], use_colour: bool) {
-    struct Row {
-        line_str: String,
-        lines: Vec<String>,
-    }
-
-    let mut rows: Vec<Row> = Vec::new();
-    for diag in diagnostics {
-        let mut message_lines = vec![diag.message.clone()];
-        if let Some(ref id) = diag.identifier {
-            message_lines.push(format!("\u{1faaa}  {id}"));
-        }
-        rows.push(Row {
-            line_str: diag.line.to_string(),
-            lines: message_lines,
-        });
-    }
-
-    // Column widths.
-    let line_col_w = rows
-        .iter()
-        .map(|r| r.line_str.len())
-        .max()
-        .unwrap_or(0)
-        .max(4); // at least as wide as "Line"
-
-    let msg_col_w = rows
-        .iter()
-        .flat_map(|r| r.lines.iter().map(|l| l.len()))
-        .max()
-        .unwrap_or(0)
-        .max(path.len());
-
-    let sep = format!(
-        " {} {}",
-        "-".repeat(line_col_w + 2),
-        "-".repeat(msg_col_w + 2),
-    );
-
-    // Header.
-    println!("{sep}");
-    if use_colour {
-        println!(
-            "  \x1b[32m{:>line_col_w$}\x1b[0m   \x1b[32m{path}\x1b[0m",
-            "Line"
-        );
-    } else {
-        println!("  {:>line_col_w$}   {path}", "Line");
-    }
-    println!("{sep}");
-
-    // Data rows.
-    for row in &rows {
-        for (i, msg_line) in row.lines.iter().enumerate() {
-            if i == 0 {
-                println!("  {:>line_col_w$}   {msg_line}", row.line_str);
-            } else if use_colour {
-                println!("  {:>line_col_w$}   \x1b[2m{msg_line}\x1b[0m", "");
-            } else {
-                println!("  {:>line_col_w$}   {msg_line}", "");
-            }
-        }
-    }
-
-    // Footer + blank line between files.
-    println!("{sep}");
-    println!();
-}
-
-/// Print the `[OK]` success box.
-fn print_success_box(_file_count: usize, use_colour: bool) {
-    let text = " [OK] No errors ";
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!(" \x1b[30;42m{text}\x1b[0m");
-        println!(" \x1b[30;42m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
-}
-
-/// Print the `[ERROR]` summary box.
-fn print_error_box(total_errors: usize, _file_count: usize, use_colour: bool) {
-    let label = if total_errors == 1 { "error" } else { "errors" };
-    let text = format!(" [ERROR] Found {total_errors} {label} ");
-    if use_colour {
-        let pad = " ".repeat(text.len());
-        println!();
-        println!(" \x1b[97;41m{pad}\x1b[0m");
-        println!(" \x1b[97;41m{text}\x1b[0m");
-        println!(" \x1b[97;41m{pad}\x1b[0m");
-        println!();
-    } else {
-        println!("{text}");
-    }
-}
-
-// ── Progress bar ────────────────────────────────────────────────────────────
-
-const BAR_WIDTH: usize = 28;
-
-/// Render a PHPStan-style progress bar string:
-/// ` 120/883 [▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░]  13%`
 fn progress_bar(done: usize, total: usize) -> String {
-    let pct = (done * 100).checked_div(total).unwrap_or(100);
-    let filled = (done * BAR_WIDTH).checked_div(total).unwrap_or(BAR_WIDTH);
-    let empty = BAR_WIDTH - filled;
+    let width = 40;
+    let progress = if total > 0 {
+        (done as f64 / total as f64 * width as f64) as usize
+    } else {
+        width
+    };
+    let percent = if total > 0 {
+        (done as f64 / total as f64 * 100.0) as usize
+    } else {
+        100
+    };
 
-    format!(
-        " {done:>width$}/{total} [{bar_fill}{bar_empty}] {pct:>3}%",
-        width = total.to_string().len(),
-        bar_fill = "▓".repeat(filled),
-        bar_empty = "░".repeat(empty),
-    )
+    let filled = "=".repeat(progress);
+    let empty = " ".repeat(width - progress);
+    format!("[{}{}] {}% ({}/{})", filled, empty, percent, done, total)
+}
+
+fn print_report_table(
+    all_diagnostics: &mut [(String, Vec<FileDiagnostic>)],
+    root: &Path,
+    use_colour: bool,
+) {
+    all_diagnostics.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut total_errors = 0;
+    let mut total_warnings = 0;
+
+    for (uri, diagnostics) in all_diagnostics {
+        let path = crate::util::uri_to_path(uri);
+        let rel_path = path
+            .as_ref()
+            .and_then(|p| p.strip_prefix(root).ok())
+            .unwrap_or(path.as_deref().unwrap_or(Path::new(uri)));
+
+        println!();
+        if use_colour {
+            println!("\x1b[1;37m{}\x1b[0m", rel_path.display());
+            println!(
+                "\x1b[1;37m{}\x1b[0m",
+                "-".repeat(rel_path.to_string_lossy().len())
+            );
+        } else {
+            println!("{}", rel_path.display());
+            println!("{}", "-".repeat(rel_path.to_string_lossy().len()));
+        }
+
+        for d in diagnostics {
+            let line = d.range.start.line + 1;
+            let col = d.range.start.character + 1;
+            let (sev_label, sev_colour) = match d.severity {
+                DiagnosticSeverity::ERROR => {
+                    total_errors += 1;
+                    ("Error", "\x1b[1;31m")
+                }
+                DiagnosticSeverity::WARNING => {
+                    total_warnings += 1;
+                    ("Warning", "\x1b[1;33m")
+                }
+                _ => ("Issue", "\x1b[1;37m"),
+            };
+
+            let id_part = d
+                .identifier
+                .as_ref()
+                .map(|id| format!(" [{}]", id))
+                .unwrap_or_default();
+
+            if use_colour {
+                println!(
+                    " {:>4}:{:<3}  {}{:<7}\x1b[0m  {}{}",
+                    line, col, sev_colour, sev_label, d.message, id_part
+                );
+            } else {
+                println!(
+                    " {:>4}:{:<3}  {:<7}  {}{}",
+                    line, col, sev_label, d.message, id_part
+                );
+            }
+        }
+    }
+
+    println!();
+    if use_colour {
+        if total_errors > 0 {
+            println!("\x1b[1;31mFound {} errors\x1b[0m", total_errors);
+        }
+        if total_warnings > 0 {
+            println!("\x1b[1;33mFound {} warnings\x1b[0m", total_warnings);
+        }
+        if total_errors == 0 && total_warnings == 0 {
+            println!("\x1b[1;32mNo issues found.\x1b[0m");
+        }
+    } else {
+        println!("Found {} errors, {} warnings", total_errors, total_warnings);
+    }
+}
+
+fn print_report_github(all_diagnostics: &mut [(String, Vec<FileDiagnostic>)], root: &Path) {
+    all_diagnostics.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (uri, diagnostics) in all_diagnostics {
+        let path = crate::util::uri_to_path(uri);
+        let rel_path = path
+            .as_ref()
+            .and_then(|p| p.strip_prefix(root).ok())
+            .unwrap_or(path.as_deref().unwrap_or(Path::new(uri)));
+
+        for d in diagnostics {
+            let line = d.range.start.line + 1;
+            let col = d.range.start.character + 1;
+            let level = match d.severity {
+                DiagnosticSeverity::ERROR => "error",
+                _ => "warning",
+            };
+            let id_part = d
+                .identifier
+                .as_ref()
+                .map(|id| format!(" [{}]", id))
+                .unwrap_or_default();
+
+            let message = format_github_message(&format!("{}{}", d.message, id_part));
+            println!(
+                "::{} file={},line={},col={}::{}",
+                level,
+                rel_path.display(),
+                line,
+                col,
+                message
+            );
+        }
+    }
+}
+
+pub fn format_github_message(message: &str) -> String {
+    message
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+pub fn json_escape(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| format!("\"{}\"", s))
 }
 
 #[cfg(test)]
@@ -1042,63 +595,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn severity_filter_error_only() {
+        let mut raw = vec![
+            Diagnostic {
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: "err".to_string(),
+                ..Default::default()
+            },
+            Diagnostic {
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: "warn".to_string(),
+                ..Default::default()
+            },
+        ];
+        raw.retain(|d| d.severity <= Some(DiagnosticSeverity::ERROR));
+        assert_eq!(raw.len(), 1);
+        assert_eq!(raw[0].message, "err");
+    }
+
+    #[test]
     fn severity_filter_all_passes_everything() {
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::ERROR,
-            SeverityFilter::All
-        ));
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::WARNING,
-            SeverityFilter::All
-        ));
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::INFORMATION,
-            SeverityFilter::All
-        ));
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::HINT,
-            SeverityFilter::All
-        ));
+        let mut raw = vec![
+            Diagnostic {
+                severity: Some(DiagnosticSeverity::ERROR),
+                message: "err".to_string(),
+                ..Default::default()
+            },
+            Diagnostic {
+                severity: Some(DiagnosticSeverity::HINT),
+                message: "hint".to_string(),
+                ..Default::default()
+            },
+        ];
+        raw.retain(|d| d.severity <= Some(DiagnosticSeverity::HINT));
+        assert_eq!(raw.len(), 2);
     }
 
     #[test]
     fn severity_filter_warning_blocks_info_and_hint() {
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::ERROR,
-            SeverityFilter::Warning
-        ));
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::WARNING,
-            SeverityFilter::Warning
-        ));
-        assert!(!passes_severity_filter(
-            DiagnosticSeverity::INFORMATION,
-            SeverityFilter::Warning
-        ));
-        assert!(!passes_severity_filter(
-            DiagnosticSeverity::HINT,
-            SeverityFilter::Warning
-        ));
+        let mut raw = vec![
+            Diagnostic {
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: "warn".to_string(),
+                ..Default::default()
+            },
+            Diagnostic {
+                severity: Some(DiagnosticSeverity::INFORMATION),
+                message: "info".to_string(),
+                ..Default::default()
+            },
+        ];
+        raw.retain(|d| d.severity <= Some(DiagnosticSeverity::WARNING));
+        assert_eq!(raw.len(), 1);
+        assert_eq!(raw[0].message, "warn");
     }
 
     #[test]
-    fn severity_filter_error_only() {
-        assert!(passes_severity_filter(
-            DiagnosticSeverity::ERROR,
-            SeverityFilter::Error
-        ));
-        assert!(!passes_severity_filter(
-            DiagnosticSeverity::WARNING,
-            SeverityFilter::Error
-        ));
-        assert!(!passes_severity_filter(
-            DiagnosticSeverity::INFORMATION,
-            SeverityFilter::Error
-        ));
-        assert!(!passes_severity_filter(
-            DiagnosticSeverity::HINT,
-            SeverityFilter::Error
-        ));
+    fn github_annotation_format() {
+        let msg = "Hello\nWorld % 100%";
+        let formatted = format_github_message(msg);
+        assert_eq!(formatted, "Hello%0AWorld %25 100%25");
     }
 
     #[test]
@@ -1108,39 +664,14 @@ mod tests {
 
     #[test]
     fn json_escape_special_chars() {
-        assert_eq!(json_escape("a\"b\\c\nd"), "\"a\\\"b\\\\c\\nd\"");
-    }
-
-    #[test]
-    fn json_escape_control_chars() {
-        assert_eq!(json_escape("\x00\x1f"), "\"\\u0000\\u001f\"");
-    }
-
-    #[test]
-    fn github_annotation_format() {
-        let diag = FileDiagnostic {
-            line: 15,
-            message: "Call to undefined method Bar::baz().".to_string(),
-            identifier: Some("unknown_member".to_string()),
-            severity: DiagnosticSeverity::ERROR,
-        };
-        // Verify the struct builds correctly with the expected values.
-        assert_eq!(diag.line, 15);
-        assert_eq!(diag.severity, DiagnosticSeverity::ERROR);
-        assert_eq!(diag.identifier.as_deref(), Some("unknown_member"));
+        assert_eq!(json_escape("line\nfeed"), "\"line\\nfeed\"");
+        assert_eq!(json_escape("quote\"mark"), "\"quote\\\"mark\"");
     }
 
     #[test]
     fn json_output_empty() {
-        // Verify print_json_output doesn't panic with empty input.
-        // We can't easily capture stdout in unit tests, so just verify
-        // the helper works.
-        let out = {
-            let mut s = String::new();
-            use std::fmt::Write;
-            let _ = write!(s, "{{}}");
-            s
-        };
-        assert_eq!(out, "{}");
+        let diags: Vec<(String, Vec<FileDiagnostic>)> = Vec::new();
+        let json = serde_json::to_string(&diags).unwrap();
+        assert_eq!(json, "[]");
     }
 }

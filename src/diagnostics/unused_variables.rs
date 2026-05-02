@@ -24,8 +24,6 @@ use crate::scope_collector::{
 };
 use crate::types::PhpVersion;
 
-use super::offset_range_to_lsp_range;
-
 /// Diagnostic code used for unused-variable diagnostics.
 pub(crate) const UNUSED_VARIABLE_CODE: &str = "unused_variable";
 
@@ -62,6 +60,8 @@ impl Backend {
 
         with_parsed_program(content, "unused_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
+                backend: self,
+                uri,
                 content,
                 php_version,
                 diagnostics: Vec::new(),
@@ -79,6 +79,8 @@ impl Backend {
 // ─── Internal context ───────────────────────────────────────────────────────
 
 struct DiagnosticCtx<'a> {
+    backend: &'a Backend,
+    uri: &'a str,
     content: &'a str,
     php_version: PhpVersion,
     diagnostics: Vec<Diagnostic>,
@@ -294,7 +296,8 @@ fn check_scope(
             }
 
             let var_len = var_name.len();
-            let range = match offset_range_to_lsp_range(
+            let range = match ctx.backend.offset_range_to_lsp_range(
+                ctx.uri,
                 ctx.content,
                 write_offset as usize,
                 write_offset as usize + var_len,
@@ -374,7 +377,8 @@ fn check_catch_frame(
             .unwrap_or(frame.start);
 
         let var_len = var_name.len();
-        let range = match offset_range_to_lsp_range(
+        let range = match ctx.backend.offset_range_to_lsp_range(
+            ctx.uri,
             ctx.content,
             diag_offset as usize,
             diag_offset as usize + var_len,

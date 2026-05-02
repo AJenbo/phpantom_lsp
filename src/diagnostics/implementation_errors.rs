@@ -81,7 +81,8 @@ impl Backend {
             }
 
             // Build the diagnostic range from the class name span.
-            let range = match super::offset_range_to_lsp_range(
+            let range = match self.offset_range_to_lsp_range(
+                uri,
                 content,
                 span.start as usize,
                 span.end as usize,

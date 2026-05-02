@@ -29,7 +29,6 @@ use crate::types::{ClassInfo, ResolvedCallableTarget};
 use crate::util::is_subtype_of_typed;
 
 use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for argument type mismatch diagnostics.
 pub(crate) const TYPE_ERROR_ARGUMENT_CODE: &str = "type_error.argument";
@@ -1496,9 +1495,13 @@ impl Backend {
             let call_args_text: Option<&str> = {
                 let start = call_site.args_start as usize;
                 let end = call_site.args_end as usize;
-                if start <= end && end <= content.len() {
-                    let slice = content[start..end].trim();
-                    if slice.is_empty() { None } else { Some(slice) }
+                if let Some(slice) = content.get(start..end) {
+                    let trimmed = slice.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
                 } else {
                     None
                 }
@@ -1618,7 +1621,8 @@ impl Backend {
                 }
 
                 // Emit diagnostic.
-                let range = match offset_range_to_lsp_range(
+                let range = match self.offset_range_to_lsp_range(
+                    uri,
                     content,
                     resolved_arg.start,
                     resolved_arg.end,

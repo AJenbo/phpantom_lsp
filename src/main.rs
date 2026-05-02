@@ -130,12 +130,12 @@ enum SeverityArg {
     Error,
 }
 
-impl From<SeverityArg> for phpantom_lsp::analyse::SeverityFilter {
+impl From<SeverityArg> for tower_lsp::lsp_types::DiagnosticSeverity {
     fn from(arg: SeverityArg) -> Self {
         match arg {
-            SeverityArg::All => Self::All,
-            SeverityArg::Warning => Self::Warning,
-            SeverityArg::Error => Self::Error,
+            SeverityArg::All => Self::HINT,
+            SeverityArg::Warning => Self::WARNING,
+            SeverityArg::Error => Self::ERROR,
         }
     }
 }
@@ -213,7 +213,7 @@ async fn main() {
 
             let options = phpantom_lsp::analyse::AnalyseOptions {
                 workspace_root,
-                path_filter: path,
+                path_filter: path.map(|p| p.to_string_lossy().to_string()),
                 severity_filter: severity.into(),
                 use_colour,
                 output_format,

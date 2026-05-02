@@ -24,7 +24,6 @@ use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
 use super::helpers::{compute_use_line_ranges, is_offset_in_ranges, make_diagnostic};
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for unknown-function diagnostics.
 pub(crate) const UNKNOWN_FUNCTION_CODE: &str = "unknown_function";
@@ -138,11 +137,15 @@ impl Backend {
             }
 
             // ── Function is unresolved — emit diagnostic ────────────────
-            let range =
-                match offset_range_to_lsp_range(content, span.start as usize, span.end as usize) {
-                    Some(r) => r,
-                    None => continue,
-                };
+            let range = match self.offset_range_to_lsp_range(
+                uri,
+                content,
+                span.start as usize,
+                span.end as usize,
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
 
             let message = format!("Function '{}' not found", name);
 

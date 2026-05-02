@@ -43,14 +43,25 @@ struct HoverClosureCtx<'a> {
 /// like `$var = $var->…` on the same line.  Used by hover to avoid
 /// applying an inline `@var` cast to the RHS reference.
 fn is_cursor_in_self_assignment_rhs(content: &str, cursor_offset: usize, var_name: &str) -> bool {
-    // Find the line containing the cursor.
-    let line_start = content[..cursor_offset]
-        .rfind('\n')
-        .map_or(0, |pos| pos + 1);
-    let line_end = content[cursor_offset..]
+    // Find the line containing the cursor safely.
+    let before = match content.get(..cursor_offset) {
+        Some(b) => b,
+        None => return false,
+    };
+    let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
+
+    let after = match content.get(cursor_offset..) {
+        Some(a) => a,
+        None => return false,
+    };
+    let line_end = after
         .find('\n')
         .map_or(content.len(), |pos| cursor_offset + pos);
-    let line = &content[line_start..line_end];
+
+    let line = match content.get(line_start..line_end) {
+        Some(l) => l,
+        None => return false,
+    };
 
     // Look for `$var = ` (plain assignment) on this line.
     let needle = format!("{} = ", var_name);
@@ -1570,10 +1581,11 @@ fn infer_callable_param_types_for_call(
                 let obj_span = mc.object.span();
                 let start = obj_span.start.offset as usize;
                 let end = obj_span.end.offset as usize;
-                if end > closure_ctx.content.len() {
-                    return None;
-                }
-                let obj_text = closure_ctx.content[start..end].trim();
+                let obj_text = closure_ctx
+                    .content
+                    .get(start..end)
+                    .map(|s| s.trim())
+                    .unwrap_or("");
 
                 let rctx = crate::completion::resolver::ResolutionCtx {
                     current_class: closure_ctx.current_class,
@@ -1610,10 +1622,11 @@ fn infer_callable_param_types_for_call(
                 let obj_span = mc.object.span();
                 let start = obj_span.start.offset as usize;
                 let end = obj_span.end.offset as usize;
-                if end > closure_ctx.content.len() {
-                    return None;
-                }
-                let obj_text = closure_ctx.content[start..end].trim();
+                let obj_text = closure_ctx
+                    .content
+                    .get(start..end)
+                    .map(|s| s.trim())
+                    .unwrap_or("");
 
                 let rctx = crate::completion::resolver::ResolutionCtx {
                     current_class: closure_ctx.current_class,

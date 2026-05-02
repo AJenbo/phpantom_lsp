@@ -432,7 +432,8 @@ impl Backend {
             // ── Emit diagnostics based on the cached outcome ────────────
             match outcome {
                 SubjectOutcome::Scalar(ref scalar) => {
-                    let range = match offset_range_to_lsp_range(
+                    let range = match self.offset_range_to_lsp_range(
+                        uri,
                         content,
                         span.start as usize,
                         span.end as usize,
@@ -460,7 +461,8 @@ impl Backend {
                 }
 
                 SubjectOutcome::UnresolvableClass(ref unresolved) => {
-                    let range = match offset_range_to_lsp_range(
+                    let range = match self.offset_range_to_lsp_range(
+                        uri,
                         content,
                         span.start as usize,
                         span.end as usize,
@@ -494,7 +496,8 @@ impl Backend {
                     // whether the subject is a bare variable, a chain, an
                     // array access, or a function call result.
                     if self.config().diagnostics.unresolved_member_access_enabled() {
-                        let range = match offset_range_to_lsp_range(
+                        let range = match self.offset_range_to_lsp_range(
+                            uri,
                             content,
                             span.start as usize,
                             span.end as usize,

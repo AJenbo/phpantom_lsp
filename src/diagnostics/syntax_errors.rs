@@ -49,7 +49,8 @@ impl Backend {
                     },
                 }
             } else {
-                match super::offset_range_to_lsp_range(
+                match self.offset_range_to_lsp_range(
+                    uri,
                     content,
                     *start_byte as usize,
                     *end_byte as usize,

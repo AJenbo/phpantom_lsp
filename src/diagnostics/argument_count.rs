@@ -31,7 +31,6 @@ use crate::parser::with_parse_cache;
 use crate::types::ResolvedCallableTarget;
 
 use super::helpers::make_diagnostic;
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for argument-count diagnostics.
 pub(crate) const ARGUMENT_COUNT_CODE: &str = "argument_count";
@@ -302,7 +301,8 @@ impl Backend {
 
             // ── Too few arguments ───────────────────────────────────
             if actual_args < required_count {
-                let range = match offset_range_to_lsp_range(
+                let range = match self.offset_range_to_lsp_range(
+                    uri,
                     content,
                     call_site.args_start.saturating_sub(1) as usize,
                     call_site.args_end.saturating_add(1) as usize,
@@ -351,7 +351,8 @@ impl Backend {
             if let Some(max) = max_count
                 && actual_args > max
             {
-                let range = match offset_range_to_lsp_range(
+                let range = match self.offset_range_to_lsp_range(
+                    uri,
                     content,
                     call_site.args_start.saturating_sub(1) as usize,
                     call_site.args_end.saturating_add(1) as usize,

@@ -172,6 +172,11 @@ pub(crate) fn catch_panic_unwind_safe<T>(
     catch_panic(label, uri, position, AssertUnwindSafe(f))
 }
 
+/// Convert a `file://` URI string back to a `PathBuf`.
+pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    Url::parse(uri).ok()?.to_file_path().ok()
+}
+
 /// Convert a filesystem path to a properly percent-encoded `file://` URI string.
 ///
 /// This **must** be used instead of `format!("file://{}", path.display())`
@@ -400,8 +405,14 @@ pub(crate) fn utf16_col_to_byte_offset(line: &str, utf16_col: u32) -> usize {
 /// Returns the total UTF-16 length of the line if `byte_offset` is past
 /// the end.
 pub(crate) fn byte_offset_to_utf16_col(line: &str, byte_offset: usize) -> u32 {
-    let clamped = byte_offset.min(line.len());
-    line[..clamped].encode_utf16().count() as u32
+    let mut col = 0u32;
+    for (i, ch) in line.char_indices() {
+        if i >= byte_offset {
+            return col;
+        }
+        col += ch.len_utf16() as u32;
+    }
+    col
 }
 
 /// Extract the short (unqualified) class name from a potentially

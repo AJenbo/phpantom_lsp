@@ -16,7 +16,6 @@ use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
 use super::helpers::{ByteRange, compute_use_line_ranges, is_offset_in_ranges};
-use super::offset_range_to_lsp_range;
 
 impl Backend {
     /// Collect unused-import diagnostics for a single file.
@@ -162,7 +161,7 @@ impl Backend {
             }
 
             // Find the `use` statement line that imports this FQN.
-            if let Some(range) = find_use_statement_range(content, alias, fqn) {
+            if let Some(range) = find_use_statement_range(self, uri, content, alias, fqn) {
                 out.push(Diagnostic {
                     range,
                     severity: Some(DiagnosticSeverity::HINT),
@@ -373,7 +372,13 @@ fn is_ident_char(b: u8) -> bool {
 /// For group imports (`use Foo\{Bar, Baz}`), if only one member is unused,
 /// we highlight just the unused member name within the group.  If the entire
 /// group is unused, we highlight the whole statement.
-fn find_use_statement_range(content: &str, alias: &str, fqn: &str) -> Option<Range> {
+fn find_use_statement_range(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    alias: &str,
+    fqn: &str,
+) -> Option<Range> {
     // The FQN's last segment or the alias — what appears in the `use` line.
     let short_name = fqn.rsplit('\\').next().unwrap_or(fqn);
     let has_alias = short_name != alias;
@@ -402,8 +407,14 @@ fn find_use_statement_range(content: &str, alias: &str, fqn: &str) -> Option<Ran
                 // For group imports, try to highlight just the unused member
                 if trimmed.contains('{')
                     && !has_alias
-                    && let Some(member_range) =
-                        find_group_member_range(content, byte_offset, line, short_name)
+                    && let Some(member_range) = find_group_member_range(
+                        backend,
+                        uri,
+                        content,
+                        byte_offset,
+                        line,
+                        short_name,
+                    )
                 {
                     return Some(member_range);
                 }
@@ -411,7 +422,7 @@ fn find_use_statement_range(content: &str, alias: &str, fqn: &str) -> Option<Ran
                 // Highlight the entire use statement line
                 let line_start = byte_offset + leading_ws;
                 let line_end = byte_offset + line.len();
-                return offset_range_to_lsp_range(content, line_start, line_end);
+                return backend.offset_range_to_lsp_range(uri, content, line_start, line_end);
             }
         }
 
@@ -452,6 +463,8 @@ fn is_group_import_match(line: &str, fqn: &str, short_name: &str) -> bool {
 /// For `use Foo\{Bar, Baz};` where `Bar` is unused, returns the range
 /// covering just `Bar` (plus trailing comma/space if appropriate).
 fn find_group_member_range(
+    backend: &Backend,
+    uri: &str,
     content: &str,
     line_byte_offset: usize,
     line: &str,
@@ -481,7 +494,7 @@ fn find_group_member_range(
             let abs_start = line_byte_offset + member_start_in_line;
             let abs_end = line_byte_offset + member_end_in_line;
 
-            return offset_range_to_lsp_range(content, abs_start, abs_end);
+            return backend.offset_range_to_lsp_range(uri, content, abs_start, abs_end);
         }
         // Move past this member + the comma
         group_offset += member.len();

@@ -702,7 +702,7 @@ impl Backend {
             SymbolKind::ClassReference { name, .. } => {
                 // Check whether this class reference is in a `new ClassName` context.
                 // If so, show the __construct method hover instead of the class hover.
-                let before = &content[..symbol.start as usize];
+                let before = content.get(..symbol.start as usize)?;
                 let trimmed = before.trim_end();
                 let is_new_context = trimmed.ends_with("new")
                     && trimmed
@@ -925,14 +925,16 @@ impl Backend {
         // assignment to be included.  We only do this for assignments
         // (not parameters, foreach, etc.) where `effective_from`
         // differs from the definition offset.
-        let cursor_offset = if self
+        let mut cursor_offset = cursor_offset;
+        if self
             .lookup_var_def_effective_from(uri, name, cursor_offset)
             .is_some()
         {
-            cursor_offset + 1
-        } else {
-            cursor_offset
-        };
+            let offset = cursor_offset as usize;
+            if let Some(ch) = content.get(offset..).and_then(|s| s.chars().next()) {
+                cursor_offset += ch.len_utf8() as u32;
+            }
+        }
 
         // $this resolves to the enclosing class, but not inside static methods.
         if name == "this" {

@@ -30,7 +30,6 @@ use crate::types::ClassInfo;
 use super::helpers::{
     ByteRange, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
 };
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for unknown-class diagnostics so that code
 /// actions can match on it.
@@ -189,11 +188,15 @@ impl Backend {
             }
 
             // ── Name is unresolved — emit diagnostic ────────────────────
-            let range =
-                match offset_range_to_lsp_range(content, span.start as usize, span.end as usize) {
-                    Some(r) => r,
-                    None => continue,
-                };
+            let range = match self.offset_range_to_lsp_range(
+                uri,
+                content,
+                span.start as usize,
+                span.end as usize,
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
 
             let message = format!("Class '{}' not found", fqn);
 

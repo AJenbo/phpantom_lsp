@@ -470,8 +470,11 @@ pub fn find_inline_var_docblock(
     let open_pos = trimmed.rfind("/**")?;
 
     // Ensure nothing but whitespace between the start of the line and `/**`.
-    let line_start = trimmed[..open_pos].rfind('\n').map_or(0, |p| p + 1);
-    let prefix = &trimmed[line_start..open_pos];
+    let line_start = match trimmed.get(..open_pos) {
+        Some(s) => s.rfind('\n').map_or(0, |p| p + 1),
+        None => return None,
+    };
+    let prefix = trimmed.get(line_start..open_pos)?;
     if !prefix.chars().all(|c| c.is_ascii_whitespace()) {
         return None;
     }
@@ -1216,7 +1219,7 @@ pub fn find_enclosing_return_type(content: &str, cursor_offset: usize) -> Option
     while sig_start > 0 && !before_brace.is_char_boundary(sig_start) {
         sig_start -= 1;
     }
-    let sig_region = &before_brace[sig_start..];
+    let sig_region = before_brace.get(sig_start..)?;
     let func_kw_rel = sig_region.rfind("function")?;
     let func_kw_pos = sig_start + func_kw_rel;
 
@@ -1233,7 +1236,7 @@ pub fn find_enclosing_return_type(content: &str, cursor_offset: usize) -> Option
     }
 
     let open_pos = after_mods.rfind("/**")?;
-    let docblock = &after_mods[open_pos..];
+    let docblock = after_mods.get(open_pos..)?;
 
     extract_return_type(docblock)
 }

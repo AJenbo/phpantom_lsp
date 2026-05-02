@@ -31,9 +31,11 @@ impl Backend {
         params: InlayHintParams,
     ) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
         let uri = params.text_document.uri.to_string();
-        let result = self.with_file_content("textDocument/inlayHint", &uri, None, |content| {
-            self.handle_inlay_hints(&uri, content, params.range)
+        let range = params.range;
+        let result = self.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
+            self.handle_inlay_hints(&uri, content, range)
         });
+
         Ok(result.flatten())
     }
 
@@ -50,8 +52,20 @@ impl Backend {
         let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
         let ctx = self.file_context(uri);
 
-        let range_start = position_to_offset(content, range.start);
-        let range_end = position_to_offset(content, range.end);
+        // If this is a Blade file, the `range` is in Blade coordinates.
+        // We must translate it to virtual PHP coordinates before comparing
+        // against offsets in the symbol map.
+        let virtual_range = if crate::blade::is_blade_file(uri) {
+            Range {
+                start: self.translate_blade_to_php(uri, range.start),
+                end: self.translate_blade_to_php(uri, range.end),
+            }
+        } else {
+            range
+        };
+
+        let range_start = position_to_offset(content, virtual_range.start);
+        let range_end = position_to_offset(content, virtual_range.end);
 
         let mut hints = Vec::new();
 
@@ -79,6 +93,13 @@ impl Backend {
                 &ctx,
                 &mut hints,
             );
+        }
+
+        // Translate hints back to Blade if needed.
+        if crate::blade::is_blade_file(uri) {
+            for hint in &mut hints {
+                hint.position = self.translate_php_to_blade(uri, hint.position);
+            }
         }
 
         Some(hints)

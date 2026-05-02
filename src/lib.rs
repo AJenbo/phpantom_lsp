@@ -97,6 +97,7 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 
 pub mod analyse;
 pub mod atom;
+pub mod blade;
 pub mod classmap_scanner;
 mod code_actions;
 mod code_lens;
@@ -563,6 +564,8 @@ pub struct Backend {
     /// must not send `window/workDoneProgress/create` requests because
     /// the client will not handle them, blocking the server indefinitely.
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports dynamic registration for type hierarchy.
+    pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
     /// Shared flag set to `true` when the LSP `shutdown` request is
     /// received.  Background workers (diagnostic, PHPStan, PHPCS) check this
     /// flag on each iteration and exit their loops.  The PHPStan
@@ -587,6 +590,11 @@ pub struct Backend {
     /// (which receives `&self`) can set it after loading the file.
     /// The diagnostic worker snapshots the value at spawn time.
     pub(crate) config: Mutex<config::Config>,
+    /// Virtual PHP content generated from Blade files.
+    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
+    /// Source maps from virtual PHP back to original Blade positions.
+    pub(crate) blade_source_maps:
+        Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
 }
 
 impl Backend {
@@ -656,9 +664,14 @@ impl Backend {
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_type_hierarchy_dynamic_registration: Arc::new(
+                std::sync::atomic::AtomicBool::new(false),
+            ),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
+            blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
+            blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -724,9 +737,14 @@ impl Backend {
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_type_hierarchy_dynamic_registration: Arc::new(
+                std::sync::atomic::AtomicBool::new(false),
+            ),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             config: Mutex::new(config::Config::default()),
+            blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
+            blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -1018,9 +1036,14 @@ impl Backend {
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
+            supports_type_hierarchy_dynamic_registration: Arc::clone(
+                &self.supports_type_hierarchy_dynamic_registration,
+            ),
             init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             config: Mutex::new(self.config.lock().clone()),
+            blade_virtual_content: Arc::clone(&self.blade_virtual_content),
+            blade_source_maps: Arc::clone(&self.blade_source_maps),
         }
     }
 
@@ -1062,5 +1085,45 @@ impl Backend {
         self.stub_index
             .write()
             .retain(|name, source| !stubs::is_stub_class_removed(source, name, version));
+    }
+
+    /// Translate a position from an original Blade file to the virtual PHP file.
+    pub(crate) fn translate_blade_to_php(
+        &self,
+        uri: &str,
+        pos: tower_lsp::lsp_types::Position,
+    ) -> tower_lsp::lsp_types::Position {
+        if let Some(map) = self.blade_source_maps.read().get(uri) {
+            map.blade_to_php(pos)
+        } else {
+            pos
+        }
+    }
+
+    /// Translate a position from a virtual PHP file back to the original Blade file.
+    pub(crate) fn translate_php_to_blade(
+        &self,
+        uri: &str,
+        pos: tower_lsp::lsp_types::Position,
+    ) -> tower_lsp::lsp_types::Position {
+        if let Some(map) = self.blade_source_maps.read().get(uri) {
+            map.php_to_blade(pos)
+        } else {
+            pos
+        }
+    }
+
+    /// Translate a location from virtual PHP coordinates back to original Blade
+    /// coordinates if the location points into a Blade file.
+    pub(crate) fn translate_location(
+        &self,
+        mut location: tower_lsp::lsp_types::Location,
+    ) -> tower_lsp::lsp_types::Location {
+        let uri_str = location.uri.to_string();
+        if crate::blade::is_blade_file(&uri_str) {
+            location.range.start = self.translate_php_to_blade(&uri_str, location.range.start);
+            location.range.end = self.translate_php_to_blade(&uri_str, location.range.end);
+        }
+        location
     }
 }

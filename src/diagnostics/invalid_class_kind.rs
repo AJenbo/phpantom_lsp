@@ -27,7 +27,6 @@ use crate::types::{ClassInfo, ClassLikeKind};
 use super::helpers::{
     compute_use_line_ranges, is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
 };
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for invalid-class-kind diagnostics.
 pub(crate) const INVALID_CLASS_KIND_CODE: &str = "invalid_class_kind";
@@ -126,7 +125,8 @@ impl Backend {
             if let Some((severity, message)) =
                 check_kind_in_context(&class_info, ref_ctx, &fqn, &class_loader)
             {
-                let range = match offset_range_to_lsp_range(
+                let range = match self.offset_range_to_lsp_range(
+                    uri,
                     content,
                     span.start as usize,
                     span.end as usize,

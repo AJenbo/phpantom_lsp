@@ -61,7 +61,6 @@ use crate::scope_collector::{
 };
 
 use super::helpers::make_diagnostic;
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for undefined-variable diagnostics so that
 /// code actions can match on it.
@@ -110,6 +109,8 @@ impl Backend {
 
         with_parsed_program(content, "undefined_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
+                backend: self,
+                uri,
                 content,
                 diagnostics: Vec::new(),
             };
@@ -213,6 +214,8 @@ impl Backend {
 
 /// Collects diagnostics while walking the AST.
 struct DiagnosticCtx<'a> {
+    backend: &'a Backend,
+    uri: &'a str,
     content: &'a str,
     diagnostics: Vec<Diagnostic>,
 }
@@ -464,7 +467,8 @@ fn check_scope(
 
             // Emit diagnostic.
             let var_len = access.name.len();
-            let range = match offset_range_to_lsp_range(
+            let range = match ctx.backend.offset_range_to_lsp_range(
+                ctx.uri,
                 ctx.content,
                 access.offset as usize,
                 access.offset as usize + var_len,

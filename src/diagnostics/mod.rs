@@ -465,16 +465,13 @@ fn extract_checked_exception_fqn(message: &str) -> Option<String> {
 /// we should not eagerly clear diagnostics that happen to sit on a
 /// line with a blanket suppression the user added independently.
 fn line_has_ignore_for(content: &str, diag_line: u32, identifier: &str) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
     let line_idx = diag_line as usize;
 
     // Check the diagnostic line itself and the line before it.
     for idx in [line_idx, line_idx.wrapping_sub(1)] {
-        if idx >= lines.len() {
-            continue;
-        }
-        let line = lines[idx];
-        if let Some(ignore_pos) = line.find("@phpstan-ignore") {
+        if let Some(line) = content.split('\n').nth(idx)
+            && let Some(ignore_pos) = line.find("@phpstan-ignore")
+        {
             let after = &line[ignore_pos + "@phpstan-ignore".len()..];
             // `@phpstan-ignore-line` and `@phpstan-ignore-next-line`
             // suppress everything — we can't attribute them to any
@@ -640,7 +637,15 @@ impl Backend {
 
         // ── Phase 1: collect and cache fast diagnostics ─────────────
         let mut fast_diagnostics = Vec::new();
-        self.collect_fast_diagnostics(uri_str, content, &mut fast_diagnostics);
+        {
+            let vc_handle = self.blade_virtual_content.read();
+            let effective_content = vc_handle
+                .get(uri_str)
+                .map(|s| s.as_str())
+                .unwrap_or(content);
+
+            self.collect_fast_diagnostics(uri_str, effective_content, &mut fast_diagnostics);
+        }
 
         {
             let mut cache = self.diag_last_fast.lock();
@@ -662,7 +667,13 @@ impl Backend {
                 &self.resolved_class_cache,
             );
 
-            self.collect_slow_diagnostics(uri_str, content, &mut slow_diagnostics);
+            let vc_handle = self.blade_virtual_content.read();
+            let effective_content = vc_handle
+                .get(uri_str)
+                .map(|s| s.as_str())
+                .unwrap_or(content);
+
+            self.collect_slow_diagnostics(uri_str, effective_content, &mut slow_diagnostics);
         }
 
         {
@@ -1858,6 +1869,54 @@ fn is_full_line_range(range: &Range) -> bool {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+impl Backend {
+    /// Convert a byte range from the preprocessed (virtual) content back to
+    /// an LSP range in the original source file.
+    ///
+    /// For standard PHP files, this is a straight conversion.  For Blade
+    /// files, it converts the bytes to positions in the virtual PHP, then
+    /// translates those positions back to original Blade coordinates using
+    /// the source map.
+    pub(crate) fn offset_range_to_lsp_range(
+        &self,
+        uri: &str,
+        content: &str,
+        start_byte: usize,
+        end_byte: usize,
+    ) -> Option<Range> {
+        let virtual_php_handle = self.blade_virtual_content.read();
+        if let Some(virtual_php) = virtual_php_handle.get(uri)
+            && let Some(map) = self.blade_source_maps.read().get(uri)
+        {
+            if start_byte > virtual_php.len() || end_byte > virtual_php.len() {
+                return None;
+            }
+
+            let mut range = crate::util::byte_range_to_lsp_range(virtual_php, start_byte, end_byte);
+
+            if range.start.line < 5 {
+                // Diagnostic originates from the prologue (injected headers).
+                // We skip these to avoid false positives on line 1 of Blade.
+                return None;
+            }
+
+            range.start = map.php_to_blade(range.start);
+            range.end = map.php_to_blade(range.end);
+
+            return Some(range);
+        }
+
+        // Fallback for standard PHP or if map is missing
+        if start_byte > content.len() || end_byte > content.len() {
+            return None;
+        }
+
+        Some(crate::util::byte_range_to_lsp_range(
+            content, start_byte, end_byte,
+        ))
+    }
+}
+
 /// Build a diagnostic range from byte offsets, returning `None` if either
 /// offset is past the end of `content`.
 ///
@@ -2619,6 +2678,60 @@ mod tests {
             doc.is_empty(),
             "should return empty when no docblock exists, got: {}",
             doc
+        );
+    }
+
+    #[test]
+    fn test_offset_range_to_lsp_range_ignores_prologue() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.blade.php";
+        let content = "Hello World";
+        backend.update_ast(uri, content);
+
+        // First 5 lines are prologue.
+        let virtual_php = {
+            let vc_handle = backend.blade_virtual_content.read();
+            vc_handle
+                .get(uri)
+                .cloned()
+                .expect("Virtual content should exist")
+        };
+
+        // Find start of line 4 (0-indexed).
+        let mut offset = 0;
+        let mut lines_seen = 0;
+        for (i, ch) in virtual_php.char_indices() {
+            if lines_seen == 4 {
+                offset = i;
+                break;
+            }
+            if ch == '\n' {
+                lines_seen += 1;
+            }
+        }
+
+        // byte range in prologue
+        let range = backend.offset_range_to_lsp_range(uri, content, offset, offset + 5);
+        assert!(range.is_none(), "Diagnostic in prologue should be ignored");
+
+        // byte range after prologue (line 5+)
+        let mut after_offset = 0;
+        let mut lines_seen = 0;
+        for (i, ch) in virtual_php.char_indices() {
+            if lines_seen == 5 {
+                after_offset = i;
+                break;
+            }
+            if ch == '\n' {
+                lines_seen += 1;
+            }
+        }
+
+        let range_after =
+            backend.offset_range_to_lsp_range(uri, content, after_offset, after_offset + 5);
+        assert!(
+            range_after.is_some(),
+            "Diagnostic after prologue should be kept"
         );
     }
 }

@@ -28,7 +28,6 @@ use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::resolve_to_fqn;
-use super::offset_range_to_lsp_range;
 
 impl Backend {
     /// Collect `@deprecated` usage diagnostics for a single file.
@@ -92,7 +91,8 @@ impl Backend {
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
-                        && let Some(range) = offset_range_to_lsp_range(
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
                             content,
                             span.start as usize,
                             span.end as usize,
@@ -198,7 +198,8 @@ impl Backend {
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
                             && let Some(msg) = &method.deprecation_message
-                            && let Some(range) = offset_range_to_lsp_range(
+                            && let Some(range) = self.offset_range_to_lsp_range(
+                                uri,
                                 content,
                                 span.start as usize,
                                 span.end as usize,
@@ -223,7 +224,8 @@ impl Backend {
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
                             && let Some(msg) = &prop.deprecation_message
-                            && let Some(range) = offset_range_to_lsp_range(
+                            && let Some(range) = self.offset_range_to_lsp_range(
+                                uri,
                                 content,
                                 span.start as usize,
                                 span.end as usize,
@@ -245,7 +247,8 @@ impl Backend {
                             && let Some(constant) =
                                 resolved.constants.iter().find(|c| c.name == *member_name)
                             && let Some(msg) = &constant.deprecation_message
-                            && let Some(range) = offset_range_to_lsp_range(
+                            && let Some(range) = self.offset_range_to_lsp_range(
+                                uri,
                                 content,
                                 span.start as usize,
                                 span.end as usize,
@@ -275,7 +278,8 @@ impl Backend {
                     if let Some(func_info) =
                         self.resolve_function_name(name, &file_use_map, &file_namespace)
                         && let Some(msg) = &func_info.deprecation_message
-                        && let Some(range) = offset_range_to_lsp_range(
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
                             content,
                             span.start as usize,
                             span.end as usize,
