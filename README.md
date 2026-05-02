@@ -34,7 +34,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | PHPStan types                   | ✅       | ❌           | 🚧         | 🚧          | 🚧          |
 | Conditional return types        | ✅       | ❌           | ✅         | 🚧          | ❌          |
 | Closure parameter inference     | ✅       | 🚧           | 🚧         | 🚧          | ❌          |
-| Laravel Eloquent                | ✅       | ❌           | 🚧         | ❌          | 🧩          |
+| Laravel                         | ✅       | ❌           | 🚧         | ❌          | 🧩          |
 | **Refactoring**                 |          |              |            |             |             |
 | Rename                          | ✅       | 💰           | 💰         | ✅          | ✅          |
 | Common refactorings<sup>3</sup> | ✅       | ❌           | 💰         | ✅          | ✅          |
@@ -63,7 +63,7 @@ Performance measured on a production codebase: 21K PHP files, 1.5M lines of code
 - **Closure parameter inference.** `$users->map(fn($u) => $u->name)` infers `$u` as `User` from the collection's generic context.
 - **Conditional return types.** PHPStan-style conditional `@return` types resolve to the concrete branch at each call site.
 - **Type aliases and shapes.** `@phpstan-type`, `@phpstan-import-type`, and `object{...}` shapes all resolve through to completions.
-- **Laravel Eloquent.** Relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. No Larastan, no ide-helper, no database access required.
+- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No Larastan, no ide-helper, no database access required.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
 ## Project Awareness

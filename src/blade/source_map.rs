@@ -4,7 +4,12 @@ use tower_lsp::lsp_types::Position;
 #[derive(Debug, Clone, Default)]
 pub struct BladeSourceMap {
     /// Per-line column anchor points.
-    /// Each entry is (blade_col, php_col).
+    ///
+    /// Each entry is a pair `(blade_utf16_col, php_utf16_col)` representing
+    /// a synchronisation point: position `blade_utf16_col` in the original
+    /// Blade line corresponds to position `php_utf16_col` in the virtual
+    /// PHP line.  Between two adjacent anchors the mapping is linear (1:1
+    /// for PHP content, 0:N for boilerplate replacements).
     pub adjustments: Vec<Vec<(u32, u32)>>,
 }
 
@@ -12,7 +17,7 @@ impl BladeSourceMap {
     pub fn blade_to_php(&self, pos: Position) -> Position {
         let line = pos.line as usize;
         // Prologue adds 5 lines. Blade line 0 becomes virtual line 5.
-        let virtual_line = (line + 5) as u32;
+        let virtual_line = line as u32 + super::PROLOGUE_LINES;
 
         if line >= self.adjustments.len() {
             return Position {
@@ -50,13 +55,13 @@ impl BladeSourceMap {
     }
 
     pub fn php_to_blade(&self, pos: Position) -> Position {
-        if pos.line < 5 {
+        if pos.line < super::PROLOGUE_LINES {
             return Position {
                 line: 0,
                 character: 0,
             };
         }
-        let line = (pos.line - 5) as usize;
+        let line = (pos.line - super::PROLOGUE_LINES) as usize;
 
         if line >= self.adjustments.len() {
             return Position {

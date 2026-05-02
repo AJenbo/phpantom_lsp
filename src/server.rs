@@ -494,6 +494,12 @@ impl LanguageServer for Backend {
 
         self.open_files.write().remove(&uri);
 
+        // Clean up Blade preprocessor state for the closed file.
+        if crate::blade::is_blade_file(&uri) {
+            self.blade_virtual_content.write().remove(&uri);
+            self.blade_source_maps.write().remove(&uri);
+        }
+
         self.clear_file_maps(&uri);
 
         // Clear diagnostics so stale warnings don't linger after the file is closed

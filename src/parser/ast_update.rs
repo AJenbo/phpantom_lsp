@@ -33,17 +33,18 @@ impl Backend {
     /// changed (or a class was added/removed), meaning other open files
     /// that reference those classes may have stale diagnostics.
     pub fn update_ast(&self, uri: &str, content: &str) -> bool {
-        let mut content_to_parse = content.to_string();
-        if crate::blade::is_blade_file(uri) {
+        let content_to_parse = if crate::blade::is_blade_file(uri) {
             let (virtual_php, source_map) = crate::blade::preprocessor::preprocess(content);
-            self.blade_virtual_content
-                .write()
-                .insert(uri.to_string(), virtual_php.clone());
             self.blade_source_maps
                 .write()
                 .insert(uri.to_string(), source_map);
-            content_to_parse = virtual_php;
-        }
+            self.blade_virtual_content
+                .write()
+                .insert(uri.to_string(), virtual_php.clone());
+            virtual_php
+        } else {
+            content.to_string()
+        };
 
         // The mago-syntax parser contains `unreachable!()` and `.expect()`
         // calls that can panic on malformed PHP (e.g. partially-written

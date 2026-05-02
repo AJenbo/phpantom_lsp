@@ -46,86 +46,72 @@ mago-syntax parser only understands pure PHP. The strategy:
 
 ## Phase 1: Blade-to-PHP Preprocessor
 
-This phase delivers the core value: completion and go-to-definition
-for PHP expressions inside Blade templates.
+The core preprocessor is implemented in `src/blade/`. It transforms
+Blade templates into virtual PHP line-by-line, with a source map for
+coordinate translation. The LSP pipeline (`with_file_content`,
+`update_ast`, `did_close`) transparently handles Blade files.
 
-### 1. New module `src/blade/`
+Known issues in the current implementation:
 
-Create the following files:
+### Hover ranges are offset
 
-- `src/blade/mod.rs` — module declarations, `is_blade_file()` helper,
-  public `preprocess()` entry point.
-- `src/blade/preprocessor.rs` — the main Blade-to-PHP transformation
-  engine.
-- `src/blade/directives.rs` — directive pattern matching and their PHP
-  translations.
-- `src/blade/source_map.rs` — `BladeSourceMap`, `ColumnAdjustment`,
-  and position translation functions.
+Hover works (correct type info is shown) but the highlight range
+appears at the wrong position. The `hover` handler in `server.rs`
+translates the inbound cursor position (blade→php) but does not
+translate the returned `Hover.range` back (php→blade). Other
+handlers (rename, highlights, linked editing) already do this
+translation.
 
-Register `pub mod blade;` in `src/lib.rs`.
+### Dynamic completion does not work inside echo expressions
 
-### 2. Preprocessor design
+Static completion (class names, `Mysql::` members) works because it
+is resolved from the global symbol index without needing positional
+content. Dynamic completion (`$country->`) fails because it requires
+walking the AST to find variable assignments and infer types, which
+depends on the virtual PHP content and a correctly translated cursor
+position. The `handle_completion` method in `handler.rs` bypasses
+`with_file_content` and calls `get_file_content` directly, so it
+operates on the original Blade source with an untranslated position.
 
-The preprocessor operates line-by-line and produces exactly one output
-line per input line. This is the single most important invariant: it
-makes line mapping a trivial identity function so only column
-adjustments are needed.
+### Syntax coloring may not appear
 
-The virtual PHP document starts with an implicit `<?php` prologue
-(occupying a synthetic first line if the Blade file doesn't start with
-one). Each Blade line is then transformed:
+The semantic token provider correctly handles Blade files internally,
+but editors typically decide whether to request semantic tokens based
+on the document's `languageId`. When a `.blade.php` file is opened
+with `languageId: "blade"` (not `"php"`), the editor may never send
+a `textDocument/semanticTokens/full` request because the server
+registered as a PHP language server. Needs investigation per editor.
 
-- **Blade directives** become single-line PHP statements.
-- **Echo expressions** (`{{ }}`, `{!! !!}`) are replaced inline.
-- **HTML-only lines** become single-line PHP comments (`// HTML`).
-- **Component tags** are handled in Phase 2.
+Editors like Zed rely on Tree-sitter for base syntax highlighting
+and use LSP semantic tokens as an additional layer. Since Blade
+files use a Blade Tree-sitter grammar (not PHP), the PHP expressions
+inside directives and echo statements get no language-aware coloring
+unless the LSP provides semantic tokens covering them. We should
+ensure semantic tokens are comprehensive enough to provide full PHP
+highlighting inside Blade files (variables, class names, keywords,
+function calls, etc.) since the editor's Tree-sitter grammar won't
+cover the PHP portions.
 
-#### 2a. Echo expressions
+### Code actions are not Blade-aware
 
-| Blade | Virtual PHP |
-|---|---|
-| `{{ $expr }}` | `echo e($expr);` |
-| `{!! $expr !!}` | `echo ($expr);` |
-| `{{-- comment --}}` | `/* comment */` |
+Code actions like "Import class" insert a `use` statement at the top
+of the file rather than inside a `@php` / `<?php` block. All code
+actions that produce text edits need their ranges translated, and
+actions that generate new code need to be aware of Blade structure.
 
-When echo expressions appear mid-line (surrounded by HTML), the
-surrounding HTML becomes a comment on the same line and the echo
-expression is emitted as PHP on that line. Multiple echo expressions
-on the same line are joined with `;` on the same output line.
+### `@forelse` / `@empty` as loop construct
 
-The `@{{ expr }}` escape syntax (used for JS frameworks) strips the
-leading `@` and emits a comment.
+The `@forelse` directive is not in the directive list. The spec
+defines `@forelse ($arr as $v)` → `foreach ($arr as $v):` and
+`@empty` (in forelse context) → `endforeach; if (false):` with
+`@endforelse` → `endif;`.
 
-#### 2b. Control directives
+Remaining work in this phase:
 
-| Blade | Virtual PHP |
-|---|---|
-| `@if ($cond)` | `if ($cond):` |
-| `@elseif ($cond)` | `elseif ($cond):` |
-| `@else` | `else:` |
-| `@endif` | `endif;` |
-| `@foreach ($arr as $v)` | `foreach ($arr as $v):` |
-| `@endforeach` | `endforeach;` |
-| `@for (...)` | `for (...):` |
-| `@endfor` | `endfor;` |
-| `@while (...)` | `while (...):` |
-| `@endwhile` | `endwhile;` |
-| `@forelse ($arr as $v)` | `foreach ($arr as $v):` |
-| `@empty` | `endforeach; if (false):` |
-| `@endforelse` | `endif;` |
-| `@switch($v)` | `switch($v):` |
-| `@case(...)` | `case (...):` |
-| `@break` | `break;` |
-| `@default` | `default:` |
-| `@endswitch` | `endswitch;` |
-| `@unless (...)` | `if (!( ... )):` |
-| `@endunless` | `endif;` |
-| `@isset($v)` | `if (isset($v)):` |
-| `@endisset` | `endif;` |
-| `@empty($v)` (directive) | `if (empty($v)):` |
-| `@endempty` | `endif;` |
+### Directives that expose implicit variables
 
-#### 2c. Directives that expose implicit variables
+These directives should inject implicit variables into the virtual PHP
+but currently fall through to the generic directive handler:
 
 | Blade | Virtual PHP |
 |---|---|
@@ -136,9 +122,10 @@ leading `@` and emits a comment.
 | `@error('field')` | `if (true): $message = '';` |
 | `@enderror` | `endif;` |
 
-#### 2d. Stub directives
+### Stub directives
 
-These are parsed but produce no semantic PHP effect:
+These directives are recognized by the preprocessor but currently
+produce generic output rather than the semantic PHP they should:
 
 - `@auth`/`@endauth`, `@guest`/`@endguest`, `@env(...)`/`@endenv`,
   `@production`/`@endproduction`, `@once`/`@endonce` →
@@ -149,197 +136,34 @@ These are parsed but produce no semantic PHP effect:
   `@includeWhen(...)`, `@includeUnless(...)`, `@includeFirst(...)`,
   `@each(...)` → `/* @directive */`
 
-#### 2e. PHP blocks
+### Verbatim regions
 
-| Blade | Virtual PHP |
-|---|---|
-| `@php ... @endphp` | Raw PHP content (unwrap the delimiters) |
-| `@use('App\Models\Flight')` | `use App\Models\Flight;` |
-| `@use('App\Models\Flight', 'F')` | `use App\Models\Flight as F;` |
-| `@use('App\Models\{A, B}')` | `use App\Models\{A, B};` |
+`@verbatim ... @endverbatim` content should become PHP comments (it
+contains JS template syntax that would confuse the parser). Not yet
+implemented.
 
-#### 2f. Service injection
+### `$loop` variable injection
 
-`@inject('metrics', 'App\Services\MetricsService')` →
-`$metrics = new \App\Services\MetricsService();`
-
-This gives the variable the correct type for completion.
-
-#### 2g. Inline attribute directives
-
-`@class([...])`, `@style([...])`, `@checked(...)`, `@selected(...)`,
-`@disabled(...)`, `@readonly(...)`, `@required(...)` → `echo (...);`
-so their PHP expressions get parsed.
-
-#### 2h. Verbatim regions
-
-`@verbatim ... @endverbatim` content becomes PHP comments (it
-contains JS template syntax that would confuse the parser).
-
-#### 2i. Unknown directives
-
-Any `@directive(...)` not recognized becomes `/* @directive(...) */`.
-
-### 3. Source map
-
-Because the preprocessor maintains one output line per input line, the
-`BladeSourceMap` only stores per-line column adjustments:
-
-```rust
-pub struct BladeSourceMap {
-    /// Per-line column adjustment regions.
-    /// Lines with no adjustments have an empty vec (identity mapping).
-    adjustments: Vec<Vec<ColumnAdjustment>>,
-}
-
-pub struct ColumnAdjustment {
-    pub blade_col_start: u32,
-    pub blade_col_end: u32,
-    pub php_col_start: u32,
-    pub php_col_end: u32,
-}
-```
-
-Functions on `BladeSourceMap`:
-
-- `blade_to_php(line, col) -> (line, col)` — translate a position
-  in the original Blade file to the virtual PHP.
-- `php_to_blade(line, col) -> (line, col)` — translate a position
-  in the virtual PHP back to the original Blade file.
-
-### 4. New fields on `Backend`
-
-```rust
-/// Virtual PHP content generated from Blade files.
-/// Maps file URI -> preprocessed PHP source.
-pub(crate) blade_virtual_content: Arc<Mutex<HashMap<String, String>>>,
-
-/// Source maps from virtual PHP back to original Blade positions.
-/// Maps file URI -> BladeSourceMap.
-pub(crate) blade_source_maps: Arc<Mutex<HashMap<String, BladeSourceMap>>>,
-```
-
-Add these to `Backend::defaults()` with empty `HashMap`s.
-
-### 5. Wire into the LSP pipeline
-
-#### 5a. `is_blade_file()` helper
-
-A public function in `src/blade/mod.rs`:
-
-```rust
-pub fn is_blade_file(uri: &str) -> bool {
-    uri.ends_with(".blade.php")
-}
-```
-
-The server should also check `languageId == "blade"` in `did_open`
-when available (some editors send this for Blade files).
-
-#### 5b. `did_open` / `did_change` in `server.rs`
-
-After storing the file content in `open_files`, check
-`is_blade_file(&uri)`. If true:
-
-1. Run `blade::preprocess(&content)` which returns
-   `(virtual_php: String, source_map: BladeSourceMap)`.
-2. Store the virtual PHP in `blade_virtual_content`.
-3. Store the source map in `blade_source_maps`.
-4. Call `self.update_ast(&uri, &virtual_php)` (not the original
-   content).
-
-If the file is not Blade, the existing path is unchanged.
-
-#### 5c. `completion` in `handler.rs`
-
-At the top of `handle_completion`, after reading `content` from
-`open_files`, check if this is a Blade file. If so:
-
-1. Read the virtual PHP from `blade_virtual_content` (this is what
-   gets parsed and resolved against).
-2. Read the source map from `blade_source_maps`.
-3. Translate the cursor `position` from Blade coordinates to virtual
-   PHP coordinates using `source_map.blade_to_php()`.
-4. Run the normal completion pipeline against the virtual PHP content
-   with the translated position.
-5. Translate result positions in `CompletionItem` text edits back to
-   Blade coordinates using `source_map.php_to_blade()`.
-
-#### 5d. `goto_definition` in `server.rs`
-
-Same pattern: translate the incoming position to virtual PHP
-coordinates before resolution, translate the result location back
-if it points into the same Blade file.
-
-#### 5e. `did_close` in `server.rs`
-
-Clean up `blade_virtual_content` and `blade_source_maps` entries
-for the closed file.
-
-### 6. Implicit variables
-
-The preprocessor injects these declarations at the top of the virtual
-PHP (after the `<?php` prologue):
-
-```php
-/** @var \Illuminate\Support\ViewErrorBag $errors */
-$errors = new \Illuminate\Support\ViewErrorBag();
-/** @var \Illuminate\View\Factory $__env */
-$__env = new \Illuminate\View\Factory();
-```
-
-Inside `@foreach` blocks, inject a `$loop` variable declaration
-immediately after the `foreach` opening:
+The preprocessor injects `$errors` and `$__env` in the prologue, but
+does not yet inject a `$loop` variable inside `@foreach` blocks:
 
 ```php
 /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */
 $loop = (object)[];
 ```
 
-### 7. Explicit type declarations via `@var` PHPDoc
+### `languageId` check in `did_open`
 
-Users declare variable types in their Blade templates by writing:
+The server checks `is_blade_file()` (URI suffix) but does not yet
+check `languageId == "blade"` from the `did_open` params. Some
+editors send this for Blade files.
 
-```blade
-@php
-/**
- * @bladestan-signature
- * @var string $name
- * @var \App\Models\User $user
- */
-@endphp
-```
+### Additional test coverage
 
-The `@php ... @endphp` block becomes raw PHP. The `@var` tags are
-standard PHPDoc that mago-syntax already parses. The
-`@bladestan-signature` marker is just a comment we ignore. This works
-out of the box with the preprocessor and is compatible with the
-Bladestan ecosystem. No special handling needed.
-
-### 8. Tests
-
-Create `tests/blade_preprocessor.rs` with unit tests:
-
-- Echo expressions: `{{ $var }}`, `{!! $html !!}`, `{{-- comment --}}`
-- Each control directive (if/else/endif, foreach, for, while, switch,
-  forelse, unless, isset, empty)
-- Directives with implicit vars (@error, @session, @context)
-- Stub directives (@auth, @guest, @csrf, etc.)
-- PHP blocks (@php/@endphp, @use)
-- Service injection (@inject)
-- Inline attribute directives (@class, @checked, etc.)
+- Directives with implicit vars (`@error`, `@session`, `@context`)
+- Stub directives (`@auth`, `@guest`, `@csrf`, etc.)
 - Verbatim regions
-- Unknown directives
-- Mixed lines (HTML with embedded `{{ }}`)
-- Line count preservation (critical invariant)
-
-Create `tests/completion_blade.rs` with integration tests:
-
-- `$this->` inside a `@php` block
-- `$var->` where `$var` is declared via `@var` PHPDoc
-- `$user->` inside a `@foreach` with typed collection
 - `$loop->` inside a `@foreach`
-- `$errors->` (implicit variable)
 - `$value` inside `@session` block
 - `$message` inside `@error` block
 
@@ -714,38 +538,17 @@ Extend `tests/completion_blade.rs`:
 
 ## Implementation Sequence
 
-The items below are ordered for incremental delivery. Each step
-produces a testable, shippable improvement.
+Steps 1-2 are complete. The remaining steps build on the existing
+preprocessor and LSP pipeline.
 
-### Step 1: Preprocessor skeleton (items 1-3)
+### Step 3: Remaining Phase 1 items
 
-Create `src/blade/mod.rs`, `preprocessor.rs`, `directives.rs`,
-`source_map.rs`. Implement the `preprocess()` function that handles
-echo expressions and all control/stub directives. Write the
-`BladeSourceMap` with `blade_to_php()` and `php_to_blade()`.
+Inject `$loop` inside `@foreach` blocks. Handle `@session`/`@error`/
+`@context` implicit variables. Implement stub directives and verbatim
+regions. Add `languageId` check.
 
-**Deliverable:** A pure function
-`preprocess(blade_source: &str) -> (String, BladeSourceMap)` with
-comprehensive unit tests proving line count preservation and correct
-PHP output.
-
-### Step 2: Wire into LSP (items 4-5)
-
-Add `blade_virtual_content` and `blade_source_maps` to `Backend`.
-Modify `did_open`, `did_change`, `did_close`, `completion`, and
-`goto_definition` in `server.rs` to route Blade files through the
-preprocessor and translate positions.
-
-**Deliverable:** Completion works for `$var->` inside `{{ }}` and
-`@php` blocks in `.blade.php` files.
-
-### Step 3: Implicit variables (item 6)
-
-Inject `$errors`, `$__env`, and `$loop` declarations. Handle
-`@session`/`@error`/`@context` implicit `$value`/`$message`.
-
-**Deliverable:** `$errors->`, `$loop->first`, and `$value` inside
-`@session` blocks all produce completions.
+**Deliverable:** `$loop->first`, `$value` inside `@session` blocks,
+and `$message` inside `@error` blocks all produce completions.
 
 ### Step 4: Discovery (item 9)
 

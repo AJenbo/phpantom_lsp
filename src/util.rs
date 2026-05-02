@@ -172,11 +172,6 @@ pub(crate) fn catch_panic_unwind_safe<T>(
     catch_panic(label, uri, position, AssertUnwindSafe(f))
 }
 
-/// Convert a `file://` URI string back to a `PathBuf`.
-pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
-    Url::parse(uri).ok()?.to_file_path().ok()
-}
-
 /// Convert a filesystem path to a properly percent-encoded `file://` URI string.
 ///
 /// This **must** be used instead of `format!("file://{}", path.display())`

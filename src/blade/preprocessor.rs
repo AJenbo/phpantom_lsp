@@ -196,7 +196,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         buffer.push(')');
                         char_idx += 1;
                         current_utf16_col += 1;
-                        flash_buffer(
+                        flush_buffer(
                             &mut processed,
                             &mut buffer,
                             mode,
@@ -218,7 +218,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
             }
 
             if match_len > 0 || mode != next_mode {
-                flash_buffer(
+                flush_buffer(
                     &mut processed,
                     &mut buffer,
                     mode,
@@ -261,7 +261,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
             current_utf16_col += ch.len_utf16() as u32;
         }
 
-        flash_buffer(
+        flush_buffer(
             &mut processed,
             &mut buffer,
             mode,
@@ -278,7 +278,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     (virtual_php, source_map)
 }
 
-fn flash_buffer(
+fn flush_buffer(
     processed: &mut String,
     buffer: &mut String,
     mode: Mode,
@@ -347,10 +347,18 @@ mod tests {
     fn test_preprocess_multiline_directive() {
         let content = "@include('vendor.fbRemarket', [\n    'facebook_pixel_id' => Config::get('services.facebook.pixel_id'),\n])\n\n@include('vendor.googleRemarket')";
         let (php, _) = preprocess(content);
-        println!("OUTPUT1:\n{}", php);
+        assert!(
+            php.contains("blade_directive"),
+            "@include should produce blade_directive call: {}",
+            php
+        );
 
         let content2 = "{{\n    $var\n}}";
         let (php2, _) = preprocess(content2);
-        println!("OUTPUT2:\n{}", php2);
+        assert!(
+            php2.contains("$var"),
+            "Multiline echo should preserve variable: {}",
+            php2
+        );
     }
 }

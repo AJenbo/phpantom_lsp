@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- **Blade Preprocessor.** Simplified the state machine for parsing blade directive arguments and optimized directive string matching. This reduces complexity and improves theoretical performance when processing blade files.
+- **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. The preprocessor transforms Blade syntax into virtual PHP on the fly, with coordinate translation so all editor features report correct positions. ([#100](https://github.com/AJenbo/phpantom_lsp/pull/100) by [@MingJen](https://github.com/MingJen))
 
 ### Fixed
 
+- **Type hierarchy registration.** Dynamic registration for type hierarchy is now gated on client capability, preventing errors in editors that don't support it.
 - **Property `self`/`static` type resolution.** Properties declared with `@var self|null` or `static` type annotations now resolve to the owning class name instead of displaying the raw `self`/`static` keyword in hover and type inference.
 - **Magic `__get` property access.** Accessing undefined properties on objects with a `__get` method now resolves to the method's declared return type, even when `__get` has no template parameters (e.g. `SimpleXMLElement::$child` resolves to `SimpleXMLElement`).
 - **Magic `__call` method return type.** Calling undefined methods on objects with a `__call` method now resolves to `__call`'s declared return type for hover and type inference.
