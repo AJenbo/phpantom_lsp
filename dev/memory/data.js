@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777760318826,
+  "lastUpdate": 1777760820927,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6221,6 +6221,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dalessandro.ariel@gmail.com",
+            "name": "Ariel",
+            "username": "adalessa"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6afb6d4acf86a0c393e5506d0e88aee9138a5f18",
+          "message": "Add Nix Flake",
+          "timestamp": "2026-05-03T00:16:15+02:00",
+          "tree_id": "ec00da9bfe53a01ce95ac747de77c5bd8d124bec",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6afb6d4acf86a0c393e5506d0e88aee9138a5f18"
+        },
+        "date": 1777760820180,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.4,
             "unit": "MiB"
           }
         ]
