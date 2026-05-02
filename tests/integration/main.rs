@@ -1,5 +1,8 @@
 mod common;
 
+mod blade;
+pub mod blade_error;
+pub mod blade_regression;
 mod classmap_scanner;
 mod code_action_add_override;
 mod code_action_add_throws;
