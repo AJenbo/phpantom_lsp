@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777747197614,
+  "lastUpdate": 1777751802926,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6153,6 +6153,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "896b360001ddf3871ccb60d5e0dfd79e45bf72bd",
+          "message": "Enable dynamic variable completion in Blade echo expressions",
+          "timestamp": "2026-05-02T21:43:39+02:00",
+          "tree_id": "31988d4416403ee444577e9bbfc3cd13f2b64064",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/896b360001ddf3871ccb60d5e0dfd79e45bf72bd"
+        },
+        "date": 1777751801793,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50,
             "unit": "MiB"
           }
         ]
