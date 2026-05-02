@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777746208829,
+  "lastUpdate": 1777747197614,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6119,6 +6119,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "MingJen@users.noreply.github.com",
+            "name": "Teemo",
+            "username": "MingJen"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7bbd33c2b552bb758c71e71d7d18b3b619157a17",
+          "message": "Basic Laravel Blade Template Support (#100)",
+          "timestamp": "2026-05-02T20:29:20+02:00",
+          "tree_id": "7273e0a80456a5394f9621e794391cfde91a9b19",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/7bbd33c2b552bb758c71e71d7d18b3b619157a17"
+        },
+        "date": 1777747196950,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.8,
             "unit": "MiB"
           }
         ]
