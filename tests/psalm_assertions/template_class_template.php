@@ -13,7 +13,7 @@ namespace PsalmTest_template_class_template_1 {
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
-    assertType('null|string', $value); // SKIP range() returns bare array, no generic info to propagate
+    assertType('null|string', $value); // SKIP B17: range() returns bare array
     assertType('bool', $next);
 }
 
@@ -26,7 +26,7 @@ namespace PsalmTest_template_class_template_2 {
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
-    assertType('null|string', $value); // SKIP range() returns bare array
+    assertType('null|string', $value); // SKIP B17: range() returns bare array
 }
 
 // Test: limitIterator
@@ -38,7 +38,7 @@ namespace PsalmTest_template_class_template_3 {
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
-    assertType('null|string', $value); // SKIP range() returns bare array
+    assertType('null|string', $value); // SKIP B17: range() returns bare array
 }
 
 // Test: callbackFilterIterator
@@ -53,7 +53,7 @@ namespace PsalmTest_template_class_template_4 {
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
-    assertType('null|string', $value); // SKIP range() returns bare array
+    assertType('null|string', $value); // SKIP B17: range() returns bare array
 }
 
 // Test: noRewindIterator
@@ -65,7 +65,7 @@ namespace PsalmTest_template_class_template_5 {
     $key = $decoratorIterator->key();
     $value = $decoratorIterator->current();
 
-    assertType('null|string', $value); // SKIP range() returns bare array
+    assertType('null|string', $value); // SKIP B17: range() returns bare array
 }
 
 
@@ -600,7 +600,7 @@ namespace PsalmTest_template_class_template_18 {
     $a_or_b = $random_collection->get();
 
     assertType('C<A>|C<B>', $random_collection);
-    assertType('A|B', $a_or_b); // SKIP multi-namespace test runner limitation (works in real code)
+    assertType('A|B', $a_or_b); // SKIP B18: multi-namespace test runner
 }
 
 // Test: templatedGet
@@ -786,7 +786,7 @@ namespace PsalmTest_template_class_template_24 {
         }
     }
 
-    assertType('Collection<A>', $packages); // SKIP multi-namespace test runner limitation (works in real code)
+    assertType('Collection<A>', $packages); // SKIP B18: multi-namespace test runner
 }
 
 // Test: newWithoutInferredTemplate

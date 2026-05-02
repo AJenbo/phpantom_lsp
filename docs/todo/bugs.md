@@ -8,49 +8,38 @@ pipeline so it produces correct data. Downstream consumers
 to second-guess upstream output.
 
 
+## B17. `range()` lacks conditional return type
 
+`range()` in phpstorm-stubs returns bare `array`. Psalm and
+PHPStan infer `list<int>`, `list<float>`, or `list<string>`
+depending on the argument types. Without a conditional return
+type (or a stub patch), generic information is lost when the
+result is passed to `new ArrayIterator(range(...))`.
 
+A stub patch with conditional return types would fix this.
+Alternatively, wait for phpstorm-stubs to add proper generics.
 
-
-## B14. Template/generic resolution in multi-namespace test files
-
-**Discovered:** SKIP audit of
+**Tests:** SKIPs on lines 16, 29, 41, 56, 68 of
 `tests/psalm_assertions/template_class_template.php`.
 
-Remaining failures have multiple root causes (the original
-multi-namespace theory was incorrect for most of them):
 
-- **Lines 16, 29, 41, 56, 68:** `range()` returns bare `array` in
-  phpstorm-stubs (no generic args), so the type information is lost
-  before it reaches the iterator constructors.  The iterator
-  decorator stub patches themselves work correctly when the input
-  array has generic type annotations (see
-  `tests/psalm_assertions/spl_iterator_patches.php`).
-- **Lines 602, 788:** Union generic method resolution and static
-  method template inference work correctly in single-namespace
-  files. The failures are caused by the multi-namespace test
-  runner not resolving short class names to FQN across namespace
-  blocks in the same file.
+## B18. Multi-namespace assertion runner does not resolve short names
 
-**Fixed:**
-- Line 122 — `@var` docblocks with additional tags
-  (e.g. `@psalm-suppress`) after the type corrupted the type
-  string. Fixed in `parse_inline_var_docblock_no_var`.
-- Line 752 — `new ArrayCollection([])` inferred
-  `ArrayCollection<array, array>` instead of
-  `ArrayCollection<never, never>`. Root cause: when both `@param`
-  and `@psalm-param` existed for the same parameter,
-  `extract_param_raw_type_from_info` returned the first match in
-  document order instead of respecting `@phpstan-param` >
-  `@psalm-param` > `@param` priority.
-- SPL iterator decorator stubs (`CachingIterator`,
-  `InfiniteIterator`, `LimitIterator`, `CallbackFilterIterator`,
-  `FilterIterator`) and `ArrayIterator` constructor patched with
-  `@template` annotations matching PHPStan's stubs.
+The `tests/assert_type_runner.rs` test harness opens a single file
+and hovers over synthetic variables. When the file contains
+multiple `namespace { }` blocks, short class names in `@var`
+annotations or method return types are not expanded to FQN before
+resolution. This causes hover to return no type for expressions
+that depend on cross-namespace class lookup.
 
-**Tests:** SKIPs in `tests/psalm_assertions/template_class_template.php`
-(lines 16, 29, 41, 56, 68, 602, 788).
+The type engine itself is correct: the same assertions pass in
+single-namespace files. The fix belongs in the test runner (or
+in the LSP's namespace-aware name resolution for inline `@var`
+annotations).
 
+**Tests:** SKIPs on lines 602 and 788 of
+`tests/psalm_assertions/template_class_template.php`;
+3 SKIPs in `tests/psalm_assertions/magic_method_annotation.php`.
 
 
 ## B16. PDOStatement fetch mode-dependent return types
@@ -77,11 +66,10 @@ tests that may now pass. Run
 `cargo nextest run --test assert_type_runner --no-fail-fast` with
 the SKIP removed to verify.
 
-Remaining SKIPs (7) are:
-- `template_class_template.php` (5) — `range()` returns bare
-  `array`, no generic info to propagate through iterator chain;
-  (2) — multi-namespace test runner limitation
-- `magic_method_annotation.php` (3) — B14 cross-namespace
-  resolution in single-file test runner
+Remaining SKIPs (11) are:
+- `template_class_template.php` (5) — B17: `range()` returns bare
+  `array`; (2) — B18: multi-namespace test runner limitation
+- `magic_method_annotation.php` (3) — B18: multi-namespace test
+  runner limitation
 - `mixin_annotation.php` (1) — `IteratorIterator` not in fixture
   runner stubs (feature works with full stubs)
