@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777650543998,
+  "lastUpdate": 1777685512625,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -5983,6 +5983,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "754b133d35ed2f0bddd48255196e8d5bfdb3c123",
+          "message": "Prioritize @phpstan-param and @psalm-param over @param tags in docblock\nparam type extraction",
+          "timestamp": "2026-05-02T03:21:09+02:00",
+          "tree_id": "c1f12b507153d5bbe2a3645d42f48c9dc03ab195",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/754b133d35ed2f0bddd48255196e8d5bfdb3c123"
+        },
+        "date": 1777685511460,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 46.1,
             "unit": "MiB"
           }
         ]
