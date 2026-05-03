@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777776895856,
+  "lastUpdate": 1777812576499,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6289,6 +6289,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "MingJen@users.noreply.github.com",
+            "name": "Teemo",
+            "username": "MingJen"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "53273b9b7ba6dd35f64834187b19f2a635fecb27",
+          "message": "feat(laravel): go-to-definition for view, route, and translation keys",
+          "timestamp": "2026-05-03T14:38:38+02:00",
+          "tree_id": "d0b787c4d228d9a9eebef0e68c31fe8b5686309f",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/53273b9b7ba6dd35f64834187b19f2a635fecb27"
+        },
+        "date": 1777812575466,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.8,
             "unit": "MiB"
           }
         ]
