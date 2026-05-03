@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777818425804,
+  "lastUpdate": 1777822062122,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6391,6 +6391,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 47.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dc87f97593ae79cfe837ccdb63733d6f84a23cbb",
+          "message": "Add go-to-definition for Eloquent $dates and where{Property} entries",
+          "timestamp": "2026-05-03T17:17:06+02:00",
+          "tree_id": "a8ad2899387f0183846dfbf24dc8f52c1708be33",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/dc87f97593ae79cfe837ccdb63733d6f84a23cbb"
+        },
+        "date": 1777822061637,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.2,
             "unit": "MiB"
           }
         ]
