@@ -8,25 +8,6 @@ pipeline so it produces correct data. Downstream consumers
 to second-guess upstream output.
 
 
-## B18. Multi-namespace assertion runner does not resolve short names
-
-The `tests/assert_type_runner.rs` test harness opens a single file
-and hovers over synthetic variables. When the file contains
-multiple `namespace { }` blocks, short class names in `@var`
-annotations or method return types are not expanded to FQN before
-resolution. This causes hover to return no type for expressions
-that depend on cross-namespace class lookup.
-
-The type engine itself is correct: the same assertions pass in
-single-namespace files. The fix belongs in the test runner (or
-in the LSP's namespace-aware name resolution for inline `@var`
-annotations).
-
-**Tests:** SKIPs on lines 602 and 788 of
-`tests/psalm_assertions/template_class_template.php`;
-3 SKIPs in `tests/psalm_assertions/magic_method_annotation.php`.
-
-
 ## B16. PDOStatement fetch mode-dependent return types
 
 **Blocked on:** [phpstorm-stubs#1882](https://github.com/JetBrains/phpstorm-stubs/pull/1882)
@@ -51,10 +32,4 @@ tests that may now pass. Run
 `cargo nextest run --test assert_type_runner --no-fail-fast` with
 the SKIP removed to verify.
 
-Remaining SKIPs (11) are:
-- `template_class_template.php` (5) — B17: `range()` returns bare
-  `array`; (2) — B18: multi-namespace test runner limitation
-- `magic_method_annotation.php` (3) — B18: multi-namespace test
-  runner limitation
-- `mixin_annotation.php` (1) — `IteratorIterator` not in fixture
-  runner stubs (feature works with full stubs)
+No remaining SKIPs.

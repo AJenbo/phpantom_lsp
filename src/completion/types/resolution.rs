@@ -312,6 +312,13 @@ fn resolve_named_type(
         same_ns
             .or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
             .or_else(|| class_loader(name))
+    } else if !name.contains('\\') && owning_class_name.is_empty() {
+        // For unqualified names in top-level code (no enclosing class),
+        // prefer the namespace-aware class_loader over find_class_by_name.
+        // The class_loader uses the FileContext's namespace to resolve
+        // short names correctly, while find_class_by_name returns the
+        // first match regardless of namespace in multi-namespace files.
+        class_loader(name).or_else(|| find_class_by_name(all_classes, name).map(Arc::clone))
     } else {
         find_class_by_name(all_classes, name)
             .map(Arc::clone)

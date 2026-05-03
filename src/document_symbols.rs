@@ -526,6 +526,7 @@ mod tests {
             is_virtual: false,
             type_assertions: vec![],
             throws: vec![],
+            if_this_is: None,
         };
         let detail = build_method_detail(&method);
         assert_eq!(detail, Some("(): void".to_string()));
@@ -579,6 +580,7 @@ mod tests {
             is_virtual: false,
             type_assertions: vec![],
             throws: vec![],
+            if_this_is: None,
         };
         let detail = build_method_detail(&method);
         assert_eq!(

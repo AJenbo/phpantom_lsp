@@ -2206,6 +2206,8 @@ impl Backend {
                         is_virtual: false,
                         type_assertions,
                         throws,
+                        if_this_is: method_docblock_text
+                            .and_then(crate::docblock::extract_if_this_is_type),
                     });
                 }
                 ClassLikeMember::Property(property) => {

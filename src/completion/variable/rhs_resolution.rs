@@ -31,6 +31,7 @@ use mago_syntax::ast::class_like::member::ClassLikeMember;
 use mago_syntax::ast::*;
 
 use crate::Backend;
+use crate::atom::{Atom, AtomMap};
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::PhpType;
@@ -2877,9 +2878,36 @@ fn resolve_rhs_method_call_inner<'b>(
         let method_template_subs =
             Backend::build_method_template_subs(owner, &method_name, &arg_refs, &rctx);
 
-        // Merge class-level and method-level subs. Method-level takes precedence.
+        // ── @psalm-if-this-is template inference ────────────────
+        // When a method has a `@psalm-if-this-is` annotation and
+        // method-level template parameters remain unresolved (no
+        // arguments to infer from), match the receiver's concrete
+        // type against the pattern to compute substitutions.
+        let if_this_is_subs: HashMap<String, PhpType> = owner
+            .get_method_ci(&method_name)
+            .and_then(|m| m.if_this_is.as_ref())
+            .and_then(|pattern| {
+                let receiver_type = receiver_resolved
+                    .get(idx)
+                    .or_else(|| receiver_resolved.first())
+                    .map(|rt| &rt.type_string)?;
+                let method = owner.get_method_ci(&method_name)?;
+                Some(infer_if_this_is_subs(
+                    pattern,
+                    receiver_type,
+                    &method.template_params,
+                    &method.template_param_bounds,
+                ))
+            })
+            .unwrap_or_default();
+
+        // Merge class-level, method-level, and if-this-is subs.
+        // if-this-is overrides method-level defaults (which may be
+        // `mixed` for unresolvable templates). Method-level takes
+        // precedence over class-level.
         let mut template_subs = class_level_subs;
         template_subs.extend(method_template_subs);
+        template_subs.extend(if_this_is_subs);
         let mr_ctx = MethodReturnCtx {
             all_classes: ctx.all_classes,
             class_loader: ctx.class_loader,
@@ -2929,7 +2957,7 @@ fn resolve_rhs_method_call_inner<'b>(
         };
         let ret_type_string = method_ref.and_then(|m| m.return_type.as_ref()).map(|ret| {
             let substituted = if !template_subs.is_empty() {
-                ret.substitute(&template_subs)
+                ret.substitute(&template_subs).simplified()
             } else {
                 ret.clone()
             };
@@ -3359,12 +3387,14 @@ fn resolve_rhs_static_call(
         && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
     {
         let method_name = ident.value.to_string();
-        let owner = ctx
-            .all_classes
-            .iter()
-            .find(|c| c.name == cls_name)
-            .map(|c| ClassInfo::clone(c))
-            .or_else(|| (ctx.class_loader)(&cls_name).map(Arc::unwrap_or_clone));
+        let owner = (ctx.class_loader)(&cls_name)
+            .map(Arc::unwrap_or_clone)
+            .or_else(|| {
+                ctx.all_classes
+                    .iter()
+                    .find(|c| c.name == cls_name)
+                    .map(|c| ClassInfo::clone(c))
+            });
         if let Some(ref owner) = owner {
             let arg_texts = super::raw_type_inference::extract_arg_texts_from_ast(
                 &static_call.argument_list,
@@ -4078,6 +4108,125 @@ fn extract_closure_or_arrow_return_type(expr: &Expression<'_>) -> Option<PhpType
             .as_ref()
             .map(|rth| extract_hint_type(&rth.hint)),
         _ => None,
+    }
+}
+
+/// Infer template parameter substitutions from a `@psalm-if-this-is` pattern
+/// by matching it against the receiver's concrete type.
+///
+/// For example, given:
+/// - `pattern`: `ArrayList<TOption|TEither>`
+/// - `receiver`: `ArrayList<Either<Exception, int>|Option<int>>`
+/// - Method templates: `A`, `B`, `TOption of Option<A>`, `TEither of Either<mixed, B>`
+///
+/// This matches `TOption → Option<int>`, `TEither → Either<Exception, int>`,
+/// then extracts `A = int` from `Option<A>` vs `Option<int>`, and
+/// `B = int` from `Either<mixed, B>` vs `Either<Exception, int>`.
+fn infer_if_this_is_subs(
+    pattern: &PhpType,
+    receiver: &PhpType,
+    template_params: &[Atom],
+    template_bounds: &AtomMap<PhpType>,
+) -> HashMap<String, PhpType> {
+    let mut subs: HashMap<String, PhpType> = HashMap::new();
+
+    // Step 1: Match the top-level structure (e.g. Generic vs Generic)
+    // and collect direct template bindings.
+    match_type_pattern(
+        pattern,
+        receiver,
+        template_params,
+        template_bounds,
+        &mut subs,
+    );
+
+    // Step 2: For each matched template that has a bound with nested
+    // templates, match the bound against the concrete value to extract
+    // the nested template parameters.
+    let direct_subs = subs.clone();
+    for (tpl_name, concrete_type) in &direct_subs {
+        let tpl_atom = crate::atom::atom(tpl_name);
+        if let Some(bound) = template_bounds.get(&tpl_atom) {
+            match_type_pattern(
+                bound,
+                concrete_type,
+                template_params,
+                template_bounds,
+                &mut subs,
+            );
+        }
+    }
+
+    subs
+}
+
+/// Recursively match a type pattern against a concrete type, collecting
+/// template parameter bindings into `subs`.
+fn match_type_pattern(
+    pattern: &PhpType,
+    concrete: &PhpType,
+    template_params: &[Atom],
+    template_bounds: &AtomMap<PhpType>,
+    subs: &mut HashMap<String, PhpType>,
+) {
+    match (pattern, concrete) {
+        // A named type that is a template parameter — bind it.
+        (PhpType::Named(name), _)
+            if template_params.iter().any(|t| t.as_str() == name.as_str()) =>
+        {
+            subs.entry(name.clone()).or_insert_with(|| concrete.clone());
+        }
+        // Generic types with matching base names — recurse into args.
+        (PhpType::Generic(p_base, p_args), PhpType::Generic(c_base, c_args))
+            if p_base == c_base && p_args.len() == c_args.len() =>
+        {
+            for (p_arg, c_arg) in p_args.iter().zip(c_args.iter()) {
+                match_type_pattern(p_arg, c_arg, template_params, template_bounds, subs);
+            }
+        }
+        // Union types — match pattern members against concrete members
+        // by trying to pair each template pattern member with a concrete
+        // member whose base name matches the template's bound.
+        (PhpType::Union(p_members), PhpType::Union(c_members)) => {
+            for p_m in p_members {
+                if let PhpType::Named(name) = p_m {
+                    if template_params.iter().any(|t| t.as_str() == name.as_str()) {
+                        // This pattern member is a template param in a union.
+                        // Find the concrete union member whose base name
+                        // matches this template's bound base name.
+                        let tpl_atom = crate::atom::atom(name);
+                        if let Some(bound) = template_bounds.get(&tpl_atom) {
+                            let bound_base = bound.base_name().unwrap_or_default();
+                            for c_m in c_members {
+                                let c_base = c_m.base_name().unwrap_or_default();
+                                if c_base == bound_base {
+                                    subs.entry(name.clone()).or_insert_with(|| c_m.clone());
+                                    break;
+                                }
+                            }
+                        } else {
+                            // No bound — take the first concrete member.
+                            if let Some(c_m) = c_members.first() {
+                                subs.entry(name.clone()).or_insert_with(|| c_m.clone());
+                            }
+                        }
+                    }
+                } else {
+                    // Non-template pattern member — recurse.
+                    for c_m in c_members {
+                        if p_m.base_name() == c_m.base_name() {
+                            match_type_pattern(p_m, c_m, template_params, template_bounds, subs);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // Nullable patterns.
+        (PhpType::Nullable(p_inner), PhpType::Nullable(c_inner)) => {
+            match_type_pattern(p_inner, c_inner, template_params, template_bounds, subs);
+        }
+        _ => {}
     }
 }
 

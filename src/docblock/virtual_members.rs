@@ -245,6 +245,7 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
             is_virtual: true,
             type_assertions: Vec::new(),
             throws: Vec::new(),
+            if_this_is: None,
         });
 
         if is_vendor_tag {

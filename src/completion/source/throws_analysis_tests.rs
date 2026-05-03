@@ -832,6 +832,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
             is_virtual: false,
             type_assertions: Vec::new(),
             throws: throws.into_iter().map(PhpType::parse).collect(),
+            if_this_is: None,
         })
         .collect();
 

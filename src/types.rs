@@ -596,6 +596,13 @@ pub struct MethodInfo {
     /// `throws: vec![PhpType::Named("InvalidArgumentException".into())]`.  Used
     /// during code generation and analysis to propagate exception information.
     pub throws: Vec<PhpType>,
+    /// Type constraint from `@psalm-if-this-is` or `@phpstan-if-this-is`.
+    ///
+    /// When present, the method's return type should only be applied if
+    /// the receiver's type matches this pattern. Template parameters in
+    /// the pattern are resolved against the caller's concrete type to
+    /// compute additional template substitutions for the return type.
+    pub if_this_is: Option<PhpType>,
 }
 
 impl MethodInfo {
@@ -683,6 +690,7 @@ impl MethodInfo {
             is_virtual: true,
             type_assertions: Vec::new(),
             throws: Vec::new(),
+            if_this_is: None,
         }
     }
 
@@ -713,6 +721,7 @@ impl MethodInfo {
             is_virtual: true,
             type_assertions: Vec::new(),
             throws: Vec::new(),
+            if_this_is: None,
         }
     }
 }

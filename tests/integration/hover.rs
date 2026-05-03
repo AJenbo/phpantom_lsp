@@ -33,6 +33,83 @@ fn hover_text(hover: &Hover) -> &str {
     }
 }
 
+// ─── Multi-namespace hover ──────────────────────────────────────────────────
+
+/// Short class names in `@var` annotations resolve through the namespace-aware
+/// class loader, not via a first-match scan of all classes in the file.  Without
+/// this, multi-namespace files where several blocks define a class with the same
+/// short name (e.g. `C`) would resolve to the wrong block's class.
+#[test]
+fn hover_generic_var_annotation_in_multi_namespace() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace NsOne {
+    class A {}
+    class B {}
+
+    /**
+     * @template T
+     */
+    class C {
+        /** @var T */
+        private $t;
+        /** @param T $t */
+        public function __construct($t) { $this->t = $t; }
+        /** @return T */
+        public function get() { return $this->t; }
+    }
+
+    function doTest(): void {
+        /** @var C<A>|C<B> $random_collection **/
+        $a_or_b = $random_collection->get();
+        $a_or_b;
+    }
+}
+"#;
+
+    // Hover on `$a_or_b` at line 19 (inside function in NsOne namespace)
+    let hover = hover_at(&backend, uri, content, 19, 9).expect("expected hover on $a_or_b");
+    let text = hover_text(&hover);
+    // $a_or_b should be A|B (the return type of C::get() with template substitution)
+    assert!(
+        text.contains("A") && text.contains("B"),
+        "should resolve $a_or_b to A|B: {}",
+        text
+    );
+}
+
+/// Variables with the same name in different namespace blocks must not leak
+/// across blocks.  The resolver must only walk the namespace block that
+/// contains the cursor.
+#[test]
+fn hover_variable_shadowing_across_namespace_blocks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Block1 {
+    class Dog { public function bark(): string { return 'woof'; } }
+    $x = new Dog();
+}
+
+namespace Block2 {
+    class Cat { public function meow(): string { return 'meow'; } }
+    $x = new Cat();
+    $x;
+}
+"#;
+
+    // Hover on `$x` at line 9 (inside Block2, not Block1)
+    let hover = hover_at(&backend, uri, content, 9, 5).expect("expected hover on $x");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Cat"),
+        "should resolve to Cat, not Dog: {}",
+        text
+    );
+    assert!(!text.contains("Dog"), "should not resolve to Dog: {}", text);
+}
+
 // ─── Variable hover ─────────────────────────────────────────────────────────
 
 #[test]
@@ -11194,6 +11271,146 @@ namespace NS7 {
     assert!(
         text.contains("A"),
         "$afoo_bar should resolve to A via Foo<A>::bar(), got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_top_level_variable_in_namespace_block() {
+    // Variable assigned at namespace top level (not inside any class or
+    // function) should resolve via the forward walker's top-level path.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace TopLevelNs {
+    class Foo {
+        public function bar(): void {}
+    }
+    $x = new Foo();
+    $y = $x;
+}
+"#;
+
+    backend.update_ast(uri, content);
+
+    // Hover on $y — should resolve to Foo via the top-level forward walk.
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$y = $x"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let line_text = content.lines().nth(target_line as usize).unwrap();
+    let col = line_text.find("$y").unwrap() as u32;
+    let hover =
+        hover_at(&backend, uri, content, target_line, col + 1).expect("expected hover on $y");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Foo"),
+        "$y should resolve to Foo at namespace top level, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_top_level_variable_multi_ns_same_class_name() {
+    // When two namespace blocks define a class with the same short name,
+    // variables in each block should resolve to their own namespace's class.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Ns1 {
+    class ParentClass {
+        public function __callStatic(string $name, array $args) {}
+    }
+    /**
+     * @method static static getInstance()
+     */
+    class Child extends ParentClass {}
+    $a = Child::getInstance();
+}
+namespace Ns2 {
+    class ParentClass {
+        public function __callStatic(string $name, array $args) {}
+    }
+    /**
+     * @method static static getInstance()
+     */
+    class Child extends ParentClass {}
+    $f = Child::getInstance();
+    $g = $f;
+}
+"#;
+
+    backend.update_ast(uri, content);
+
+    // Hover on $g in Ns2 — should resolve to Ns2\Child, not Ns1\Child.
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$g = $f"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let line_text = content.lines().nth(target_line as usize).unwrap();
+    let col = line_text.find("$g").unwrap() as u32;
+    let hover =
+        hover_at(&backend, uri, content, target_line, col + 1).expect("expected hover on $g");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Child"),
+        "$g should resolve to Child in multi-namespace file, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_top_level_variable_multi_ns_same_class_assert_runner_pattern() {
+    // Mimics the assert runner transform: assertType('Child', $f) becomes
+    // $__phpantom_assert_10 = $f; and we hover on $__phpantom_assert_10.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace Ns1 {
+    class ParentClass {
+        public function __callStatic(string $name, array $args) {}
+    }
+    /**
+     * @method static string getString()
+     */
+    class Child extends ParentClass {}
+    $a = Child::getString();
+    $__phpantom_assert_0 = $a;
+}
+namespace Ns2 {
+    class ParentClass {
+        public function __callStatic(string $name, array $args) {}
+    }
+    /**
+     * @method static static getInstance()
+     */
+    class Child extends ParentClass {}
+    $f = Child::getInstance();
+    $__phpantom_assert_10 = $f;
+}
+"#;
+
+    backend.update_ast(uri, content);
+
+    // Hover on $__phpantom_assert_10 in PsalmTest_2.
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("$__phpantom_assert_10 = $f"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let line_text = content.lines().nth(target_line as usize).unwrap();
+    let col = line_text.find("$__phpantom_assert_10").unwrap() as u32;
+    let hover = hover_at(&backend, uri, content, target_line, col + 1)
+        .expect("expected hover on $__phpantom_assert_10");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Child"),
+        "$__phpantom_assert_10 should resolve to Child via $f, got: {}",
         text
     );
 }

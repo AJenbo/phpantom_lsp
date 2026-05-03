@@ -97,6 +97,32 @@ pub fn has_deprecated_tag_from_info(info: &DocblockInfo) -> bool {
     extract_deprecation_message_from_info(info).is_some()
 }
 
+/// Extract the type from a `@psalm-if-this-is` or `@phpstan-if-this-is` tag.
+///
+/// `@psalm-if-this-is ArrayList<TOption|TEither>` returns
+/// `Some(PhpType::Generic("ArrayList", [Union(TOption, TEither)]))`.
+pub fn extract_if_this_is_type(docblock: &str) -> Option<PhpType> {
+    extract_if_this_is_type_from_info(&parse_docblock_for_tags(docblock)?)
+}
+
+/// Like [`extract_if_this_is_type`], but operates on a pre-parsed
+/// [`DocblockInfo`].
+pub fn extract_if_this_is_type_from_info(info: &DocblockInfo) -> Option<PhpType> {
+    let tag = info
+        .tags
+        .iter()
+        .find(|t| t.name == "psalm-if-this-is" || t.name == "phpstan-if-this-is")?;
+    let desc = tag.description.trim();
+    if desc.is_empty() {
+        return None;
+    }
+    let (type_str, _) = split_type_token(desc);
+    if type_str.is_empty() {
+        return None;
+    }
+    Some(PhpType::parse(type_str))
+}
+
 /// Extract the PHP version from a `@removed` PHPDoc tag.
 ///
 /// Handles the format `@removed X.Y` where `X.Y` is a PHP version

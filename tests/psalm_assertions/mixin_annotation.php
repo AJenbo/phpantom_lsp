@@ -70,7 +70,7 @@ namespace PsalmTest_mixin_annotation_2 {
     $iter = new IteratorIterator(new Subject());
     $b = $iter->index(0);
 
-    assertType('bool', $b); // SKIP — IteratorIterator not in fixture runner stubs (feature works with full stubs)
+    assertType('bool', $b);
 }
 
 // Test: templatedMixin

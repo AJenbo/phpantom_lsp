@@ -600,7 +600,7 @@ namespace PsalmTest_template_class_template_18 {
     $a_or_b = $random_collection->get();
 
     assertType('C<A>|C<B>', $random_collection);
-    assertType('A|B', $a_or_b); // SKIP B18: multi-namespace test runner
+    assertType('A|B', $a_or_b);
 }
 
 // Test: templatedGet
@@ -786,7 +786,7 @@ namespace PsalmTest_template_class_template_24 {
         }
     }
 
-    assertType('Collection<A>', $packages); // SKIP B18: multi-namespace test runner
+    assertType('Collection<A>', $packages);
 }
 
 // Test: newWithoutInferredTemplate

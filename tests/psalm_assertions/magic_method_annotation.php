@@ -83,7 +83,7 @@ namespace PsalmTest_magic_method_annotation_2 {
     assertType('bool', $c);
     assertType('array<string|int>', $d);
     assertType('callable(): string', $e);
-    assertType('Child', $f); // SKIP — cross-namespace ParentClass resolution in single-file test runner
+    assertType('Child', $f);
 }
 
 // Test: validStaticAnnotationWithDefault
@@ -283,8 +283,8 @@ namespace PsalmTest_magic_method_annotation_10 {
     $d = new D();
     $e = $d->get();
 
-    assertType('B', $b); // SKIP — cross-namespace $b variable shadowing in single-file test runner
+    assertType('B', $b);
     assertType('B', $c);
-    assertType('B', $e); // SKIP — cross-namespace $e variable shadowing in single-file test runner 
+    assertType('B', $e);
 }
 

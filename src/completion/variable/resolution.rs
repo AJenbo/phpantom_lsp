@@ -13,6 +13,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::ast::*;
 
+use crate::atom::atom;
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::{PhpType, ShapeEntry, is_keyword_type};
@@ -201,8 +202,10 @@ pub(in crate::completion) fn resolve_variable_in_statements<'b>(
 
     // Pre-compute top-level variable scope so that `global $x` inside
     // function bodies can look up `$x`'s type from the file's top level.
-    // Only do the expensive walk when the file actually contains a `global`
-    // keyword — the vast majority of PHP files don't use it.
+    // Only do the expensive full-file walk when the file actually uses the
+    // `global` keyword.  When the cursor turns out to be at the top level
+    // (not inside any class or function), this scope is also reused for
+    // the variable lookup, avoiding a redundant second forward walk.
     let file_has_global_keyword = ctx.content.contains("global ");
     let top_level_scope = if ctx.top_level_scope.is_none() && file_has_global_keyword {
         let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
@@ -296,6 +299,17 @@ pub(in crate::completion) fn resolve_variable_in_statements<'b>(
                 return resolve_variable_in_members(trait_def.members.iter(), ctx);
             }
             Statement::Namespace(ns) => {
+                // Only recurse into namespace blocks that contain the
+                // cursor.  Without this check, variables with the same
+                // name in earlier namespace blocks (e.g. `$b` in two
+                // different blocks) would be returned from the wrong
+                // block, causing cross-namespace variable shadowing.
+                let ns_span = ns.span();
+                if ctx.cursor_offset < ns_span.start.offset
+                    || ctx.cursor_offset > ns_span.end.offset
+                {
+                    continue;
+                }
                 let results = resolve_variable_in_statements(ns.statements().iter(), ctx);
                 if !results.is_empty() {
                     return results;
@@ -340,8 +354,23 @@ pub(in crate::completion) fn resolve_variable_in_statements<'b>(
     }
 
     // The cursor is not inside any class/interface/enum body — it must
-    // be in top-level code.  Try the forward walker first.
-    {
+    // be in top-level code.  Look up the variable from the pre-computed
+    // top-level scope (built above with cursor_offset=u32::MAX).
+    if let Some(ref tls) = ctx.top_level_scope {
+        let prefixed = if ctx.var_name.starts_with('$') {
+            ctx.var_name.to_string()
+        } else {
+            format!("${}", ctx.var_name)
+        };
+        if let Some(types) = tls.get(&atom(&prefixed))
+            && !types.is_empty()
+        {
+            return types.clone();
+        }
+    } else {
+        // Fallback: top_level_scope was not pre-computed (should not
+        // happen in normal flow, but be defensive).  Run a
+        // position-aware forward walk.
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
             current_class: ctx.current_class,
             all_classes: ctx.all_classes,
