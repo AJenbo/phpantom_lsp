@@ -35,11 +35,13 @@ cargo test
 cargo clippy -- -D warnings
 cargo clippy --tests -- -D warnings
 cargo fmt --check
-php -l example.php
-php -d zend.assertions=1 example.php
+php -l examples/demo.php
+php -d zend.assertions=1 examples/demo.php
+php -l examples/laravel/app/Demo.php
+phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```
 
-All six must pass with zero warnings and zero failures.
+All eight must pass with zero warnings and zero failures.
 
 ### Manual LSP Testing
 

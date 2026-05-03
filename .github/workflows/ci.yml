@@ -71,8 +71,9 @@ jobs:
         with:
           php-version: "8.4"
           ini-values: zend.assertions=1
-      - run: php -l example.php
-      - run: php -d zend.assertions=1 example.php
+      - run: php -l examples/demo.php
+      - run: php -d zend.assertions=1 examples/demo.php
+      - run: php -l examples/laravel/app/Demo.php
 
   benchmark:
     name: Benchmark

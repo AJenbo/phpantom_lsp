@@ -1,0 +1,240 @@
+<?php
+/**
+ * Laravel Demo Classes for PHPantom LSP
+ *
+ * Open any demo() method and trigger completion inside it.
+ * Requires a real Laravel installation via `composer install`.
+ */
+
+namespace App;
+
+use App\Models\Bakery;
+use App\Models\BlogAuthor;
+use App\Models\BlogPost;
+use App\Models\Review;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\View;
+
+// ── Eloquent Virtual Properties ─────────────────────────────────────────────
+// Alphabetical — every property a through w should appear in order.
+// Trigger completion on `$bakery->` and scan the list.
+
+class EloquentPropertyDemo
+{
+    public function demo(): void
+    {
+        $bakery = new Bakery();
+
+        $bakery->apricot;             // $casts 'boolean'           → bool
+        $bakery->baguettes;           // relationship HasMany       → Collection<Loaf>
+        $bakery->baguettes_count;     // relationship count         → int
+        $bakery->croissant;           // $attributes default        → string
+        $bakery->defrosted_at;        // $dates (deprecated)        → Carbon\Carbon
+        $bakery->dough_temp;          // $casts 'float'             → float
+        $bakery->egg_count;           // $attributes default        → int
+        $bakery->flour;               // $fillable (no cast/attr)   → mixed
+        $bakery->fresh();             // #[Scope] method            → Builder
+        $bakery->gluten_free;         // $attributes default        → bool
+        $bakery->headBaker;           // relationship HasOne        → Baker
+        $bakery->head_baker_count;    // relationship count         → int
+        $bakery->icing;               // $casts custom class        → ?Frosting
+        $bakery->jam_flavor;          // $casts enum                → JamFlavor
+        $bakery->kitchen_id;          // $guarded (no cast/attr)    → mixed
+        $bakery->loaf_name;           // legacy accessor            → string
+        $bakery->masterRecipe;        // relationship BelongsToMany → Collection<BakeryRecipe>
+        $bakery->master_recipe_count; // relationship count         → int
+        $bakery->notes;               // $casts 'array'             → array
+        $bakery->oven_code;           // $hidden (no cast/attr)     → mixed
+        $bakery->proved_at;           // $casts 'datetime'          → \Carbon\Carbon
+        $bakery->quality;             // casts() method 'float'     → float
+        $bakery->rye_blend;           // $visible (no cast/attr)    → mixed
+        $bakery->sprinkle;            // modern accessor Attribute  → string
+        $bakery->topping('choc');     // scope method               → Builder
+        $bakery->unbaked();           // scope method               → Builder
+        $bakery->vendor;              // body-inferred morphTo      → Model
+        $bakery->vendor_count;        // relationship count         → int
+        $bakery->warmth;              // $appends (no cast/attr)    → mixed
+        // MUST NOT appear: secret_ingredient (private $attributes field)
+
+        // BelongsTo relationship property + method call with covariant $this
+        $post = new BlogPost();
+        $post->author;                // relationship BelongsTo     → BlogAuthor
+        $post->author()->associate($post->author); // associate() on BelongsTo
+    }
+}
+
+
+// ── Eloquent Query Builder ──────────────────────────────────────────────────
+
+class EloquentQueryDemo
+{
+    public function demo(): void
+    {
+        // Builder-as-static forwarding
+        BlogAuthor::where('active', true);
+        BlogAuthor::where('active', 1)->get();     // → Collection<BlogAuthor>
+        BlogAuthor::where('active', 1)->first();   // → BlogAuthor|null
+        BlogAuthor::orderBy('name')->limit(10)->get();
+        BlogAuthor::whereIn('id', [1, 2])->groupBy('genre')->get();
+        BlogAuthor::where('active', 1)->first()->profile->getBio();
+
+        // Model @method tags available on Builder (e.g. SoftDeletes withTrashed)
+        BlogAuthor::where('active', 1)->withTrashed()->first();
+        BlogAuthor::groupBy('genre')->onlyTrashed()->get();
+
+        // Scope methods — instance and static
+        $author = new BlogAuthor();
+        $author->active();
+        $author->ofGenre('fiction');
+        BlogAuthor::active();
+        BlogAuthor::ofGenre('fiction');
+
+        // Scopes on Builder instances (convention and #[Scope] attribute)
+        BlogAuthor::where('active', 1)->active()->ofGenre('sci-fi')->get();
+        Bakery::where('open', true)->fresh()->get();
+        $query = BlogAuthor::where('genre', 'fiction');
+        $query->active();
+        $query->orderBy('name')->get();
+
+        // where{PropertyName}() dynamic methods (from $fillable, $casts, etc.)
+        Bakery::whereFlour('whole wheat');           // from $fillable
+        Bakery::whereApricot(true);                  // from $casts
+        Bakery::whereDefrostedAt('2024-01-01');      // from $dates
+        Bakery::whereCroissant('almond');             // from $attributes
+        Bakery::whereKitchenId(42);                   // from $guarded
+        Bakery::whereOvenCode('X9');                  // from $hidden
+        Bakery::whereFlour('rye')->whereApricot(true)->get();
+        Bakery::where('open', true)->whereFlour('spelt')->fresh()->first();
+
+        // Conditionable when()/unless() chain continuation
+        BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
+        BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
+    }
+}
+
+
+// ── Custom Eloquent Collections ─────────────────────────────────────────────
+
+class CustomCollectionDemo
+{
+    public function demo(): void
+    {
+        // Builder chain → custom collection via #[CollectedBy]
+        $reviews = Review::where('published', true)->get();
+        $reviews->topRated();             // custom method from ReviewCollection
+        $reviews->averageRating();        // custom method from ReviewCollection
+        $reviews->first();                // inherited — returns Review|null
+
+        // Relationship properties also use the custom collection
+        $review = new Review();
+        $review->replies->topRated();     // HasMany<Review> → ReviewCollection
+    }
+}
+
+
+// ── Eloquent Closure Parameter Inference ────────────────────────────────────
+
+class EloquentClosureDemo
+{
+    public function demo(): void
+    {
+        // Eloquent chunk — $orders inferred as Collection
+        BlogAuthor::where('active', true)->chunk(100, function ($orders) {
+            $orders->count();             // resolves to Eloquent Collection
+        });
+
+        // Explicit bare type hint inherits inferred generic args for foreach
+        BlogAuthor::where('active', true)->chunk(100, function (Collection $authors) {
+            foreach ($authors as $author) {
+                $author->posts();           // resolves to BlogAuthor via Collection<int, BlogAuthor>
+            }
+        });
+
+        // Eloquent whereHas — $query inferred as Builder<BlogPost> (the related model)
+        BlogAuthor::whereHas('posts', function ($query) {
+            $query->where('published', true); // resolves to Builder<BlogPost>
+        });
+
+        // Dot-notation relation chain
+        BlogPost::whereHas('author', function ($q) {
+            $q->where('active', true);    // resolves to Builder<BlogAuthor>
+        });
+    }
+}
+
+
+// ── Laravel Config & Env Navigation ─────────────────────────────────────────
+
+class LaravelConfigEnvDemo
+{
+    /**
+     * "Go to Definition" and "Find All References" for config keys and env vars.
+     *
+     * Try:
+     *  1. Ctrl+Click "app.name" to jump to config/app.php.
+     *  2. Ctrl+Click "APP_KEY" to jump to .env.
+     *  3. "Find All References" on "app.name" to see all usage sites.
+     */
+    public function demo(): void
+    {
+        // Global helper
+        config('app.name');
+
+        // Facade methods
+        Config::get('app.name');
+        Config::set('app.env', 'production');
+
+        // Env helper
+        env('APP_KEY');
+        env('DB_PASSWORD', 'secret');
+    }
+}
+
+
+// ── Laravel View, Route & Translation Navigation ───────────────────────────
+
+class LaravelNavigationDemo
+{
+    /**
+     * "Go to Definition" and "Find All References" for Laravel identifiers.
+     *
+     * Try:
+     *  1. Ctrl+Click "welcome" to jump to resources/views/welcome.blade.php.
+     *  2. Ctrl+Click "admin.users.index" to jump to the view.
+     *  3. Ctrl+Click "home" to jump to the ->name('home') declaration in routes/web.php.
+     *  4. Ctrl+Click "auth.failed" to jump to lang/en/auth.php.
+     */
+    public function demo(): void
+    {
+        // Blade Views
+        view('welcome');
+        View::make('admin.users.index');
+        View::exists('emails.order_shipped');
+
+        // Named Routes
+        route('home');
+        route('admin.users.index');
+
+        // Translation Keys
+        __('messages.welcome');
+        trans('auth.failed');
+        trans_choice('messages.notifications', 5);
+        Lang::get('pagination.next');
+        Lang::has('validation.required');
+    }
+}
+
+
+// ── Laravel Config (definition & references) ────────────────────────────────
+
+class LaravelConfigDemo
+{
+    public function demo(): void
+    {
+        config('app.name');
+        \Illuminate\Support\Facades\Config::get('database.default');
+        \Illuminate\Support\Facades\Config::set('app.timezone', 'UTC');
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "App\\Models\\": "app/Models/"
+        }
+    },
+    "require": {
+        "laravel/framework": "^12.0"
+    }
+}

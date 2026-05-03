@@ -33,7 +33,7 @@ files), a single `analyze` run triggers **251,032 calls** to
 The resolved-class cache mitigates this for repeated lookups of the
 same class, but the forward walker (`build_diagnostic_scopes`) still
 pays the cost of cache-key construction, lock acquisition, and
-context setup on every expression. On `example.php` (~6 000 lines,
+context setup on every expression. On `examples/demo.php` (~6 000 lines,
 ~300 classes), `build_diagnostic_scopes` alone takes **35.6 seconds**
 (78% of total analysis time in debug builds). The diagnostic
 collectors add another 9.8 seconds (21%). Everything else (init,
@@ -142,13 +142,13 @@ Fixed a bug where `build_diagnostic_scopes` ran twice per file in
 release builds: once explicitly in the analyze loop, and again
 inside `collect_slow_diagnostics`. Added an early-return guard that
 skips the walk when the scope cache is already populated. This cut
-`slow` time from 9.4s to 0.6s on example.php.
+`slow` time from 9.4s to 0.6s on examples/demo.php.
 
 #### Phase 4c: Eliminate ClassInfo cloning
 
 **Impact: Critical. Effort: Medium-High.**
 
-Fresh profiling (perf, release build, example.php) shows the
+Fresh profiling (perf, release build, examples/demo.php) shows the
 dominant cost is **ClassInfo cloning and allocation churn**:
 
 | Symbol | Self % | Notes |
@@ -202,7 +202,7 @@ the resolution pipeline.
 
 **Expected impact:** Eliminates ~10-15% of total CPU (clone +
 drop + associated malloc/free). Combined with the double-walk
-fix, should bring example.php from ~9.5s to ~5-6s.
+fix, should bring examples/demo.php from ~9.5s to ~5-6s.
 
 #### Phase 4d: Reduce string formatting overhead
 
@@ -220,7 +220,7 @@ fix, should bring example.php from ~9.5s to ~5-6s.
 Plan: audit hot-path `format!()` calls and replace with
 pre-computed or cached values where possible.
 
-### Profiling data (current, release build, example.php)
+### Profiling data (current, release build, examples/demo.php)
 
 Measured after Phase 4a + double-walk fix:
 
@@ -343,9 +343,9 @@ The problem is needing them for every runtime analysis thread.
 
 ## Success criteria
 
-- `phpantom_lsp analyze --project-root . example.php` completes
+- `phpantom_lsp analyze --project-root . examples/demo.php` completes
   in under 2 seconds (release build).
-- Analysis time for example.php (~300 classes) approaches Mago's
+- Analysis time for examples/demo.php (~300 classes) approaches Mago's
   speed (sub-second).
 - No test regressions in the existing test suite.
 - Memory usage for the populated metadata is within 2x of the

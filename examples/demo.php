@@ -13,10 +13,10 @@
  *   2. SCAFFOLDING — supporting definitions (scroll past these)
  *
  * Priority:
- *   Basic everyday features → Laravel → Trivial (works everywhere) → Advanced
+ *   Basic everyday features → Trivial (works everywhere) → Advanced
  */
 
-namespace Demo {
+namespace Demo;
 
 use Attribute;
 use Closure;
@@ -975,25 +975,25 @@ class CollectionForeachDemo
         $src = new ScaffoldingCollectionForeach();
 
         // From method return type
-        foreach ($src->allMembers() as $user) {
-            $user->getName();             // via method return type → collection generics
+        foreach ($src->allPens() as $pen) {
+            $pen->write();                // via method return type → collection generics
         }
 
         // From new instance
-        $items = new UserEloquentCollection();
+        $items = new PenCollection();
         foreach ($items as $item) {
-            $item->getEmail();            // resolves to User via @extends generics
+            $item->color();               // resolves to Pen via @extends generics
         }
 
         // From property type
-        foreach ($src->members as $user) {
-            $user->getEmail();            // via property type → collection generics
+        foreach ($src->pens as $pen) {
+            $pen->color();                // via property type → collection generics
         }
 
         // From variable
-        $collection = $src->allMembers();
-        foreach ($collection as $user) {
-            $user->getName();             // via variable assignment scanning
+        $collection = $src->allPens();
+        foreach ($collection as $pen) {
+            $pen->write();                // via variable assignment scanning
         }
     }
 }
@@ -1837,130 +1837,6 @@ class MatchClassStringDemo
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  LARAVEL — Eloquent features that other editors struggle with
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ── Eloquent Virtual Properties ─────────────────────────────────────────────
-// Alphabetical — every property a through w should appear in order.
-// Trigger completion on `$bakery->` and scan the list.
-
-class EloquentPropertyDemo
-{
-    public function demo(): void
-    {
-        $bakery = new Bakery();
-
-        $bakery->apricot;             // $casts 'boolean'           → bool
-        $bakery->baguettes;           // relationship HasMany       → Collection<Loaf>
-        $bakery->baguettes_count;     // relationship count         → int
-        $bakery->croissant;           // $attributes default        → string
-        $bakery->defrosted_at;        // $dates (deprecated)        → Carbon\Carbon
-        $bakery->dough_temp;          // $casts 'float'             → float
-        $bakery->egg_count;           // $attributes default        → int
-        $bakery->flour;               // $fillable (no cast/attr)   → mixed
-        $bakery->fresh();             // #[Scope] method            → Builder
-        $bakery->gluten_free;         // $attributes default        → bool
-        $bakery->headBaker;           // relationship HasOne        → Baker
-        $bakery->head_baker_count;    // relationship count         → int
-        $bakery->icing;               // $casts custom class        → ?Frosting
-        $bakery->jam_flavor;          // $casts enum                → JamFlavor
-        $bakery->kitchen_id;          // $guarded (no cast/attr)    → mixed
-        $bakery->loaf_name;           // legacy accessor            → string
-        $bakery->masterRecipe;        // relationship BelongsToMany → Collection<BakeryRecipe>
-        $bakery->master_recipe_count; // relationship count         → int
-        $bakery->notes;               // $casts 'array'             → array
-        $bakery->oven_code;           // $hidden (no cast/attr)     → mixed
-        $bakery->proved_at;           // $casts 'datetime'          → \Carbon\Carbon
-        $bakery->quality;             // casts() method 'float'     → float
-        $bakery->rye_blend;           // $visible (no cast/attr)    → mixed
-        $bakery->sprinkle;            // modern accessor Attribute  → string
-        $bakery->topping('choc');     // scope method               → Builder
-        $bakery->unbaked();           // scope method               → Builder
-        $bakery->vendor;              // body-inferred morphTo      → Model
-        $bakery->vendor_count;        // relationship count         → int
-        $bakery->warmth;              // $appends (no cast/attr)    → mixed
-        // MUST NOT appear: secret_ingredient (private $attributes field)
-
-        // BelongsTo relationship property + method call with covariant $this
-        $post = new BlogPost();
-        $post->author;                // relationship BelongsTo     → BlogAuthor
-        $post->author()->associate($post->author); // associate() on BelongsTo
-    }
-}
-
-
-// ── Eloquent Query Builder ──────────────────────────────────────────────────
-
-class EloquentQueryDemo
-{
-    public function demo(): void
-    {
-        // Builder-as-static forwarding
-        BlogAuthor::where('active', true);
-        BlogAuthor::where('active', 1)->get();     // → Collection<BlogAuthor>
-        BlogAuthor::where('active', 1)->first();   // → BlogAuthor|null
-        BlogAuthor::orderBy('name')->limit(10)->get();
-        BlogAuthor::whereIn('id', [1, 2])->groupBy('genre')->get();
-        BlogAuthor::where('active', 1)->first()->profile->getBio();
-
-        // Model @method tags available on Builder (e.g. SoftDeletes withTrashed)
-        BlogAuthor::where('active', 1)->withTrashed()->first();
-        BlogAuthor::groupBy('genre')->onlyTrashed()->get();
-
-        // Scope methods — instance and static
-        $author = new BlogAuthor();
-        $author->active();
-        $author->ofGenre('fiction');
-        BlogAuthor::active();
-        BlogAuthor::ofGenre('fiction');
-
-        // Scopes on Builder instances (convention and #[Scope] attribute)
-        BlogAuthor::where('active', 1)->active()->ofGenre('sci-fi')->get();
-        Bakery::where('open', true)->fresh()->get();
-        $query = BlogAuthor::where('genre', 'fiction');
-        $query->active();
-        $query->orderBy('name')->get();
-
-        // where{PropertyName}() dynamic methods (from $fillable, $casts, etc.)
-        Bakery::whereFlour('whole wheat');           // from $fillable
-        Bakery::whereApricot(true);                  // from $casts
-        Bakery::whereDefrostedAt('2024-01-01');      // from $dates
-        Bakery::whereCroissant('almond');             // from $attributes
-        Bakery::whereKitchenId(42);                   // from $guarded
-        Bakery::whereOvenCode('X9');                  // from $hidden
-        Bakery::whereFlour('rye')->whereApricot(true)->get();
-        Bakery::where('open', true)->whereFlour('spelt')->fresh()->first();
-
-        // Conditionable when()/unless() chain continuation
-        // The patch replaces the unresolved TWhenReturnType template param
-        // with $this so that chained calls after when()/unless() resolve.
-        BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
-        BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
-    }
-}
-
-
-// ── Custom Eloquent Collections ─────────────────────────────────────────────
-
-class CustomCollectionDemo
-{
-    public function demo(): void
-    {
-        // Builder chain → custom collection via #[CollectedBy]
-        $reviews = Review::where('published', true)->get();
-        $reviews->topRated();             // custom method from ReviewCollection
-        $reviews->averageRating();        // custom method from ReviewCollection
-        $reviews->first();                // inherited — returns Review|null
-
-        // Relationship properties also use the custom collection
-        $review = new Review();
-        $review->replies->topRated();     // HasMany<Review> → ReviewCollection
-    }
-}
-
-
 // ── Closure Parameter Inference ─────────────────────────────────────────────
 
 class ClosureParamInferenceDemo
@@ -1979,30 +1855,6 @@ class ClosureParamInferenceDemo
 
         // Explicit type hint takes precedence over inference
         $src->items->map(fn(Pencil $p) => $p->sketch());
-
-        // Eloquent chunk — $orders inferred as Collection
-        BlogAuthor::where('active', true)->chunk(100, function ($orders) {
-            $orders->count();             // resolves to Eloquent Collection
-        });
-
-        // Explicit bare type hint inherits inferred generic args for foreach
-        BlogAuthor::where('active', true)->chunk(100, function (Collection $authors) {
-            foreach ($authors as $author) {
-                $author->posts();           // resolves to BlogAuthor via Collection<int, BlogAuthor>
-            }
-        });
-
-        // Eloquent whereHas — $query inferred as Builder<BlogPost> (the related model)
-        BlogAuthor::whereHas('posts', function ($query) {
-            $query->where('published', true); // resolves to Builder<BlogPost>
-        });
-
-        // Dot-notation relation chain: category.articles resolves through each segment
-        // BlogPost::whereHas('author.profile', fn($q) => $q->)
-        //   => $q is Builder<AuthorProfile>, not Builder<BlogPost>
-        BlogPost::whereHas('author', function ($q) {
-            $q->where('active', true);    // resolves to Builder<BlogAuthor>
-        });
 
         // $this in callable param resolves to receiver, not current class
         $pipeline = new ScaffoldingPipeline();
@@ -2087,68 +1939,6 @@ class SignatureHelpDemo
         // When the effective docblock type differs from the native PHP type
         // the description is prefixed with the effective type:
         $svc->search('php', 1, 25);
-    }
-}
-
-
-// ── Laravel Config & Env Navigation ─────────────────────────────────────────
-
-class LaravelConfigEnvDemo
-{
-    /**
-     * "Go to Definition" and "Find All References" for config keys and env vars.
-     *
-     * Try:
-     *  1. Ctrl+Click "app.name" to jump to config/app.php (mocked in tests).
-     *  2. Ctrl+Click "APP_KEY" to jump to .env (mocked in tests).
-     *  3. "Find All References" on "app.name" to see all usage sites.
-     */
-    public function demo(): void
-    {
-        // Global helper
-        config('app.name');
-
-        // Facade methods
-        \Config::get('app.name');
-        \Illuminate\Support\Facades\Config::set('app.env', 'production');
-
-        // Env helper
-        env('APP_KEY');
-        env('DB_PASSWORD', 'secret');
-    }
-}
-
-
-// ── Laravel View, Route & Translation Navigation ───────────────────────────
-
-class LaravelNavigationDemo
-{
-    /**
-     * "Go to Definition" and "Find All References" for Laravel identifiers.
-     *
-     * Try:
-     *  1. Ctrl+Click "welcome" to jump to resources/views/welcome.blade.php.
-     *  2. Ctrl+Click "admin.index" to jump to resources/views/admin/index.blade.php.
-     *  3. Ctrl+Click "home" to jump to the ->name('home') declaration in routes/web.php.
-     *  4. Ctrl+Click "auth.failed" to jump to lang/en/auth.php.
-     */
-    public function demo(): void
-    {
-        // Blade Views
-        view('welcome');
-        View::make('admin.index');
-        View::exists('emails.order_shipped');
-
-        // Named Routes
-        route('home');
-        route('admin.users.index');
-
-        // Translation Keys
-        __('messages.welcome');
-        trans('auth.failed');
-        trans_choice('messages.notifications', 5);
-        \Lang::get('pagination.next');
-        \Illuminate\Support\Facades\Lang::has('validation.required');
     }
 }
 
@@ -2340,7 +2130,7 @@ class ReverseImplementationDemo implements GtdPrintable
 // Try on GtdPrintable: supertypes → (none), subtypes → GtdPlainPrinter, GtdHtmlPrinter, ReverseImplementationDemo
 // Try on ReverseImplementationDemo: supertypes → GtdPrintable, subtypes → (none)
 // Try on User: supertypes → Model, Renderable, subtypes → AdminUser
-// Try on Model: supertypes → (none), subtypes → User, Bakery, BlogAuthor, ...
+// Try on Model: supertypes → (none), subtypes → User, ClassFilteringDemo, HoverOriginsDemo
 
 
 // ── Context-Aware Class Name Filtering ──────────────────────────────────────
@@ -3846,7 +3636,7 @@ class TreeMapperImpl
 // RUNTIME ASSERTIONS: When adding a new demo, add matching assert() calls
 // to runDemoAssertions() at the bottom of the Demo namespace. This catches
 // cases where our scaffolding stubs don't actually return what their
-// docblocks claim. Run: php -d zend.assertions=1 example.php
+// docblocks claim. Run: php -d zend.assertions=1 examples/demo.php
 //
 // HOISTING PITFALL: Do NOT add __toString() to any class that is
 // forward-referenced via `extends` or `implements`. PHP implicitly adds
@@ -4177,11 +3967,11 @@ class ScaffoldingGenericShape extends ScaffoldingGenericShapeBase {}
 
 class ScaffoldingCollectionForeach
 {
-    public UserEloquentCollection $members;
+    public PenCollection $pens;
 
-    public function allMembers(): UserEloquentCollection
+    public function allPens(): PenCollection
     {
-        return new UserEloquentCollection();
+        return new PenCollection();
     }
 }
 
@@ -4459,15 +4249,6 @@ trait HasFactory
 {
     /** @return TFactory */
     public static function factory() {}
-}
-
-/**
- * @method static \Illuminate\Database\Eloquent\Builder<static> withTrashed(bool $withTrashed = true)
- * @method static \Illuminate\Database\Eloquent\Builder<static> onlyTrashed()
- */
-trait ScaffoldingSoftDeletes
-{
-    public function trashed(): bool { return false; }
 }
 
 /**
@@ -5439,236 +5220,9 @@ class BrokenDocRecovery
     }
 }
 
-// ─── Foreach over Generic Collection Classes ────────────────────────────────
-
-/**
- * @template TKey of array-key
- * @template-covariant TValue
- * @implements \IteratorAggregate<TKey, TValue>
- */
-class BaseCollection implements \IteratorAggregate
-{
-    /** @return \ArrayIterator<TKey, TValue> */
-    public function getIterator(): \ArrayIterator { return new \ArrayIterator([]); }
-}
-
-/**
- * @template TKey of array-key
- * @template TModel of Model
- * @extends BaseCollection<TKey, TModel>
- */
-class EloquentCollection extends BaseCollection {}
-
-/**
- * @extends EloquentCollection<int, User>
- */
-final class UserEloquentCollection extends EloquentCollection {}
-
-// ── Laravel Relationship Demo Models ────────────────────────────────────────
-
-// ── Bakery — Alphabetical Eloquent property demo model ──────────────────────
-// One virtual member per letter (a–v), each from a different source.
-// Trigger `$bakery->` in EloquentPropertyDemo and verify a–v in order.
-
-class Bakery extends \Illuminate\Database\Eloquent\Model
-{
-    protected $fillable = ['flour'];
-
-    protected $guarded = ['kitchen_id'];
-
-    protected $hidden = ['oven_code'];
-
-    protected $dates = ['defrosted_at'];
-
-    protected $visible = ['rye_blend'];
-
-    protected $appends = ['warmth'];
-
-    protected $casts = [
-        'apricot'    => 'boolean',
-        'dough_temp' => 'float',
-        'icing'      => FrostingCast::class,
-        'jam_flavor' => JamFlavor::class,
-        'notes'      => 'array',
-        'proved_at'  => 'datetime',
-    ];
-
-    protected function casts(): array
-    {
-        return [
-            'quality' => 'float',
-        ];
-    }
-
-    protected $attributes = [
-        'croissant'   => 'plain',
-        'egg_count'   => 0,
-        'gluten_free' => false,
-    ];
-
-    /** @return \Illuminate\Database\Eloquent\Relations\HasMany<Loaf, $this> */
-    public function baguettes(): mixed { return $this->hasMany(Loaf::class); }
-
-    /** @return \Illuminate\Database\Eloquent\Relations\HasOne<Baker, $this> */
-    public function headBaker(): mixed { return $this->hasOne(Baker::class); }
-
-    /** @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<BakeryRecipe, $this> */
-    public function masterRecipe(): mixed { return $this->belongsToMany(BakeryRecipe::class); }
-
-    public function vendor() { return $this->morphTo(); }
-
-    public function scopeTopping(\Illuminate\Database\Eloquent\Builder $query, string $type): void
-    {
-        $query->where('topping', $type);
-    }
-
-    public function scopeUnbaked(\Illuminate\Database\Eloquent\Builder $query): void
-    {
-        $query->where('baked', false);
-    }
-
-    #[\Illuminate\Database\Eloquent\Attributes\Scope]
-    protected function fresh(\Illuminate\Database\Eloquent\Builder $query): void
-    {
-        $query->where('fresh', true);
-    }
-
-    public function getLoafNameAttribute(): string { return ''; }
-
-    /** @return \Illuminate\Database\Eloquent\Casts\Attribute<string> */
-    protected function sprinkle(): \Illuminate\Database\Eloquent\Casts\Attribute
-    {
-        return new \Illuminate\Database\Eloquent\Casts\Attribute();
-    }
-}
-
-class Loaf extends \Illuminate\Database\Eloquent\Model
-{
-    public function getWeight(): int { return 0; }
-}
-
-class Baker extends \Illuminate\Database\Eloquent\Model
-{
-    public function getName(): string { return ''; }
-}
-
-class BakeryRecipe extends \Illuminate\Database\Eloquent\Model
-{
-    public function getTitle(): string { return ''; }
-}
-
-enum JamFlavor: string
-{
-    case Strawberry = 'strawberry';
-    case Raspberry = 'raspberry';
-    case Blueberry = 'blueberry';
-}
-
-// ── BlogAuthor — used by EloquentQueryDemo and ClosureParamInferenceDemo ────
-
-class BlogAuthor extends \Illuminate\Database\Eloquent\Model
-{
-    use ScaffoldingSoftDeletes;
-
-    protected $fillable = ['name', 'email', 'genre'];
-
-    protected $guarded = ['id'];
-
-    protected $hidden = ['password'];
-
-    /** @return \Illuminate\Database\Eloquent\Relations\HasMany<BlogPost, $this> */
-    public function posts(): mixed { return $this->hasMany(BlogPost::class); }
-
-    /** @return \Illuminate\Database\Eloquent\Relations\HasOne<AuthorProfile, $this> */
-    public function profile(): mixed { return $this->hasOne(AuthorProfile::class); }
-
-    public function scopeActive(\Illuminate\Database\Eloquent\Builder $query): void
-    {
-        $query->where('active', true);
-    }
-
-    public function scopeOfGenre(\Illuminate\Database\Eloquent\Builder $query, string $genre): void
-    {
-        $query->where('genre', $genre);
-    }
-}
-
-class BlogPost extends \Illuminate\Database\Eloquent\Model
-{
-    public function getTitle(): string { return ''; }
-    public function getSlug(): string { return ''; }
-
-    /** @return \Illuminate\Database\Eloquent\Relations\BelongsTo<BlogAuthor, covariant $this> */
-    public function author(): mixed { return $this->belongsTo(BlogAuthor::class); }
-}
-
-class AuthorProfile extends \Illuminate\Database\Eloquent\Model
-{
-    public function getBio(): string { return ''; }
-    public function getAvatar(): string { return ''; }
-}
-
-class BlogTag extends \Illuminate\Database\Eloquent\Model
-{
-    public function getLabel(): string { return ''; }
-}
-
-// ── Custom Eloquent Collection Demo Models ──────────────────────────────────
-
-/**
- * @template TKey of array-key
- * @template TModel
- * @extends \Illuminate\Database\Eloquent\Collection<TKey, TModel>
- */
-class ReviewCollection extends \Illuminate\Database\Eloquent\Collection
-{
-    /** @return array<TKey, TModel> */
-    public function topRated(): array { return []; }
-
-    /** @return float */
-    public function averageRating(): float { return 0.0; }
-}
-
-#[\Illuminate\Database\Eloquent\Attributes\CollectedBy(ReviewCollection::class)]
-class Review extends \Illuminate\Database\Eloquent\Model
-{
-    public function getTitle(): string { return ''; }
-    public function getRating(): int { return 0; }
-
-    /** @return \Illuminate\Database\Eloquent\Relations\HasMany<Review, $this> */
-    public function replies(): mixed { return $this->hasMany(Review::class); }
-}
-
-class Frosting
-{
-    public function __construct(private string $flavor = '') {}
-    public function getFlavor(): string { return $this->flavor; }
-    public function isSweet(): bool { return $this->flavor !== ''; }
-    public function __toString(): string { return $this->flavor; }
-}
-
-class FrostingCast
-{
-    public function get($model, string $key, mixed $value, array $attributes): ?Frosting
-    {
-        return new Frosting((string) $value);
-    }
-}
-
-enum OrderStatus: string
-{
-    case Pending = 'pending';
-    case Processing = 'processing';
-    case Completed = 'completed';
-    case Cancelled = 'cancelled';
-
-    public function label(): string { return $this->value; }
-    public function isPending(): bool { return $this === self::Pending; }
-}
-
 // ── Runtime Assertions ──────────────────────────────────────────────────────
 // Verify that the type claims in demo comments match reality.
-// Run: php example.php
+// Run: php examples/demo.php
 
 function runDemoAssertions(): void
 {
@@ -6639,260 +6193,7 @@ function runDemoAssertions(): void
     $pen = $demo->getPens()->current();
     assert($pen instanceof Pen, 'ArrayIterator<int, Pen>::current() must return Pen');
 
-    // ── Laravel Config ────────────────────────────────────────────────
-    assert(config('app.name', 'Default') === 'Default', 'config() should return default');
-    assert(\Config::get('app.name', 'Default') === 'Default', 'Config::get() should return default');
-
     echo "All assertions passed.\n";
 }
 
-// ── Laravel Config (definition & references) ────────────────────────────────
-// Try: Ctrl+Click 'app.name' or 'database.default' to jump to the declaration
-// in config/app.php or config/database.php.
-// Try: "Find All References" on 'app.name' to find other usages.
-
-class LaravelConfigDemo
-{
-    public function demo(): void
-    {
-        config('app.name');
-        \Config::get('database.default');
-        \Config::set('app.timezone', 'UTC');
-    }
-}
-
 runDemoAssertions();
-
-} // end namespace Demo
-
-// ── Illuminate Stubs ────────────────────────────────────────────────────────
-// Minimal stubs matching real Laravel classes so that the Eloquent demo models
-// above resolve Builder methods, relationship properties, and scope forwarding
-// without requiring a real Laravel installation.
-
-namespace {
-    /**
-     * Get / set the specified configuration value.
-     *
-     * @param  array|string|null  $key
-     * @param  mixed  $default
-     * @return mixed
-     */
-    function config($key = null, $default = null) { return $default; }
-
-    class Config {
-        /** @return mixed */
-        public static function get(string $key, $default = null) { return $default; }
-        /** @return void */
-        public static function set(string $key, $value = null) {}
-    }
-}
-
-namespace Illuminate\Database\Eloquent {
-
-    abstract class Model {
-        /** @return \Illuminate\Database\Eloquent\Builder<static> */
-        public static function query() {}
-
-        /** @return \Illuminate\Database\Eloquent\Relations\HasMany<\Illuminate\Database\Eloquent\Model, $this> */
-        public function hasMany(string $related, ?string $foreignKey = null, ?string $localKey = null) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\HasOne<\Illuminate\Database\Eloquent\Model, $this> */
-        public function hasOne(string $related, ?string $foreignKey = null, ?string $localKey = null) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\Illuminate\Database\Eloquent\Model, $this> */
-        public function belongsTo(string $related, ?string $foreignKey = null, ?string $ownerKey = null) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\Illuminate\Database\Eloquent\Model, $this> */
-        public function belongsToMany(string $related, ?string $table = null) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\MorphOne<\Illuminate\Database\Eloquent\Model, $this> */
-        public function morphOne(string $related, string $name) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\MorphMany<\Illuminate\Database\Eloquent\Model, $this> */
-        public function morphMany(string $related, string $name) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\MorphTo<\Illuminate\Database\Eloquent\Model, $this> */
-        public function morphTo(?string $name = null, ?string $type = null, ?string $id = null) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, $this> */
-        public function morphToMany(string $related, string $name) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\HasManyThrough<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model, $this> */
-        public function hasManyThrough(string $related, string $through) {}
-        /** @return \Illuminate\Database\Eloquent\Relations\HasOneThrough<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model, $this> */
-        public function hasOneThrough(string $related, string $through) {}
-    }
-
-    /**
-     * @template TModel of \Illuminate\Database\Eloquent\Model
-     *
-     * @mixin \Illuminate\Database\Query\Builder
-     */
-    class Builder implements \Illuminate\Contracts\Database\Eloquent\Builder {
-        /** @use \Illuminate\Database\Concerns\BuildsQueries<TModel> */
-        use \Illuminate\Database\Concerns\BuildsQueries;
-        use \Illuminate\Support\Traits\Conditionable;
-
-        /**
-         * @param  (\Closure(static): mixed)|string|array  $column
-         * @return $this
-         */
-        public function where($column, $operator = null, $value = null, $boolean = 'and') {}
-
-        /** @return \Illuminate\Database\Eloquent\Collection<int, TModel> */
-        public function get($columns = ['*']) { return new Collection(); }
-
-        /**
-         * @param  string  $relation
-         * @param  (\Closure(\Illuminate\Database\Eloquent\Builder<TModel>): mixed)|null  $callback
-         * @return static
-         */
-        public function whereHas(string $relation, ?\Closure $callback = null): static { return $this; }
-
-        /**
-         * @param  array<array-key, array|(\Closure(\Illuminate\Database\Eloquent\Relations\Relation): mixed)|string>|string  $relations
-         * @param  (\Closure(\Illuminate\Database\Eloquent\Relations\Relation): mixed)|string|null  $callback
-         * @return static
-         */
-        public function with($relations, $callback = null): static { return $this; }
-    }
-
-    /**
-     * @template TKey of array-key
-     * @template TModel of \Illuminate\Database\Eloquent\Model
-     */
-    class Collection {
-        /** @return TModel|null */
-        public function first(): mixed { return null; }
-        public function count(): int { return 0; }
-    }
-}
-
-namespace Illuminate\Database\Eloquent\Relations {
-    /**
-     * @template TRelated of \Illuminate\Database\Eloquent\Model
-     * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
-     * @template TResult
-     */
-    class Relation {
-        /** @return static */
-        public function where(string $column, $operator = null, $value = null): static { return $this; }
-        /** @return static */
-        public function orderBy(string $column, string $direction = 'asc'): static { return $this; }
-    }
-    class HasMany extends Relation {}
-    class HasOne extends Relation {}
-    class BelongsTo extends Relation {
-        public function associate(mixed $model): static { return $this; }
-        public function dissociate(): static { return $this; }
-    }
-    class BelongsToMany extends Relation {}
-    class MorphOne extends Relation {}
-    class MorphMany extends Relation {}
-    class MorphTo extends Relation {}
-    class MorphToMany extends Relation {}
-    class HasManyThrough extends Relation {}
-    class HasOneThrough extends Relation {}
-}
-
-namespace Illuminate\Database\Eloquent\Attributes {
-    class CollectedBy {
-        public function __construct(string $collectionClass) {}
-    }
-    class Scope {}
-}
-
-namespace Illuminate\Database\Eloquent\Casts {
-    class Attribute {}
-}
-
-namespace Illuminate\Database\Eloquent {
-    /** @template TCollection */
-    trait HasCollection {}
-}
-
-namespace Illuminate\Database\Concerns {
-
-    /**
-     * @template TValue
-     */
-    trait BuildsQueries {
-        /** @return TValue|null */
-        public function first($columns = ['*']) { return null; }
-
-        /**
-         * @param  callable(\Illuminate\Support\Collection<int, TValue>, int): mixed  $callback
-         * @return bool
-         */
-        public function chunk($count, callable $callback) { return true; }
-    }
-}
-
-namespace Illuminate\Database\Query {
-
-    class Builder {
-        /**
-         * @param  string  $column
-         * @return $this
-         */
-        public function whereIn($column, $values, $boolean = 'and', $not = false) { return $this; }
-
-        /** @return $this */
-        public function groupBy(...$groups) { return $this; }
-
-        /** @return $this */
-        public function orderBy($column, $direction = 'asc') { return $this; }
-
-        /** @return $this */
-        public function limit($value) { return $this; }
-
-        /**
-         * @return \Illuminate\Support\Collection<int, \stdClass>
-         */
-        public function get($columns = ['*']) {}
-    }
-}
-
-namespace Illuminate\Support {
-
-    /**
-     * @template TKey of array-key
-     * @template TValue
-     * @implements \IteratorAggregate<TKey, TValue>
-     */
-    class Collection implements \IteratorAggregate {
-        /** @return int */
-        public function count(): int { return 0; }
-        /** @return TValue|null */
-        public function first(): mixed { return null; }
-        /** @return array<TKey, TValue> */
-        public function all(): array { return []; }
-        /**
-         * @param callable(TValue, TKey): mixed $callback
-         * @return static
-         */
-        public function each(callable $callback): static { return $this; }
-        public function getIterator(): \ArrayIterator { return new \ArrayIterator([]); }
-    }
-}
-
-namespace Illuminate\Support\Traits {
-
-    /**
-     * @template TWhenReturnType
-     * @template TUnlessReturnType
-     */
-    trait Conditionable {
-        /**
-         * @param  (callable($this): TWhenReturnType)|null  $callback
-         * @return $this|TWhenReturnType
-         */
-        public function when(mixed $value = null, ?callable $callback = null, ?callable $default = null): mixed { return $this; }
-
-        /**
-         * @param  (callable($this): TUnlessReturnType)|null  $callback
-         * @return $this|TUnlessReturnType
-         */
-        public function unless(mixed $value = null, ?callable $callback = null, ?callable $default = null): mixed { return $this; }
-    }
-}
-
-namespace Illuminate\Contracts\Database\Eloquent {
-    /**
-     * @mixin \Illuminate\Database\Eloquent\Builder
-     */
-    interface Builder {}
-}

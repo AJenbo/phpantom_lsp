@@ -54,7 +54,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application).
 </sub>
 
-> **Want to verify?** Open [`example.php`](example.php) in your editor and trigger completion at the marked locations. It exercises every type intelligence feature in the table, including edge cases where tools diverge.
+> **Want to verify?** Open [`examples/demo.php`](examples/demo.php) in your editor and trigger completion at the marked locations. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings.
 
 ## Context-Aware Intelligence
 

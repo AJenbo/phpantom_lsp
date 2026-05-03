@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Laravel example project.** All Laravel-specific demos (Eloquent, config/env, views, routes, translations) moved to a standalone `examples/laravel/` project with real config, route, view, and translation files. The main `examples/demo.php` is now framework-agnostic.
 - **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. The preprocessor transforms Blade syntax into virtual PHP on the fly, with coordinate translation so all editor features report correct positions. ([#100](https://github.com/AJenbo/phpantom_lsp/pull/100) by [@MingJen](https://github.com/MingJen))
 - **Blade keyword highlighting.** Blade directives, echo delimiters, PHP keywords, cast types, comments, and PHPDoc tags inside `.blade.php` files now receive semantic tokens for proper syntax coloring. PHP keywords and cast types are emitted from the AST and shared with `.php` files, so highlighting is fully in sync between both file types.
 

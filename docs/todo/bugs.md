@@ -21,15 +21,3 @@ handle this automatically.
 **Tests:** Assertion lines were removed from
 `tests/psalm_assertions/method_call.php` (out of scope until
 upstream stubs land).
-
-
-## Bulk un-SKIP after fixes
-
-There are `// SKIP` markers across `tests/psalm_assertions/*.php`
-covering gaps in the type engine. When working on any type engine
-improvement, grep for `// SKIP` in the assertion files to find
-tests that may now pass. Run
-`cargo nextest run --test assert_type_runner --no-fail-fast` with
-the SKIP removed to verify.
-
-No remaining SKIPs.
