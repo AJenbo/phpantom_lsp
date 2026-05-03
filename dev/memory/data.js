@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777823495718,
+  "lastUpdate": 1777824685362,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6459,6 +6459,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d88de843f88b0787b14e909a2717ff8c0f78c355",
+          "message": "Implement methods: omit invalid generic return type hints",
+          "timestamp": "2026-05-03T18:00:21+02:00",
+          "tree_id": "ad656f34f97afc2c584d11daa9e561274f01a143",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/d88de843f88b0787b14e909a2717ff8c0f78c355"
+        },
+        "date": 1777824684843,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.3,
             "unit": "MiB"
           }
         ]
