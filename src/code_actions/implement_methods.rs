@@ -530,11 +530,9 @@ fn format_return_type(
     // syntax. Docblock types may contain generic annotations (e.g.
     // `array<TKey, TValue>`) that are not legal as native return type hints.
     if let Some(ref ret) = method.return_type {
-        if is_valid_native_hint(ret) {
-            let shortened = shorten_php_type_direct(ret, use_map, file_namespace);
-            if !shortened.is_empty() {
-                return format!(": {}", shortened);
-            }
+        let shortened = shorten_php_type_direct(ret, use_map, file_namespace);
+        if is_valid_native_hint(ret) && !shortened.is_empty() {
+            return format!(": {}", shortened);
         }
     }
 
