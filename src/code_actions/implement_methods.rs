@@ -491,6 +491,27 @@ fn format_params(
     parts.join(", ")
 }
 
+/// Returns `true` if `ty` can be written as a native PHP return type hint.
+///
+/// Docblock-only types (generics, array shapes, callables with signatures,
+/// conditional types, template variables, etc.) must not be emitted as
+/// native hints in generated method stubs.
+fn is_valid_native_hint(ty: &PhpType) -> bool {
+    match ty {
+        // Plain named types and their nullable wrappers are always valid.
+        PhpType::Named(_) => true,
+        PhpType::Nullable(inner) => is_valid_native_hint(inner),
+        // Union types are valid only when every member is valid (PHP 8+
+        // union return types like `int|string|null` are legal).
+        PhpType::Union(members) => members.iter().all(is_valid_native_hint),
+        // Intersection types (`A&B`) are valid PHP 8.1+ hints.
+        PhpType::Intersection(members) => members.iter().all(is_valid_native_hint),
+        // Everything else is a docblock-only construct and must not be
+        // used as a native return type hint.
+        _ => false,
+    }
+}
+
 /// Format the return type hint for a method stub.
 fn format_return_type(
     method: &MethodInfo,
@@ -505,11 +526,15 @@ fn format_return_type(
         }
     }
 
-    // Fall back to the docblock return type.
+    // Fall back to the docblock return type, but only when it is valid PHP
+    // syntax. Docblock types may contain generic annotations (e.g.
+    // `array<TKey, TValue>`) that are not legal as native return type hints.
     if let Some(ref ret) = method.return_type {
-        let shortened = shorten_php_type_direct(ret, use_map, file_namespace);
-        if !shortened.is_empty() {
-            return format!(": {}", shortened);
+        if is_valid_native_hint(ret) {
+            let shortened = shorten_php_type_direct(ret, use_map, file_namespace);
+            if !shortened.is_empty() {
+                return format!(": {}", shortened);
+            }
         }
     }
 
@@ -1028,6 +1053,39 @@ mod tests {
 
         let result = build_method_stubs(&methods, &HashMap::new(), &None, content, &class);
         assert!(result.contains("public static function init(): void"));
+    }
+
+    #[test]
+    fn stub_omits_generic_docblock_return_type() {
+        // When a method has no native return type but only a @return with
+        // generic syntax (array<K,V>), the stub must NOT emit the generic
+        // type as a native PHP return type hint because that is a syntax
+        // error in PHP.
+        let methods = vec![MethodInfo {
+            native_return_type: None,
+            return_type: Some(PhpType::parse("array<TKey, TValue>")),
+            visibility: Visibility::Public,
+            ..MethodInfo::virtual_method("toArray", None)
+        }];
+
+        let content = "<?php\nclass Foo {\n    \n}\n";
+        let class = ClassInfo {
+            name: crate::atom::atom("Foo"),
+            start_offset: content.find('{').unwrap() as u32,
+            end_offset: content.rfind('}').unwrap() as u32 + 1,
+            ..Default::default()
+        };
+
+        let result = build_method_stubs(&methods, &HashMap::new(), &None, content, &class);
+        // No return type hint should be present.
+        assert!(
+            !result.contains(": array<"),
+            "expected no generic return type hint, got: {result}"
+        );
+        assert!(
+            result.contains("public function toArray()"),
+            "expected stub without return type, got: {result}"
+        );
     }
 
     #[test]
