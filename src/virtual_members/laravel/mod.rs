@@ -104,10 +104,12 @@ pub(crate) fn resolve_laravel_string_key(
     backend: &crate::Backend,
     kind: &crate::symbol_map::LaravelStringKind,
     key: &str,
-) -> Option<tower_lsp::lsp_types::Location> {
+) -> Vec<tower_lsp::lsp_types::Location> {
     use crate::symbol_map::LaravelStringKind;
     match kind {
-        LaravelStringKind::Config => resolve_config_key_declaration(backend, key),
+        LaravelStringKind::Config => resolve_config_key_declaration(backend, key)
+            .into_iter()
+            .collect(),
     }
 }
 

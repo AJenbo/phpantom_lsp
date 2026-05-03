@@ -560,7 +560,7 @@ impl Backend {
         }
 
         // Try to resolve the definition location.
-        if let Some(loc) = self.resolve_definition(uri, content, position) {
+        for loc in self.resolve_definition(uri, content, position) {
             let def_uri = loc.uri.to_string();
             if vendor_prefixes
                 .iter()

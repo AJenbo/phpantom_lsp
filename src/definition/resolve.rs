@@ -37,7 +37,7 @@ impl Backend {
         uri: &str,
         content: &str,
         position: Position,
-    ) -> Option<Location> {
+    ) -> Vec<Location> {
         // Consult precomputed symbol map (retries one byte earlier for
         // end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);
@@ -45,18 +45,20 @@ impl Backend {
             && let Some(resolved) =
                 self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
         {
-            return Some(resolved);
+            return resolved;
         }
 
         // Laravel config fallback: declaration sites in config/*.php
         if let Some(loc) =
             laravel::resolve_config_key_definition_fallback(self, uri, content, position)
         {
-            return Some(loc);
+            return vec![loc];
         }
 
         // env() fallback: not yet indexed in the symbol map.
         laravel::resolve_env_definition(self, content, position)
+            .into_iter()
+            .collect()
     }
 
     /// Look up the symbol at the given byte offset in the precomputed
@@ -164,7 +166,7 @@ impl Backend {
         content: &str,
         position: Position,
         cursor_offset: u32,
-    ) -> Option<Location> {
+    ) -> Option<Vec<Location>> {
         match kind {
             SymbolKind::Variable { name } => {
                 let var_name = format!("${}", name);
@@ -194,10 +196,10 @@ impl Backend {
                             content,
                             cursor_offset as usize + 1 + name.len(),
                         );
-                        return Some(Location {
+                        return Some(vec![Location {
                             uri: parsed_uri,
                             range: Range { start, end },
-                        });
+                        }]);
                     }
                 }
 
@@ -208,20 +210,20 @@ impl Backend {
                     let start_pos =
                         crate::util::offset_to_position(content, var_def.offset as usize);
                     let end_pos = crate::util::offset_to_position(content, token_end as usize);
-                    return Some(Location {
+                    return Some(vec![Location {
                         uri: target_uri,
                         range: Range {
                             start: start_pos,
                             end: end_pos,
                         },
-                    });
+                    }]);
                 }
 
                 // Fallback: AST-based variable resolution.
                 if let Some(location) =
                     Self::resolve_variable_definition(content, uri, position, &var_name)
                 {
-                    return Some(location);
+                    return Some(vec![location]);
                 }
                 None
             }
@@ -249,16 +251,18 @@ impl Backend {
                     access_kind,
                     access_hint,
                 };
+
                 self.resolve_member_definition_with(uri, content, position, &mctx)
+                    .map(|loc| vec![loc])
             }
 
-            SymbolKind::SelfStaticParent(ssp_kind) => {
-                self.resolve_self_static_parent(uri, content, position, *ssp_kind)
-            }
+            SymbolKind::SelfStaticParent(ssp_kind) => self
+                .resolve_self_static_parent(uri, content, position, *ssp_kind)
+                .map(|loc| vec![loc]),
 
-            SymbolKind::ClassReference { name, is_fqn, .. } => {
-                self.resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
-            }
+            SymbolKind::ClassReference { name, is_fqn, .. } => self
+                .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
+                .map(|loc| vec![loc]),
 
             SymbolKind::ClassDeclaration { name }
             | SymbolKind::MemberDeclaration { name, .. }
@@ -272,10 +276,10 @@ impl Backend {
                 let start = crate::util::offset_to_position(content, cursor_offset as usize);
                 let end =
                     crate::util::offset_to_position(content, cursor_offset as usize + name.len());
-                Some(Location {
+                Some(vec![Location {
                     uri: parsed_uri,
                     range: Range { start, end },
-                })
+                }])
             }
 
             SymbolKind::FunctionCall { name, .. } => {
@@ -291,6 +295,7 @@ impl Backend {
                     candidates.push(name.clone());
                 }
                 self.resolve_function_definition(&candidates)
+                    .map(|loc| vec![loc])
             }
 
             SymbolKind::ConstantReference { name } => {
@@ -305,10 +310,12 @@ impl Backend {
                 // handles standalone `define()` constants and bare constant
                 // references only.
                 self.resolve_constant_definition(&candidates)
+                    .map(|loc| vec![loc])
             }
 
             SymbolKind::LaravelStringKey { kind, key } => {
-                laravel::resolve_laravel_string_key(self, kind, key)
+                let locs = laravel::resolve_laravel_string_key(self, kind, key);
+                if locs.is_empty() { None } else { Some(locs) }
             }
 
             SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => None,

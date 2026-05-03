@@ -521,9 +521,20 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
 
         self.handle_with_position("goto_definition", &uri, position, |content, pos| {
-            self.resolve_definition(&uri, content, pos)
-                .map(|loc| self.translate_location(loc))
-                .map(GotoDefinitionResponse::Scalar)
+            let locs = self.resolve_definition(&uri, content, pos);
+            if locs.is_empty() {
+                None
+            } else if locs.len() == 1 {
+                Some(GotoDefinitionResponse::Scalar(
+                    self.translate_location(locs[0].clone()),
+                ))
+            } else {
+                Some(GotoDefinitionResponse::Array(
+                    locs.into_iter()
+                        .map(|l| self.translate_location(l))
+                        .collect(),
+                ))
+            }
         })
     }
 
