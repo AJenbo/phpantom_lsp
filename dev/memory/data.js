@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777760820927,
+  "lastUpdate": 1777776895856,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6255,6 +6255,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "18aff5b384573d255208546c2e704207300dc82c",
+          "message": "Fix multi-namespace variable and class resolution, enable skipped tests",
+          "timestamp": "2026-05-03T04:44:03+02:00",
+          "tree_id": "59e20cff08635a59f03b5a213f66a4ac431b0506",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/18aff5b384573d255208546c2e704207300dc82c"
+        },
+        "date": 1777776894682,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 47.7,
             "unit": "MiB"
           }
         ]
