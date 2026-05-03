@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777831701081,
+  "lastUpdate": 1777832093381,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6527,6 +6527,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b48e28ce24e89c9bc2f46441c77b0de769eece28",
+          "message": "Fix clippy",
+          "timestamp": "2026-05-03T20:04:08+02:00",
+          "tree_id": "45881844a5fc66b2ae254dad8141194528c471b0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/b48e28ce24e89c9bc2f46441c77b0de769eece28"
+        },
+        "date": 1777832091837,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.6,
             "unit": "MiB"
           }
         ]
