@@ -103,6 +103,7 @@ mod linked_editing;
 mod parser;
 mod php_version;
 mod references;
+mod references_laravel_trans;
 mod return_type_resolution;
 mod semantic_tokens;
 mod server_lifecycle;

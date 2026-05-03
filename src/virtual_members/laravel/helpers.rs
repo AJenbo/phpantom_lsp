@@ -185,6 +185,82 @@ pub(crate) fn accessor_method_candidates(property_name: &str) -> Vec<String> {
     ]
 }
 
+/// Extract the `'as' => 'prefix.'` name prefix from a `Route::group([…], fn(){})` argument list.
+///
+/// The array may be in any position; all non-array arguments are skipped.
+pub(crate) fn extract_as_prefix_from_args<'a>(
+    args: impl Iterator<Item = &'a Expression<'a>>,
+    content: &str,
+) -> String {
+    for arg in args {
+        let elements: Vec<&ArrayElement<'_>> = match arg {
+            Expression::Array(arr) => arr.elements.iter().collect(),
+            Expression::LegacyArray(arr) => arr.elements.iter().collect(),
+            _ => continue,
+        };
+        for element in elements {
+            let ArrayElement::KeyValue(kv) = element else {
+                continue;
+            };
+            let Some((key, _, _)) = extract_string_literal(kv.key, content) else {
+                continue;
+            };
+            if key == "as"
+                && let Some((val, _, _)) = extract_string_literal(kv.value, content)
+            {
+                return val.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// Collect all `->name('...')` values from the call chain that precedes `->group()`.
+///
+/// Handles both instance method chains (`->name('prefix.')`) and the static
+/// entry point (`Route::name('prefix.')`).
+pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
+    match expr {
+        Expression::Call(Call::Method(mc)) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return chain_name_prefix(mc.object, content);
+            };
+            if ident.value.eq_ignore_ascii_case("name") {
+                let arg_name = mc
+                    .argument_list
+                    .arguments
+                    .iter()
+                    .next()
+                    .and_then(|a| extract_string_literal(a.value(), content))
+                    .map(|(n, _, _)| n)
+                    .unwrap_or("");
+                let parent = chain_name_prefix(mc.object, content);
+                format!("{parent}{arg_name}")
+            } else {
+                chain_name_prefix(mc.object, content)
+            }
+        }
+        // Route::name('prefix.') — static entry point of the chain.
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return String::new();
+            };
+            if ident.value.eq_ignore_ascii_case("name") {
+                sc.argument_list
+                    .arguments
+                    .iter()
+                    .next()
+                    .and_then(|a| extract_string_literal(a.value(), content))
+                    .map(|(n, _, _)| n.to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 // ─── Shared PHP AST walker ───────────────────────────────────────────────────

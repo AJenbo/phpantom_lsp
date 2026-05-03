@@ -216,6 +216,12 @@ pub(crate) enum SymbolKind {
 pub(crate) enum LaravelStringKind {
     /// A `config('dot.key')` or `Config::get('dot.key')` call.
     Config,
+    /// A `view('name')` or `View::make('name')` call.
+    View,
+    /// A `route('name')` call.
+    Route,
+    /// A `__('key')`, `trans('key')`, or `Lang::get('key')` call.
+    Trans,
 }
 
 // ─── Template parameter definition site structures ──────────────────────────

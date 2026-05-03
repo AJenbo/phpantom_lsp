@@ -2119,6 +2119,40 @@ class LaravelConfigEnvDemo
 }
 
 
+// ── Laravel View, Route & Translation Navigation ───────────────────────────
+
+class LaravelNavigationDemo
+{
+    /**
+     * "Go to Definition" and "Find All References" for Laravel identifiers.
+     *
+     * Try:
+     *  1. Ctrl+Click "welcome" to jump to resources/views/welcome.blade.php.
+     *  2. Ctrl+Click "admin.index" to jump to resources/views/admin/index.blade.php.
+     *  3. Ctrl+Click "home" to jump to the ->name('home') declaration in routes/web.php.
+     *  4. Ctrl+Click "auth.failed" to jump to lang/en/auth.php.
+     */
+    public function demo(): void
+    {
+        // Blade Views
+        view('welcome');
+        View::make('admin.index');
+        View::exists('emails.order_shipped');
+
+        // Named Routes
+        route('home');
+        route('admin.users.index');
+
+        // Translation Keys
+        __('messages.welcome');
+        trans('auth.failed');
+        trans_choice('messages.notifications', 5);
+        \Lang::get('pagination.next');
+        \Illuminate\Support\Facades\Lang::has('validation.required');
+    }
+}
+
+
 // ── Callable Snippet Insertion ──────────────────────────────────────────────
 
 class SnippetInsertionDemo
