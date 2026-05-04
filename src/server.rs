@@ -520,22 +520,28 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("goto_definition", &uri, position, |content, pos| {
-            let locs = self.resolve_definition(&uri, content, pos);
-            if locs.is_empty() {
-                None
-            } else if locs.len() == 1 {
-                Some(GotoDefinitionResponse::Scalar(
-                    self.translate_location(locs[0].clone()),
-                ))
-            } else {
-                Some(GotoDefinitionResponse::Array(
-                    locs.into_iter()
-                        .map(|l| self.translate_location(l))
-                        .collect(),
-                ))
-            }
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position("goto_definition", &uri_clone, position, |content, pos| {
+                let locs = backend.resolve_definition(&uri_clone, content, pos);
+                if locs.is_empty() {
+                    None
+                } else if locs.len() == 1 {
+                    Some(GotoDefinitionResponse::Scalar(
+                        backend.translate_location(locs[0].clone()),
+                    ))
+                } else {
+                    Some(GotoDefinitionResponse::Array(
+                        locs.into_iter()
+                            .map(|l| backend.translate_location(l))
+                            .collect(),
+                    ))
+                }
+            })
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn goto_implementation(
@@ -600,15 +606,27 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("goto_type_definition", &uri, position, |content, pos| {
-            self.resolve_type_definition(&uri, content, pos)
-                .map(|locs| {
-                    locs.into_iter()
-                        .map(|l| self.translate_location(l))
-                        .collect()
-                })
-                .and_then(wrap_locations)
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position(
+                "goto_type_definition",
+                &uri_clone,
+                position,
+                |content, pos| {
+                    backend
+                        .resolve_type_definition(&uri_clone, content, pos)
+                        .map(|locs| {
+                            locs.into_iter()
+                                .map(|l| backend.translate_location(l))
+                                .collect()
+                        })
+                        .and_then(wrap_locations)
+                },
+            )
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -619,9 +637,15 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("hover", &uri, position, |content, pos| {
-            self.handle_hover(&uri, content, pos)
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position("hover", &uri_clone, position, |content, pos| {
+                backend.handle_hover(&uri_clone, content, pos)
+            })
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -674,14 +698,20 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = params.text_document.uri.to_string();
 
-        self.handle_with_uri("code_action", &uri, |content| {
-            let actions = self.handle_code_action(&uri, content, &params);
-            if actions.is_empty() {
-                None
-            } else {
-                Some(actions)
-            }
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_uri("code_action", &uri_clone, |content| {
+                let actions = backend.handle_code_action(&uri_clone, content, &params);
+                if actions.is_empty() {
+                    None
+                } else {
+                    Some(actions)
+                }
+            })
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn code_action_resolve(&self, action: CodeAction) -> Result<CodeAction> {
@@ -704,9 +734,15 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("signature_help", &uri, position, |content, pos| {
-            self.handle_signature_help(&uri, content, pos)
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position("signature_help", &uri_clone, position, |content, pos| {
+                backend.handle_signature_help(&uri_clone, content, pos)
+            })
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn document_highlight(
@@ -720,20 +756,34 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        self.handle_with_position("document_highlight", &uri, position, |content, pos| {
-            self.handle_document_highlight(&uri, content, pos)
-                .map(|highlights| {
-                    highlights
-                        .into_iter()
-                        .map(|h| {
-                            let mut h = h;
-                            h.range.start = self.translate_php_to_blade(&uri, h.range.start);
-                            h.range.end = self.translate_php_to_blade(&uri, h.range.end);
-                            h
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position(
+                "document_highlight",
+                &uri_clone,
+                position,
+                |content, pos| {
+                    backend
+                        .handle_document_highlight(&uri_clone, content, pos)
+                        .map(|highlights| {
+                            highlights
+                                .into_iter()
+                                .map(|h| {
+                                    let mut h = h;
+                                    h.range.start =
+                                        backend.translate_php_to_blade(&uri_clone, h.range.start);
+                                    h.range.end =
+                                        backend.translate_php_to_blade(&uri_clone, h.range.end);
+                                    h
+                                })
+                                .collect()
                         })
-                        .collect()
-                })
+                },
+            )
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn linked_editing_range(
@@ -770,51 +820,67 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
-        self.handle_with_position("prepare_rename", &uri, position, |content, pos| {
-            self.handle_prepare_rename(&uri, content, pos)
-                .map(|res| match res {
-                    PrepareRenameResponse::Range(r) => PrepareRenameResponse::Range(Range {
-                        start: self.translate_php_to_blade(&uri, r.start),
-                        end: self.translate_php_to_blade(&uri, r.end),
-                    }),
-                    PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
-                        PrepareRenameResponse::RangeWithPlaceholder {
-                            range: Range {
-                                start: self.translate_php_to_blade(&uri, range.start),
-                                end: self.translate_php_to_blade(&uri, range.end),
-                            },
-                            placeholder,
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position("prepare_rename", &uri_clone, position, |content, pos| {
+                backend
+                    .handle_prepare_rename(&uri_clone, content, pos)
+                    .map(|res| match res {
+                        PrepareRenameResponse::Range(r) => PrepareRenameResponse::Range(Range {
+                            start: backend.translate_php_to_blade(&uri_clone, r.start),
+                            end: backend.translate_php_to_blade(&uri_clone, r.end),
+                        }),
+                        PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
+                            PrepareRenameResponse::RangeWithPlaceholder {
+                                range: Range {
+                                    start: backend.translate_php_to_blade(&uri_clone, range.start),
+                                    end: backend.translate_php_to_blade(&uri_clone, range.end),
+                                },
+                                placeholder,
+                            }
                         }
-                    }
-                    PrepareRenameResponse::DefaultBehavior { default_behavior } => {
-                        PrepareRenameResponse::DefaultBehavior { default_behavior }
-                    }
-                })
+                        PrepareRenameResponse::DefaultBehavior { default_behavior } => {
+                            PrepareRenameResponse::DefaultBehavior { default_behavior }
+                        }
+                    })
+            })
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
-        self.handle_with_position("rename", &uri, position, |content, pos| {
-            self.handle_rename(&uri, content, pos, &params.new_name)
-                .map(|mut edit| {
-                    if let Some(changes) = &mut edit.changes {
-                        for (uri, edits) in changes {
-                            let uri_str = uri.to_string();
-                            if crate::blade::is_blade_file(&uri_str) {
-                                for e in edits {
-                                    e.range.start =
-                                        self.translate_php_to_blade(&uri_str, e.range.start);
-                                    e.range.end =
-                                        self.translate_php_to_blade(&uri_str, e.range.end);
+        let new_name = params.new_name.clone();
+
+        let backend = self.clone_for_blocking();
+        let uri_clone = uri.clone();
+        tokio::task::spawn_blocking(move || {
+            backend.handle_with_position("rename", &uri_clone, position, |content, pos| {
+                backend
+                    .handle_rename(&uri_clone, content, pos, &new_name)
+                    .map(|mut edit| {
+                        if let Some(changes) = &mut edit.changes {
+                            for (uri, edits) in changes {
+                                let uri_str = uri.to_string();
+                                if crate::blade::is_blade_file(&uri_str) {
+                                    for e in edits {
+                                        e.range.start =
+                                            backend.translate_php_to_blade(&uri_str, e.range.start);
+                                        e.range.end =
+                                            backend.translate_php_to_blade(&uri_str, e.range.end);
+                                    }
                                 }
                             }
                         }
-                    }
-                    edit
-                })
+                        edit
+                    })
+            })
         })
+        .await
+        .unwrap_or(Ok(None))
     }
 
     async fn document_symbol(

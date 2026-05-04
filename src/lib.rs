@@ -1049,9 +1049,9 @@ impl Backend {
 
     /// Cheap clone that shares all `Arc`-wrapped state with the original.
     ///
-    /// Used by `goto_implementation` and `references` to move the
+    /// Used by LSP handlers (hover, definition, references, etc.) to move
     /// blocking sync work onto a `spawn_blocking` thread while keeping
-    /// the async runtime free to flush progress notifications.
+    /// the async runtime free to process cancellations and other requests.
     pub(crate) fn clone_for_blocking(&self) -> Self {
         self.clone_for_diagnostic_worker()
     }

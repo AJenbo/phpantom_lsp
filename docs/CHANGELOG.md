@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. The preprocessor transforms Blade syntax into virtual PHP on the fly, with coordinate translation so all editor features report correct positions. ([#100](https://github.com/AJenbo/phpantom_lsp/pull/100) by [@MingJen](https://github.com/MingJen))
 - **Blade keyword highlighting.** Blade directives, echo delimiters, PHP keywords, cast types, comments, and PHPDoc tags inside `.blade.php` files now receive semantic tokens for proper syntax coloring. PHP keywords and cast types are emitted from the AST and shared with `.php` files, so highlighting is fully in sync between both file types.
 
+### Changed
+
+- **LSP responsiveness.** Hover, go-to-definition, go-to-type-definition, signature help, code actions, document highlight, prepare-rename, and rename handlers now run on background threads instead of the async event loop. When one request is slow (e.g. resolving a deep trait hierarchy), other requests and cancellations are no longer blocked.
+
 ### Fixed
 
 - **Type hierarchy registration.** Dynamic registration for type hierarchy is now gated on client capability, preventing errors in editors that don't support it.
