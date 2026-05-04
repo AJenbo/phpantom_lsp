@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777832093381,
+  "lastUpdate": 1777896382195,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6561,6 +6561,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "cb97400fee7d0d8e03193aa78ce2aac9c508192e",
+          "message": "Show post-assignment type when hovering on reassigned variable for\nreassignment in method bodies and conditional blocks.",
+          "timestamp": "2026-05-04T13:55:22+02:00",
+          "tree_id": "6b08b2c6699ff2be23ad8a4890d4cf24ec050259",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/cb97400fee7d0d8e03193aa78ce2aac9c508192e"
+        },
+        "date": 1777896381473,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.7,
             "unit": "MiB"
           }
         ]
