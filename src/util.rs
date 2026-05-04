@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
+use mago_syntax::ast::ModifierSequenceExt;
+
 use crate::php_type::PhpType;
 
 /// Resolve an unqualified or partially-qualified PHP class/function name

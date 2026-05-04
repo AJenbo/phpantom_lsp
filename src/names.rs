@@ -25,10 +25,9 @@ impl OwnedResolvedNames {
     /// Build an `OwnedResolvedNames` by copying every entry out of the
     /// arena-backed `ResolvedNames`.
     pub fn from_resolved(resolved: &mago_names::ResolvedNames<'_>) -> Self {
-        let entries = resolved.all();
-        let mut names = HashMap::with_capacity(entries.len());
-        for (&offset, &(fqn, imported)) in entries {
-            names.insert(offset, (fqn.to_owned(), imported));
+        let mut names = HashMap::with_capacity(resolved.len());
+        for (start, _end, fqn, imported) in resolved.iter() {
+            names.insert(start, (fqn.to_owned(), imported));
         }
         Self { names }
     }

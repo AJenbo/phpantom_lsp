@@ -414,11 +414,7 @@ pub(crate) fn build_use_function_edit(
     let sort_key = format!("function {}", fqn.to_lowercase());
 
     // Skip if this exact function is already imported.
-    if use_block
-        .existing
-        .iter()
-        .any(|(_, k)| k == &sort_key)
-    {
+    if use_block.existing.iter().any(|(_, k)| k == &sort_key) {
         return None;
     }
     let insert_pos = use_block.insert_position_for_key(&sort_key);

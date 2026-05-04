@@ -12,6 +12,7 @@
 //! structured via [`emit_type_spans`] which uses `mago-type-syntax` to
 //! parse types and walk the AST with accurate span information.
 
+use bumpalo::Bump;
 use mago_database::file::FileId;
 use mago_docblock::document::TagKind;
 use mago_span::{HasSpan, Position, Span};
@@ -481,7 +482,9 @@ pub(super) fn emit_type_spans(
         Position::new(effective_token.len() as u32),
     );
 
-    match mago_type_syntax::parse_str(parse_span, effective_token) {
+    let arena = Bump::new();
+    let effective_token = arena.alloc_str(effective_token);
+    match mago_type_syntax::parse_str(&arena, parse_span, effective_token) {
         Ok(ty) => {
             let mut local_spans: Vec<SymbolSpan> = Vec::new();
             emit_type_spans_from_ast(&ty, 0, &mut local_spans);
@@ -662,18 +665,18 @@ fn emit_type_spans_from_ast(
     match ty {
         // ── Composite types ─────────────────────────────────────────
         type_ast::Type::Union(u) => {
-            emit_type_spans_from_ast(&u.left, base_offset, spans);
-            emit_type_spans_from_ast(&u.right, base_offset, spans);
+            emit_type_spans_from_ast(u.left, base_offset, spans);
+            emit_type_spans_from_ast(u.right, base_offset, spans);
         }
         type_ast::Type::Intersection(i) => {
-            emit_type_spans_from_ast(&i.left, base_offset, spans);
-            emit_type_spans_from_ast(&i.right, base_offset, spans);
+            emit_type_spans_from_ast(i.left, base_offset, spans);
+            emit_type_spans_from_ast(i.right, base_offset, spans);
         }
         type_ast::Type::Nullable(n) => {
-            emit_type_spans_from_ast(&n.inner, base_offset, spans);
+            emit_type_spans_from_ast(n.inner, base_offset, spans);
         }
         type_ast::Type::Parenthesized(p) => {
-            emit_type_spans_from_ast(&p.inner, base_offset, spans);
+            emit_type_spans_from_ast(p.inner, base_offset, spans);
         }
 
         // ── Named / Reference types ─────────────────────────────────
@@ -725,13 +728,13 @@ fn emit_type_spans_from_ast(
 
         // ── Slice: T[] ──────────────────────────────────────────────
         type_ast::Type::Slice(s) => {
-            emit_type_spans_from_ast(&s.inner, base_offset, spans);
+            emit_type_spans_from_ast(s.inner, base_offset, spans);
         }
 
         // ── Shape types ─────────────────────────────────────────────
         type_ast::Type::Shape(s) => {
             for field in &s.fields {
-                emit_type_spans_from_ast(&field.value, base_offset, spans);
+                emit_type_spans_from_ast(field.value, base_offset, spans);
             }
         }
 
@@ -739,7 +742,7 @@ fn emit_type_spans_from_ast(
         type_ast::Type::Object(o) => {
             if let Some(props) = &o.properties {
                 for field in &props.fields {
-                    emit_type_spans_from_ast(&field.value, base_offset, spans);
+                    emit_type_spans_from_ast(field.value, base_offset, spans);
                 }
             }
         }
@@ -761,7 +764,7 @@ fn emit_type_spans_from_ast(
                     }
                 }
                 if let Some(ret) = &spec.return_type {
-                    emit_type_spans_from_ast(&ret.return_type, base_offset, spans);
+                    emit_type_spans_from_ast(ret.return_type, base_offset, spans);
                 }
             }
         }
@@ -770,9 +773,9 @@ fn emit_type_spans_from_ast(
         type_ast::Type::Conditional(c) => {
             // The subject is a variable ($param) — skip it.
             // Recurse into the condition, then, and otherwise types.
-            emit_type_spans_from_ast(&c.target, base_offset, spans);
-            emit_type_spans_from_ast(&c.then, base_offset, spans);
-            emit_type_spans_from_ast(&c.otherwise, base_offset, spans);
+            emit_type_spans_from_ast(c.target, base_offset, spans);
+            emit_type_spans_from_ast(c.then, base_offset, spans);
+            emit_type_spans_from_ast(c.otherwise, base_offset, spans);
         }
 
         // ── class-string / interface-string / enum-string / trait-string ─
@@ -807,8 +810,8 @@ fn emit_type_spans_from_ast(
 
         // ── Index access: T[K] ─────────────────────────────────────
         type_ast::Type::IndexAccess(i) => {
-            emit_type_spans_from_ast(&i.target, base_offset, spans);
-            emit_type_spans_from_ast(&i.index, base_offset, spans);
+            emit_type_spans_from_ast(i.target, base_offset, spans);
+            emit_type_spans_from_ast(i.index, base_offset, spans);
         }
 
         // ── int-mask / int-mask-of ──────────────────────────────────

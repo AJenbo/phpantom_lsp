@@ -2310,7 +2310,8 @@ class Real {}
 
     #[test]
     fn use_function_not_captured() {
-        let content = b"<?php\nnamespace App\\Cache;\nuse function is_array;\nuse function array_map;\n";
+        let content =
+            b"<?php\nnamespace App\\Cache;\nuse function is_array;\nuse function array_map;\n";
         let result = find_symbols(content);
         assert!(
             result.functions.is_empty(),

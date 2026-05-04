@@ -17,6 +17,7 @@
 
 use std::fmt;
 
+use bumpalo::Bump;
 use mago_database::file::FileId;
 use mago_span::{Position, Span};
 use mago_type_syntax::ast;
@@ -302,7 +303,9 @@ impl PhpType {
             Position::new(effective.len() as u32),
         );
 
-        match mago_type_syntax::parse_str(span, effective) {
+        let arena = Bump::new();
+        let effective = arena.alloc_str(effective);
+        match mago_type_syntax::parse_str(&arena, span, effective) {
             Ok(ty) => convert(&ty),
             Err(_) => PhpType::Raw(input.to_owned()),
         }
@@ -3898,8 +3901,8 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
             let members = flatten_intersection(ty);
             PhpType::Intersection(members)
         }
-        ast::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(&n.inner))),
-        ast::Type::Parenthesized(p) => convert(&p.inner),
+        ast::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
+        ast::Type::Parenthesized(p) => convert(p.inner),
 
         // -- Named / Reference types ------------------------------------------
         ast::Type::Reference(r) => {
@@ -3935,7 +3938,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         }
 
         // -- Slice: T[] -------------------------------------------------------
-        ast::Type::Slice(s) => PhpType::Array(Box::new(convert(&s.inner))),
+        ast::Type::Slice(s) => PhpType::Array(Box::new(convert(s.inner))),
 
         // -- Shape types ------------------------------------------------------
         ast::Type::Shape(s) => {
@@ -3945,7 +3948,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
                 .map(|field| {
                     let key = field.key.as_ref().map(|k| k.key.to_string());
                     let optional = field.is_optional();
-                    let value_type = convert(&field.value);
+                    let value_type = convert(field.value);
                     ShapeEntry {
                         key,
                         value_type,
@@ -3972,7 +3975,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
                     .map(|field| {
                         let key = field.key.as_ref().map(|k| k.key.to_string());
                         let optional = field.is_optional();
-                        let value_type = convert(&field.value);
+                        let value_type = convert(field.value);
                         ShapeEntry {
                             key,
                             value_type,
@@ -4009,7 +4012,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
                     let return_type = spec
                         .return_type
                         .as_ref()
-                        .map(|rt| Box::new(convert(&rt.return_type)));
+                        .map(|rt| Box::new(convert(rt.return_type)));
                     PhpType::Callable {
                         kind,
                         params,
@@ -4024,9 +4027,9 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
         ast::Type::Conditional(c) => PhpType::Conditional {
             param: c.subject.to_string(),
             negated: c.is_negated(),
-            condition: Box::new(convert(&c.target)),
-            then_type: Box::new(convert(&c.then)),
-            else_type: Box::new(convert(&c.otherwise)),
+            condition: Box::new(convert(c.target)),
+            then_type: Box::new(convert(c.then)),
+            else_type: Box::new(convert(c.otherwise)),
         },
 
         // -- class-string / interface-string ----------------------------------
@@ -4054,7 +4057,7 @@ fn convert(ty: &ast::Type<'_>) -> PhpType {
 
         // -- Index access: T[K] -----------------------------------------------
         ast::Type::IndexAccess(i) => {
-            PhpType::IndexAccess(Box::new(convert(&i.target)), Box::new(convert(&i.index)))
+            PhpType::IndexAccess(Box::new(convert(i.target)), Box::new(convert(i.index)))
         }
 
         // -- Variable (e.g. $this in conditional types) -----------------------
@@ -4133,8 +4136,8 @@ fn convert_keyword_with_optional_generics(
 fn flatten_union(ty: &ast::Type<'_>) -> Vec<PhpType> {
     match ty {
         ast::Type::Union(u) => {
-            let mut types = flatten_union(&u.left);
-            types.extend(flatten_union(&u.right));
+            let mut types = flatten_union(u.left);
+            types.extend(flatten_union(u.right));
             types
         }
         other => vec![convert(other)],
@@ -4145,8 +4148,8 @@ fn flatten_union(ty: &ast::Type<'_>) -> Vec<PhpType> {
 fn flatten_intersection(ty: &ast::Type<'_>) -> Vec<PhpType> {
     match ty {
         ast::Type::Intersection(i) => {
-            let mut types = flatten_intersection(&i.left);
-            types.extend(flatten_intersection(&i.right));
+            let mut types = flatten_intersection(i.left);
+            types.extend(flatten_intersection(i.right));
             types
         }
         other => vec![convert(other)],
@@ -4505,7 +4508,9 @@ mod tests {
             Position::new(0),
             Position::new(input.len() as u32),
         );
-        let mago_canonical = match mago_type_syntax::parse_str(span, input) {
+        let arena = Bump::new();
+        let input_arena = arena.alloc_str(input);
+        let mago_canonical = match mago_type_syntax::parse_str(&arena, span, input_arena) {
             Ok(ty) => ty.to_string(),
             Err(_) => {
                 // If mago can't parse it, PhpType should produce Raw.
