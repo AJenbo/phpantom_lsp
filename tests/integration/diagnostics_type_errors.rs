@@ -3831,3 +3831,34 @@ class Controller {
         "Should not flag bare array from method return as incompatible with typed array param, got: {msgs:?}"
     );
 }
+
+#[test]
+fn no_false_positive_for_property_narrowed_via_instanceof() {
+    let php = r#"<?php
+interface MockInterface {
+    public function shouldReceive(string $name): self;
+}
+
+class EpaymentService {
+    public function annul(): bool { return true; }
+}
+
+class TestCase {
+    private EpaymentService $service;
+
+    protected function mockMethod(MockInterface $mock, string $method): void {}
+
+    public function test(): void {
+        if ($this->service instanceof MockInterface) {
+            $this->mockMethod($this->service, 'annul');
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Property narrowed via instanceof should be accepted as MockInterface, got: {msgs:?}"
+    );
+}

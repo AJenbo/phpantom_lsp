@@ -174,8 +174,7 @@ fn walk_class_string_assignments<'b>(
                 {
                     // Extract class names from the iterated expression
                     // (e.g. `[Page::class, CustomPage::class]`).
-                    let class_names =
-                        extract_class_string_names_from_array(foreach.expression);
+                    let class_names = extract_class_string_names_from_array(foreach.expression);
                     if !class_names.is_empty() {
                         results.clear();
                         for cn in class_names {
@@ -187,9 +186,7 @@ fn walk_class_string_assignments<'b>(
                                 cn
                             };
                             let lookup = short_name(&resolved_name);
-                            if let Some(cls) =
-                                ctx.all_classes.iter().find(|c| c.name == lookup)
-                            {
+                            if let Some(cls) = ctx.all_classes.iter().find(|c| c.name == lookup) {
                                 ClassInfo::push_unique(results, ClassInfo::clone(cls));
                             } else if let Some(cls) = (ctx.class_loader)(&resolved_name) {
                                 ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));

@@ -1359,7 +1359,7 @@ pub(in crate::completion) fn resolve_static_owner_class(
 /// [`super::types::narrowing`] already support property paths via
 /// [`super::types::narrowing::expr_to_subject_key`], so no changes
 /// to those functions are required.
-fn apply_property_narrowing(
+pub(crate) fn apply_property_narrowing(
     property_path: &str,
     current_class: &ClassInfo,
     rctx: &ResolutionCtx<'_>,

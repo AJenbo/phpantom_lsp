@@ -314,7 +314,40 @@ fn resolve_rhs_expression_inner<'b>(
                     return from_scope;
                 }
             }
-            resolve_rhs_property_access(access, ctx)
+            let result = resolve_rhs_property_access(access, ctx);
+            // When no scope_var_resolver is available (e.g. type error
+            // diagnostic), apply property narrowing from enclosing
+            // if-conditions (instanceof checks).  This ensures that
+            // `$this->prop` inside `if ($this->prop instanceof X)`
+            // resolves to X instead of the declared property type.
+            if ctx.scope_var_resolver.is_none()
+                && !result.is_empty()
+                && let Some(key) = crate::completion::types::narrowing::expr_to_subject_key(expr)
+                && key.contains("->")
+            {
+                let rctx = ctx.as_resolution_ctx();
+                let mut classes: Vec<Arc<ClassInfo>> =
+                    result.iter().filter_map(|r| r.class_info.clone()).collect();
+                if !classes.is_empty() {
+                    crate::completion::resolver::apply_property_narrowing(
+                        &key,
+                        ctx.current_class,
+                        &rctx,
+                        &mut classes,
+                    );
+                    // If narrowing changed the classes, return the narrowed result.
+                    let original_names: Vec<&str> = result
+                        .iter()
+                        .filter_map(|r| r.class_info.as_ref().map(|c| c.name.as_str()))
+                        .collect();
+                    let narrowed_names: Vec<&str> =
+                        classes.iter().map(|c| c.name.as_str()).collect();
+                    if original_names != narrowed_names {
+                        return ResolvedType::from_classes(classes);
+                    }
+                }
+            }
+            result
         }
         Expression::Parenthesized(p) => resolve_rhs_expression(p.expression, ctx),
         Expression::Match(match_expr) => {

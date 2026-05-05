@@ -15,7 +15,9 @@
 //! invalidation, classes from unedited files stay cached and the second
 //! pass is significantly faster.
 
-use crate::common::{create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs};
+use crate::common::{
+    create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+};
 use std::time::Instant;
 use tower_lsp::lsp_types::NumberOrString;
 
