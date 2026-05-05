@@ -17,6 +17,7 @@ use mago_syntax::ast::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::diagnostics::undefined_variables::collect_compact_vars;
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessKind, FrameKind, ScopeMap, collect_function_scope_with_kind,
@@ -93,6 +94,7 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut DiagnosticCtx<'_>) {
         Statement::Function(func) => {
             let body_start = func.body.left_brace.start.offset;
             let body_end = func.body.right_brace.end.offset;
+            let compact_vars = collect_compact_vars(func.body.statements.as_slice());
             let scope = collect_function_scope_with_resolver(
                 &func.parameter_list,
                 func.body.statements.as_slice(),
@@ -100,7 +102,7 @@ fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut DiagnosticCtx<'_>) {
                 body_end,
                 None,
             );
-            check_scope(&scope, ctx, None);
+            check_scope(&scope, ctx, None, &compact_vars);
         }
         Statement::Class(class) => {
             collect_from_class_members(class.members.as_slice(), ctx);
@@ -137,6 +139,7 @@ fn collect_from_class_members(members: &[ClassLikeMember<'_>], ctx: &mut Diagnos
             // Collect promoted parameter names so we can exclude them.
             let promoted_params = collect_promoted_params(&method.parameter_list);
 
+            let compact_vars = collect_compact_vars(block.statements.as_slice());
             let scope = collect_function_scope_with_kind(
                 &method.parameter_list,
                 block.statements.as_slice(),
@@ -145,7 +148,7 @@ fn collect_from_class_members(members: &[ClassLikeMember<'_>], ctx: &mut Diagnos
                 FrameKind::Method,
             );
 
-            check_scope(&scope, ctx, Some(&promoted_params));
+            check_scope(&scope, ctx, Some(&promoted_params), &compact_vars);
         }
     }
 }
@@ -173,6 +176,7 @@ fn check_scope(
     scope: &ScopeMap,
     ctx: &mut DiagnosticCtx<'_>,
     promoted_params: Option<&HashSet<String>>,
+    compact_vars: &HashSet<String>,
 ) {
     if scope.frames.is_empty() {
         return;
@@ -268,6 +272,11 @@ fn check_scope(
 
             // Skip variables named $_ or starting with $_
             if var_name == "$_" || var_name.starts_with("$_") {
+                continue;
+            }
+
+            // Skip variables referenced by compact().
+            if compact_vars.contains(var_name) {
                 continue;
             }
 
@@ -1149,5 +1158,36 @@ function foo() {
             exception_diags[0].range.start.line, exception_diags[1].range.start.line,
             "diagnostics should be on different lines"
         );
+    }
+
+    #[test]
+    fn compact_suppresses_unused_variable() {
+        let diags = collect(
+            r#"<?php
+function foo() {
+    $breadcrumb = 'home';
+    $unused = 'x';
+    return view('page', compact('breadcrumb'));
+}
+"#,
+        );
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("$unused"));
+    }
+
+    #[test]
+    fn compact_in_method_suppresses_unused_variable() {
+        let diags = collect(
+            r#"<?php
+class Ctrl {
+    public function show() {
+        $brand = 'x';
+        $series = 'y';
+        return view('page', compact('brand', 'series'));
+    }
+}
+"#,
+        );
+        assert_eq!(diags.len(), 0);
     }
 }

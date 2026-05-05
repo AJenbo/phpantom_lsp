@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Type hierarchy registration.** Dynamic registration for type hierarchy is now gated on client capability, preventing errors in editors that don't support it.
+- **`compact()` variables no longer flagged as unused.** Variables passed by name to `compact('var1', 'var2')` are now recognized as used, eliminating false-positive unused-variable diagnostics in controllers and views.
 - **Eloquent `$dates` and `where{Property}` go-to-definition.** Ctrl+clicking a property backed by the `$dates` array now jumps to the string entry inside `$dates`, matching the behaviour already supported for `$casts`, `$attributes`, `$fillable`, `$guarded`, `$hidden`, `$visible`, and `$appends`. Ctrl+clicking a `where{Property}()` dynamic method (e.g. `whereFlour`, `whereKitchenId`) now jumps to the corresponding column entry in whichever Eloquent array defines that column.
 - **Property `self`/`static` type resolution.** Properties declared with `@var self|null` or `static` type annotations now resolve to the owning class name instead of displaying the raw `self`/`static` keyword in hover and type inference.
 - **Magic `__get` property access.** Accessing undefined properties on objects with a `__get` method now resolves to the method's declared return type, even when `__get` has no template parameters (e.g. `SimpleXMLElement::$child` resolves to `SimpleXMLElement`).

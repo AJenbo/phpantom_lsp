@@ -991,7 +991,7 @@ fn expr_has_extract(expr: &Expression<'_>) -> bool {
 /// Collect variable names referenced by `compact('var1', 'var2', …)`
 /// calls.  These variables are used by string name and should be
 /// considered defined.
-fn collect_compact_vars(statements: &[Statement<'_>]) -> HashSet<String> {
+pub(crate) fn collect_compact_vars(statements: &[Statement<'_>]) -> HashSet<String> {
     let mut vars = HashSet::new();
     for stmt in statements {
         collect_compact_from_stmt(stmt, &mut vars);
