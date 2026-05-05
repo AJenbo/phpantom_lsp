@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778011496366,
+  "lastUpdate": 1778012665982,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6799,6 +6799,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1647d0c7783df47ad99a35f09204e3c351079c16",
+          "message": "Suppress false type errors for type aliases and analyze functions in if\nguards",
+          "timestamp": "2026-05-05T22:12:18+02:00",
+          "tree_id": "2ec180e4d454f0e6c9f01f5f2b75ca851818a6aa",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/1647d0c7783df47ad99a35f09204e3c351079c16"
+        },
+        "date": 1778012665058,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.1,
             "unit": "MiB"
           }
         ]
