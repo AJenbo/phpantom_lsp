@@ -1735,7 +1735,7 @@ pub(crate) fn infer_inline_variable_type(
 
     let current_class = crate::util::find_class_at_offset(all_classes, cursor_offset);
 
-    crate::hover::variable_type::resolve_variable_type(
+    crate::completion::variable::resolution::resolve_variable_php_type(
         var_name,
         effective_content,
         cursor_offset,

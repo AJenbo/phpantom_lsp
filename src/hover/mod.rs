@@ -9,7 +9,6 @@
 //! powers completion.
 
 mod formatting;
-pub(crate) mod variable_type;
 
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
@@ -982,15 +981,17 @@ impl Backend {
         // Try the type-string path first.  This preserves generic
         // parameters (e.g. `Generator<int, Pencil>`) and scalar types
         // (e.g. `int`) that the ClassInfo-based path would lose.
-        if let Some(resolved_type) = variable_type::resolve_variable_type(
-            &var_name,
-            content,
-            cursor_offset,
-            current_class,
-            &ctx.classes,
-            &class_loader,
-            loaders,
-        ) {
+        if let Some(resolved_type) =
+            crate::completion::variable::resolution::resolve_variable_php_type(
+                &var_name,
+                content,
+                cursor_offset,
+                current_class,
+                &ctx.classes,
+                &class_loader,
+                loaders,
+            )
+        {
             // When the type is a template parameter, show its variance
             // and bound (e.g. "**template-covariant** `TNode` of `AstNode`")
             // above the code block so the user sees the constraint.

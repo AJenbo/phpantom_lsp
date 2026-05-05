@@ -158,7 +158,7 @@ fn infer_element_type<'b>(
                 .iter()
                 .find(|c| c.name == ctx.current_class.name)
                 .map(|c| c.as_ref());
-            crate::hover::variable_type::resolve_variable_type(
+            crate::completion::variable::resolution::resolve_variable_php_type(
                 &var_text,
                 ctx.content,
                 offset as u32,

@@ -1056,15 +1056,16 @@ pub(crate) fn resolve_subject_outcome(
     // For bare variables, try the hover fallback for UnresolvableClass
     // detection only.
     if let SubjectExpr::Variable(var_name) = &expr
-        && let Some(resolved_type) = crate::hover::variable_type::resolve_variable_type(
-            var_name,
-            ctx.content,
-            ctx.cursor_offset,
-            ctx.current_class,
-            ctx.all_classes,
-            ctx.class_loader,
-            Loaders::with_function(ctx.function_loader),
-        )
+        && let Some(resolved_type) =
+            crate::completion::variable::resolution::resolve_variable_php_type(
+                var_name,
+                ctx.content,
+                ctx.cursor_offset,
+                ctx.current_class,
+                ctx.all_classes,
+                ctx.class_loader,
+                Loaders::with_function(ctx.function_loader),
+            )
         && let Some(unresolved) = check_unresolvable_class_name(&resolved_type, ctx.class_loader)
     {
         return SubjectOutcome::UnresolvableClass(unresolved);
