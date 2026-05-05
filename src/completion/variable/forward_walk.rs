@@ -8803,10 +8803,10 @@ fn collect_condition_property_keys(expr: &Expression<'_>) -> Vec<String> {
 
 fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys: &mut Vec<String>) {
     match expr {
-        // instanceof: `$a->foo instanceof Foo`
+        // instanceof: `$a->foo instanceof Foo` or `$row["page"] instanceof Foo`
         Expression::Binary(bin) if bin.operator.is_instanceof() => {
             if let Some(key) = narrowing::expr_to_subject_key(bin.lhs)
-                && key.contains("->")
+                && (key.contains("->") || key.contains("[\""))
                 && !keys.contains(&key)
             {
                 keys.push(key);
@@ -8860,7 +8860,7 @@ fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys: &mut Vec<S
                         Argument::Named(named) => named.value,
                     };
                     if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
-                        && key.contains("->")
+                        && (key.contains("->") || key.contains("[\""))
                         && !keys.contains(&key)
                     {
                         keys.push(key);

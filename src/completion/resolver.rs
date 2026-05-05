@@ -35,6 +35,7 @@ use crate::Backend;
 use crate::docblock;
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::PhpType;
+use crate::subject_expr::BracketSegment;
 use crate::subject_expr::SubjectExpr;
 use crate::types::*;
 use crate::util::{find_class_by_name, is_self_or_static, resolve_class_keyword};
@@ -672,6 +673,72 @@ fn resolve_target_classes_expr_inner_impl(
 
         // ── Array access on variable or call expression ─────────
         SubjectExpr::ArrayAccess { base, segments } => {
+            // Check if the scope has a narrowed type for this array
+            // access (e.g. `$row['page']` narrowed via `instanceof`).
+            if let Some(scope_resolver) = ctx.scope_var_resolver {
+                // Build the scope key with double-quote format used by
+                // `expr_to_subject_key` (e.g. `$row["page"]`).
+                let scope_key = {
+                    let mut k = base.to_subject_text();
+                    for seg in segments {
+                        match seg {
+                            BracketSegment::StringKey(s) => {
+                                k.push_str(&format!("[\"{}\"]", s));
+                            }
+                            BracketSegment::ElementAccess => {
+                                k.push_str("[]");
+                            }
+                        }
+                    }
+                    k
+                };
+                let from_scope = scope_resolver(&scope_key);
+                if !from_scope.is_empty() {
+                    return from_scope;
+                }
+            }
+            // When no scope resolver is available (top-level completion),
+            // try resolving the full array access key through the forward
+            // walker.  This picks up instanceof narrowing on array elements
+            // (e.g. `$row['page'] instanceof Page` narrows `$row["page"]`).
+            if ctx.scope_var_resolver.is_none() && matches!(base.as_ref(), SubjectExpr::Variable(_))
+            {
+                let scope_key = {
+                    let mut k = base.to_subject_text();
+                    for seg in segments {
+                        match seg {
+                            BracketSegment::StringKey(s) => {
+                                k.push_str(&format!("[\"{}\"]", s));
+                            }
+                            BracketSegment::ElementAccess => {
+                                k.push_str("[]");
+                            }
+                        }
+                    }
+                    k
+                };
+                let dummy_class;
+                let effective_class = match current_class {
+                    Some(cc) => cc,
+                    None => {
+                        dummy_class = ClassInfo::default();
+                        &dummy_class
+                    }
+                };
+                let resolved = crate::completion::variable::resolution::resolve_variable_types(
+                    &scope_key,
+                    effective_class,
+                    all_classes,
+                    ctx.content,
+                    ctx.cursor_offset,
+                    class_loader,
+                    Loaders::with_function(ctx.function_loader),
+                );
+                if !resolved.is_empty() {
+                    return resolved;
+                }
+            }
+
             // When the base is a call expression (e.g. `$c->items()[0]`),
             // resolve the call's raw return type and use it as a candidate
             // for array-segment walking.  This mirrors the variable path

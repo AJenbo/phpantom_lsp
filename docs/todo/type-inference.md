@@ -481,14 +481,6 @@ design.
 This fixed `Order:646,647` (`json_decode` → `mixed` → `is_object`
 guard → property access).
 
-**Remaining:** `instanceof` narrowing on array element access
-expressions (T20 concern). The narrowing system only matches bare
-variable names (`$var`), not subscript expressions (`$arr[0]`).
-The `PurchaseFileService` case that originally motivated this item
-is now resolved by the `DB::select()` return type patch (B14) combined
-with `stdClass` property access suppression, but the general gap
-remains for any `$arr[$i] instanceof Foo` pattern.
-
 ## T25. Call-site template argument inference for callable parameters
 
 **Impact: Medium · Effort: Medium — partially done**

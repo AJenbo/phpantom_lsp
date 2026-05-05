@@ -535,3 +535,35 @@ async fn test_not_is_array_reassignment_to_array_foreach() {
         methods
     );
 }
+
+// ── instanceof narrowing on array access expressions ────────────────────
+
+#[tokio::test]
+async fn test_instanceof_narrows_array_access_expression() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///instanceof_array_access.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Page {\n",
+        "    public function getId(): int { return 1; }\n",
+        "}\n",
+        "class Table {\n",
+        "    /** @return array<int, array<string, mixed>> */\n",
+        "    public function getRows(): array { return []; }\n",
+        "}\n",
+        "function test(Table $table): void {\n",
+        "    foreach ($table->getRows() as $row) {\n",
+        "        if ($row['page'] instanceof Page) {\n",
+        "            $row['page']->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+    let items = complete_at(&backend, &uri, text, 11, 28).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getId"),
+        "After instanceof narrowing on array access, should see Page methods; got: {:?}",
+        methods
+    );
+}
