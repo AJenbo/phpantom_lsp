@@ -1433,7 +1433,13 @@ fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Co
         Some(positions) => {
             for (idx, arg) in func_call.argument_list.arguments.iter().enumerate() {
                 if positions.contains(&idx) {
-                    walk_expression_as_write(arg.value(), collector);
+                    // By-ref out-parameters are recorded as ReadWrite:
+                    // the variable is "used" by being passed to the
+                    // function, even though the function overwrites it.
+                    // This prevents false "unused variable" diagnostics
+                    // for variables that exist solely to satisfy PHP's API
+                    // (e.g. `getmxrr($domain, $dummy)`).
+                    walk_expression_as_readwrite(arg.value(), collector);
                 } else {
                     walk_expression(arg.value(), collector);
                 }
@@ -1488,7 +1494,7 @@ fn walk_method_call_arguments_inner(
         {
             for (idx, arg) in argument_list.arguments.iter().enumerate() {
                 if positions.contains(&idx) {
-                    walk_expression_as_write(arg.value(), collector);
+                    walk_expression_as_readwrite(arg.value(), collector);
                 } else {
                     walk_expression(arg.value(), collector);
                 }
@@ -1532,7 +1538,7 @@ fn walk_static_method_call_arguments(
         {
             for (idx, arg) in static_call.argument_list.arguments.iter().enumerate() {
                 if positions.contains(&idx) {
-                    walk_expression_as_write(arg.value(), collector);
+                    walk_expression_as_readwrite(arg.value(), collector);
                 } else {
                     walk_expression(arg.value(), collector);
                 }
@@ -1570,7 +1576,7 @@ fn walk_constructor_arguments(
         {
             for (idx, arg) in args.arguments.iter().enumerate() {
                 if positions.contains(&idx) {
-                    walk_expression_as_write(arg.value(), collector);
+                    walk_expression_as_readwrite(arg.value(), collector);
                 } else {
                     walk_expression(arg.value(), collector);
                 }

@@ -724,6 +724,23 @@ function foo($items) {
     }
 
     #[test]
+    fn no_diagnostic_for_byref_out_param() {
+        let diags = collect(
+            r#"<?php
+function test(string $domain): bool {
+    $dummy = [];
+    return getmxrr($domain, $dummy);
+}
+"#,
+        );
+        assert!(
+            !diags.iter().any(|d| d.message.contains("$dummy")),
+            "Got unexpected diagnostic for $dummy: {:?}",
+            diags
+        );
+    }
+
+    #[test]
     fn no_diagnostic_for_foreach_by_reference_binding() {
         let diags = collect(
             r#"<?php
