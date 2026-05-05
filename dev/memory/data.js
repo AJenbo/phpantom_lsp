@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778014731034,
+  "lastUpdate": 1778015425731,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6969,6 +6969,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6dc0a3fd8f40e582889f9a73c431c1546a3e353b",
+          "message": "Resolve Foo::class parameter defaults to FQN in extract_parameters",
+          "timestamp": "2026-05-05T22:58:10+02:00",
+          "tree_id": "db33b592658dd43a1ef67397159021c537d7b2d5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/6dc0a3fd8f40e582889f9a73c431c1546a3e353b"
+        },
+        "date": 1778015424758,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53.8,
             "unit": "MiB"
           }
         ]
