@@ -246,11 +246,21 @@ impl Backend {
         // like `if (! function_exists('...'))`) using the shared helper
         // which recurses into if/block statements.
         let mut functions = Vec::new();
+        // Update doc_ctx with the file's use-map and namespace so that
+        // parameter default values (e.g. `Application::class`) can be
+        // resolved to FQNs during extraction.
+        let func_doc_ctx = DocblockCtx {
+            trivias: doc_ctx.trivias,
+            content: doc_ctx.content,
+            php_version: doc_ctx.php_version,
+            use_map: use_map.clone(),
+            namespace: namespace.clone(),
+        };
         Self::extract_functions_from_statements(
             program.statements.iter(),
             &mut functions,
             &namespace,
-            Some(&doc_ctx),
+            Some(&func_doc_ctx),
         );
         if !functions.is_empty() {
             // Resolve class-like names in function return types and

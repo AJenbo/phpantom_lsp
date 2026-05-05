@@ -5019,11 +5019,20 @@ async fn test_method_template_self_class_resolves_to_enclosing_class() {
     backend.did_open(open_params).await;
 
     let line = text.lines().position(|l| l.contains("$child->")).unwrap() as u32;
-    let col = text.lines().nth(line as usize).unwrap().find("$child->").unwrap() as u32 + 8;
+    let col = text
+        .lines()
+        .nth(line as usize)
+        .unwrap()
+        .find("$child->")
+        .unwrap() as u32
+        + 8;
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
-            position: Position { line, character: col },
+            position: Position {
+                line,
+                character: col,
+            },
         },
         work_done_progress_params: Default::default(),
         partial_result_params: Default::default(),

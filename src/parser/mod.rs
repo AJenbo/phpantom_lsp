@@ -938,7 +938,15 @@ pub(crate) fn extract_parameters(
                 let span = dv.value.span();
                 let start = span.start.offset as usize;
                 let end = span.end.offset as usize;
-                src.get(start..end).map(|s| s.trim().to_string())
+                let raw = src.get(start..end)?.trim().to_string();
+                // Resolve `ClassName::class` to its FQN so that
+                // downstream template substitution can find the class.
+                if let Some(class_name) = raw.strip_suffix("::class") {
+                    let fqn = resolve_default_class_name(class_name, doc_ctx);
+                    Some(format!("{}::class", fqn))
+                } else {
+                    Some(raw)
+                }
             });
 
             ParameterInfo {
@@ -954,6 +962,35 @@ pub(crate) fn extract_parameters(
             }
         })
         .collect()
+}
+
+/// Resolve a class name from a parameter default (`Foo::class`) to its FQN
+/// using the file's use-map and namespace from [`DocblockCtx`].
+fn resolve_default_class_name(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
+    // Already fully-qualified.
+    if let Some(stripped) = name.strip_prefix('\\') {
+        return stripped.to_string();
+    }
+    let Some(ctx) = doc_ctx else {
+        return name.to_string();
+    };
+    // Check use-map (handles `use App\Application;` → "Application" → "App\Application").
+    if let Some(fqn) = ctx.use_map.get(name) {
+        return fqn.clone();
+    }
+    // If the name has a namespace prefix (e.g. `Sub\Foo`), check the first segment.
+    if let Some(first_seg) = name.split('\\').next()
+        && first_seg != name
+        && let Some(base) = ctx.use_map.get(first_seg)
+    {
+        let rest = &name[first_seg.len() + 1..];
+        return format!("{}\\{}", base, rest);
+    }
+    // Prepend file namespace if present.
+    if let Some(ref ns) = ctx.namespace {
+        return format!("{}\\{}", ns, name);
+    }
+    name.to_string()
 }
 
 /// Extract visibility from a set of modifiers.
