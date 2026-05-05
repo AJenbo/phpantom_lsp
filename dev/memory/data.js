@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778012665982,
+  "lastUpdate": 1778012726803,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6833,6 +6833,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3383fc3794ddd1cf20f07f0d6046edf4b4066a96",
+          "message": "Add compute_existence_guards helper and use in diagnostics modules",
+          "timestamp": "2026-05-05T22:13:33+02:00",
+          "tree_id": "1da40fd87c2035c687931d79fd3e4bf2726a5c18",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3383fc3794ddd1cf20f07f0d6046edf4b4066a96"
+        },
+        "date": 1778012725683,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.7,
             "unit": "MiB"
           }
         ]
