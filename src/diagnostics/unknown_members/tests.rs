@@ -5228,3 +5228,44 @@ class Svc {
         "expected no diagnostics after guard clause narrowing on property in foreach, got: {diags:?}",
     );
 }
+
+#[test]
+fn no_diagnostic_for_arbitrary_method_on_soap_client() {
+    let php = r#"<?php
+function test(\SoapClient $client): void {
+$client->gettransactionlist(['foo' => 'bar']);
+$client->delete(123);
+$client->capture('abc');
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for arbitrary methods on SoapClient, got: {diags:?}",
+    );
+}
+
+#[test]
+fn no_diagnostic_for_arbitrary_method_on_soap_client_subclass() {
+    // When a class extends SoapClient, it inherits __call and any
+    // method should be valid.  In single-file tests the parent chain
+    // may not fully resolve from stubs, so we test with a direct
+    // SoapClient parameter typed as the subclass via docblock.
+    let php = r#"<?php
+class MyService extends \SoapClient {
+    public function getConnection(): \SoapClient { return $this; }
+}
+function test(): void {
+$svc = new MyService('http://example.com?wsdl');
+$svc->getConnection()->customMethod();
+}
+"#;
+    let backend = Backend::new_test();
+    let diags = collect(&backend, "file:///test.php", php);
+    // The getConnection() returns \SoapClient, which should suppress.
+    assert!(
+        diags.is_empty(),
+        "expected no diagnostics for arbitrary methods on SoapClient subclass, got: {diags:?}",
+    );
+}

@@ -480,6 +480,13 @@ impl Backend {
                 }
 
                 SubjectOutcome::UnresolvableClass(ref unresolved) => {
+                    // SoapClient is a SOAP proxy where any method is
+                    // valid.  Even if we cannot fully resolve the class,
+                    // suppress the diagnostic.
+                    let type_str = unresolved.to_string();
+                    if type_str == "SoapClient" || type_str == "\\SoapClient" {
+                        continue;
+                    }
                     let range = match self.offset_range_to_lsp_range(
                         uri,
                         content,
@@ -733,6 +740,19 @@ impl Backend {
                     .iter()
                     .any(|c| has_magic_method_for_access(c, is_static, true)));
 
+        // ── SoapClient: suppress diagnostic entirely ────────────────
+        // SoapClient is a SOAP proxy where any method name is valid
+        // (proxied to the remote service).  PHP does not error, and
+        // PHPStan treats all calls as returning mixed.  Suppress the
+        // diagnostic but do not break the chain.
+        if has_magic_call
+            && resolved_classes
+                .iter()
+                .any(|c| is_soap_client(&c.name, class_loader))
+        {
+            return (MemberCheckResult::MagicFallback, diagnostics);
+        }
+
         // ── Member is unresolved on ALL branches — emit diagnostic ──
         let range = match offset_range_to_lsp_range(content, start as usize, end as usize) {
             Some(r) => r,
@@ -943,6 +963,29 @@ fn has_magic_method_for_access(class: &ClassInfo, is_static: bool, is_method_cal
             .any(|m| m.name.eq_ignore_ascii_case("__get"));
     }
 
+    false
+}
+
+/// Returns `true` if `class_name` is `SoapClient` or a class that
+/// ultimately extends `SoapClient`.  SoapClient acts as a SOAP
+/// proxy: any method name is valid and returns mixed at runtime.
+fn is_soap_client(class_name: &str, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+    if class_name == "SoapClient" {
+        return true;
+    }
+    // Walk the parent chain to check if this class extends SoapClient.
+    let mut current = class_loader(class_name);
+    let mut depth = 0;
+    while let Some(cls) = current {
+        if cls.name == "SoapClient" {
+            return true;
+        }
+        depth += 1;
+        if depth > 20 {
+            break;
+        }
+        current = cls.parent_class.as_ref().and_then(|p| class_loader(p));
+    }
     false
 }
 
