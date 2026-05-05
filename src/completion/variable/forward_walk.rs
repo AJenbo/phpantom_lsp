@@ -1627,6 +1627,16 @@ fn walk_top_level_statements<'a, 'b: 'a>(
                     diag_ctx,
                 );
             }
+            // Functions nested inside if blocks (common pattern:
+            // `if (!function_exists('name')) { function name() {} }`)
+            // must be analyzed the same way as top-level functions.
+            Statement::If(if_stmt) => {
+                record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                process_statement(stmt, &mut top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &top_level_scope, &ctx);
+                record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
+            }
             // Top-level code: walk it with the shared scope so that
             // variable assignments accumulate and subsequent accesses
             // can be served from the scope cache instead of remaining
@@ -1637,6 +1647,54 @@ fn walk_top_level_statements<'a, 'b: 'a>(
                 walk_closures_in_statement(stmt, &top_level_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
             }
+        }
+    }
+}
+
+/// Recurse into an if-statement body looking for function declarations
+/// and analyze each one.  Handles the common PHP pattern:
+/// `if (!function_exists('name')) { function name(...) { ... } }`
+fn walk_functions_in_if_body<'b>(
+    body: &'b mago_syntax::ast::control_flow::r#if::IfBody<'b>,
+    default_class: &ClassInfo,
+    diag_ctx: &DiagnosticWalkCtx<'_>,
+) {
+    use mago_syntax::ast::control_flow::r#if::IfBody;
+
+    let statements: &[Statement<'b>] = match body {
+        IfBody::Statement(stmt_body) => {
+            // Single statement body — check if it's a block.
+            if let Statement::Block(block) = stmt_body.statement {
+                block.statements.as_slice()
+            } else if let Statement::Function(func) = stmt_body.statement {
+                analyze_function_body(
+                    func.parameter_list.parameters.iter(),
+                    func.body.statements.iter(),
+                    func.span().start.offset,
+                    default_class,
+                    None,
+                    true,
+                    diag_ctx,
+                );
+                return;
+            } else {
+                return;
+            }
+        }
+        IfBody::ColonDelimited(colon_body) => colon_body.statements.as_slice(),
+    };
+
+    for inner_stmt in statements.iter() {
+        if let Statement::Function(func) = inner_stmt {
+            analyze_function_body(
+                func.parameter_list.parameters.iter(),
+                func.body.statements.iter(),
+                func.span().start.offset,
+                default_class,
+                None,
+                true,
+                diag_ctx,
+            );
         }
     }
 }

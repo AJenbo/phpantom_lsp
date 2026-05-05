@@ -123,10 +123,12 @@ fn is_type_compatible(
     // compatibility without the underlying type, so suppress to avoid
     // false positives.  Namespaced types (containing `\`) are real class
     // references that should still be checked.
-    if let PhpType::Named(name) = param_type {
-        if !name.contains('\\') && !crate::php_type::is_builtin_non_class_type(name) && class_loader(name).is_none() {
-            return true;
-        }
+    if let PhpType::Named(name) = param_type
+        && !name.contains('\\')
+        && !crate::php_type::is_builtin_non_class_type(name)
+        && class_loader(name).is_none()
+    {
+        return true;
     }
 
     // Skip anonymous class arguments.  Anonymous classes are stored
