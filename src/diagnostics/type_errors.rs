@@ -57,6 +57,7 @@ struct ResolvedCallArgs {
 /// Returns `true` when the type is a bare unparameterised `array`.
 fn is_bare_array(ty: &PhpType) -> bool {
     matches!(ty, PhpType::Named(n) if n.eq_ignore_ascii_case("array"))
+        || matches!(ty, PhpType::Array(inner) if inner.is_mixed())
 }
 
 /// Check if an argument type is compatible with a parameter type.

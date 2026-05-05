@@ -15,7 +15,7 @@
 //! invalidation, classes from unedited files stay cached and the second
 //! pass is significantly faster.
 
-use crate::common::{create_psr4_workspace, create_test_backend_with_full_stubs};
+use crate::common::{create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs};
 use std::time::Instant;
 use tower_lsp::lsp_types::NumberOrString;
 
@@ -2094,5 +2094,54 @@ class Calculator {
         "Expected no diagnostics for cross-file self-returning method chains, got {}: {:?}",
         out.len(),
         out.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ─── Foreach over array of ::class literals resolves static access ───────────
+
+#[test]
+fn foreach_class_string_array_static_access_no_false_positive() {
+    let php = r#"<?php
+class Page {
+    public const TABLE_NAME = 'pages';
+}
+
+class Newsletter {
+    public const TABLE_NAME = 'newsletters';
+}
+
+class Controller {
+    public function test(): void {
+        foreach ([Page::class, Newsletter::class] as $className) {
+            echo $className::TABLE_NAME;
+        }
+    }
+}
+"#;
+
+    let uri = "file:///test/foreach_class.php";
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+
+    let mut out = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, php, &mut out);
+
+    let relevant: Vec<_> = out
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+            })
+        })
+        .collect();
+    assert!(
+        relevant.is_empty(),
+        "Should not flag static access on foreach class-string variable, got: {:?}",
+        relevant.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }

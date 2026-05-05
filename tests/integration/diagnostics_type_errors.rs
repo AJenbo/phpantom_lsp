@@ -3803,3 +3803,31 @@ class MyException extends NativeException {}
         "Should not flag Exception subclass as incompatible with Throwable, got: {msgs:?}"
     );
 }
+
+// ─── Bare array (Array(mixed)) passed to typed array parameter ──────────────
+
+#[test]
+fn no_false_positive_bare_array_from_method_call_to_typed_array_param() {
+    let php = r#"<?php
+class ORM {
+    /** @return array */
+    public function getByQuery(string $class, string $query): array { return []; }
+}
+
+class Controller {
+    /** @param array<Item> $items */
+    public function process(array $items): void {}
+
+    public function test(ORM $orm): void {
+        $items = $orm->getByQuery('Item', 'SELECT * FROM items');
+        $this->process($items);
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Should not flag bare array from method return as incompatible with typed array param, got: {msgs:?}"
+    );
+}

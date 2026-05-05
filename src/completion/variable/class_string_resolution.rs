@@ -157,8 +157,56 @@ fn walk_class_string_assignments<'b>(
         if stmt.span().start.offset >= ctx.cursor_offset {
             continue;
         }
-        if let Statement::Expression(expr_stmt) = stmt {
-            check_class_string_assignment(expr_stmt.expression, ctx, results);
+        match stmt {
+            Statement::Expression(expr_stmt) => {
+                check_class_string_assignment(expr_stmt.expression, ctx, results);
+            }
+            Statement::Foreach(foreach) => {
+                // Check if the foreach value variable matches our target
+                // and the iterated expression is an array of ::class literals.
+                let value_expr = foreach.target.value();
+                let value_name = match value_expr {
+                    Expression::Variable(Variable::Direct(dv)) => Some(dv.name.to_string()),
+                    _ => None,
+                };
+                if let Some(name) = value_name
+                    && name == ctx.var_name
+                {
+                    // Extract class names from the iterated expression
+                    // (e.g. `[Page::class, CustomPage::class]`).
+                    let class_names =
+                        extract_class_string_names_from_array(foreach.expression);
+                    if !class_names.is_empty() {
+                        results.clear();
+                        for cn in class_names {
+                            let resolved_name = if let Some(resolved) =
+                                resolve_class_keyword(&cn, Some(ctx.current_class))
+                            {
+                                resolved
+                            } else {
+                                cn
+                            };
+                            let lookup = short_name(&resolved_name);
+                            if let Some(cls) =
+                                ctx.all_classes.iter().find(|c| c.name == lookup)
+                            {
+                                ClassInfo::push_unique(results, ClassInfo::clone(cls));
+                            } else if let Some(cls) = (ctx.class_loader)(&resolved_name) {
+                                ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
+                            }
+                        }
+                    }
+                }
+                // Also walk the foreach body for nested assignments.
+                let body_stmts: Vec<&Statement> = match &foreach.body {
+                    mago_syntax::ast::ForeachBody::Statement(s) => vec![s],
+                    mago_syntax::ast::ForeachBody::ColonDelimited(b) => {
+                        b.statements.iter().collect()
+                    }
+                };
+                walk_class_string_assignments(body_stmts.into_iter(), ctx, results);
+            }
+            _ => {}
         }
     }
 }
@@ -230,6 +278,34 @@ fn extract_class_string_names(expr: &Expression<'_>) -> Vec<String> {
             let mut names = Vec::new();
             names.extend(extract_class_string_names(binary.lhs));
             names.extend(extract_class_string_names(binary.rhs));
+            names
+        }
+        _ => vec![],
+    }
+}
+
+/// Extract class names from array elements that are `::class` literals.
+///
+/// Handles `[Page::class, CustomPage::class]` and similar array
+/// expressions used as foreach iterables.
+fn extract_class_string_names_from_array(expr: &Expression<'_>) -> Vec<String> {
+    match expr {
+        Expression::Array(array) => {
+            let mut names = Vec::new();
+            for item in array.elements.iter() {
+                if let ArrayElement::Value(val) = item {
+                    names.extend(extract_class_string_names(val.value));
+                }
+            }
+            names
+        }
+        Expression::LegacyArray(array) => {
+            let mut names = Vec::new();
+            for item in array.elements.iter() {
+                if let ArrayElement::Value(val) = item {
+                    names.extend(extract_class_string_names(val.value));
+                }
+            }
             names
         }
         _ => vec![],
