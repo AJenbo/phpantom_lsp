@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777986139601,
+  "lastUpdate": 1777992400586,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6731,6 +6731,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "291ddfc4f08b3177cff8a3ad723c8b86b7142cb8",
+          "message": "Handle compound OR guard clause narrowing in guard clauses",
+          "timestamp": "2026-05-05T16:34:56+02:00",
+          "tree_id": "3171baf1c15ea8591979397ede74667860a0f1c7",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/291ddfc4f08b3177cff8a3ad723c8b86b7142cb8"
+        },
+        "date": 1777992399949,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.7,
             "unit": "MiB"
           }
         ]
