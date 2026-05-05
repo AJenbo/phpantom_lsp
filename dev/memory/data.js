@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778023909222,
+  "lastUpdate": 1778023978059,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7207,6 +7207,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "17f52134f87beab254799d52a75501a23de76d10",
+          "message": "feat: instanceof narrowing on array access expressions\n\nAfter `if ($row['page'] instanceof Page)`, the type of\n$row['page'] inside the if-body is now narrowed to Page.\n\nThis eliminates false-positive unresolved_member_access diagnostics\non patterns like $row['page']->getId() that are guarded by an\ninstanceof check.",
+          "timestamp": "2026-05-06T01:20:50+02:00",
+          "tree_id": "87de858814cf5f8b7b045f80afcdf32a7a328b19",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/17f52134f87beab254799d52a75501a23de76d10"
+        },
+        "date": 1778023977450,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53,
             "unit": "MiB"
           }
         ]
