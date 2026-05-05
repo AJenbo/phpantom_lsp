@@ -117,6 +117,18 @@ fn is_type_compatible(
         return true;
     }
 
+    // Skip when the param type is a Named type that can't be loaded as a
+    // class and has no namespace separator — it's likely a @phpstan-type /
+    // @psalm-type alias that we couldn't expand.  We can't verify
+    // compatibility without the underlying type, so suppress to avoid
+    // false positives.  Namespaced types (containing `\`) are real class
+    // references that should still be checked.
+    if let PhpType::Named(name) = param_type {
+        if !name.contains('\\') && !crate::php_type::is_builtin_non_class_type(name) && class_loader(name).is_none() {
+            return true;
+        }
+    }
+
     // Skip anonymous class arguments.  Anonymous classes are stored
     // with synthetic names (`__anonymous@<offset>`) that are not
     // indexed globally, so the class loader cannot resolve their
