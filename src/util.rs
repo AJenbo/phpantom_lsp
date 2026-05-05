@@ -875,6 +875,8 @@ pub(crate) fn is_subtype_of(
 
     // Walk the parent class chain (parent_class is also a resolved FQN).
     let mut current_parent = class.parent_class.map(|a| a.to_string());
+    let mut visited_parents: std::collections::HashSet<String> = std::collections::HashSet::new();
+    visited_parents.insert(class.fqn().to_string());
     let mut depth = 0u32;
     while let Some(ref name) = current_parent {
         depth += 1;
@@ -887,6 +889,9 @@ pub(crate) fn is_subtype_of(
         // Load the parent to check its interfaces (transitively)
         // and continue the class chain.
         if let Some(parent_info) = class_loader(name) {
+            // Check parent's interfaces before cycle detection so that
+            // even when the class_loader's use-map shadows a global class
+            // name (returning the wrong class), we still examine interfaces.
             let mut p_iface_queue: Vec<String> = parent_info
                 .interfaces
                 .iter()
@@ -910,6 +915,57 @@ pub(crate) fn is_subtype_of(
                         p_iface_queue.push(pc.to_string());
                     }
                 }
+            }
+            // Cycle detection: if the loaded class's FQN was already
+            // visited, the class_loader's use-map may have shadowed a
+            // global class name with a same-file import (e.g.
+            // `use App\Exceptions\Exception;` makes class_loader("Exception")
+            // return App\Exceptions\Exception instead of global \Exception).
+            // Try bypassing the use-map by passing a namespace-qualified
+            // synthetic name that triggers the class_loader's short-name
+            // fallback path.
+            if !visited_parents.insert(parent_info.fqn().to_string()) {
+                // The name is a root-namespace FQN being shadowed by the
+                // use-map.  Try the class_loader with a synthetic qualified
+                // name — this skips the use-map check (which only fires for
+                // unqualified names) and falls through to the short-name
+                // fallback that calls find_or_load_class(short_name).
+                if !name.contains('\\') {
+                    let synthetic = format!("__fqn__\\{}", name);
+                    if let Some(real_parent) = class_loader(&synthetic) {
+                        // Successfully bypassed the use-map cycle.
+                        // Check this parent's interfaces for the ancestor.
+                        let mut rp_iface_queue: Vec<String> = real_parent
+                            .interfaces
+                            .iter()
+                            .map(|a| a.to_string())
+                            .collect();
+                        let mut rp_visited: std::collections::HashSet<String> =
+                            rp_iface_queue.iter().cloned().collect();
+                        while let Some(iface_name) = rp_iface_queue.pop() {
+                            if iface_name == ancestor {
+                                return true;
+                            }
+                            if let Some(iface_info) = class_loader(&iface_name) {
+                                for pi in &iface_info.interfaces {
+                                    if rp_visited.insert(pi.to_string()) {
+                                        rp_iface_queue.push(pi.to_string());
+                                    }
+                                }
+                                if let Some(ref pc) = iface_info.parent_class
+                                    && rp_visited.insert(pc.to_string())
+                                {
+                                    rp_iface_queue.push(pc.to_string());
+                                }
+                            }
+                        }
+                        // Continue walking from the real parent
+                        visited_parents.insert(real_parent.fqn().to_string());
+                        current_parent = real_parent.parent_class.map(|a| a.to_string());
+                        continue;
+                    }
+                }
+                break;
             }
             current_parent = parent_info.parent_class.map(|a| a.to_string());
         } else {

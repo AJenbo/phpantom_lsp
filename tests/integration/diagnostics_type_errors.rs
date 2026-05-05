@@ -3763,3 +3763,43 @@ function bar(string $s): void {}
         "Expected no type errors for array access on bare array, got: {msgs:?}"
     );
 }
+
+/// When a file imports a namespaced class under the same short name as a
+/// global class (e.g. `use App\Exceptions\Exception;`), the class_loader's
+/// use-map shadows the global `\Exception` during hierarchy walks.  This
+/// must not produce a false positive when the imported class ultimately
+/// extends the global class that implements the expected interface.
+#[test]
+fn no_false_positive_when_use_map_shadows_global_parent() {
+    let php = r#"<?php
+namespace App\Http;
+
+use App\Exceptions\MyException;
+use Throwable;
+
+function report(Throwable $e): void {}
+
+function test(): void {
+    report(new MyException('oops'));
+}
+"#;
+
+    let backend = create_test_backend();
+    let exception_php = r#"<?php
+namespace App\Exceptions;
+
+use Exception as NativeException;
+
+class MyException extends NativeException {}
+"#;
+    backend.update_ast("file:///app/Exceptions/MyException.php", exception_php);
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_type_error_diagnostics("file:///test.php", php, &mut out);
+    let msgs = type_error_messages(&out);
+    assert!(
+        msgs.is_empty(),
+        "Should not flag Exception subclass as incompatible with Throwable, got: {msgs:?}"
+    );
+}
