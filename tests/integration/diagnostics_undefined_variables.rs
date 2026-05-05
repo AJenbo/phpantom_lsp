@@ -70,7 +70,7 @@ function test(): void {
     assert_eq!(diags.len(), 1);
     assert_eq!(
         diags[0].code,
-        Some(NumberOrString::String("undefined_variable".to_string())),
+        Some(NumberOrString::String("unknown_variable".to_string())),
     );
     assert_eq!(diags[0].source, Some("phpantom".to_string()));
 }

@@ -393,19 +393,19 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 ("unknown_function", &|b, u, c, o| {
                                     b.collect_unknown_function_diagnostics(u, c, o)
                                 }),
-                                ("argument_count", &|b, u, c, o| {
+                                ("argument_count_mismatch", &|b, u, c, o| {
                                     b.collect_argument_count_diagnostics(u, c, o)
                                 }),
-                                ("type_error", &|b, u, c, o| {
+                                ("type_mismatch_argument", &|b, u, c, o| {
                                     b.collect_type_error_diagnostics(u, c, o)
                                 }),
-                                ("implementation", &|b, u, c, o| {
+                                ("missing_implementation", &|b, u, c, o| {
                                     b.collect_implementation_error_diagnostics(u, c, o)
                                 }),
-                                ("deprecated", &|b, u, c, o| {
+                                ("deprecated_usage", &|b, u, c, o| {
                                     b.collect_deprecated_diagnostics(u, c, o)
                                 }),
-                                ("undefined_variable", &|b, u, c, o| {
+                                ("unknown_variable", &|b, u, c, o| {
                                     b.collect_undefined_variable_diagnostics(u, c, o)
                                 }),
                                 ("invalid_class_kind", &|b, u, c, o| {

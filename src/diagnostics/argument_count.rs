@@ -33,7 +33,7 @@ use crate::types::ResolvedCallableTarget;
 use super::helpers::make_diagnostic;
 
 /// Diagnostic code used for argument-count diagnostics.
-pub(crate) const ARGUMENT_COUNT_CODE: &str = "argument_count";
+pub(crate) const ARGUMENT_COUNT_MISMATCH_CODE: &str = "argument_count_mismatch";
 
 /// Alternative minimum argument counts for built-in functions whose
 /// signatures in phpstorm-stubs declare more required parameters than
@@ -337,7 +337,7 @@ impl Backend {
                 out.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
-                    ARGUMENT_COUNT_CODE,
+                    ARGUMENT_COUNT_MISMATCH_CODE,
                     message,
                 ));
                 continue;
@@ -380,7 +380,7 @@ impl Backend {
                 out.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
-                    ARGUMENT_COUNT_CODE,
+                    ARGUMENT_COUNT_MISMATCH_CODE,
                     message,
                 ));
             }
@@ -817,7 +817,9 @@ function test(): void {
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("argument_count".to_string())),
+            Some(NumberOrString::String(
+                "argument_count_mismatch".to_string()
+            )),
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }

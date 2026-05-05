@@ -31,7 +31,7 @@ use crate::util::is_subtype_of_typed;
 use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
 
 /// Diagnostic code used for argument type mismatch diagnostics.
-pub(crate) const TYPE_ERROR_ARGUMENT_CODE: &str = "type_error.argument";
+pub(crate) const TYPE_MISMATCH_ARGUMENT_CODE: &str = "type_mismatch_argument";
 
 // ── Resolved argument info ──────────────────────────────────────────────────
 
@@ -1647,7 +1647,7 @@ impl Backend {
                 out.push(make_diagnostic(
                     range,
                     DiagnosticSeverity::ERROR,
-                    TYPE_ERROR_ARGUMENT_CODE,
+                    TYPE_MISMATCH_ARGUMENT_CODE,
                     message,
                 ));
             }

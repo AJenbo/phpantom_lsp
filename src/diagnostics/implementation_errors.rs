@@ -125,7 +125,7 @@ impl Backend {
             out.push(Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("implementation_error".to_string())),
+                code: Some(NumberOrString::String("missing_implementation".to_string())),
                 code_description: None,
                 source: Some("phpantom".to_string()),
                 message,
@@ -378,7 +378,7 @@ class Baz implements Foo {}
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("implementation_error".to_string()))
+            Some(NumberOrString::String("missing_implementation".to_string()))
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }

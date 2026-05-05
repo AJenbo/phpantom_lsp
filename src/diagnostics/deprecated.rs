@@ -340,7 +340,7 @@ fn deprecated_diagnostic(
     Diagnostic {
         range,
         severity: Some(DiagnosticSeverity::HINT),
-        code: Some(NumberOrString::String("deprecated".to_string())),
+        code: Some(NumberOrString::String("deprecated_usage".to_string())),
         code_description: None,
         source: Some("phpantom".to_string()),
         message,

@@ -64,7 +64,7 @@ use super::helpers::make_diagnostic;
 
 /// Diagnostic code used for undefined-variable diagnostics so that
 /// code actions can match on it.
-pub(crate) const UNDEFINED_VARIABLE_CODE: &str = "undefined_variable";
+pub(crate) const UNKNOWN_VARIABLE_CODE: &str = "unknown_variable";
 
 /// PHP superglobals and auto-defined variables that are always in scope.
 const SUPERGLOBALS: &[&str] = &[
@@ -107,7 +107,7 @@ impl Backend {
             self.resolve_by_ref_positions(call_kind, &file_use_map, &file_namespace)
         };
 
-        with_parsed_program(content, "undefined_variable", |program, content| {
+        with_parsed_program(content, "unknown_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
                 backend: self,
                 uri,
@@ -482,7 +482,7 @@ fn check_scope(
             ctx.diagnostics.push(make_diagnostic(
                 range,
                 DiagnosticSeverity::ERROR,
-                UNDEFINED_VARIABLE_CODE,
+                UNKNOWN_VARIABLE_CODE,
                 message,
             ));
         }
@@ -1811,7 +1811,7 @@ function test(): void {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("undefined_variable".to_string())),
+            Some(NumberOrString::String("unknown_variable".to_string())),
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }

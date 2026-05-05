@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn is_phpstan_rule_without_prefix() {
         assert!(!is_phpstan_rule("unused_import"));
-        assert!(!is_phpstan_rule("deprecated"));
+        assert!(!is_phpstan_rule("deprecated_usage"));
     }
 
     // ── End-to-end through fix_unused_imports ────────────────────────

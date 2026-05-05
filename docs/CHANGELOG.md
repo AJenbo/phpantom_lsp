@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Diagnostic code identifiers.** Standardised all diagnostic codes to a consistent `snake_case` noun-phrase scheme: `undefined_variable` → `unknown_variable`, `type_error.argument` → `type_mismatch_argument`, `argument_count` → `argument_count_mismatch`, `deprecated` → `deprecated_usage`, `implementation_error` → `missing_implementation`. Users with editor filters or scripts that match on these codes will need to update them.
 - **LSP responsiveness.** Hover, go-to-definition, go-to-type-definition, signature help, code actions, document highlight, prepare-rename, and rename handlers now run on background threads instead of the async event loop. When one request is slow (e.g. resolving a deep trait hierarchy), other requests and cancellations are no longer blocked.
 
 ### Fixed

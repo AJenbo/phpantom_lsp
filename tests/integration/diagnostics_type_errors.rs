@@ -23,9 +23,9 @@ fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
 
 fn has_type_error(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "type_error.argument"))
+        d.code.as_ref().is_some_and(
+            |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+        )
     })
 }
 
@@ -34,7 +34,7 @@ fn type_error_messages(diags: &[Diagnostic]) -> Vec<String> {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_error.argument"),
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
             )
         })
         .map(|d| d.message.clone())
@@ -414,7 +414,7 @@ function test(): void {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_error.argument"),
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
             )
         })
         .collect();
@@ -2601,7 +2601,7 @@ function test(): void {
         .filter(|d| {
             d.code
                 == Some(tower_lsp::lsp_types::NumberOrString::String(
-                    "type_error.argument".to_string(),
+                    "type_mismatch_argument".to_string(),
                 ))
         })
         .collect();

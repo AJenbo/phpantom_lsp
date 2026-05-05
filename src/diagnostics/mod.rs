@@ -1,7 +1,30 @@
 //! Diagnostics — collect and deliver LSP diagnostics for PHP files.
 //!
 //! This module collects diagnostics from multiple providers and delivers
-//! them to the editor.  Two delivery models are supported:
+//! them to the editor.
+//!
+//! ## Diagnostic code naming convention
+//!
+//! Every diagnostic has a `code` string that identifies the rule. When adding
+//! a new diagnostic, follow these rules:
+//!
+//! 1. **All `snake_case`, no dots or other separators.**
+//! 2. **Codes read as noun phrases describing the problem**, not bare
+//!    categories. Prefer `argument_count_mismatch` over `argument_count`.
+//! 3. **`unknown_*`** — symbol could not be resolved (class, function,
+//!    member, variable).
+//! 4. **`unused_*`** — symbol is defined/imported but never referenced.
+//! 5. **`type_mismatch_*`** — a value's type doesn't satisfy a constraint.
+//! 6. **`missing_*`** — a required declaration is absent (e.g.
+//!    `missing_implementation` for unimplemented interface methods).
+//! 7. **`invalid_*`** — a structural/syntactic violation (e.g.
+//!    `invalid_class_kind`).
+//! 8. **`deprecated_usage`** — usage of a deprecated symbol.
+//! 9. **`syntax_error`** — parser-level errors.
+//! 10. **`unresolved_*`** — the analyser couldn't determine the type of an
+//!     expression (opt-in coverage hints).
+//!
+//! Two delivery models are supported:
 //!
 //! - **Pull model** (`textDocument/diagnostic`, LSP 3.17) — the editor
 //!   requests diagnostics when it needs them.  Only visible files are
@@ -2318,7 +2341,7 @@ mod tests {
         let diag2 = make_diagnostic(
             range,
             DiagnosticSeverity::HINT,
-            "deprecated",
+            "deprecated_usage",
             "Method 'foo' is deprecated",
         );
         let mut diags = vec![diag1, diag2];
