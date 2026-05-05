@@ -511,6 +511,53 @@ function test(Animal $pet): string {
     );
 }
 
+/// Verify that compound OR guard clause narrowing works.
+///
+/// When the condition is `!$x instanceof A || <other>` and the body
+/// exits, after the if `$x` should be narrowed to `A`.
+#[test]
+fn compound_or_guard_clause_narrows_instanceof() {
+    let php = r#"<?php
+interface UserContract {
+    public function getId(): int;
+}
+class User implements UserContract {
+    public int $department_id;
+    public function getId(): int { return 1; }
+}
+
+function test(UserContract $user, ?int $dept_id): int {
+    if (! $user instanceof User || $dept_id === null) {
+        return 0;
+    }
+    return $user->department_id;
+}
+"#;
+
+    let uri = "file:///test/compound_or_guard.php";
+    let backend = create_test_backend_with_full_stubs();
+    backend.update_ast(uri, php);
+
+    let mut out = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, php, &mut out);
+
+    let relevant: Vec<_> = out
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(|c| {
+                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+            })
+        })
+        .collect();
+
+    assert!(
+        relevant.is_empty(),
+        "Expected no diagnostics for OR guard clause narrowing, got {}: {:?}",
+        relevant.len(),
+        relevant.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 /// Verify that `match(true)` arm conditions narrow variables in the
 /// arm body via the diagnostic scope cache.
 ///

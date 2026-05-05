@@ -3126,6 +3126,37 @@ fn collect_and_chain_operands_inner<'b>(
     out.push(expr);
 }
 
+fn collect_or_chain_operands<'b>(expr: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    let mut operands = Vec::new();
+    collect_or_chain_operands_inner(expr, &mut operands);
+    operands
+}
+
+fn collect_or_chain_operands_inner<'b>(
+    expr: &'b Expression<'b>,
+    out: &mut Vec<&'b Expression<'b>>,
+) {
+    if let Expression::Binary(bin) = expr
+        && matches!(
+            bin.operator,
+            BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+        )
+    {
+        collect_or_chain_operands_inner(bin.lhs, out);
+        collect_or_chain_operands_inner(bin.rhs, out);
+        return;
+    }
+    // Also unwrap parenthesised `||` chains.
+    if let Expression::Parenthesized(inner) = expr {
+        let inner_ops = collect_or_chain_operands(inner.expression);
+        if inner_ops.len() > 1 {
+            out.extend(inner_ops);
+            return;
+        }
+    }
+    out.push(expr);
+}
+
 /// Walk an expression tree looking for `match(true)` arms and ternary
 /// `instanceof` patterns.  When found, clone the scope, apply per-arm
 /// or per-branch narrowing, and record scope snapshots so that member
@@ -7558,6 +7589,23 @@ fn apply_condition_narrowing_inverse<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // Decompose `||` chains: NOT (A || B) = !A && !B.
+    // Each operand's inverse is applied sequentially (intersection
+    // semantics: all must hold simultaneously).
+    let or_operands = collect_or_chain_operands(condition);
+    if or_operands.len() > 1 {
+        for operand in &or_operands {
+            apply_condition_narrowing_inverse_single(operand, scope, ctx);
+        }
+        // Type guard, null, phpstan-assert, and in_array narrowing
+        // operate on the full condition expression.
+        apply_type_guard_narrowing_inverse(condition, scope);
+        apply_null_narrowing_inverse(condition, scope, ctx);
+        apply_phpstan_assert_condition_narrowing(condition, scope, ctx, true);
+        apply_in_array_narrowing(condition, scope, ctx, true);
+        return;
+    }
+
     // Decompose `&&` chains so that each operand is processed
     // individually.  For guard clauses like
     // `if (!$x instanceof A && !$x instanceof B) { return; }`,
