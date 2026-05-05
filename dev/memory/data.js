@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778015997622,
+  "lastUpdate": 1778019472396,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7037,6 +7037,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "671395214543e3053d6f360107af01a05d940ef0",
+          "message": "Suppress unknown member diagnostics for arbitrary SoapClient methods",
+          "timestamp": "2026-05-06T00:05:20+02:00",
+          "tree_id": "4b946bc13088cce0395e03d6214de972fa8eac05",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/671395214543e3053d6f360107af01a05d940ef0"
+        },
+        "date": 1778019470677,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.9,
             "unit": "MiB"
           }
         ]
