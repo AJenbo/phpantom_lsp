@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777992400586,
+  "lastUpdate": 1778011496366,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6765,6 +6765,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5477907be93bcb956fed322392f2973556ee6779",
+          "message": "Standardise diagnostic codes to consistent snake_case scheme",
+          "timestamp": "2026-05-05T21:52:50+02:00",
+          "tree_id": "508f07042c86b7f059cd24efc2c5e0bb27a56db5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/5477907be93bcb956fed322392f2973556ee6779"
+        },
+        "date": 1778011495033,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.6,
             "unit": "MiB"
           }
         ]
