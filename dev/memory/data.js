@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778023978059,
+  "lastUpdate": 1778024100031,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7241,6 +7241,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5a64ad90fac6d24329a2db65974b8929d17f04e5",
+          "message": "Update phpstorm-stubs",
+          "timestamp": "2026-05-06T01:23:12+02:00",
+          "tree_id": "d4cb8bd01ed2fbb5f572e9ef2554df232b28f16e",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/5a64ad90fac6d24329a2db65974b8929d17f04e5"
+        },
+        "date": 1778024099437,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.4,
             "unit": "MiB"
           }
         ]
