@@ -23,7 +23,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
-use super::helpers::{compute_use_line_ranges, is_offset_in_ranges, make_diagnostic};
+use super::helpers::{
+    compute_existence_guards, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic,
+};
 
 /// Diagnostic code used for unknown-function diagnostics.
 pub(crate) const UNKNOWN_FUNCTION_CODE: &str = "unknown_function";
@@ -48,6 +50,11 @@ const LANGUAGE_CONSTRUCTS: &[&str] = &[
     "compact",
     "extract",
     "assert",
+    "function_exists",
+    "class_exists",
+    "method_exists",
+    "property_exists",
+    "defined",
 ];
 
 impl Backend {
@@ -76,6 +83,9 @@ impl Backend {
 
         // ── Compute byte ranges of `use` statement lines ────────────────
         let use_line_ranges = compute_use_line_ranges(content);
+
+        // ── Compute existence guards ────────────────────────────────────
+        let existence_guards = compute_existence_guards(content);
 
         // ── Collect local function definition names ─────────────────────
         // Functions defined in the same file are always resolvable even
@@ -133,6 +143,11 @@ impl Backend {
                 .resolve_function_name(name, &file_use_map, &file_namespace)
                 .is_some()
             {
+                continue;
+            }
+
+            // ── Skip functions guarded by function_exists() ──────────────
+            if existence_guards.is_function_guarded(name, span.start) {
                 continue;
             }
 
@@ -515,6 +530,78 @@ class Test {
             out.is_empty(),
             "No diagnostics expected for use-function imported calls named after type keywords, got: {:?}",
             out,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_when_guarded_by_function_exists() {
+        let php = r#"<?php
+function test(): void {
+    if (function_exists('maybe')) {
+        maybe();
+    }
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "No diagnostics expected for function guarded by function_exists(), got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_when_negated_function_exists_with_early_return() {
+        let php = r#"<?php
+function test(): void {
+    if (!function_exists('maybe')) return;
+    maybe();
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "No diagnostics expected after negated function_exists with early return, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_when_negated_function_exists_with_throw() {
+        let php = r#"<?php
+function test(): void {
+    if (!function_exists('maybe')) {
+        throw new \RuntimeException('missing');
+    }
+    maybe();
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "No diagnostics expected after negated function_exists with throw, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn still_flags_when_negated_without_early_exit() {
+        // Negated check without early exit is a polyfill definition pattern,
+        // should NOT suppress diagnostics for the function elsewhere.
+        let php = r#"<?php
+function test(): void {
+    if (!function_exists('maybe')) {
+        // just logging, no return/throw
+        echo 'not found';
+    }
+    maybe();
+}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("maybe")),
+            "Expected unknown function diagnostic for maybe() without early exit guard, got: {:?}",
+            diags,
         );
     }
 }

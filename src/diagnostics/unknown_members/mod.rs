@@ -88,7 +88,7 @@ use crate::symbol_map::SymbolKind;
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
+use super::helpers::{compute_existence_guards, find_innermost_enclosing_class, make_diagnostic};
 use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for unknown-member diagnostics so that code
@@ -256,6 +256,9 @@ impl Backend {
         let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
         let resolved_cache = &self.resolved_class_cache;
 
+        // ── Compute existence guards ────────────────────────────────────
+        let existence_guards = compute_existence_guards(content);
+
         // ── Parse cache for this diagnostic pass ────────────────────────
         // The file content is immutable during a single diagnostic pass.
         // Activating the thread-local parse cache means every call to
@@ -299,9 +302,25 @@ impl Backend {
                     _ => continue,
                 };
 
-            // ── Skip the magic `::class` constant ───────────────────────
+            // ── Skip the magic `::class` constant ───────────────────
             if member_name == "class" && is_static {
                 continue;
+            }
+
+            // ── Skip members guarded by method_exists() ───────────────
+            if existence_guards.is_method_guarded(member_name, span.start) {
+                continue;
+            }
+
+            // ── Skip members on classes guarded by class_exists() ─────
+            // When the subject is a static access on a class guarded by
+            // class_exists(), suppress unknown member diagnostics too.
+            if is_static {
+                // The subject_text for static access is typically the class name.
+                let class_name = subject_text.trim();
+                if existence_guards.is_class_guarded(class_name, span.start) {
+                    continue;
+                }
             }
 
             let access_kind = if is_static {

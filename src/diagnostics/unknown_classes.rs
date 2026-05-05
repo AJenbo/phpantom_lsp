@@ -28,7 +28,8 @@ use crate::symbol_map::SymbolKind;
 use crate::types::ClassInfo;
 
 use super::helpers::{
-    ByteRange, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
+    ByteRange, compute_existence_guards, compute_use_line_ranges, is_offset_in_ranges,
+    make_diagnostic, resolve_to_fqn,
 };
 
 /// Diagnostic code used for unknown-class diagnostics so that code
@@ -83,12 +84,15 @@ impl Backend {
         // declarations, not actual usages — skip them.
         let use_line_ranges = compute_use_line_ranges(content);
 
-        // ── Compute byte ranges of `#[...]` attribute blocks ────────────
+        // ── Compute byte ranges of `#[...]` attribute blocks ──────────
         // Attribute class names (e.g. `\JetBrains\PhpStorm\Deprecated`)
         // are a declaration concern — the PHP runtime resolves them, and
         // users don't expect "not found" warnings on attributes from
         // unindexed dependencies.
         let attribute_ranges = compute_attribute_ranges(content);
+
+        // ── Compute existence guards ────────────────────────────────────
+        let existence_guards = compute_existence_guards(content);
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
@@ -184,6 +188,13 @@ impl Backend {
 
             // 4. Check the stub index directly (global built-in classes).
             if self.stub_index.read().contains_key(fqn.as_str()) {
+                continue;
+            }
+
+            // ── Skip classes guarded by class_exists() ─────────────────
+            if existence_guards.is_class_guarded(&fqn, span.start)
+                || existence_guards.is_class_guarded(ref_name, span.start)
+            {
                 continue;
             }
 
