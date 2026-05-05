@@ -161,32 +161,376 @@ pub(crate) fn resolve_variable_types(
     })
 }
 
-/// Resolve variable types (branch-aware variant).
+/// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].
 ///
-/// Historically this produced narrower results than
-/// [`resolve_variable_types`] by only considering the branch containing
-/// the cursor.  The forward walker now inherently produces
-/// position-accurate types, so the two functions behave identically.
-/// This entry point is kept for API compatibility with hover and
-/// diagnostics callers that pass `branch_aware: true`.
-pub(crate) fn resolve_variable_types_branch_aware(
+/// This is the **single entry point** for all consumers that need to
+/// answer "what is the type of `$var` at this offset?"  It wraps the
+/// forward walker ([`resolve_variable_types`]) and converts the result
+/// to a `PhpType`, incorporating:
+///
+/// - Inline `/** @var Type $var */` docblock overrides (unless the
+///   cursor is inside the RHS of a self-referential assignment).
+/// - The forward walker's branch-aware narrowing.
+/// - Proper preference logic: the forward walker result wins when it
+///   applies narrowing (e.g. array shape key null-stripping through
+///   guard clauses); the `@var` override wins otherwise.
+///
+/// Consumers: hover, go-to-type-definition, find-references (variable
+/// subject resolution), deprecated diagnostics, code actions.
+pub(crate) fn resolve_variable_php_type(
     var_name: &str,
-    current_class: &ClassInfo,
-    all_classes: &[Arc<ClassInfo>],
     content: &str,
     cursor_offset: u32,
+    current_class: Option<&ClassInfo>,
+    all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     loaders: Loaders<'_>,
-) -> Vec<ResolvedType> {
-    resolve_variable_types(
-        var_name,
-        current_class,
+) -> Option<PhpType> {
+    // Ensure the variable name is $-prefixed for docblock lookups.
+    let prefixed = if var_name.starts_with('$') {
+        var_name.to_owned()
+    } else {
+        format!("${}", var_name)
+    };
+
+    // 1. Inline @var override (skip for self-assignment RHS).
+    let var_override: Option<PhpType> = if let Some(var_type) =
+        docblock::find_var_raw_type_in_source(content, cursor_offset as usize, &prefixed)
+        && !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed)
+    {
+        Some(crate::util::resolve_php_type_names(&var_type, class_loader))
+    } else {
+        None
+    };
+
+    // 2. Forward walker resolution.
+    let dummy_class;
+    let effective_class = match current_class {
+        Some(cc) => cc,
+        None => {
+            dummy_class = ClassInfo::default();
+            &dummy_class
+        }
+    };
+
+    // Activate the hover scope cache when NOT inside a self-assignment RHS.
+    if !is_cursor_in_self_assignment_rhs(content, cursor_offset as usize, &prefixed) {
+        super::forward_walk::activate_hover_scope_cache(content);
+    }
+
+    let resolved = resolve_variable_types(
+        &prefixed,
+        effective_class,
         all_classes,
         content,
         cursor_offset,
         class_loader,
         loaders,
-    )
+    );
+
+    if !resolved.is_empty() {
+        let joined = ResolvedType::types_joined(&resolved);
+
+        // When the forward walk produced a result and we have a @var
+        // override, prefer the forward walk when it narrowed the type
+        // (shape entries with condition-based null stripping).
+        if let Some(ref vo) = var_override {
+            if !vo.equivalent(&joined) && vo.shape_entries().is_some() {
+                return Some(joined);
+            }
+            return Some(vo.clone());
+        }
+
+        return Some(joined);
+    }
+
+    // 3. Parameter definition site fallback.
+    //    When the cursor is on a parameter declaration (inside the
+    //    parameter list, not the body), the forward walker won't find
+    //    it because it only processes body statements.  Parse the file
+    //    and check if the cursor is on a parameter with a type hint.
+    let param_type = with_parsed_program(content, "resolve_var_param_site", |program, _| {
+        let stmts: Vec<&Statement> = program.statements.iter().collect();
+        find_param_type_at_cursor(&stmts, &prefixed, cursor_offset, content)
+            .or_else(|| find_catch_var_type_at_cursor(&stmts, &prefixed, cursor_offset))
+    });
+    if param_type.is_some() {
+        return param_type;
+    }
+
+    // Fall back to the @var override.
+    var_override
+}
+
+/// Check whether `cursor_offset` falls inside the RHS of an assignment
+/// like `$var = $var->…` on the same line.  Used to avoid applying an
+/// inline `@var` cast to the RHS reference.
+fn is_cursor_in_self_assignment_rhs(content: &str, cursor_offset: usize, var_name: &str) -> bool {
+    let before = match content.get(..cursor_offset) {
+        Some(b) => b,
+        None => return false,
+    };
+    let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
+
+    let after = match content.get(cursor_offset..) {
+        Some(a) => a,
+        None => return false,
+    };
+    let line_end = after
+        .find('\n')
+        .map_or(content.len(), |pos| cursor_offset + pos);
+
+    let line = match content.get(line_start..line_end) {
+        Some(l) => l,
+        None => return false,
+    };
+
+    let needle = format!("{} = ", var_name);
+    if let Some(assign_pos) = line.find(&needle) {
+        let rhs_start_in_line = assign_pos + needle.len();
+        let cursor_in_line = cursor_offset - line_start;
+        let rhs = &line[rhs_start_in_line..];
+        if cursor_in_line >= rhs_start_in_line && rhs.contains(var_name) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if the cursor is on a parameter definition and return its type.
+///
+/// Walks namespaces, classes, and functions to find a parameter list
+/// that contains `cursor_offset` with a parameter matching `var_name`.
+fn find_param_type_at_cursor(
+    stmts: &[&Statement<'_>],
+    var_name: &str,
+    cursor_offset: u32,
+    content: &str,
+) -> Option<PhpType> {
+    use mago_span::HasSpan;
+
+    for stmt in stmts {
+        match stmt {
+            Statement::Namespace(ns) => {
+                let inner: Vec<&Statement> = ns.statements().iter().collect();
+                if let Some(t) = find_param_type_at_cursor(&inner, var_name, cursor_offset, content)
+                {
+                    return Some(t);
+                }
+            }
+            Statement::Class(class) => {
+                for member in class.members.iter() {
+                    if let ClassLikeMember::Method(method) = member
+                        && let Some(t) = check_param_list(
+                            &method.parameter_list,
+                            var_name,
+                            cursor_offset,
+                            content,
+                            method.span().start.offset as usize,
+                        )
+                    {
+                        return Some(t);
+                    }
+                }
+            }
+            Statement::Trait(trait_def) => {
+                for member in trait_def.members.iter() {
+                    if let ClassLikeMember::Method(method) = member
+                        && let Some(t) = check_param_list(
+                            &method.parameter_list,
+                            var_name,
+                            cursor_offset,
+                            content,
+                            method.span().start.offset as usize,
+                        )
+                    {
+                        return Some(t);
+                    }
+                }
+            }
+            Statement::Enum(enum_def) => {
+                for member in enum_def.members.iter() {
+                    if let ClassLikeMember::Method(method) = member
+                        && let Some(t) = check_param_list(
+                            &method.parameter_list,
+                            var_name,
+                            cursor_offset,
+                            content,
+                            method.span().start.offset as usize,
+                        )
+                    {
+                        return Some(t);
+                    }
+                }
+            }
+            Statement::Interface(iface) => {
+                for member in iface.members.iter() {
+                    if let ClassLikeMember::Method(method) = member
+                        && let Some(t) = check_param_list(
+                            &method.parameter_list,
+                            var_name,
+                            cursor_offset,
+                            content,
+                            method.span().start.offset as usize,
+                        )
+                    {
+                        return Some(t);
+                    }
+                }
+            }
+            Statement::Function(func) => {
+                if let Some(t) = check_param_list(
+                    &func.parameter_list,
+                    var_name,
+                    cursor_offset,
+                    content,
+                    func.span().start.offset as usize,
+                ) {
+                    return Some(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Check if a parameter list contains the cursor and has a matching
+/// parameter with a type hint.
+fn check_param_list(
+    param_list: &FunctionLikeParameterList<'_>,
+    var_name: &str,
+    cursor_offset: u32,
+    content: &str,
+    method_start_offset: usize,
+) -> Option<PhpType> {
+    use mago_span::HasSpan;
+
+    let span = param_list.span();
+    if cursor_offset < span.start.offset || cursor_offset > span.end.offset {
+        return None;
+    }
+
+    for param in param_list.parameters.iter() {
+        let pname = param.variable.name.to_string();
+        if pname != var_name {
+            continue;
+        }
+
+        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
+
+        // Try @param docblock type.
+        let docblock_type =
+            docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
+                .or_else(|| {
+                    // Try extracting from docblock text directly.
+                    find_method_docblock_text(content, method_start_offset)
+                        .and_then(|doc| docblock::extract_param_raw_type(&doc, &pname))
+                });
+
+        let effective =
+            docblock::resolve_effective_type_typed(native_type.as_ref(), docblock_type.as_ref());
+
+        if effective.is_some() {
+            return effective;
+        }
+        return native_type;
+    }
+    None
+}
+
+/// Extract the raw docblock text preceding a method/function.
+fn find_method_docblock_text(content: &str, method_start: usize) -> Option<String> {
+    let before = content.get(..method_start)?;
+    let trimmed = before.trim_end();
+    if !trimmed.ends_with("*/") {
+        return None;
+    }
+    let doc_end = trimmed.len();
+    let doc_start = trimmed.rfind("/**")?;
+    Some(trimmed[doc_start..doc_end].to_string())
+}
+
+/// Check if the cursor is on a catch variable binding and return its type.
+fn find_catch_var_type_at_cursor(
+    stmts: &[&Statement<'_>],
+    var_name: &str,
+    cursor_offset: u32,
+) -> Option<PhpType> {
+    use mago_span::HasSpan;
+
+    for stmt in stmts {
+        let stmt_span = stmt.span();
+        if cursor_offset < stmt_span.start.offset || cursor_offset > stmt_span.end.offset {
+            continue;
+        }
+        match stmt {
+            Statement::Try(try_stmt) => {
+                for catch in try_stmt.catch_clauses.iter() {
+                    if let Some(ref var) = catch.variable
+                        && var.name == var_name
+                    {
+                        let var_start = var.span.start.offset;
+                        let var_end = var.span.end.offset;
+                        if cursor_offset >= var_start && cursor_offset <= var_end {
+                            return Some(extract_hint_type(&catch.hint));
+                        }
+                    }
+                }
+                // Recurse into try/catch/finally bodies.
+                let try_stmts: Vec<&Statement> = try_stmt.block.statements.iter().collect();
+                if let Some(t) = find_catch_var_type_at_cursor(&try_stmts, var_name, cursor_offset)
+                {
+                    return Some(t);
+                }
+                for catch in try_stmt.catch_clauses.iter() {
+                    let catch_stmts: Vec<&Statement> = catch.block.statements.iter().collect();
+                    if let Some(t) =
+                        find_catch_var_type_at_cursor(&catch_stmts, var_name, cursor_offset)
+                    {
+                        return Some(t);
+                    }
+                }
+                if let Some(ref finally) = try_stmt.finally_clause {
+                    let fin_stmts: Vec<&Statement> = finally.block.statements.iter().collect();
+                    if let Some(t) =
+                        find_catch_var_type_at_cursor(&fin_stmts, var_name, cursor_offset)
+                    {
+                        return Some(t);
+                    }
+                }
+            }
+            Statement::Namespace(ns) => {
+                let inner: Vec<&Statement> = ns.statements().iter().collect();
+                if let Some(t) = find_catch_var_type_at_cursor(&inner, var_name, cursor_offset) {
+                    return Some(t);
+                }
+            }
+            Statement::Class(class) => {
+                for member in class.members.iter() {
+                    if let ClassLikeMember::Method(method) = member
+                        && let MethodBody::Concrete(body) = &method.body
+                    {
+                        let body_stmts: Vec<&Statement> = body.statements.iter().collect();
+                        if let Some(t) =
+                            find_catch_var_type_at_cursor(&body_stmts, var_name, cursor_offset)
+                        {
+                            return Some(t);
+                        }
+                    }
+                }
+            }
+            Statement::Function(func) => {
+                let body_stmts: Vec<&Statement> = func.body.statements.iter().collect();
+                if let Some(t) = find_catch_var_type_at_cursor(&body_stmts, var_name, cursor_offset)
+                {
+                    return Some(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Walk a sequence of top-level statements to find the class or

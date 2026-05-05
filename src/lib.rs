@@ -136,6 +136,7 @@ pub mod stub_patches;
 pub mod stubs;
 pub mod subject_expr;
 pub(crate) mod subject_extraction;
+pub(crate) mod subject_resolution;
 pub(crate) mod symbol_map;
 pub(crate) mod toposort;
 mod type_hierarchy;

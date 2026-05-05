@@ -17,11 +17,9 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::Loaders;
 use crate::diagnostics::offset_range_to_lsp_range;
 use crate::symbol_map::SymbolKind;
-use crate::types::{ClassInfo, ResolvedType};
-use crate::util::resolve_to_fqn;
+use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
 
 /// File-level context needed for subject resolution.
@@ -498,82 +496,30 @@ fn resolve_subject_to_class(
     content: &str,
     backend: &Backend,
 ) -> Option<ClassInfo> {
-    let trimmed = subject_text.trim();
+    let class_loader = backend.class_loader_with(ctx.local_classes, ctx.use_map, ctx.namespace);
+    let function_loader = backend.function_loader_with(ctx.use_map, ctx.namespace);
+    let res_ctx = crate::subject_resolution::SubjectResolutionCtx {
+        local_classes: ctx.local_classes,
+        use_map: ctx.use_map,
+        namespace: ctx.namespace,
+        content,
+        class_loader: &class_loader,
+        function_loader: &function_loader,
+    };
 
-    match trimmed {
-        "self" | "static" | "$this" => {
-            let cls = ctx
-                .local_classes
-                .iter()
-                .find(|c| {
-                    !c.name.starts_with("__anonymous@")
-                        && access_offset >= c.start_offset
-                        && access_offset <= c.end_offset
-                })
-                .or_else(|| {
-                    ctx.local_classes
-                        .iter()
-                        .find(|c| !c.name.starts_with("__anonymous@"))
-                })?;
-            let fqn = if let Some(ns) = ctx.namespace {
-                format!("{}\\{}", ns, cls.name)
-            } else {
-                cls.name.to_string()
-            };
-            backend
-                .find_or_load_class(&fqn)
-                .map(|arc| ClassInfo::clone(&arc))
-        }
-        "parent" => {
-            let cls = ctx
-                .local_classes
-                .iter()
-                .find(|c| !c.name.starts_with("__anonymous@") && c.parent_class.is_some())?;
-            let parent = cls.parent_class.as_ref()?;
-            let fqn = resolve_to_fqn(parent, ctx.use_map, ctx.namespace);
-            backend
-                .find_or_load_class(&fqn)
-                .map(|arc| ClassInfo::clone(&arc))
-        }
-        _ if is_static && !trimmed.starts_with('$') => {
-            let fqn = resolve_to_fqn(trimmed, ctx.use_map, ctx.namespace);
-            backend
-                .find_or_load_class(&fqn)
-                .map(|arc| ClassInfo::clone(&arc))
-        }
-        _ if trimmed.starts_with('$') => {
-            // Variable — use variable resolution.
-            let enclosing_class = ctx
-                .local_classes
-                .iter()
-                .find(|c| {
-                    !c.name.starts_with("__anonymous@")
-                        && access_offset >= c.start_offset
-                        && access_offset <= c.end_offset
-                })
-                .map(|c| ClassInfo::clone(c))
-                .unwrap_or_default();
+    let php_type = crate::subject_resolution::resolve_subject_type(
+        subject_text,
+        is_static,
+        access_offset,
+        &res_ctx,
+    )?;
 
-            let function_loader = backend.function_loader_with(ctx.use_map, ctx.namespace);
-            let class_loader =
-                backend.class_loader_with(ctx.local_classes, ctx.use_map, ctx.namespace);
-
-            let results = ResolvedType::into_classes(
-                crate::completion::variable::resolution::resolve_variable_types(
-                    trimmed,
-                    &enclosing_class,
-                    ctx.local_classes,
-                    content,
-                    access_offset,
-                    &class_loader,
-                    Loaders::with_function(Some(&function_loader)),
-                ),
-            );
-
-            results.into_iter().next()
-        }
-        _ => None,
-    }
+    // Load the first class from the resolved type.
+    php_type
+        .top_level_class_names()
+        .into_iter()
+        .find_map(|name| backend.find_or_load_class(&name))
+        .map(|arc| ClassInfo::clone(&arc))
 }
 
 #[cfg(test)]

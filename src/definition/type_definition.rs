@@ -17,7 +17,6 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::resolver::{Loaders, ResolutionCtx};
-use crate::hover::variable_type;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::types::*;
@@ -277,8 +276,6 @@ fn resolve_variable_type_names(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
 ) -> Option<PhpType> {
-    let var_name = format!("${}", name);
-
     // $this resolves to the enclosing class, but not in static methods.
     if name == "this" {
         let in_static =
@@ -294,59 +291,20 @@ fn resolve_variable_type_names(
         return current_class.map(|cc| PhpType::Named(cc.name.to_string()));
     }
 
-    // Try the type-string path first (preserves generics, union types).
-    if let Some(resolved_type) = variable_type::resolve_variable_type(
-        &var_name,
+    // Delegate to the unified pipeline.
+    let resolved = crate::completion::variable::resolution::resolve_variable_php_type(
+        name,
         content,
         cursor_offset,
         current_class,
         &ctx.classes,
         class_loader,
-        crate::completion::resolver::Loaders::with_function(Some(function_loader)),
-    ) && !resolved_type.top_level_class_names().is_empty()
-    {
-        return Some(resolved_type);
-    }
-
-    // Fall back to ClassInfo-based resolution.
-    let dummy_class;
-    let effective_class = match current_class {
-        Some(cc) => cc,
-        None => {
-            dummy_class = ClassInfo::default();
-            &dummy_class
-        }
-    };
-
-    let types = ResolvedType::into_classes(
-        crate::completion::variable::resolution::resolve_variable_types(
-            &var_name,
-            effective_class,
-            &ctx.classes,
-            content,
-            cursor_offset,
-            class_loader,
-            Loaders::with_function(Some(function_loader)),
-        ),
+        Loaders::with_function(Some(function_loader)),
     );
 
-    let class_names: Vec<String> = types
-        .into_iter()
-        .map(|c| c.name.to_string())
-        .filter(|n| !crate::php_type::is_scalar_name_pub(n))
-        .collect();
-
-    if class_names.is_empty() {
-        return None;
-    }
-
-    if class_names.len() == 1 {
-        Some(PhpType::Named(class_names.into_iter().next().unwrap()))
-    } else {
-        Some(PhpType::Union(
-            class_names.into_iter().map(PhpType::Named).collect(),
-        ))
-    }
+    // Only return types that contain at least one class name (scalars
+    // are not useful for go-to-type-definition).
+    resolved.filter(|t| !t.top_level_class_names().is_empty())
 }
 
 #[cfg(test)]

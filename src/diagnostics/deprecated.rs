@@ -368,57 +368,27 @@ fn resolve_subject_to_class_name(
 ) -> Option<String> {
     let trimmed = subject_text.trim();
 
-    match trimmed {
-        "self" | "static" => {
-            // Find the enclosing class in this file
-            find_enclosing_class_fqn(local_classes, file_namespace, access_offset)
-        }
-        "parent" => {
-            // Find the enclosing class that actually has a parent.
-            // Prefer a class whose offset range contains the access site
-            // and that has `parent_class` set — that's the one where
-            // `parent::` is meaningful.  Fall back to any non-anonymous
-            // class with a parent, then to the first non-anonymous class
-            // (shouldn't happen in valid code, but be defensive).
-            let cls = local_classes
-                .iter()
-                .find(|c| {
-                    !c.name.starts_with("__anonymous@")
-                        && c.parent_class.is_some()
-                        && access_offset >= c.start_offset
-                        && access_offset <= c.end_offset
-                })
-                .or_else(|| {
-                    local_classes
-                        .iter()
-                        .find(|c| !c.name.starts_with("__anonymous@") && c.parent_class.is_some())
-                })
-                .or_else(|| {
-                    local_classes
-                        .iter()
-                        .find(|c| !c.name.starts_with("__anonymous@"))
-                });
-            cls.and_then(|c| {
-                c.parent_class
-                    .as_ref()
-                    .map(|p| resolve_to_fqn(p, file_use_map, file_namespace))
-            })
-        }
-        "$this" => find_enclosing_class_fqn(local_classes, file_namespace, access_offset),
-        _ if is_static && !trimmed.starts_with('$') => {
-            // Static access on a class name: `ClassName::method()`
-            Some(resolve_to_fqn(trimmed, file_use_map, file_namespace))
-        }
-        _ if trimmed.starts_with('$') => {
-            // Variable access — resolved separately by
-            // resolve_variable_subject().
-            None
-        }
-        _ => {
-            // Could be a function return or expression — skip for now
-            None
-        }
+    // Variables are resolved separately by the full resolver pipeline.
+    if trimmed.starts_with('$') && trimmed != "$this" {
+        return None;
     }
+
+    // Use the shared subject resolution utility for keywords and bare
+    // class names.  We pass a dummy function loader (not needed for
+    // non-variable subjects) and a dummy class loader.
+    let dummy_class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+    let dummy_function_loader = |_: &str| -> Option<crate::types::FunctionInfo> { None };
+    let ctx = crate::subject_resolution::SubjectResolutionCtx {
+        local_classes,
+        use_map: file_use_map,
+        namespace: file_namespace,
+        content: "",
+        class_loader: &dummy_class_loader,
+        function_loader: &dummy_function_loader,
+    };
+
+    crate::subject_resolution::resolve_subject_type(subject_text, is_static, access_offset, &ctx)
+        .and_then(|t| t.top_level_class_names().into_iter().next())
 }
 
 /// Resolve a subject expression to a `ClassInfo` using the full resolver
@@ -445,29 +415,4 @@ fn resolve_variable_subject(
         }
         _ => None,
     }
-}
-
-/// Find the FQN of the first non-anonymous class in the file (heuristic
-/// for the "enclosing class" in single-class-per-file projects).
-fn find_enclosing_class_fqn(
-    local_classes: &[Arc<ClassInfo>],
-    file_namespace: &Option<String>,
-    offset: u32,
-) -> Option<String> {
-    // Find the non-anonymous class whose byte range contains the offset.
-    // Fall back to the first non-anonymous class for top-level code
-    // outside any class body.
-    let cls = local_classes
-        .iter()
-        .find(|c| {
-            !c.name.starts_with("__anonymous@")
-                && offset >= c.start_offset
-                && offset <= c.end_offset
-        })
-        .or_else(|| {
-            local_classes
-                .iter()
-                .find(|c| !c.name.starts_with("__anonymous@"))
-        })?;
-    Some(crate::util::build_fqn(&cls.name, file_namespace.as_deref()))
 }

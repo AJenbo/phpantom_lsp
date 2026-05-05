@@ -30,9 +30,8 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
-use crate::completion::resolver::Loaders;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap};
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, ResolvedType};
+use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::{
     build_fqn, collect_php_files_gitignore, find_class_at_offset, offset_to_position,
     position_to_offset, push_unique_location, strip_fqn_prefix,
@@ -884,8 +883,8 @@ impl Backend {
     ///
     /// This is a lightweight resolution path used during reference scanning.
     /// It handles the common cases (`self`, `static`, `$this`, `parent`,
-    /// bare class name for static access, and typed `$variable` parameters)
-    /// without the full weight of the completion resolver.
+    /// Resolve a member-access subject to the FQN(s) of its type(s)
+    /// using the shared subject resolution utility.
     fn resolve_subject_to_fqns(
         &self,
         subject_text: &str,
@@ -894,83 +893,30 @@ impl Backend {
         access_offset: u32,
         content: &str,
     ) -> Vec<String> {
-        let trimmed = subject_text.trim();
-
-        match trimmed {
-            "$this" | "self" | "static" => {
-                if let Some(cls) =
-                    self.find_enclosing_class_fqn(&ctx.classes, &ctx.namespace, access_offset)
-                {
-                    return vec![cls];
-                }
-                Vec::new()
-            }
-            "parent" => {
-                if let Some(cc) = find_class_at_offset(&ctx.classes, access_offset)
-                    && let Some(ref parent) = cc.parent_class
-                {
-                    let fqn = ctx.resolve_name_at(parent, access_offset);
-                    return vec![normalize_fqn(&fqn)];
-                }
-                Vec::new()
-            }
-            _ if is_static && !trimmed.starts_with('$') => {
-                // Bare class name for static access: `ClassName::method()`.
-                let fqn = ctx.resolve_name_at(trimmed, access_offset);
-                vec![normalize_fqn(&fqn)]
-            }
-            _ if trimmed.starts_with('$') => {
-                // Variable — try variable type resolution.
-                self.resolve_variable_to_fqns(trimmed, ctx, access_offset, content)
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    /// Try to resolve a variable to its class FQN(s) using the type
-    /// resolution engine.
-    fn resolve_variable_to_fqns(
-        &self,
-        var_name: &str,
-        ctx: &crate::types::FileContext,
-        cursor_offset: u32,
-        content: &str,
-    ) -> Vec<String> {
-        let enclosing_class = find_class_at_offset(&ctx.classes, cursor_offset)
-            .cloned()
-            .unwrap_or_default();
-
         let class_loader = self.class_loader(ctx);
         let function_loader = self.function_loader(ctx);
+        let ctx = crate::subject_resolution::SubjectResolutionCtx {
+            local_classes: &ctx.classes,
+            use_map: &ctx.use_map,
+            namespace: &ctx.namespace,
+            content,
+            class_loader: &class_loader,
+            function_loader: &function_loader,
+        };
 
-        let resolved = ResolvedType::into_classes(
-            crate::completion::variable::resolution::resolve_variable_types(
-                var_name,
-                &enclosing_class,
-                &ctx.classes,
-                content,
-                cursor_offset,
-                &class_loader,
-                Loaders::with_function(Some(&function_loader)),
-            ),
-        );
-
-        resolved
-            .into_iter()
-            .map(|ci| normalize_fqn(&ci.fqn()))
-            .collect()
-    }
-
-    /// Find the FQN of the class enclosing a given byte offset.
-    fn find_enclosing_class_fqn(
-        &self,
-        classes: &[Arc<ClassInfo>],
-        namespace: &Option<String>,
-        offset: u32,
-    ) -> Option<String> {
-        let cc = find_class_at_offset(classes, offset)?;
-        let fqn = build_fqn(&cc.name, namespace.as_deref());
-        Some(normalize_fqn(&fqn))
+        match crate::subject_resolution::resolve_subject_type(
+            subject_text,
+            is_static,
+            access_offset,
+            &ctx,
+        ) {
+            Some(php_type) => php_type
+                .top_level_class_names()
+                .into_iter()
+                .map(|n| normalize_fqn(&n))
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     /// Collect the full class hierarchy (ancestors and descendants) for
