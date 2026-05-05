@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778015425731,
+  "lastUpdate": 1778015997622,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7003,6 +7003,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "987def927af1505187fb63e56220a70081436e2a",
+          "message": "Fix false type errors when use-map shadows global class names",
+          "timestamp": "2026-05-05T23:08:09+02:00",
+          "tree_id": "2f4a0ff6b81dadfdb2b22407285192a94c60789e",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/987def927af1505187fb63e56220a70081436e2a"
+        },
+        "date": 1778015996282,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.9,
             "unit": "MiB"
           }
         ]
