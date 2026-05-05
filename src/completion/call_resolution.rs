@@ -2444,6 +2444,19 @@ impl Backend {
                 .chars()
                 .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
         {
+            // self::class / static::class / parent::class resolve relative
+            // to the class at the call site.
+            if name.eq_ignore_ascii_case("self") || name.eq_ignore_ascii_case("static") {
+                return ctx
+                    .current_class
+                    .map(|c| PhpType::Named(c.fqn().to_string()));
+            }
+            if name.eq_ignore_ascii_case("parent") {
+                return ctx
+                    .current_class
+                    .and_then(|c| c.parent_class.as_ref())
+                    .map(|p| PhpType::Named(p.to_string()));
+            }
             let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
                 cls.fqn().to_string()
             } else {

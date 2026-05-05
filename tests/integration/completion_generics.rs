@@ -4979,6 +4979,77 @@ async fn test_method_template_general_does_not_break_class_string() {
     }
 }
 
+/// `self::class` passed to a `class-string<T>` template parameter should
+/// resolve T to the enclosing class, not the class that owns the method.
+#[tokio::test]
+async fn test_method_template_self_class_resolves_to_enclosing_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///self_class_tpl.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class OrmService {\n",
+        "    /**\n",
+        "     * @template T of AbstractEntity\n",
+        "     * @param class-string<T> $class\n",
+        "     * @return T[]\n",
+        "     */\n",
+        "    public function getByQuery(string $class, string $query): array {}\n",
+        "}\n",
+        "class AbstractEntity {}\n",
+        "class Category extends AbstractEntity {\n",
+        "    public function isVisible(): bool {}\n",
+        "    public function getChildren(): array {\n",
+        "        $children = (new OrmService())->getByQuery(self::class, 'SELECT 1');\n",
+        "        foreach ($children as $child) {\n",
+        "            $child->\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let line = text.lines().position(|l| l.contains("$child->")).unwrap() as u32;
+    let col = text.lines().nth(line as usize).unwrap().find("$child->").unwrap() as u32 + 8;
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position { line, character: col },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: None,
+    };
+    let result = backend.completion(completion_params).await.unwrap();
+    assert!(result.is_some(), "Completion should return results");
+
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
+                .collect();
+
+            assert!(
+                method_names.contains(&"isVisible"),
+                "self::class should resolve T to Category, got methods: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// $this->method($arg) inside a class body via assignment.
 /// Verifies the AST-based resolve_rhs_expression path.
 #[tokio::test]
