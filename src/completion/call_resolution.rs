@@ -2008,23 +2008,29 @@ impl Backend {
             let arg_text = match arg_texts.get(param_idx) {
                 Some(text) => text.trim(),
                 None => {
-                    // No argument was provided at the call site.  If the
-                    // parameter has a default value of `null`, resolve the
-                    // template param to `null`.  This handles the common
-                    // pattern `@template TDefault` with
-                    // `@param TDefault $default = null` where the caller
-                    // omits the argument — e.g. `Collection::first()`
-                    // returns `TValue|TFirstDefault` and `TFirstDefault`
-                    // should become `null` when no default is passed.
+                    // No argument was provided at the call site.  Fall
+                    // back to the parameter's default value so that
+                    // template params can be inferred from defaults
+                    // (e.g. `app()` with `$name = Application::class`).
                     if let Some(param) = method.parameters.get(param_idx)
-                        && param.default_value.as_deref().is_some_and(|d| d == "null")
+                        && let Some(default) = param.default_value.as_deref()
                         && !subs.contains_key(tpl_name.as_str())
                     {
-                        crate::completion::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            PhpType::null(),
-                        );
+                        if default == "null" {
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                PhpType::null(),
+                            );
+                        } else if let Some(resolved) =
+                            Backend::resolve_arg_text_to_type(default, ctx)
+                        {
+                            crate::completion::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                resolved,
+                            );
+                        }
                     }
                     continue;
                 }

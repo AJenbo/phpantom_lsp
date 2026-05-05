@@ -1164,10 +1164,7 @@ fn build_constructor_template_subs(
         };
 
         // Get the corresponding argument text.
-        let arg_text = match arg_texts.get(param_idx) {
-            Some(text) => text.trim(),
-            None => continue,
-        };
+        let provided_arg = arg_texts.get(param_idx).map(|t| t.trim());
 
         // Determine the binding mode by inspecting the parameter's
         // docblock type hint.  The type hint tells us how the template
@@ -1177,6 +1174,27 @@ fn build_constructor_template_subs(
             .get(param_idx)
             .and_then(|p| p.type_hint.as_ref());
         let binding_mode = classify_template_binding(tpl_name, param_hint);
+
+        // Fall back to the parameter's default value only for binding
+        // modes where the default is meaningful.
+        let default_value = ctor
+            .parameters
+            .get(param_idx)
+            .and_then(|p| p.default_value.as_deref());
+        let arg_text: &str = match provided_arg {
+            Some(text) => text,
+            None => match &binding_mode {
+                TemplateBindingMode::ClassStringInner => match default_value {
+                    Some(d) => d,
+                    None => continue,
+                },
+                TemplateBindingMode::Direct => match default_value {
+                    Some(d) if d.ends_with("::class") => d,
+                    _ => continue,
+                },
+                _ => continue,
+            },
+        };
 
         match binding_mode {
             TemplateBindingMode::Direct => {
@@ -1856,10 +1874,7 @@ pub(crate) fn build_function_template_subs(
             None => continue,
         };
 
-        let arg_text = match arg_texts.get(param_idx) {
-            Some(text) => text.trim(),
-            None => continue,
-        };
+        let provided_arg = arg_texts.get(param_idx).map(|t| t.trim());
 
         // Determine the binding mode by inspecting the parameter's
         // docblock type hint.  The type hint tells us how the template
@@ -1869,6 +1884,28 @@ pub(crate) fn build_function_template_subs(
             .get(param_idx)
             .and_then(|p| p.type_hint.as_ref());
         let binding_mode = classify_template_binding(tpl_name, param_hint);
+
+        // Fall back to the parameter's default value only for binding
+        // modes where the default is meaningful (class-string<T> with
+        // a `Foo::class` default, or direct bindings with `::class`).
+        let default_value = func_info
+            .parameters
+            .get(param_idx)
+            .and_then(|p| p.default_value.as_deref());
+        let arg_text: &str = match provided_arg {
+            Some(text) => text,
+            None => match &binding_mode {
+                TemplateBindingMode::ClassStringInner => match default_value {
+                    Some(d) => d,
+                    None => continue,
+                },
+                TemplateBindingMode::Direct => match default_value {
+                    Some(d) if d.ends_with("::class") => d,
+                    _ => continue,
+                },
+                _ => continue,
+            },
+        };
 
         match binding_mode {
             TemplateBindingMode::Direct => {
