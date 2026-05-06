@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778029145275,
+  "lastUpdate": 1778032357132,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7343,6 +7343,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3b7eeddaebae843cf72e4e44584991e3cc179b9a",
+          "message": "Add custom collection classes and update Blade demos for Laravel",
+          "timestamp": "2026-05-06T03:40:44+02:00",
+          "tree_id": "ad4f9c5efddfee40206019fe28f4aef21f195205",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3b7eeddaebae843cf72e4e44584991e3cc179b9a"
+        },
+        "date": 1778032356349,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.5,
             "unit": "MiB"
           }
         ]
