@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778038252615,
+  "lastUpdate": 1778038591873,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7513,6 +7513,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ea4e61c4980308e0c10f8fab2cb3c61f285ad907",
+          "message": "Remove user role column from users index view",
+          "timestamp": "2026-05-06T05:24:44+02:00",
+          "tree_id": "f3f7540c074f08864d20fe8a7eb2a358e571b798",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/ea4e61c4980308e0c10f8fab2cb3c61f285ad907"
+        },
+        "date": 1778038590627,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.7,
             "unit": "MiB"
           }
         ]
