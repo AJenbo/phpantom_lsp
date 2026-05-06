@@ -8,6 +8,16 @@ pipeline so it produces correct data. Downstream consumers
 to second-guess upstream output.
 
 
+## B17. Blade `{{` hover shows inner expression instead of `e()`
+
+Hovering on the `{{` delimiter in a Blade template should show
+hover info for the implicit `e()` (htmlspecialchars) call that
+Blade compiles to. Currently it shows hover for the expression
+inside the echo (e.g. `config(...)`) because the position mapping
+offsets into the virtual PHP content rather than recognising the
+delimiter itself.
+
+
 ## B16. PDOStatement fetch mode-dependent return types
 
 **Blocked on:** [phpstorm-stubs#1882](https://github.com/JetBrains/phpstorm-stubs/pull/1882)

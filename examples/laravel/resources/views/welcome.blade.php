@@ -19,7 +19,6 @@
     @if($user)
         <p>Hello, {{ $user->name }}!</p>
         <p>Email: {{ $user->email }}</p>
-        <p>Status: {{ $user->status->label() }}</p>
     @endif
 
     {{-- Foreach with model completion — $posts->byNewest() uses PostCollection --}}
@@ -38,7 +37,7 @@
     </nav>
 
     {{-- Includes and nested views --}}
-    @include('emails.order_shipped', ['order' => $order ?? null])
+    @include('emails.order_shipped', ['post' => $posts->first()])
 
     {{-- Conditional rendering with config --}}
     @if(config('app.debug'))

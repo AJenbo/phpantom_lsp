@@ -378,6 +378,25 @@ mod tests {
     }
 
     #[test]
+    fn test_preprocess_foreach() {
+        let content = r#"@php
+/**
+ * @var \App\Models\AuthorCollection $users
+ */
+@endphp
+
+@foreach($users->active()->byName() as $user)
+    <p>{{ $user->name }}</p>
+@endforeach
+"#;
+        let (php, _) = preprocess(content);
+        for (i, line) in php.lines().enumerate() {
+            eprintln!("{:2}: {}", i, line);
+        }
+        assert!(php.contains("$user->name"));
+    }
+
+    #[test]
     fn test_preprocess_multiline_directive() {
         let content = "@include('vendor.fbRemarket', [\n    'facebook_pixel_id' => Config::get('services.facebook.pixel_id'),\n])\n\n@include('vendor.googleRemarket')";
         let (php, _) = preprocess(content);

@@ -6115,6 +6115,55 @@ fn process_foreach<'b>(foreach: &'b Foreach<'b>, scope: &mut ScopeState, ctx: &F
         return;
     }
 
+    // Apply any standalone `/** @var Type $var */` docblocks that precede
+    // the foreach keyword.  These are not separate AST statements (the
+    // parser attaches them as comments to the foreach), so they won't be
+    // processed by `process_expression_statement`.  Without this, variables
+    // typed only via docblock (common in Blade templates) won't be in scope
+    // when the iterable expression is resolved.
+    //
+    // We extract all variables referenced in the foreach expression and
+    // check for @var annotations for each one.
+    let foreach_offset = foreach.foreach.span().start.offset as usize;
+    if let Expression::Variable(Variable::Direct(dv)) = foreach.expression {
+        let var_name = format!("${}", dv.name);
+        if scope.get(dv.name).is_empty()
+            && let Some(var_type) =
+                crate::docblock::find_var_raw_type_in_source(ctx.content, foreach_offset, &var_name)
+        {
+            let resolved = resolve_type_to_resolved_types(
+                &crate::util::resolve_php_type_names(&var_type, ctx.class_loader),
+                ctx,
+            );
+            scope.set(dv.name, resolved);
+        }
+    } else {
+        // For complex expressions like `$users->active()->byName()`,
+        // extract the base variable and resolve its type from @var.
+        let expr_start = foreach.expression.span().start.offset as usize;
+        let expr_end = foreach.expression.span().end.offset as usize;
+        if let Some(expr_text) = ctx.content.get(expr_start..expr_end) {
+            // Extract the base variable (e.g. "$users" from "$users->active()->byName()")
+            if let Some(base_end) = expr_text.find("->").or_else(|| expr_text.find("::")) {
+                let base_var = expr_text[..base_end].trim();
+                if let Some(scope_key) = base_var.strip_prefix('$')
+                    && scope.get(scope_key).is_empty()
+                    && let Some(var_type) = crate::docblock::find_var_raw_type_in_source(
+                        ctx.content,
+                        foreach_offset,
+                        base_var,
+                    )
+                {
+                    let resolved = resolve_type_to_resolved_types(
+                        &crate::util::resolve_php_type_names(&var_type, ctx.class_loader),
+                        ctx,
+                    );
+                    scope.set(scope_key, resolved);
+                }
+            }
+        }
+    }
+
     // Resolve the iterable expression's type.
     let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);
 
@@ -6514,13 +6563,6 @@ fn bind_foreach_value<'b>(
             }
 
             // Strategy 2: class-based fallback for bare collection names.
-            // Resolve the iterable type to ClassInfo, merge inheritance,
-            // and extract the element type from @extends/@implements generics.
-            // Skip when the extracted element type is an unsubstituted
-            // template parameter (e.g. `TValue` from `ArrayObject<TKey, TValue>`)
-            // — binding it would produce incorrect scope entries that
-            // override the backward scanner's correct resolution via
-            // inline `/** @var */` docblocks.
             let element_via_class = resolve_iterable_element_via_class(it, ctx);
             if let Some(element_type) = element_via_class
                 && !is_unsubstituted_template_param(&element_type)
@@ -6802,7 +6844,19 @@ fn resolve_iterable_element_via_class(
             &merged,
             ctx.class_loader,
         );
-        if element_type.is_some() {
+        if let Some(ref et) = element_type {
+            // When the extracted type is an unsubstituted template parameter
+            // (e.g. `TModel`), resolve it through the class's template bounds
+            // (e.g. `@template TModel of BlogAuthor` → `BlogAuthor`).
+            if let Some(name) = et.base_name()
+                && merged
+                    .template_params
+                    .iter()
+                    .any(|p| p.as_ref() as &str == name)
+                && let Some(bound) = merged.template_param_bounds.get(&crate::atom::atom(name))
+            {
+                return Some(bound.clone());
+            }
             return element_type;
         }
     }

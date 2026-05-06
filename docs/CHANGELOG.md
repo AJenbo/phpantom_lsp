@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Blade hover positions.** Hover ranges in `.blade.php` files are now translated back to original Blade coordinates, so the editor highlights the correct symbol under the cursor.
 - **Standalone `@var` completion.** Variables typed only via a standalone `/** @var Type $var */` docblock (with no preceding assignment) now resolve for member completion and go-to-definition. This fixes completion inside Blade templates that use `@php /** @var \App\Models\Foo $var */ @endphp`.
+- **Foreach loop variable resolution in Blade.** Loop variables (e.g. `$user` in `@foreach($users->active() as $user)`) now resolve their element type correctly when the iterable is typed via a standalone `@var` docblock. Template parameter bounds (e.g. `@template TModel of BlogAuthor`) are substituted through the inheritance chain.
 
 ### Changed
 
