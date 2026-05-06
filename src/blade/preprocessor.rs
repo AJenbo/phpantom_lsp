@@ -401,8 +401,8 @@ mod tests {
         let content = "@include('vendor.fbRemarket', [\n    'facebook_pixel_id' => Config::get('services.facebook.pixel_id'),\n])\n\n@include('vendor.googleRemarket')";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive"),
-            "@include should produce blade_directive call: {}",
+            php.contains("blade_view_directive"),
+            "@include should produce blade_view_directive call: {}",
             php
         );
 

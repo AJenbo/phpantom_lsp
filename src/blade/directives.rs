@@ -131,9 +131,11 @@ pub fn translate_directive(directive: &str) -> String {
         "break" => "break;".to_string(),
         "default" => "default:".to_string(),
         "inject" => "$".to_string(),
-        "extends" | "section" | "yield" | "include" | "includeIf" | "includeWhen"
-        | "includeUnless" | "includeFirst" | "push" | "prepend" | "component" | "slot"
-        | "props" | "aware" => "blade_directive".to_string(),
+        "extends" | "include" | "includeIf" | "includeWhen" | "includeUnless" | "includeFirst"
+        | "component" | "each" => "blade_view_directive".to_string(),
+        "section" | "yield" | "push" | "prepend" | "slot" | "props" | "aware" => {
+            "blade_directive".to_string()
+        }
         "endsection" | "endpush" | "endprepend" | "endcomponent" | "endslot" | "stop" | "show"
         | "append" | "overwrite" => "".to_string(),
         _ => format!("/* @{directive} */"),

@@ -3922,3 +3922,69 @@ Route::get('/products', [ProductController::class, 'index'])->name('products.ind
     );
     assert_eq!(definition_line(&result), 1);
 }
+
+// ─── Blade @include go-to-definition ─────────────────────────────────────────
+
+#[tokio::test]
+async fn test_goto_definition_blade_include_directive() {
+    let blade_layout = "<div>\n    @include('partials.header')\n</div>";
+    let blade_partial = "<!-- header partial -->";
+
+    let (backend, dir) = make_workspace(&[
+        ("resources/views/layout.blade.php", blade_layout),
+        ("resources/views/partials/header.blade.php", blade_partial),
+    ]);
+
+    // Cursor on "partials.header" in @include('partials.header') — line 1, char 16.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "resources/views/layout.blade.php",
+        blade_layout,
+        1,
+        16,
+    )
+    .await;
+
+    let result = result.expect("@include('partials.header') should resolve to blade template");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri
+            .as_str()
+            .ends_with("/resources/views/partials/header.blade.php"),
+        "Should jump to partials/header.blade.php, got: {}",
+        target_uri
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_blade_extends_directive() {
+    let blade_child = "@extends('layouts.app')\n<p>Content</p>";
+    let blade_layout = "<!-- app layout -->";
+
+    let (backend, dir) = make_workspace(&[
+        ("resources/views/page.blade.php", blade_child),
+        ("resources/views/layouts/app.blade.php", blade_layout),
+    ]);
+
+    // Cursor on "layouts.app" in @extends('layouts.app') — line 0, char 13.
+    let result = goto_definition_at(
+        &backend,
+        &dir,
+        "resources/views/page.blade.php",
+        blade_child,
+        0,
+        13,
+    )
+    .await;
+
+    let result = result.expect("@extends('layouts.app') should resolve to blade template");
+    let target_uri = definition_uri(&result);
+    assert!(
+        target_uri
+            .as_str()
+            .ends_with("/resources/views/layouts/app.blade.php"),
+        "Should jump to layouts/app.blade.php, got: {}",
+        target_uri
+    );
+}

@@ -1805,7 +1805,9 @@ fn extract_from_expression<'a>(
                                 &mut ctx.spans,
                             );
                         }
-                        if name_clean.eq_ignore_ascii_case("view") {
+                        if name_clean.eq_ignore_ascii_case("view")
+                            || name_clean.eq_ignore_ascii_case("blade_view_directive")
+                        {
                             try_emit_laravel_string_span(
                                 crate::symbol_map::LaravelStringKind::View,
                                 &func_call.argument_list,
