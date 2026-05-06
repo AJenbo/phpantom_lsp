@@ -107,6 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **False-positive diagnostics on startup.** Files opened while the project was still indexing could produce spurious "class not found" errors. Diagnostics are now deferred until initialization completes.
 - **Analyzer and LSP no longer hang on files with deeply nested loops.**
 - **Infinite loop on array key reassignment patterns.** Files containing `$arr['key'] = f($arr['key'])` no longer hang the analyzer.
+- **Chained calls with complex arguments resolve the correct return type.** Calling `redirect($string . $var)->with(...)` now resolves to `RedirectResponse` as expected. Complex argument expressions (concatenation, method calls, etc.) were previously serialized as empty, causing conditional return types to take the wrong branch.
 - **Stack overflow on large codebases and large files.** The `analyze` command no longer crashes with stack overflows on large files.
 - **Non-deterministic diagnostic counts eliminated.** Projects with heavy use of generics no longer see false positives that vary between runs.
 - **Pull-diagnostic reliability.** Editors that support pull diagnostics no longer show duplicate or stale diagnostics.

@@ -4877,3 +4877,87 @@ class Test {
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Conditional return types — redirect() helper
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `redirect($to)` has `@return ($to is null ? Redirector : RedirectResponse)`.
+/// When called with a non-null argument (including string concatenation),
+/// the return type must resolve to `RedirectResponse`, which carries `with()`
+/// and `withErrors()`.  No `unknown_member` diagnostic should fire.
+#[test]
+fn redirect_with_concat_arg_resolves_to_redirect_response() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{"autoload":{"psr-4":{"App\\":"/src/"}}}"#,
+        &[
+            (
+                "helpers.php",
+                r#"<?php
+namespace {
+    use Illuminate\Routing\Redirector;
+    use Illuminate\Http\RedirectResponse;
+
+    /**
+     * @return ($to is null ? \Illuminate\Routing\Redirector : \Illuminate\Http\RedirectResponse)
+     */
+    function redirect(?string $to = null): Redirector|RedirectResponse
+    {
+        return new RedirectResponse();
+    }
+}
+"#,
+            ),
+            (
+                "src/Routing/Redirector.php",
+                r#"<?php
+namespace Illuminate\Routing;
+class Redirector {}
+"#,
+            ),
+            (
+                "src/Http/RedirectResponse.php",
+                r#"<?php
+namespace Illuminate\Http;
+class RedirectResponse {
+    public function with(string $key, mixed $value = null): static {}
+    public function withErrors(mixed $provider, string $key = 'default'): static {}
+}
+"#,
+            ),
+            (
+                "src/Controller.php",
+                r#"<?php
+namespace App;
+class Customer { public int $id = 0; }
+class MyController {
+    public function action(Customer $customer): void {
+        // String concatenation arg — must resolve to RedirectResponse.
+        redirect('/users/' . $customer->id . '#tab')->with('msg', 'ok');
+        redirect('/users/' . $customer->id)->withErrors(['e']);
+        // Assigned form works too (baseline sanity check).
+        $r = redirect('/users/' . $customer->id);
+        $r->with('msg', 'ok');
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    let uri = "file:///src/Controller.php";
+    let content = std::fs::read_to_string(
+        std::path::Path::new(_dir.path()).join("src/Controller.php"),
+    )
+    .unwrap();
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &content);
+    let with_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("with") || d.message.contains("withErrors"))
+        .collect();
+    assert!(
+        with_diags.is_empty(),
+        "redirect()->with()/withErrors() should resolve to RedirectResponse. Got: {:?}",
+        with_diags
+    );
+}

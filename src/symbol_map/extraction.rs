@@ -3069,9 +3069,12 @@ fn format_all_call_args(args: &TokenSeparatedSequence<'_, Argument<'_>>) -> Stri
         let text = format_arg_expr(arg_expr);
         parts.push(text);
     }
-    // Trim trailing `...` placeholders so that simple single-arg calls
-    // (the common case) don't produce `method(Foo::class, ...)`.
-    while parts.last().is_some_and(|p| p == "...") {
+    // Trim trailing `...` placeholders beyond the first argument so
+    // that multi-arg calls like `method(Foo::class, ...)` don't grow
+    // a long tail of placeholders, but a single unknown argument still
+    // produces `func(...)` rather than `func()` (which would look like
+    // a no-arg call and break conditional return-type resolution).
+    while parts.len() > 1 && parts.last().is_some_and(|p| p == "...") {
         parts.pop();
     }
     parts.join(", ")
