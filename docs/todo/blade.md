@@ -76,12 +76,6 @@ produce generic output rather than the semantic PHP they should:
   `@includeWhen(...)`, `@includeUnless(...)`, `@includeFirst(...)`,
   `@each(...)` → `/* @directive */`
 
-### Verbatim regions
-
-`@verbatim ... @endverbatim` content should become PHP comments (it
-contains JS template syntax that would confuse the parser). Not yet
-implemented.
-
 ### `$loop` variable injection
 
 The preprocessor injects `$errors` and `$__env` in the prologue, but

@@ -7,6 +7,7 @@ enum Mode {
     Php,
     DirectiveArgs(&'static str),
     SkipArgs(&'static str),
+    Verbatim,
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
@@ -64,6 +65,25 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 }
             }
 
+            // In Verbatim mode, skip all content until @endverbatim
+            if mode == Mode::Verbatim {
+                let remaining = &line_chars[char_idx..];
+                let rest_str: String = remaining.iter().collect();
+                if rest_str.starts_with("@endverbatim") {
+                    // End verbatim: close comment, skip the directive, return to Html
+                    let directive_len = "@endverbatim".len();
+                    char_idx += directive_len;
+                    current_utf16_col += directive_len as u32;
+                    processed.push_str(" */ ");
+                    mode = Mode::Html;
+                } else {
+                    // Skip char (it's inside the comment)
+                    char_idx += 1;
+                    current_utf16_col += ch.len_utf16() as u32;
+                }
+                continue;
+            }
+
             let remaining = &line_chars[char_idx..];
 
             let mut match_len = 0;
@@ -101,6 +121,9 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         } else if directive == "endphp" {
                             replacement = "".to_string();
                             next_mode = Mode::Html;
+                        } else if directive == "verbatim" {
+                            replacement = " /* ".to_string();
+                            next_mode = Mode::Verbatim;
                         } else if directive == "empty" {
                             // @empty with parens = if(empty(...)):, without parens = forelse separator
                             let after_dir: String = rest_str[directive.len()..].chars().collect();
@@ -157,7 +180,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "production"
                                 | "env"
                                 | "once"
-                                | "verbatim"
                                 | "fragment"
                                 | "hasSection"
                                 | "sectionMissing"
@@ -203,7 +225,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "endcontext"
                                 | "enderror"
                                 | "endonce"
-                                | "endverbatim"
                                 | "endfragment"
                                 | "endPushIf"
                                 | "endPushOnce"
@@ -468,6 +489,19 @@ mod tests {
         assert!(php.contains("if (true)"), "should contain if (true): {}", php);
         assert!(php.contains("$value = '';"), "should inject $value: {}", php);
         assert!(php.contains("endif;"), "should contain endif: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_verbatim() {
+        let content = "@verbatim\n    {{ $name }}\n    @if(true)\n@endverbatim\n<p>{{ $real }}</p>\n";
+        let (php, _) = preprocess(content);
+        // Content between @verbatim and @endverbatim should be commented out
+        assert!(php.contains("/*"), "should open comment: {}", php);
+        assert!(php.contains("*/"), "should close comment: {}", php);
+        // The {{ $name }} inside verbatim should NOT produce echo
+        assert!(!php.contains("$name"), "verbatim content should be commented out: {}", php);
+        // The {{ $real }} after @endverbatim should work normally
+        assert!(php.contains("$real"), "content after endverbatim should work: {}", php);
     }
 
     #[test]
