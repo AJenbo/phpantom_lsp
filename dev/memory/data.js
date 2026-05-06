@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778037201600,
+  "lastUpdate": 1778037857460,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7445,6 +7445,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8415aa4c546c734d406d3514af977fc35b410a67",
+          "message": "Enable go-to-definition for Blade view directives (@include, @extends,\netc.)",
+          "timestamp": "2026-05-06T05:12:30+02:00",
+          "tree_id": "a8748d09ec4af75cc1e3d8a2712e2c8babad0f90",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/8415aa4c546c734d406d3514af977fc35b410a67"
+        },
+        "date": 1778037856654,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.3,
             "unit": "MiB"
           }
         ]
