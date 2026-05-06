@@ -640,6 +640,17 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         tokio::task::spawn_blocking(move || {
+            // For Blade files, check if the cursor is on a `{{` or `{!!` echo
+            // delimiter. If so, return hover for `e()` (escaped echo) or a
+            // raw-echo explanation, rather than falling through to the virtual
+            // PHP content where the position maps into boilerplate.
+            if crate::blade::is_blade_file(&uri_clone)
+                && let Some(hover) =
+                    backend.blade_echo_delimiter_hover(&uri_clone, position)
+            {
+                return Ok(Some(hover));
+            }
+
             backend.handle_with_position("hover", &uri_clone, position, |content, pos| {
                 let mut hover = backend.handle_hover(&uri_clone, content, pos)?;
                 if crate::blade::is_blade_file(&uri_clone)

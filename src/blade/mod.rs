@@ -115,3 +115,91 @@ fn extract_string_literal(s: &str) -> Option<&str> {
         None
     }
 }
+
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
+
+impl crate::Backend {
+    /// If the cursor is on a `{{`, `}}`, `{!!`, or `!!}` Blade echo delimiter,
+    /// return a hover describing the implicit `e()` call (for escaped echo)
+    /// or raw output (for unescaped echo).
+    pub(crate) fn blade_echo_delimiter_hover(
+        &self,
+        uri: &str,
+        position: Position,
+    ) -> Option<Hover> {
+        let content = self.get_file_content(uri)?;
+        let line = content.lines().nth(position.line as usize)?;
+        let col = position.character as usize;
+
+        // Check if cursor is on `{{` (escaped echo open)
+        if col < line.len()
+            && line.get(col..col + 2) == Some("{{")
+            && line.get(col..col + 3) != Some("{!!")
+        {
+            return Some(self.blade_e_hover(position, 2));
+        }
+        // Also match if cursor is on the second `{` of `{{`
+        if col > 0
+            && line.get(col - 1..col + 1) == Some("{{")
+            && (col < 2 || line.get(col - 1..col + 2) != Some("{!!"))
+        {
+            return Some(self.blade_e_hover(
+                Position {
+                    line: position.line,
+                    character: (col - 1) as u32,
+                },
+                2,
+            ));
+        }
+        // `}}` closing delimiter
+        if col < line.len()
+            && line.get(col..col + 2) == Some("}}")
+            && (col == 0 || line.as_bytes().get(col - 1) != Some(&b'!'))
+        {
+            return Some(self.blade_e_hover(position, 2));
+        }
+        if col > 0
+            && line.get(col - 1..col + 1) == Some("}}")
+            && (col < 2 || line.as_bytes().get(col - 2) != Some(&b'!'))
+        {
+            return Some(self.blade_e_hover(
+                Position {
+                    line: position.line,
+                    character: (col - 1) as u32,
+                },
+                2,
+            ));
+        }
+
+        None
+    }
+
+    /// Build hover content for `{{ }}` (escaped echo via `e()`).
+    fn blade_e_hover(&self, start: Position, len: u32) -> Hover {
+        // Try to resolve the actual `e()` function from the project/stubs.
+        let empty_use_map = std::collections::HashMap::new();
+        let loader = self.function_loader_with(&empty_use_map, &None);
+        let content = if let Some(func) = loader("e") {
+            crate::hover::hover_for_function(&func, None)
+                .contents
+        } else {
+            HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: "Blade escaped echo. Output is passed through `e()` (`htmlspecialchars`).\n\n\
+                    ```php\n<?php\nfunction e(mixed $value, bool $doubleEncode = true): string;\n```"
+                    .to_string(),
+            })
+        };
+        Hover {
+            contents: content,
+            range: Some(Range {
+                start,
+                end: Position {
+                    line: start.line,
+                    character: start.character + len,
+                },
+            }),
+        }
+    }
+
+}
