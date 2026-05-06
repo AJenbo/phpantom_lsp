@@ -6,6 +6,7 @@ enum Mode {
     Html,
     Php,
     DirectiveArgs(&'static str),
+    SkipArgs(&'static str),
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
@@ -13,7 +14,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     let mut source_map = BladeSourceMap::default();
 
     // ── Prologue (5 lines) ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} }\n");
     virtual_php.push_str("/** @var \\Illuminate\\Support\\ViewErrorBag $errors */\n");
     virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
     virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
@@ -113,6 +114,14 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 replacement = " endforeach; if (false): ".to_string();
                                 next_mode = Mode::Html;
                             }
+                        } else if matches!(directive, "session" | "context") {
+                            replacement = " if (true) ".to_string();
+                            next_mode = Mode::SkipArgs(": $value = '';");
+                            paren_depth = 0;
+                        } else if directive == "error" {
+                            replacement = " if (true) ".to_string();
+                            next_mode = Mode::SkipArgs(": $message = '';");
+                            paren_depth = 0;
                         } else if matches!(
                             directive,
                             "if" | "elseif"
@@ -147,9 +156,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "guest"
                                 | "production"
                                 | "env"
-                                | "session"
-                                | "context"
-                                | "error"
                                 | "once"
                                 | "verbatim"
                                 | "fragment"
@@ -263,6 +269,33 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         continue;
                     }
                 }
+            } else if let Mode::SkipArgs(suffix) = mode {
+                // Consume balanced parens without outputting them
+                if ch == '(' {
+                    paren_depth += 1;
+                } else if ch == ')' {
+                    paren_depth -= 1;
+                    if paren_depth <= 0 {
+                        char_idx += 1;
+                        current_utf16_col += 1;
+                        // Discard buffer (args not output)
+                        buffer.clear();
+
+                        let start_suffix = utf16_count(&processed) as u32;
+                        processed.push_str(suffix);
+                        let end_suffix = utf16_count(&processed) as u32;
+
+                        adjustments.push((current_utf16_col, start_suffix));
+                        adjustments.push((current_utf16_col, end_suffix));
+
+                        mode = Mode::Html;
+                        continue;
+                    }
+                }
+                // Don't output anything in SkipArgs - just advance
+                char_idx += 1;
+                current_utf16_col += ch.len_utf16() as u32;
+                continue;
             }
 
             if match_len > 0 || mode != next_mode {
@@ -426,6 +459,43 @@ mod tests {
         assert!(php.contains("endforeach"), "should contain endforeach: {}", php);
         assert!(php.contains("if (false):"), "should contain if (false): {}", php);
         assert!(php.contains("endif;"), "should contain endif: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_session_directive() {
+        let content = "@session('key')\n    <p>{{ $value }}</p>\n@endsession\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true)"), "should contain if (true): {}", php);
+        assert!(php.contains("$value = '';"), "should inject $value: {}", php);
+        assert!(php.contains("endif;"), "should contain endif: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_error_directive() {
+        let content = "@error('email')\n    <p>{{ $message }}</p>\n@enderror\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true)"), "should contain if (true): {}", php);
+        assert!(php.contains("$message = '';"), "should inject $message: {}", php);
+        assert!(php.contains("endif;"), "should contain endif: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_context_directive() {
+        let content = "@context('key')\n    <p>{{ $value }}</p>\n@endcontext\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true)"), "should contain if (true): {}", php);
+        assert!(php.contains("$value = '';"), "should inject $value: {}", php);
+        assert!(php.contains("endif;"), "should contain endif: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_prologue_declares_view_directive() {
+        let (php, _) = preprocess("<p>hello</p>");
+        assert!(
+            php.contains("function blade_view_directive"),
+            "prologue should declare blade_view_directive: {}",
+            php
+        );
     }
 
     #[test]

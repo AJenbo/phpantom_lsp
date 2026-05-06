@@ -62,20 +62,6 @@ actions that generate new code need to be aware of Blade structure.
 
 Remaining work in this phase:
 
-### Directives that expose implicit variables
-
-These directives should inject implicit variables into the virtual PHP
-but currently fall through to the generic directive handler:
-
-| Blade | Virtual PHP |
-|---|---|
-| `@session('key')` | `if (true): $value = '';` |
-| `@endsession` | `endif;` |
-| `@context('key')` | `if (true): $value = '';` |
-| `@endcontext` | `endif;` |
-| `@error('field')` | `if (true): $message = '';` |
-| `@enderror` | `endif;` |
-
 ### Stub directives
 
 These directives are recognized by the preprocessor but currently

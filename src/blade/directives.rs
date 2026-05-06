@@ -121,9 +121,10 @@ pub fn translate_directive(directive: &str) -> String {
         "unless" => "if(!".to_string(),
         "else" => "else:".to_string(),
         "endif" | "endforeach" | "endfor" | "endwhile" | "endunless" | "endisset" | "endempty"
-        | "endswitch" | "endforelse" => {
+        | "endswitch" | "endforelse" | "endsession" | "endcontext" | "enderror" => {
             let mapped = match directive {
-                "endunless" | "endisset" | "endempty" => "endif",
+                "endunless" | "endisset" | "endempty" | "endsession" | "endcontext"
+                | "enderror" => "endif",
                 "endforelse" => "endif",
                 other => other,
             };
