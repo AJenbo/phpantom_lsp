@@ -64,7 +64,7 @@ class Bakery extends Model
     }
 
     #[Scope]
-    protected function fresh(\Illuminate\Database\Eloquent\Builder $query): void
+    protected function freshlyBaked(\Illuminate\Database\Eloquent\Builder $query): void
     {
         $query->where('fresh', true);
     }

@@ -2,7 +2,7 @@
 /**
  * Laravel Demo Classes for PHPantom LSP
  *
- * Open any demo() method and trigger completion inside it.
+ * Open any method and trigger completion inside it.
  * Requires a real Laravel installation via `composer install`.
  */
 
@@ -17,13 +17,13 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\View;
 
-// ── Eloquent Virtual Properties ─────────────────────────────────────────────
-// Alphabetical — every property a through w should appear in order.
-// Trigger completion on `$bakery->` and scan the list.
-
-class EloquentPropertyDemo
+class Demo
 {
-    public function demo(): void
+    // ── Eloquent Virtual Properties ─────────────────────────────────────────
+    // Alphabetical — every property a through w should appear in order.
+    // Trigger completion on `$bakery->` and scan the list.
+
+    public function eloquentProperty(): void
     {
         $bakery = new Bakery();
 
@@ -35,7 +35,7 @@ class EloquentPropertyDemo
         $bakery->dough_temp;          // $casts 'float'             → float
         $bakery->egg_count;           // $attributes default        → int
         $bakery->flour;               // $fillable (no cast/attr)   → mixed
-        $bakery->fresh();             // #[Scope] method            → Builder
+        $bakery->freshlyBaked();      // #[Scope] attribute method  → Builder
         $bakery->gluten_free;         // $attributes default        → bool
         $bakery->headBaker;           // relationship HasOne        → Baker
         $bakery->head_baker_count;    // relationship count         → int
@@ -63,14 +63,11 @@ class EloquentPropertyDemo
         $post->author;                // relationship BelongsTo     → BlogAuthor
         $post->author()->associate($post->author); // associate() on BelongsTo
     }
-}
 
 
-// ── Eloquent Query Builder ──────────────────────────────────────────────────
+    // ── Eloquent Query Builder ──────────────────────────────────────────────
 
-class EloquentQueryDemo
-{
-    public function demo(): void
+    public function eloquentQuery(): void
     {
         // Builder-as-static forwarding
         BlogAuthor::where('active', true);
@@ -93,7 +90,7 @@ class EloquentQueryDemo
 
         // Scopes on Builder instances (convention and #[Scope] attribute)
         BlogAuthor::where('active', 1)->active()->ofGenre('sci-fi')->get();
-        Bakery::where('open', true)->fresh()->get();
+        Bakery::where('open', true)->freshlyBaked()->get();
         $query = BlogAuthor::where('genre', 'fiction');
         $query->active();
         $query->orderBy('name')->get();
@@ -106,20 +103,17 @@ class EloquentQueryDemo
         Bakery::whereKitchenId(42);                   // from $guarded
         Bakery::whereOvenCode('X9');                  // from $hidden
         Bakery::whereFlour('rye')->whereApricot(true)->get();
-        Bakery::where('open', true)->whereFlour('spelt')->fresh()->first();
+        Bakery::where('open', true)->whereFlour('spelt')->freshlyBaked()->first();
 
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
     }
-}
 
 
-// ── Custom Eloquent Collections ─────────────────────────────────────────────
+    // ── Custom Eloquent Collections ─────────────────────────────────────────
 
-class CustomCollectionDemo
-{
-    public function demo(): void
+    public function customCollection(): void
     {
         // Builder chain → custom collection via #[CollectedBy]
         $reviews = Review::where('published', true)->get();
@@ -131,14 +125,11 @@ class CustomCollectionDemo
         $review = new Review();
         $review->replies->topRated();     // HasMany<Review> → ReviewCollection
     }
-}
 
 
-// ── Eloquent Closure Parameter Inference ────────────────────────────────────
+    // ── Eloquent Closure Parameter Inference ────────────────────────────────
 
-class EloquentClosureDemo
-{
-    public function demo(): void
+    public function eloquentClosure(): void
     {
         // Eloquent chunk — $orders inferred as Collection
         BlogAuthor::where('active', true)->chunk(100, function ($orders) {
@@ -162,13 +153,10 @@ class EloquentClosureDemo
             $q->where('active', true);    // resolves to Builder<BlogAuthor>
         });
     }
-}
 
 
-// ── Laravel Config & Env Navigation ─────────────────────────────────────────
+    // ── Laravel Config & Env Navigation ─────────────────────────────────────
 
-class LaravelConfigEnvDemo
-{
     /**
      * "Go to Definition" and "Find All References" for config keys and env vars.
      *
@@ -177,7 +165,7 @@ class LaravelConfigEnvDemo
      *  2. Ctrl+Click "APP_KEY" to jump to .env.
      *  3. "Find All References" on "app.name" to see all usage sites.
      */
-    public function demo(): void
+    public function laravelConfigEnv(): void
     {
         // Global helper
         config('app.name');
@@ -190,13 +178,10 @@ class LaravelConfigEnvDemo
         env('APP_KEY');
         env('DB_PASSWORD', 'secret');
     }
-}
 
 
-// ── Laravel View, Route & Translation Navigation ───────────────────────────
+    // ── Laravel View, Route & Translation Navigation ───────────────────────
 
-class LaravelNavigationDemo
-{
     /**
      * "Go to Definition" and "Find All References" for Laravel identifiers.
      *
@@ -206,7 +191,7 @@ class LaravelNavigationDemo
      *  3. Ctrl+Click "home" to jump to the ->name('home') declaration in routes/web.php.
      *  4. Ctrl+Click "auth.failed" to jump to lang/en/auth.php.
      */
-    public function demo(): void
+    public function laravelNavigation(): void
     {
         // Blade Views
         view('welcome');
@@ -224,14 +209,11 @@ class LaravelNavigationDemo
         Lang::get('pagination.next');
         Lang::has('validation.required');
     }
-}
 
 
-// ── Laravel Config (definition & references) ────────────────────────────────
+    // ── Laravel Config (definition & references) ────────────────────────────
 
-class LaravelConfigDemo
-{
-    public function demo(): void
+    public function laravelConfig(): void
     {
         config('app.name');
         Config::get('database.default');
