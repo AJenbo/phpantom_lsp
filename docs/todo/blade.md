@@ -62,20 +62,6 @@ actions that generate new code need to be aware of Blade structure.
 
 Remaining work in this phase:
 
-### Stub directives
-
-These directives are recognized by the preprocessor but currently
-produce generic output rather than the semantic PHP they should:
-
-- `@auth`/`@endauth`, `@guest`/`@endguest`, `@env(...)`/`@endenv`,
-  `@production`/`@endproduction`, `@once`/`@endonce` →
-  `if (true):` / `endif;`
-- `@csrf`, `@method(...)`, `@push`/`@endpush`, `@prepend`/`@endprepend`,
-  `@stack(...)`, `@yield(...)`, `@section(...)`/`@endsection`/`@show`,
-  `@extends(...)`, `@include(...)` and variants, `@includeIf(...)`,
-  `@includeWhen(...)`, `@includeUnless(...)`, `@includeFirst(...)`,
-  `@each(...)` → `/* @directive */`
-
 ### `$loop` variable injection
 
 The preprocessor injects `$errors` and `$__env` in the prologue, but
@@ -88,12 +74,7 @@ $loop = (object)[];
 
 ### Additional test coverage
 
-- Directives with implicit vars (`@error`, `@session`, `@context`)
-- Stub directives (`@auth`, `@guest`, `@csrf`, etc.)
-- Verbatim regions
-- `$loop->` inside a `@foreach`
-- `$value` inside `@session` block
-- `$message` inside `@error` block
+- `$loop->` inside a `@foreach` (blocked on `$loop` variable injection)
 
 ---
 

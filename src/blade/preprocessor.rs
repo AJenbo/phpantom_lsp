@@ -147,6 +147,23 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             paren_depth = 0;
                         } else if matches!(
                             directive,
+                            "auth" | "guest" | "production" | "env" | "once"
+                        ) {
+                            // These are conditional blocks: if args present, skip them;
+                            // if no args, emit directly.
+                            let after_dir: String =
+                                rest_str[directive.len()..].chars().collect();
+                            let after_trimmed = after_dir.trim_start();
+                            if after_trimmed.starts_with('(') {
+                                replacement = " if (true) ".to_string();
+                                next_mode = Mode::SkipArgs(":");
+                                paren_depth = 0;
+                            } else {
+                                replacement = " if (true): ".to_string();
+                                next_mode = Mode::Html;
+                            }
+                        } else if matches!(
+                            directive,
                             "if" | "elseif"
                                 | "foreach"
                                 | "forelse"
@@ -175,11 +192,6 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "slot"
                                 | "props"
                                 | "aware"
-                                | "auth"
-                                | "guest"
-                                | "production"
-                                | "env"
-                                | "once"
                                 | "fragment"
                                 | "hasSection"
                                 | "sectionMissing"
@@ -548,6 +560,86 @@ mod tests {
             php2.contains("$var"),
             "Multiline echo should preserve variable: {}",
             php2
+        );
+    }
+
+    #[test]
+    fn test_preprocess_stub_directives() {
+        // @csrf should produce a comment (no-args directive)
+        let content = "@csrf\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("/* @csrf */"),
+            "@csrf should become a comment: {}",
+            php
+        );
+
+        // @auth without args should produce if (true):
+        let content = "@auth\n<p>logged in</p>\n@endauth\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true):"), "@auth should produce if (true):: {}", php);
+        assert!(php.contains("endif;"), "@endauth should produce endif;: {}", php);
+
+        // @auth with args should also produce if (true):
+        let content = "@auth('admin')\n<p>admin</p>\n@endauth\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true)"), "@auth('admin') should produce if (true): {}", php);
+        assert!(php.contains("endif;"), "@endauth should produce endif;: {}", php);
+
+        // @guest without args
+        let content = "@guest\n<p>guest</p>\n@endguest\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true):"), "@guest should produce if (true):: {}", php);
+        assert!(php.contains("endif;"), "@endguest should produce endif;: {}", php);
+
+        // @production (never takes args)
+        let content = "@production\n<p>prod</p>\n@endproduction\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true):"), "@production should produce if (true):: {}", php);
+        assert!(php.contains("endif;"), "@endproduction should produce endif;: {}", php);
+
+        // @env with args
+        let content = "@env('local')\n<p>local</p>\n@endenv\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true)"), "@env should produce if (true): {}", php);
+        assert!(php.contains("endif;"), "@endenv should produce endif;: {}", php);
+
+        // @once without args
+        let content = "@once\n<script>app.js</script>\n@endonce\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("if (true):"), "@once should produce if (true):: {}", php);
+        assert!(php.contains("endif;"), "@endonce should produce endif;: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_session_value_accessible() {
+        // $value should be accessible inside @session block
+        let content = "@session('status')\n{{ $value }}\n@endsession\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("$value = '';"), "should declare $value: {}", php);
+        // The $value echo should appear after the declaration
+        let val_decl = php.find("$value = '';").unwrap();
+        // Find last occurrence of $value (the echo usage)
+        let val_echo = php.rfind("$value").unwrap();
+        assert!(
+            val_echo > val_decl,
+            "$value usage should come after declaration: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_error_message_accessible() {
+        // $message should be accessible inside @error block
+        let content = "@error('email')\n{{ $message }}\n@enderror\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("$message = '';"), "should declare $message: {}", php);
+        let msg_decl = php.find("$message = '';").unwrap();
+        let msg_echo = php.rfind("$message").unwrap();
+        assert!(
+            msg_echo > msg_decl,
+            "$message usage should come after declaration: {}",
+            php
         );
     }
 }
