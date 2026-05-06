@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778098407021,
+  "lastUpdate": 1778099342488,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7649,6 +7649,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "74b6332e62f72ca024abbe03b4a2b92ad462288b",
+          "message": "Remove completed stub directive TODOs and add tests for them",
+          "timestamp": "2026-05-06T22:16:33+02:00",
+          "tree_id": "c411e66252fe216ecbea5f00c2dfb0c72a96384d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/74b6332e62f72ca024abbe03b4a2b92ad462288b"
+        },
+        "date": 1778099341904,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.9,
             "unit": "MiB"
           }
         ]
