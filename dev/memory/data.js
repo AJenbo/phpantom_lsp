@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778035169487,
+  "lastUpdate": 1778037201600,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7411,6 +7411,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "321727e89ba972d2d584b2a4ae5e82b3573952d9",
+          "message": "Add Blade foreach variable resolution for standalone @var docblocks",
+          "timestamp": "2026-05-06T05:01:25+02:00",
+          "tree_id": "b447565145796f1dc702310fe510641d0e81c251",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/321727e89ba972d2d584b2a4ae5e82b3573952d9"
+        },
+        "date": 1778037200937,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.5,
             "unit": "MiB"
           }
         ]
