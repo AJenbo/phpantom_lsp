@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778027809228,
+  "lastUpdate": 1778029145275,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7309,6 +7309,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 50,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "233483bcbe48ac61ff4a429373b4602349d4de44",
+          "message": "Refactor Laravel demo methods into a single Demo class",
+          "timestamp": "2026-05-06T02:47:25+02:00",
+          "tree_id": "ddc39be9956af134c09290b645695bc4671d988b",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/233483bcbe48ac61ff4a429373b4602349d4de44"
+        },
+        "date": 1778029144678,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.3,
             "unit": "MiB"
           }
         ]
