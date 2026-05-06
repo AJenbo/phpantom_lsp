@@ -117,8 +117,8 @@ class Demo
     {
         // Builder chain → custom collection via #[CollectedBy]
         $reviews = Review::where('published', true)->get();
-        $reviews->topRated();             // custom method from ReviewCollection
-        $reviews->averageRating();        // custom method from ReviewCollection
+        $top = $reviews->topRated();           // custom method from ReviewCollection
+        $avg = $reviews->averageRating();       // custom method from ReviewCollection
         $reviews->first();                // inherited — returns Review|null
 
         // Relationship properties also use the custom collection
@@ -133,7 +133,7 @@ class Demo
     {
         // Eloquent chunk — $orders inferred as Collection
         BlogAuthor::where('active', true)->chunk(100, function ($orders) {
-            $orders->count();             // resolves to Eloquent Collection
+            $total = $orders->count();    // resolves to Eloquent Collection
         });
 
         // Explicit bare type hint inherits inferred generic args for foreach
@@ -162,8 +162,8 @@ class Demo
      *
      * Try:
      *  1. Ctrl+Click "app.name" to jump to config/app.php.
-     *  2. Ctrl+Click "APP_KEY" to jump to .env.
-     *  3. "Find All References" on "app.name" to see all usage sites.
+     *  2. Ctrl+Click "app.key" to jump to config/app.php, then Ctrl+Click env('APP_KEY') to .env.
+     *  3. "Find All References" on "app.name" to see all usage sites (including Blade views).
      */
     public function laravelConfigEnv(): void
     {
@@ -174,9 +174,10 @@ class Demo
         Config::get('app.name');
         Config::set('app.env', 'production');
 
-        // Env helper
-        env('APP_KEY');
-        env('DB_PASSWORD', 'secret');
+        // Config keys that use env() — Ctrl+Click jumps to the config file,
+        // then Ctrl+Click the env() call there to jump to .env
+        config('app.key');                // uses env('APP_KEY')
+        config('database.connections.mysql.password'); // uses env('DB_PASSWORD')
     }
 
 
@@ -193,10 +194,11 @@ class Demo
      */
     public function laravelNavigation(): void
     {
-        // Blade Views
-        view('welcome');
-        View::make('admin.users.index');
-        View::exists('emails.order_shipped');
+        // Blade Views — passing typed data for in-template completion
+        $posts = BlogPost::where('published', true)->get();
+        view('welcome', compact('posts'));
+        View::make('admin.users.index', ['users' => BlogAuthor::all()]);
+        View::exists('emails.blog_published');
 
         // Named Routes
         route('home');

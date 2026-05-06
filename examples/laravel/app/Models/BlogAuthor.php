@@ -2,7 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Attributes\CollectedBy;
 use Illuminate\Database\Eloquent\Model;
+
+#[CollectedBy(AuthorCollection::class)]
 
 /**
  * @method static \Illuminate\Database\Eloquent\Builder<static> withTrashed(bool $withTrashed = true)

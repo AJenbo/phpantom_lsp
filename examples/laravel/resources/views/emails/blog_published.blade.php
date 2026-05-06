@@ -1,0 +1,22 @@
+{{-- PHPantom Laravel Demo: Blog Post Published Email --}}
+{{-- Demonstrates variable completion inside included partials --}}
+@php
+/**
+ * @bladestan-signature
+ * @var \App\Models\BlogPost $post
+ * @var \App\Models\BlogAuthor $author
+ */
+@endphp
+
+<div style="font-family: sans-serif; padding: 20px;">
+    <h2>{{ __('messages.welcome') }}!</h2>
+
+    <p>New post by {{ $author->name }}:</p>
+    <h3>{{ $post->getTitle() }}</h3>
+    <p>Slug: {{ $post->getSlug() }}</p>
+    <p>Published: {{ $post->created_at->diffForHumans() }}</p>
+
+    <footer>
+        <p>&copy; {{ config('app.name') }} {{ date('Y') }}</p>
+    </footer>
+</div>
