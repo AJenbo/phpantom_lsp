@@ -60,22 +60,6 @@ of the file rather than inside a `@php` / `<?php` block. All code
 actions that produce text edits need their ranges translated, and
 actions that generate new code need to be aware of Blade structure.
 
-Remaining work in this phase:
-
-### `$loop` variable injection
-
-The preprocessor injects `$errors` and `$__env` in the prologue, but
-does not yet inject a `$loop` variable inside `@foreach` blocks:
-
-```php
-/** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */
-$loop = (object)[];
-```
-
-### Additional test coverage
-
-- `$loop->` inside a `@foreach` (blocked on `$loop` variable injection)
-
 ---
 
 ## Phase 2: Component Support

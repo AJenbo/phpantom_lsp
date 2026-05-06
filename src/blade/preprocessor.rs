@@ -162,11 +162,13 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 replacement = " if (true): ".to_string();
                                 next_mode = Mode::Html;
                             }
+                        } else if matches!(directive, "foreach" | "forelse") {
+                            replacement = format!(" {} ", translate_directive(directive));
+                            next_mode = Mode::DirectiveArgs(": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */ $loop = (object)[];");
+                            paren_depth = 0;
                         } else if matches!(
                             directive,
                             "if" | "elseif"
-                                | "foreach"
-                                | "forelse"
                                 | "for"
                                 | "while"
                                 | "switch"
@@ -444,6 +446,29 @@ mod tests {
             "Failed to parse parens inside string: {}",
             php
         );
+    }
+
+    #[test]
+    fn test_preprocess_foreach_loop_variable() {
+        let content = "@foreach($items as $item)\n{{ $loop->first }}\n@endforeach\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("$loop"), "should inject $loop variable: {}", php);
+        assert!(
+            php.contains("object{index: int"),
+            "should have typed $loop: {}",
+            php
+        );
+        // $loop should be declared before its usage
+        let loop_decl = php.find("$loop = (object)[];").unwrap();
+        let loop_use = php.rfind("$loop").unwrap();
+        assert!(loop_use > loop_decl, "$loop usage after declaration: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_forelse_loop_variable() {
+        let content = "@forelse($items as $item)\n{{ $loop->index }}\n@empty\n@endforelse\n";
+        let (php, _) = preprocess(content);
+        assert!(php.contains("$loop = (object)[];"), "forelse should also inject $loop: {}", php);
     }
 
     #[test]
