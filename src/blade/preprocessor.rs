@@ -70,11 +70,9 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                 let remaining = &line_chars[char_idx..];
                 let rest_str: String = remaining.iter().collect();
                 if rest_str.starts_with("@endverbatim") {
-                    // End verbatim: close comment, skip the directive, return to Html
                     let directive_len = "@endverbatim".len();
                     char_idx += directive_len;
                     current_utf16_col += directive_len as u32;
-                    processed.push_str(" */ ");
                     mode = Mode::Html;
                 } else {
                     // Skip char (it's inside the comment)
@@ -122,7 +120,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             replacement = "".to_string();
                             next_mode = Mode::Html;
                         } else if directive == "verbatim" {
-                            replacement = " /* ".to_string();
+                            replacement = "".to_string();
                             next_mode = Mode::Verbatim;
                         } else if directive == "empty" {
                             // @empty with parens = if(empty(...)):, without parens = forelse separator
@@ -532,13 +530,19 @@ mod tests {
     fn test_preprocess_verbatim() {
         let content = "@verbatim\n    {{ $name }}\n    @if(true)\n@endverbatim\n<p>{{ $real }}</p>\n";
         let (php, _) = preprocess(content);
-        // Content between @verbatim and @endverbatim should be commented out
-        assert!(php.contains("/*"), "should open comment: {}", php);
-        assert!(php.contains("*/"), "should close comment: {}", php);
         // The {{ $name }} inside verbatim should NOT produce echo
-        assert!(!php.contains("$name"), "verbatim content should be commented out: {}", php);
+        assert!(!php.contains("$name"), "verbatim content should be skipped: {}", php);
         // The {{ $real }} after @endverbatim should work normally
         assert!(php.contains("$real"), "content after endverbatim should work: {}", php);
+    }
+
+    #[test]
+    fn test_preprocess_verbatim_with_comment_syntax() {
+        // Verbatim blocks may contain */ which would break PHP block comments
+        let content = "@verbatim\n    {{ /* js comment */ value }}\n@endverbatim\n<p>{{ $after }}</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(!php.contains("js comment"), "verbatim content should be skipped: {}", php);
+        assert!(php.contains("$after"), "content after endverbatim should work: {}", php);
     }
 
     #[test]
