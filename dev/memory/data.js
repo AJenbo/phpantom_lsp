@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778099342488,
+  "lastUpdate": 1778099666909,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7683,6 +7683,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 52.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f36bef6602e3ab27345a20ce9a005e443428e112",
+          "message": "Inject $loop variable in foreach and forelse blocks",
+          "timestamp": "2026-05-06T22:22:25+02:00",
+          "tree_id": "f243d1d1f7e8f7a0dfaac9e8b50bb21c02e90bc5",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/f36bef6602e3ab27345a20ce9a005e443428e112"
+        },
+        "date": 1778099665780,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.5,
             "unit": "MiB"
           }
         ]
