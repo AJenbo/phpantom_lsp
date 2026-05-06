@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778066942778,
+  "lastUpdate": 1778098407021,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7615,6 +7615,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "337d5b903cd54ddc582eacf109396e7fab57601e",
+          "message": "Implement @verbatim handling in Blade preprocessor",
+          "timestamp": "2026-05-06T22:01:10+02:00",
+          "tree_id": "f306254dc6f09cab53bc1cb98698dc44eabc09d4",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/337d5b903cd54ddc582eacf109396e7fab57601e"
+        },
+        "date": 1778098405966,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.2,
             "unit": "MiB"
           }
         ]
