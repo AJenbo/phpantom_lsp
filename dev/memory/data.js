@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778107025650,
+  "lastUpdate": 1778107094964,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7819,6 +7819,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9402e739a39708199a8b9dc04b1d010765878343",
+          "message": "Fix conditional return type resolution for chained calls with complex\narguments",
+          "timestamp": "2026-05-07T00:25:59+02:00",
+          "tree_id": "82dc15ea148462e9691dbb3df1054af68511f8d9",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/9402e739a39708199a8b9dc04b1d010765878343"
+        },
+        "date": 1778107093752,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.4,
             "unit": "MiB"
           }
         ]
