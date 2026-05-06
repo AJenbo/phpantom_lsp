@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778032357132,
+  "lastUpdate": 1778035169487,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7377,6 +7377,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4db156b22aab7e87bb2bca1fb5a897615a30243b",
+          "message": "Fix Blade hover range translation and standalone @var completion",
+          "timestamp": "2026-05-06T04:27:43+02:00",
+          "tree_id": "8054afa96b3c92265174e04d9e9ef0c4ab8eec49",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/4db156b22aab7e87bb2bca1fb5a897615a30243b"
+        },
+        "date": 1778035168463,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 50.5,
             "unit": "MiB"
           }
         ]
