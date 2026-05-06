@@ -1,6 +1,7 @@
 mod common;
 
 mod blade;
+pub mod blade_debug;
 pub mod blade_error;
 pub mod blade_regression;
 mod classmap_scanner;

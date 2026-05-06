@@ -641,7 +641,14 @@ impl LanguageServer for Backend {
         let uri_clone = uri.clone();
         tokio::task::spawn_blocking(move || {
             backend.handle_with_position("hover", &uri_clone, position, |content, pos| {
-                backend.handle_hover(&uri_clone, content, pos)
+                let mut hover = backend.handle_hover(&uri_clone, content, pos)?;
+                if crate::blade::is_blade_file(&uri_clone)
+                    && let Some(range) = &mut hover.range
+                {
+                    range.start = backend.translate_php_to_blade(&uri_clone, range.start);
+                    range.end = backend.translate_php_to_blade(&uri_clone, range.end);
+                }
+                Some(hover)
             })
         })
         .await

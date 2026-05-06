@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade template support.** Completion, hover, go-to-definition, diagnostics, semantic tokens, and inlay hints work inside `.blade.php` files. The preprocessor transforms Blade syntax into virtual PHP on the fly, with coordinate translation so all editor features report correct positions. ([#100](https://github.com/AJenbo/phpantom_lsp/pull/100) by [@MingJen](https://github.com/MingJen))
 - **Blade keyword highlighting.** Blade directives, echo delimiters, PHP keywords, cast types, comments, and PHPDoc tags inside `.blade.php` files now receive semantic tokens for proper syntax coloring. PHP keywords and cast types are emitted from the AST and shared with `.php` files, so highlighting is fully in sync between both file types.
 
+### Fixed
+
+- **Blade hover positions.** Hover ranges in `.blade.php` files are now translated back to original Blade coordinates, so the editor highlights the correct symbol under the cursor.
+- **Standalone `@var` completion.** Variables typed only via a standalone `/** @var Type $var */` docblock (with no preceding assignment) now resolve for member completion and go-to-definition. This fixes completion inside Blade templates that use `@php /** @var \App\Models\Foo $var */ @endphp`.
+
 ### Changed
 
 - **Unified type resolution.** Hover, go-to-type-definition, find-references, deprecated diagnostics, and replace-deprecated code actions now share a single variable/subject resolution pipeline. Fixes resolved in one feature automatically apply to all others.

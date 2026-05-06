@@ -1,4 +1,3 @@
-{{-- PHPantom Laravel Demo: Admin Users Index --}}
 {{-- Demonstrates completion and navigation in nested Blade views --}}
 @php
 /**

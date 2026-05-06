@@ -1,4 +1,3 @@
-{{-- PHPantom Laravel Demo: Blade Template --}}
 {{-- Try: Ctrl+Click on variables, config keys, route names, and translation keys --}}
 @php
 /**

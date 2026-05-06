@@ -1,4 +1,3 @@
-{{-- PHPantom Laravel Demo: Blog Post Published Email --}}
 {{-- Demonstrates variable completion inside included partials --}}
 @php
 /**
