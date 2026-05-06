@@ -652,8 +652,7 @@ impl LanguageServer for Backend {
             // raw-echo explanation, rather than falling through to the virtual
             // PHP content where the position maps into boilerplate.
             if backend.is_blade_file(&uri_clone)
-                && let Some(hover) =
-                    backend.blade_echo_delimiter_hover(&uri_clone, position)
+                && let Some(hover) = backend.blade_echo_delimiter_hover(&uri_clone, position)
             {
                 return Ok(Some(hover));
             }

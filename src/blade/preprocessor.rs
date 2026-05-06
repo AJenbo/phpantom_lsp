@@ -149,8 +149,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         ) {
                             // These are conditional blocks: if args present, skip them;
                             // if no args, emit directly.
-                            let after_dir: String =
-                                rest_str[directive.len()..].chars().collect();
+                            let after_dir: String = rest_str[directive.len()..].chars().collect();
                             let after_trimmed = after_dir.trim_start();
                             if after_trimmed.starts_with('(') {
                                 replacement = " if (true) ".to_string();
@@ -162,16 +161,13 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                             }
                         } else if matches!(directive, "foreach" | "forelse") {
                             replacement = format!(" {} ", translate_directive(directive));
-                            next_mode = Mode::DirectiveArgs(": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */ $loop = (object)[];");
+                            next_mode = Mode::DirectiveArgs(
+                                ": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */ $loop = (object)[];",
+                            );
                             paren_depth = 0;
                         } else if matches!(
                             directive,
-                            "if" | "elseif"
-                                | "for"
-                                | "while"
-                                | "switch"
-                                | "unless"
-                                | "isset"
+                            "if" | "elseif" | "for" | "while" | "switch" | "unless" | "isset"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(":"); // Directive Args
@@ -450,7 +446,11 @@ mod tests {
     fn test_preprocess_foreach_loop_variable() {
         let content = "@foreach($items as $item)\n{{ $loop->first }}\n@endforeach\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("$loop"), "should inject $loop variable: {}", php);
+        assert!(
+            php.contains("$loop"),
+            "should inject $loop variable: {}",
+            php
+        );
         assert!(
             php.contains("object{index: int"),
             "should have typed $loop: {}",
@@ -459,14 +459,22 @@ mod tests {
         // $loop should be declared before its usage
         let loop_decl = php.find("$loop = (object)[];").unwrap();
         let loop_use = php.rfind("$loop").unwrap();
-        assert!(loop_use > loop_decl, "$loop usage after declaration: {}", php);
+        assert!(
+            loop_use > loop_decl,
+            "$loop usage after declaration: {}",
+            php
+        );
     }
 
     #[test]
     fn test_preprocess_forelse_loop_variable() {
         let content = "@forelse($items as $item)\n{{ $loop->index }}\n@empty\n@endforelse\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("$loop = (object)[];"), "forelse should also inject $loop: {}", php);
+        assert!(
+            php.contains("$loop = (object)[];"),
+            "forelse should also inject $loop: {}",
+            php
+        );
     }
 
     #[test]
@@ -512,8 +520,16 @@ mod tests {
             eprintln!("{:2}: {}", i, line);
         }
         assert!(php.contains("foreach"), "should contain foreach: {}", php);
-        assert!(php.contains("endforeach"), "should contain endforeach: {}", php);
-        assert!(php.contains("if (false):"), "should contain if (false): {}", php);
+        assert!(
+            php.contains("endforeach"),
+            "should contain endforeach: {}",
+            php
+        );
+        assert!(
+            php.contains("if (false):"),
+            "should contain if (false): {}",
+            php
+        );
         assert!(php.contains("endif;"), "should contain endif: {}", php);
     }
 
@@ -521,36 +537,70 @@ mod tests {
     fn test_preprocess_session_directive() {
         let content = "@session('key')\n    <p>{{ $value }}</p>\n@endsession\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true)"), "should contain if (true): {}", php);
-        assert!(php.contains("$value = '';"), "should inject $value: {}", php);
+        assert!(
+            php.contains("if (true)"),
+            "should contain if (true): {}",
+            php
+        );
+        assert!(
+            php.contains("$value = '';"),
+            "should inject $value: {}",
+            php
+        );
         assert!(php.contains("endif;"), "should contain endif: {}", php);
     }
 
     #[test]
     fn test_preprocess_verbatim() {
-        let content = "@verbatim\n    {{ $name }}\n    @if(true)\n@endverbatim\n<p>{{ $real }}</p>\n";
+        let content =
+            "@verbatim\n    {{ $name }}\n    @if(true)\n@endverbatim\n<p>{{ $real }}</p>\n";
         let (php, _) = preprocess(content);
         // The {{ $name }} inside verbatim should NOT produce echo
-        assert!(!php.contains("$name"), "verbatim content should be skipped: {}", php);
+        assert!(
+            !php.contains("$name"),
+            "verbatim content should be skipped: {}",
+            php
+        );
         // The {{ $real }} after @endverbatim should work normally
-        assert!(php.contains("$real"), "content after endverbatim should work: {}", php);
+        assert!(
+            php.contains("$real"),
+            "content after endverbatim should work: {}",
+            php
+        );
     }
 
     #[test]
     fn test_preprocess_verbatim_with_comment_syntax() {
         // Verbatim blocks may contain */ which would break PHP block comments
-        let content = "@verbatim\n    {{ /* js comment */ value }}\n@endverbatim\n<p>{{ $after }}</p>\n";
+        let content =
+            "@verbatim\n    {{ /* js comment */ value }}\n@endverbatim\n<p>{{ $after }}</p>\n";
         let (php, _) = preprocess(content);
-        assert!(!php.contains("js comment"), "verbatim content should be skipped: {}", php);
-        assert!(php.contains("$after"), "content after endverbatim should work: {}", php);
+        assert!(
+            !php.contains("js comment"),
+            "verbatim content should be skipped: {}",
+            php
+        );
+        assert!(
+            php.contains("$after"),
+            "content after endverbatim should work: {}",
+            php
+        );
     }
 
     #[test]
     fn test_preprocess_error_directive() {
         let content = "@error('email')\n    <p>{{ $message }}</p>\n@enderror\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true)"), "should contain if (true): {}", php);
-        assert!(php.contains("$message = '';"), "should inject $message: {}", php);
+        assert!(
+            php.contains("if (true)"),
+            "should contain if (true): {}",
+            php
+        );
+        assert!(
+            php.contains("$message = '';"),
+            "should inject $message: {}",
+            php
+        );
         assert!(php.contains("endif;"), "should contain endif: {}", php);
     }
 
@@ -558,8 +608,16 @@ mod tests {
     fn test_preprocess_context_directive() {
         let content = "@context('key')\n    <p>{{ $value }}</p>\n@endcontext\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true)"), "should contain if (true): {}", php);
-        assert!(php.contains("$value = '';"), "should inject $value: {}", php);
+        assert!(
+            php.contains("if (true)"),
+            "should contain if (true): {}",
+            php
+        );
+        assert!(
+            php.contains("$value = '';"),
+            "should inject $value: {}",
+            php
+        );
         assert!(php.contains("endif;"), "should contain endif: {}", php);
     }
 
@@ -606,38 +664,86 @@ mod tests {
         // @auth without args should produce if (true):
         let content = "@auth\n<p>logged in</p>\n@endauth\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true):"), "@auth should produce if (true):: {}", php);
-        assert!(php.contains("endif;"), "@endauth should produce endif;: {}", php);
+        assert!(
+            php.contains("if (true):"),
+            "@auth should produce if (true):: {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endauth should produce endif;: {}",
+            php
+        );
 
         // @auth with args should also produce if (true):
         let content = "@auth('admin')\n<p>admin</p>\n@endauth\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true)"), "@auth('admin') should produce if (true): {}", php);
-        assert!(php.contains("endif;"), "@endauth should produce endif;: {}", php);
+        assert!(
+            php.contains("if (true)"),
+            "@auth('admin') should produce if (true): {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endauth should produce endif;: {}",
+            php
+        );
 
         // @guest without args
         let content = "@guest\n<p>guest</p>\n@endguest\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true):"), "@guest should produce if (true):: {}", php);
-        assert!(php.contains("endif;"), "@endguest should produce endif;: {}", php);
+        assert!(
+            php.contains("if (true):"),
+            "@guest should produce if (true):: {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endguest should produce endif;: {}",
+            php
+        );
 
         // @production (never takes args)
         let content = "@production\n<p>prod</p>\n@endproduction\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true):"), "@production should produce if (true):: {}", php);
-        assert!(php.contains("endif;"), "@endproduction should produce endif;: {}", php);
+        assert!(
+            php.contains("if (true):"),
+            "@production should produce if (true):: {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endproduction should produce endif;: {}",
+            php
+        );
 
         // @env with args
         let content = "@env('local')\n<p>local</p>\n@endenv\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true)"), "@env should produce if (true): {}", php);
-        assert!(php.contains("endif;"), "@endenv should produce endif;: {}", php);
+        assert!(
+            php.contains("if (true)"),
+            "@env should produce if (true): {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endenv should produce endif;: {}",
+            php
+        );
 
         // @once without args
         let content = "@once\n<script>app.js</script>\n@endonce\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("if (true):"), "@once should produce if (true):: {}", php);
-        assert!(php.contains("endif;"), "@endonce should produce endif;: {}", php);
+        assert!(
+            php.contains("if (true):"),
+            "@once should produce if (true):: {}",
+            php
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endonce should produce endif;: {}",
+            php
+        );
     }
 
     #[test]
@@ -645,7 +751,11 @@ mod tests {
         // $value should be accessible inside @session block
         let content = "@session('status')\n{{ $value }}\n@endsession\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("$value = '';"), "should declare $value: {}", php);
+        assert!(
+            php.contains("$value = '';"),
+            "should declare $value: {}",
+            php
+        );
         // The $value echo should appear after the declaration
         let val_decl = php.find("$value = '';").unwrap();
         // Find last occurrence of $value (the echo usage)
@@ -662,7 +772,11 @@ mod tests {
         // $message should be accessible inside @error block
         let content = "@error('email')\n{{ $message }}\n@enderror\n";
         let (php, _) = preprocess(content);
-        assert!(php.contains("$message = '';"), "should declare $message: {}", php);
+        assert!(
+            php.contains("$message = '';"),
+            "should declare $message: {}",
+            php
+        );
         let msg_decl = php.find("$message = '';").unwrap();
         let msg_echo = php.rfind("$message").unwrap();
         assert!(

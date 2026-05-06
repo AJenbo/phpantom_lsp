@@ -121,12 +121,13 @@ pub fn translate_directive(directive: &str) -> String {
         "unless" => "if(!".to_string(),
         "else" => "else:".to_string(),
         "endif" | "endforeach" | "endfor" | "endwhile" | "endunless" | "endisset" | "endempty"
-        | "endswitch" | "endforelse" | "endsession" | "endcontext" | "enderror"
-        | "endauth" | "endguest" | "endproduction" | "endenv" | "endonce" => {
+        | "endswitch" | "endforelse" | "endsession" | "endcontext" | "enderror" | "endauth"
+        | "endguest" | "endproduction" | "endenv" | "endonce" => {
             let mapped = match directive {
                 "endunless" | "endisset" | "endempty" | "endsession" | "endcontext"
-                | "enderror" | "endauth" | "endguest" | "endproduction" | "endenv"
-                | "endonce" => "endif",
+                | "enderror" | "endauth" | "endguest" | "endproduction" | "endenv" | "endonce" => {
+                    "endif"
+                }
                 "endforelse" => "endif",
                 other => other,
             };
