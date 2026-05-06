@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778099666909,
+  "lastUpdate": 1778100083835,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7717,6 +7717,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "43b9e0e10822c9055955ba6f60010d309cfd80d3",
+          "message": "Fix verbatim block handling to skip content instead of commenting",
+          "timestamp": "2026-05-06T22:29:35+02:00",
+          "tree_id": "4a965f0bb8746e70184a1bc614e86c4eec694ec4",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/43b9e0e10822c9055955ba6f60010d309cfd80d3"
+        },
+        "date": 1778100083173,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49,
             "unit": "MiB"
           }
         ]
