@@ -24,7 +24,6 @@
                 <tr>
                     <td>{{ $user->name }}</td>
                     <td>{{ $user->email }}</td>
-                    <td>{{ $user->role ?? 'N/A' }}</td>
                 </tr>
             @endforeach
         </tbody>
