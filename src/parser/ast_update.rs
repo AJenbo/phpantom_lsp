@@ -33,7 +33,7 @@ impl Backend {
     /// changed (or a class was added/removed), meaning other open files
     /// that reference those classes may have stale diagnostics.
     pub fn update_ast(&self, uri: &str, content: &str) -> bool {
-        let content_to_parse = if crate::blade::is_blade_file(uri) {
+        let content_to_parse = if self.is_blade_file(uri) {
             let (virtual_php, source_map) = crate::blade::preprocessor::preprocess(content);
             self.blade_source_maps
                 .write()

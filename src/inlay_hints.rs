@@ -55,7 +55,7 @@ impl Backend {
         // If this is a Blade file, the `range` is in Blade coordinates.
         // We must translate it to virtual PHP coordinates before comparing
         // against offsets in the symbol map.
-        let virtual_range = if crate::blade::is_blade_file(uri) {
+        let virtual_range = if self.is_blade_file(uri) {
             Range {
                 start: self.translate_blade_to_php(uri, range.start),
                 end: self.translate_blade_to_php(uri, range.end),
@@ -96,7 +96,7 @@ impl Backend {
         }
 
         // Translate hints back to Blade if needed.
-        if crate::blade::is_blade_file(uri) {
+        if self.is_blade_file(uri) {
             for hint in &mut hints {
                 hint.position = self.translate_php_to_blade(uri, hint.position);
             }

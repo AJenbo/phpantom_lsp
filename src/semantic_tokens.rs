@@ -144,7 +144,7 @@ impl Backend {
         tokens.sort_by(|a, b| a.line.cmp(&b.line).then(a.start_char.cmp(&b.start_char)));
 
         // Translate tokens to Blade coordinates if necessary.
-        if crate::blade::is_blade_file(uri) {
+        if self.is_blade_file(uri) {
             let mut translated_tokens = Vec::with_capacity(tokens.len());
             for tok in tokens {
                 let start_pos = Position {

@@ -442,6 +442,12 @@ impl LanguageServer for Backend {
         let uri = doc.uri.to_string();
         let text = Arc::new(doc.text);
 
+        // Track files opened with languageId "blade" so they get
+        // Blade preprocessing even without a .blade.php extension.
+        if doc.language_id == "blade" && !crate::blade::is_blade_file(&uri) {
+            self.blade_uris.write().insert(uri.clone());
+        }
+
         // Store file content
         self.open_files
             .write()
@@ -495,9 +501,10 @@ impl LanguageServer for Backend {
         self.open_files.write().remove(&uri);
 
         // Clean up Blade preprocessor state for the closed file.
-        if crate::blade::is_blade_file(&uri) {
+        if self.is_blade_file(&uri) {
             self.blade_virtual_content.write().remove(&uri);
             self.blade_source_maps.write().remove(&uri);
+            self.blade_uris.write().remove(&uri);
         }
 
         self.clear_file_maps(&uri);
@@ -644,15 +651,16 @@ impl LanguageServer for Backend {
             // delimiter. If so, return hover for `e()` (escaped echo) or a
             // raw-echo explanation, rather than falling through to the virtual
             // PHP content where the position maps into boilerplate.
-            if crate::blade::is_blade_file(&uri_clone)
-                && let Some(hover) = backend.blade_echo_delimiter_hover(&uri_clone, position)
+            if backend.is_blade_file(&uri_clone)
+                && let Some(hover) =
+                    backend.blade_echo_delimiter_hover(&uri_clone, position)
             {
                 return Ok(Some(hover));
             }
 
             backend.handle_with_position("hover", &uri_clone, position, |content, pos| {
                 let mut hover = backend.handle_hover(&uri_clone, content, pos)?;
-                if crate::blade::is_blade_file(&uri_clone)
+                if backend.is_blade_file(&uri_clone)
                     && let Some(range) = &mut hover.range
                 {
                     range.start = backend.translate_php_to_blade(&uri_clone, range.start);
@@ -882,7 +890,7 @@ impl LanguageServer for Backend {
                         if let Some(changes) = &mut edit.changes {
                             for (uri, edits) in changes {
                                 let uri_str = uri.to_string();
-                                if crate::blade::is_blade_file(&uri_str) {
+                                if backend.is_blade_file(&uri_str) {
                                     for e in edits {
                                         e.range.start =
                                             backend.translate_php_to_blade(&uri_str, e.range.start);
@@ -1329,7 +1337,7 @@ impl Backend {
         let mut pos = position;
 
         // If this is a Blade file, use the virtual PHP content and translate the position.
-        if crate::blade::is_blade_file(uri)
+        if self.is_blade_file(uri)
             && let Some(virtual_content) = self.blade_virtual_content.read().get(uri)
         {
             content = virtual_content.clone();

@@ -92,12 +92,6 @@ does not yet inject a `$loop` variable inside `@foreach` blocks:
 $loop = (object)[];
 ```
 
-### `languageId` check in `did_open`
-
-The server checks `is_blade_file()` (URI suffix) but does not yet
-check `languageId == "blade"` from the `did_open` params. Some
-editors send this for Blade files.
-
 ### Additional test coverage
 
 - Directives with implicit vars (`@error`, `@session`, `@context`)

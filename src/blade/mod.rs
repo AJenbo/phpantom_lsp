@@ -201,3 +201,26 @@ impl crate::Backend {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_blade_file_by_extension() {
+        assert!(is_blade_file("file:///app/views/welcome.blade.php"));
+        assert!(!is_blade_file("file:///app/controllers/Home.php"));
+    }
+
+    #[test]
+    fn test_is_blade_file_by_language_id() {
+        let backend = crate::Backend::test_defaults();
+        // Not blade by extension
+        let uri = "file:///app/views/welcome.php";
+        assert!(!backend.is_blade_file(uri));
+
+        // Register via language_id
+        backend.blade_uris.write().insert(uri.to_string());
+        assert!(backend.is_blade_file(uri));
+    }
+}

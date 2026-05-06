@@ -596,6 +596,9 @@ pub struct Backend {
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
+    /// URIs opened with `languageId == "blade"` that don't have a `.blade.php` extension.
+    /// Allows editors to signal Blade files via languageId alone.
+    pub(crate) blade_uris: Arc<RwLock<std::collections::HashSet<String>>>,
 }
 
 impl Backend {
@@ -673,6 +676,7 @@ impl Backend {
             config: Mutex::new(config::Config::default()),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
+            blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
         }
     }
 
@@ -746,6 +750,7 @@ impl Backend {
             config: Mutex::new(config::Config::default()),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
+            blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
         }
     }
 
@@ -1045,6 +1050,7 @@ impl Backend {
             config: Mutex::new(self.config.lock().clone()),
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),
             blade_source_maps: Arc::clone(&self.blade_source_maps),
+            blade_uris: Arc::clone(&self.blade_uris),
         }
     }
 
@@ -1088,6 +1094,12 @@ impl Backend {
             .retain(|name, source| !stubs::is_stub_class_removed(source, name, version));
     }
 
+    /// Check whether a URI refers to a Blade template file.
+    /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
+    pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
+        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
+    }
+
     /// Translate a position from an original Blade file to the virtual PHP file.
     pub(crate) fn translate_blade_to_php(
         &self,
@@ -1121,7 +1133,7 @@ impl Backend {
         mut location: tower_lsp::lsp_types::Location,
     ) -> tower_lsp::lsp_types::Location {
         let uri_str = location.uri.to_string();
-        if crate::blade::is_blade_file(&uri_str) {
+        if self.is_blade_file(&uri_str) {
             location.range.start = self.translate_php_to_blade(&uri_str, location.range.start);
             location.range.end = self.translate_php_to_blade(&uri_str, location.range.end);
         }
