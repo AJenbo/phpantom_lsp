@@ -100,16 +100,29 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                         } else if directive == "endphp" {
                             replacement = "".to_string();
                             next_mode = Mode::Html;
+                        } else if directive == "empty" {
+                            // @empty with parens = if(empty(...)):, without parens = forelse separator
+                            let after_dir: String = rest_str[directive.len()..].chars().collect();
+                            let after_trimmed = after_dir.trim_start();
+                            if after_trimmed.starts_with('(') {
+                                replacement = format!(" {} ", translate_directive(directive));
+                                next_mode = Mode::DirectiveArgs(":");
+                                paren_depth = 0;
+                            } else {
+                                // forelse @empty (no args) → endforeach; if (false):
+                                replacement = " endforeach; if (false): ".to_string();
+                                next_mode = Mode::Html;
+                            }
                         } else if matches!(
                             directive,
                             "if" | "elseif"
                                 | "foreach"
+                                | "forelse"
                                 | "for"
                                 | "while"
                                 | "switch"
                                 | "unless"
                                 | "isset"
-                                | "empty"
                         ) {
                             replacement = format!(" {} ", translate_directive(directive));
                             next_mode = Mode::DirectiveArgs(":"); // Directive Args
@@ -163,6 +176,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
                                 | "endisset"
                                 | "endempty"
                                 | "endswitch"
+                                | "endforelse"
                                 | "endsection"
                                 | "endpush"
                                 | "endprepend"
@@ -394,6 +408,24 @@ mod tests {
             eprintln!("{:2}: {}", i, line);
         }
         assert!(php.contains("$user->name"));
+    }
+
+    #[test]
+    fn test_preprocess_forelse() {
+        let content = r#"@forelse($users as $user)
+    <p>{{ $user->name }}</p>
+@empty
+    <p>No users</p>
+@endforelse
+"#;
+        let (php, _) = preprocess(content);
+        for (i, line) in php.lines().enumerate() {
+            eprintln!("{:2}: {}", i, line);
+        }
+        assert!(php.contains("foreach"), "should contain foreach: {}", php);
+        assert!(php.contains("endforeach"), "should contain endforeach: {}", php);
+        assert!(php.contains("if (false):"), "should contain if (false): {}", php);
+        assert!(php.contains("endif;"), "should contain endif: {}", php);
     }
 
     #[test]

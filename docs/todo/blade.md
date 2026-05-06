@@ -53,28 +53,12 @@ coordinate translation. The LSP pipeline (`with_file_content`,
 
 Known issues in the current implementation:
 
-### Hover ranges are offset
-
-Hover works (correct type info is shown) but the highlight range
-appears at the wrong position. The `hover` handler in `server.rs`
-translates the inbound cursor position (blade→php) but does not
-translate the returned `Hover.range` back (php→blade). Other
-handlers (rename, highlights, linked editing) already do this
-translation.
-
 ### Code actions are not Blade-aware
 
 Code actions like "Import class" insert a `use` statement at the top
 of the file rather than inside a `@php` / `<?php` block. All code
 actions that produce text edits need their ranges translated, and
 actions that generate new code need to be aware of Blade structure.
-
-### `@forelse` / `@empty` as loop construct
-
-The `@forelse` directive is not in the directive list. The spec
-defines `@forelse ($arr as $v)` → `foreach ($arr as $v):` and
-`@empty` (in forelse context) → `endforeach; if (false):` with
-`@endforelse` → `endif;`.
 
 Remaining work in this phase:
 

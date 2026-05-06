@@ -6,6 +6,8 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
         "endif",
         "foreach",
         "endforeach",
+        "forelse",
+        "endforelse",
         "for",
         "endfor",
         "while",
@@ -115,12 +117,14 @@ pub fn translate_directive(directive: &str) -> String {
     match directive {
         "php" | "endphp" => "".to_string(),
         "if" | "elseif" | "foreach" | "for" | "while" | "switch" | "case" => directive.to_string(),
+        "forelse" => "foreach".to_string(),
         "unless" => "if(!".to_string(),
         "else" => "else:".to_string(),
         "endif" | "endforeach" | "endfor" | "endwhile" | "endunless" | "endisset" | "endempty"
-        | "endswitch" => {
+        | "endswitch" | "endforelse" => {
             let mapped = match directive {
                 "endunless" | "endisset" | "endempty" => "endif",
+                "endforelse" => "endif",
                 other => other,
             };
             format!("{mapped};")
