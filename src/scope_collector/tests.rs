@@ -1405,7 +1405,9 @@ function test(string $input): ?string {
     let match_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$match" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$match" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         match_writes >= 1,
@@ -1426,7 +1428,9 @@ function test(string $query): string {
     let data_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$data" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$data" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         data_writes >= 1,
@@ -1449,7 +1453,9 @@ function test(string $input): ?string {
     let match_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$match" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$match" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         match_writes >= 1,
@@ -1496,7 +1502,9 @@ function test($mh): int {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$running" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$running" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "curl_multi_exec's $running should be a Write");
 }
@@ -1512,12 +1520,16 @@ function test(): void {
     let errno_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$errno" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$errno" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let errstr_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$errstr" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$errstr" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(errno_writes >= 1, "fsockopen's $errno should be a Write");
     assert!(errstr_writes >= 1, "fsockopen's $errstr should be a Write");
@@ -1535,7 +1547,9 @@ function test(string $data, $key): string {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$signature" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$signature" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "openssl_sign's $signature should be a Write");
 }
@@ -1552,7 +1566,9 @@ function test(string $input): array {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$result" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$result" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "mb_parse_str's $result should be a Write");
 }
@@ -1569,7 +1585,9 @@ function test(): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$status" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$status" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "pcntl_wait's $status should be a Write");
 }
@@ -1586,7 +1604,9 @@ function test(string $file): array {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$imageinfo" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$imageinfo" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "getimagesize's $imageinfo should be a Write");
 }
@@ -1603,12 +1623,16 @@ function test(string $host): void {
     let mxhosts_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$mxhosts" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$mxhosts" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let weights_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$weights" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$weights" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         mxhosts_writes >= 1,
@@ -1632,7 +1656,9 @@ function test($fp): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$wouldblock" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$wouldblock" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "flock's $wouldblock should be a Write");
 }
@@ -1649,17 +1675,23 @@ function test($queue): void {
     let msgtype_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$msgtype" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$msgtype" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let data_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$data" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$data" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let errorcode_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$errorcode" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$errorcode" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         msgtype_writes >= 1,
@@ -1684,7 +1716,9 @@ function test($ldap, $result): void {
     let errcode_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$errcode" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$errcode" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         errcode_writes >= 1,
@@ -1704,12 +1738,16 @@ function test(): void {
     let file_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$file" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$file" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let line_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$line" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$line" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(file_writes >= 1, "headers_sent's $file should be a Write");
     assert!(line_writes >= 1, "headers_sent's $line should be a Write");
@@ -1727,7 +1765,9 @@ function test(): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$optind" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$optind" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(writes >= 1, "getopt's $optind should be a Write");
 }
@@ -1744,17 +1784,23 @@ function test(string $file): void {
     let width_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$width" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$width" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let height_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$height" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$height" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     let type_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$type" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$type" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         width_writes >= 1,
@@ -1812,7 +1858,9 @@ function test(): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$output" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$output" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         writes >= 1,
@@ -1838,7 +1886,9 @@ function test(string $input): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$match" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$match" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         writes >= 1,
@@ -1868,7 +1918,9 @@ function test(): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$errors" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$errors" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         writes >= 1,
@@ -1894,7 +1946,9 @@ function test(): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$warnings" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$warnings" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         writes >= 1,
@@ -1956,7 +2010,9 @@ function test(string $input): void {
     let result_writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$result" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$result" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(result_writes >= 1, "By-ref second arg should be a Write");
 }
@@ -1983,7 +2039,9 @@ function test(): void {
     let writes = scope_map
         .accesses
         .iter()
-        .filter(|a| a.name == "$output" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite))
+        .filter(|a| {
+            a.name == "$output" && matches!(a.kind, AccessKind::Write | AccessKind::ReadWrite)
+        })
         .count();
     assert!(
         writes >= 1,

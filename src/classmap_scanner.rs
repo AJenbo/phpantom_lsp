@@ -355,6 +355,38 @@ pub fn scan_vendor_packages_with_skip(
             }
         }
 
+        // Files entries (individual PHP files that are always loaded)
+        if let Some(files) = autoload.get("files").and_then(|f| f.as_array()) {
+            let mut has_custom_autoloader = false;
+            for entry in files {
+                if let Some(file_str) = entry.as_str() {
+                    let file = pkg_path.join(file_str);
+                    if file.is_file()
+                        && file.extension().is_some_and(|ext| ext == "php")
+                        && !skip_paths.contains(&file)
+                    {
+                        // Check if this file registers a custom autoloader.
+                        if !has_custom_autoloader
+                            && let Ok(content) = std::fs::read(&file)
+                            && memmem::find(&content, b"spl_autoload_register").is_some()
+                        {
+                            has_custom_autoloader = true;
+                        }
+                        plain_files.push(file);
+                    }
+                }
+            }
+
+            // When a files entry registers a custom autoloader via
+            // spl_autoload_register, it will load classes from the
+            // package at runtime. Since we can't execute that logic,
+            // do a full scan of the package directory to discover all
+            // classes it provides.
+            if has_custom_autoloader {
+                collect_php_files(&pkg_path, &vendor_dir_paths, skip_paths, &mut plain_files);
+            }
+        }
+
         // Classmap entries
         if let Some(cm) = autoload.get("classmap").and_then(|c| c.as_array()) {
             for entry in cm {
@@ -544,7 +576,19 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
             if let Ok(content) = std::fs::read(path) {
                 let scan = find_symbols(&content);
                 for fqcn in scan.classes {
-                    result.classmap.entry(fqcn).or_insert_with(|| path.clone());
+                    let class_short_name = fqcn_short_name(&fqcn).to_owned();
+                    result
+                        .classmap
+                        .entry(fqcn)
+                        .and_modify(|existing| {
+                            let existing_stem =
+                                existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            if existing_stem != class_short_name && new_stem == class_short_name {
+                                *existing = path.clone();
+                            }
+                        })
+                        .or_insert_with(|| path.clone());
                 }
                 for fqn in scan.functions {
                     result
@@ -602,7 +646,25 @@ fn scan_files_parallel_full(files: &[PathBuf]) -> WorkspaceScanResult {
     for batch in results {
         for (scan, path) in batch {
             for fqcn in scan.classes {
-                result.classmap.entry(fqcn).or_insert_with(|| path.clone());
+                let class_short_name = fqcn_short_name(&fqcn).to_owned();
+                result
+                    .classmap
+                    .entry(fqcn)
+                    .and_modify(|existing| {
+                        // When two files declare the same FQN, prefer the one
+                        // whose filename matches the class's short name (PSR-4
+                        // convention). This handles packages with conditional
+                        // loading (e.g. ArraySubsetAsserts.php vs
+                        // ArraySubsetAssertsEmpty.php both defining the same
+                        // trait name).
+                        let existing_stem =
+                            existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        if existing_stem != class_short_name && new_stem == class_short_name {
+                            *existing = path.clone();
+                        }
+                    })
+                    .or_insert_with(|| path.clone());
             }
             for fqn in scan.functions {
                 result
@@ -1663,6 +1725,14 @@ fn normalise_prefix(prefix: &str) -> String {
     } else {
         format!("{prefix}\\")
     }
+}
+
+/// Extract the short (unqualified) class name from a fully-qualified name.
+///
+/// For example, `"DMS\\PHPUnitExtensions\\ArraySubset\\ArraySubsetAsserts"`
+/// yields `"ArraySubsetAsserts"`.
+fn fqcn_short_name(fqcn: &str) -> &str {
+    fqcn.rsplit('\\').next().unwrap_or(fqcn)
 }
 
 /// Extract string values from a JSON value that is either a single
