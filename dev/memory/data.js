@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778101134737,
+  "lastUpdate": 1778107025650,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7785,6 +7785,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "eeaedb464a497af372716e164b6d427a0ab10adc",
+          "message": "Update mago crates to version 1.26 in Cargo.toml and Cargo.lock",
+          "timestamp": "2026-05-07T00:20:35+02:00",
+          "tree_id": "2b20ce4d7bf983351c0a70e6cccc029c7f2408bc",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/eeaedb464a497af372716e164b6d427a0ab10adc"
+        },
+        "date": 1778107024383,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.2,
             "unit": "MiB"
           }
         ]
