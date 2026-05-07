@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778107094964,
+  "lastUpdate": 1778163802071,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7843,6 +7843,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/AJenbo/phpantom_lsp/commit/9402e739a39708199a8b9dc04b1d010765878343"
         },
         "date": 1778107093752,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 49.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "836358a1b8a19410b739c1587666266e6666b99b",
+          "message": "Add Replace FQCN with import code",
+          "timestamp": "2026-05-07T16:11:16+02:00",
+          "tree_id": "70ff87bcbe560abfcf62acb838b840122fe30695",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/836358a1b8a19410b739c1587666266e6666b99b"
+        },
+        "date": 1778163801451,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
