@@ -116,6 +116,13 @@ pub struct FormattingConfig {
     /// - `""` — disable phpcbf.
     /// - Any other value — use as the command.
     pub phpcbf: Option<String>,
+    /// Command (path or name) to run Laravel Pint.
+    ///
+    /// - `None` (default) — check `require-dev` in `composer.json`;
+    ///   if absent, fall back to the built-in formatter.
+    /// - `""` — disable pint.
+    /// - Any other value — use as the command.
+    pub pint: Option<String>,
     /// Maximum runtime in milliseconds before each formatter is killed.
     /// Defaults to 10 000 ms (10 seconds).  Applied per tool, not
     /// for the combined pipeline.
@@ -129,10 +136,12 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is entirely disabled (both tools explicitly
+    /// Whether formatting is entirely disabled (all tools explicitly
     /// set to empty strings).
     pub fn is_disabled(&self) -> bool {
-        self.php_cs_fixer.as_deref() == Some("") && self.phpcbf.as_deref() == Some("")
+        self.php_cs_fixer.as_deref() == Some("")
+            && self.phpcbf.as_deref() == Some("")
+            && self.pint.as_deref() == Some("")
     }
 }
 
@@ -873,10 +882,15 @@ analyze-timeout = 45000
     fn formatting_empty_string_disables_tool() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE_NAME);
-        std::fs::write(&path, "[formatting]\nphp-cs-fixer = \"\"\nphpcbf = \"\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "[formatting]\nphp-cs-fixer = \"\"\nphpcbf = \"\"\npint = \"\"\n",
+        )
+        .unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(config.formatting.phpcbf.as_deref(), Some(""));
+        assert_eq!(config.formatting.pint.as_deref(), Some(""));
         assert!(config.formatting.is_disabled());
     }
 

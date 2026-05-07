@@ -1,10 +1,10 @@
 //! Built-in formatting with external tool override.
 //!
 //! PHPantom ships a built-in PHP formatter (mago-formatter) that works
-//! out of the box.  Projects that depend on php-cs-fixer or
-//! PHP_CodeSniffer in their `composer.json` `require-dev` automatically
-//! use those tools instead.  Users can also override tool paths or
-//! disable formatting entirely via `.phpantom.toml`.
+//! out of the box.  Projects that depend on Laravel Pint, php-cs-fixer,
+//! or PHP_CodeSniffer in their `composer.json` `require-dev`
+//! automatically use those tools instead.  Users can also override tool
+//! paths or disable formatting entirely via `.phpantom.toml`.
 //!
 //! ## Resolution strategy
 //!
@@ -12,9 +12,10 @@
 //!    `.phpantom.toml`, use that tool.  If they set it to `""`, that
 //!    tool is disabled.
 //! 2. **Composer `require-dev` wins over built-in.**  If
-//!    `composer.json` lists `friendsofphp/php-cs-fixer` or
-//!    `squizlabs/php_codesniffer` in `require-dev`, resolve the binary
-//!    via Composer's bin-dir and run it as a subprocess.
+//!    `composer.json` lists `laravel/pint`,
+//!    `friendsofphp/php-cs-fixer`, or `squizlabs/php_codesniffer` in
+//!    `require-dev`, resolve the binary via Composer's bin-dir and run
+//!    it as a subprocess.
 //! 3. **Otherwise, use mago-formatter.**  No subprocess, no temp files,
 //!    no external dependencies.  Uses PER-CS 2.0 defaults.
 //!
@@ -23,9 +24,11 @@
 //! ```toml
 //! [formatting]
 //! # Explicit path: always use this tool, skip require-dev detection.
+//! # pint = "/usr/local/bin/pint"
 //! # php-cs-fixer = "/usr/local/bin/php-cs-fixer"
 //!
 //! # Empty string: disable this tool entirely.
+//! # pint = ""
 //! # php-cs-fixer = ""
 //!
 //! # Omitted (default): check require-dev, then fall back to
@@ -37,11 +40,12 @@
 //!
 //! ## Config file discovery
 //!
-//! Both external tools discover their project config by walking up from
-//! the file being formatted.  To ensure the project's style rules are
-//! applied, formatting runs on a sibling temp file in the same
-//! directory as the original so that config walkers
-//! (`.php-cs-fixer.php`, `.phpcs.xml`, etc.) find the project rules.
+//! External tools discover their project config by walking up from
+//! the file being formatted.  File-based tools (php-cs-fixer, phpcbf)
+//! run on a sibling temp file in the same directory as the original so
+//! that config walkers (`.php-cs-fixer.php`, `.phpcs.xml`, etc.) find
+//! the project rules.  Pint uses `--stdin-filename` to achieve the
+//! same config discovery without temp files.
 
 use std::borrow::Cow;
 use std::io::Write;
@@ -105,9 +109,18 @@ pub(crate) fn resolve_strategy(
     // Check for explicit config overrides first.
     let fixer_explicit = matches!(config.php_cs_fixer.as_deref(), Some(s) if !s.is_empty());
     let phpcbf_explicit = matches!(config.phpcbf.as_deref(), Some(s) if !s.is_empty());
+    let pint_explicit = matches!(config.pint.as_deref(), Some(s) if !s.is_empty());
 
-    if fixer_explicit || phpcbf_explicit {
+    if fixer_explicit || phpcbf_explicit || pint_explicit {
         let mut tools = Vec::new();
+        if let Some(cmd) = config.pint.as_deref()
+            && !cmd.is_empty()
+        {
+            tools.push(ResolvedTool {
+                name: "pint",
+                path: PathBuf::from(cmd),
+            });
+        }
         if let Some(cmd) = config.php_cs_fixer.as_deref()
             && !cmd.is_empty()
         {
@@ -139,6 +152,14 @@ pub(crate) fn resolve_strategy(
         // one tool while leaving the other to auto-detect).
         let fixer_disabled = config.php_cs_fixer.as_deref() == Some("");
         let phpcbf_disabled = config.phpcbf.as_deref() == Some("");
+        let pint_disabled = config.pint.as_deref() == Some("");
+
+        if !pint_disabled
+            && crate::composer::has_require_dev(package, "laravel/pint")
+            && let Some(tool) = resolve_from_bin_dir("pint", workspace_root, bin)
+        {
+            tools.push(tool);
+        }
 
         if !fixer_disabled
             && crate::composer::has_require_dev(package, "friendsofphp/php-cs-fixer")
@@ -283,6 +304,7 @@ fn run_tool(
     match tool.name {
         "php-cs-fixer" => run_php_cs_fixer(&tool.path, content, file_path, timeout),
         "phpcbf" => run_phpcbf(&tool.path, content, file_path, timeout),
+        "pint" => run_pint(&tool.path, content, file_path, timeout),
         _ => Err(format!("Unknown formatting tool: {}", tool.name)),
     }
 }
@@ -332,6 +354,76 @@ fn run_php_cs_fixer(
             }
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Run Pint via stdin and return the formatted content.
+///
+/// Command: `<tool> --stdin-filename=<file_path>`
+///
+/// Pint reads from stdin and writes the formatted output to stdout
+/// when `--stdin-filename` is provided.
+fn run_pint(
+    tool_path: &Path,
+    content: &str,
+    file_path: &Path,
+    timeout: Duration,
+) -> Result<String, String> {
+    let mut child = Command::new(tool_path)
+        .arg(format!("--stdin-filename={}", file_path.display()))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn pint: {}", e))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("Failed to write to pint stdin: {}", e))?;
+    }
+
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    std::io::Read::read_to_string(&mut out, &mut stdout)
+                        .map_err(|e| format!("Failed to read pint stdout: {}", e))?;
+                }
+
+                let code = status.code().unwrap_or(-1);
+                if code == 0 {
+                    return Ok(stdout);
+                }
+
+                let mut stderr = String::new();
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
+                }
+                return Err(format!(
+                    "pint exited with code {} (stderr: {})",
+                    code,
+                    stderr.trim()
+                ));
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Formatter timed out after {}ms",
+                        timeout.as_millis()
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                return Err(format!("Error waiting for pint: {}", e));
+            }
+        }
     }
 }
 
@@ -565,6 +657,7 @@ mod tests {
     #[test]
     fn strategy_both_disabled() {
         let config = FormattingConfig {
+            pint: Some(String::new()),
             php_cs_fixer: Some(String::new()),
             phpcbf: Some(String::new()),
             timeout: None,
@@ -576,6 +669,7 @@ mod tests {
     #[test]
     fn strategy_explicit_commands() {
         let config = FormattingConfig {
+            pint: None,
             php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
             phpcbf: Some("/usr/bin/phpcbf".to_string()),
             timeout: None,
@@ -596,6 +690,7 @@ mod tests {
     #[test]
     fn strategy_one_explicit_one_disabled() {
         let config = FormattingConfig {
+            pint: None,
             php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
             phpcbf: Some(String::new()),
             timeout: None,
@@ -763,6 +858,7 @@ mod tests {
 
         // User explicitly set a different path.
         let config = FormattingConfig {
+            pint: None,
             php_cs_fixer: Some("/opt/php-cs-fixer".to_string()),
             phpcbf: Some(String::new()),
             timeout: None,
@@ -1000,6 +1096,7 @@ mod tests {
     fn execute_disabled_returns_none() {
         let content = "<?php\necho 'hello';\n";
         let config = FormattingConfig {
+            pint: None,
             php_cs_fixer: Some(String::new()),
             phpcbf: Some(String::new()),
             timeout: None,
