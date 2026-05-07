@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Collection;
+
 /**
  * @template TKey of array-key
  * @template TModel
- * @extends \Illuminate\Database\Eloquent\Collection<TKey, TModel>
+ * @extends Collection<TKey, TModel>
  */
-class ReviewCollection extends \Illuminate\Database\Eloquent\Collection
+class ReviewCollection extends Collection
 {
     /** @return array<TKey, TModel> */
     public function topRated(): array { return []; }

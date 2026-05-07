@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Collection;
+
 /**
  * @template TKey of array-key
  * @template TModel of BlogAuthor
- * @extends \Illuminate\Database\Eloquent\Collection<TKey, TModel>
+ * @extends Collection<TKey, TModel>
  */
-class AuthorCollection extends \Illuminate\Database\Eloquent\Collection
+class AuthorCollection extends Collection
 {
     /** @return static */
     public function active(): static { return $this->filter(fn($a) => $a->active); }

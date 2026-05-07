@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Collection;
+
 /**
  * @template TKey of array-key
  * @template TModel of BlogPost
- * @extends \Illuminate\Database\Eloquent\Collection<TKey, TModel>
+ * @extends Collection<TKey, TModel>
  */
-class PostCollection extends \Illuminate\Database\Eloquent\Collection
+class PostCollection extends Collection
 {
     /** @return static */
     public function published(): static { return $this->filter(fn($p) => $p->published); }

@@ -275,6 +275,13 @@ fn check_scope(
                 continue;
             }
 
+            // Skip $loop in Blade files — it's injected by the
+            // preprocessor for every @foreach/@forelse and may not
+            // be explicitly referenced in the template body.
+            if var_name == "$loop" && crate::blade::is_blade_file(ctx.uri) {
+                continue;
+            }
+
             // Skip variables referenced by compact().
             if compact_vars.contains(var_name) {
                 continue;

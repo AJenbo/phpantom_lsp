@@ -39,9 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`array_reduce`, `array_sum`, and `array_product` return type inference.** `array_reduce()` resolves to the type of its initial value argument. `array_sum()` and `array_product()` resolve to `int|float`.
 - **Machine-readable CLI output.** Both `analyze` and `fix` accept a `--format` flag with `table`, `github`, and `json` options. When `GITHUB_ACTIONS` is set, table output automatically includes GitHub annotations.
 - **Magic property diagnostics.** New `report-magic-properties` option under `[diagnostics]` in `.phpantom.toml`. When enabled, classes with `__get` that also have virtual properties (from `@property` docblock tags, Laravel Eloquent column inference, or other providers) will flag unknown property access instead of silently allowing it.
+- **Inline diagnostic suppression.** `// @phpantom-ignore code` on the same line or the line above suppresses the specified diagnostic. Multiple codes can be comma-separated. A bare `// @phpantom-ignore` suppresses all diagnostics on the target line.
 
 ### Changed
 
+- **Replace FQCN with import.** Now replaces all occurrences of the same FQCN throughout the file in one action, not just the one under the cursor. A new "Replace all FQCNs with imports" action appears when the file contains multiple distinct FQCNs, replacing all of them at once (skipping those with import conflicts).
 - **LSP responsiveness.** Hover, go-to-definition, signature help, code actions, rename, and other handlers now run on background threads. Slow requests no longer block other requests or cancellations.
 - **Faster analysis.** Analysis time cut significantly on large projects.
 - **Editing responsiveness.** Classes evicted from the cache after a file edit are now eagerly re-populated in dependency order.
@@ -55,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Blade diagnostics in `analyze` command.** Blade template files now receive full diagnostics (unknown members, unknown classes, unused variables, etc.) when running `phpantom_lsp analyze`.
 - **Blade unknown-member diagnostic positions.** Unknown-member diagnostics in Blade files now point to the correct line in the original template instead of the virtual PHP line number.
+- **False-positive unused `$loop` in Blade templates.** The `$loop` variable injected by `@foreach`/`@forelse` is no longer flagged as unused when the template body doesn't reference it.
 - **Spurious function auto-imports.** Import statements like `use function is_array;` were misidentified as function declarations, polluting the completion list with phantom entries that inserted incorrect imports.
 - **Duplicate `use function` insertion.** Accepting a function completion no longer inserts a `use function` statement when the exact import already exists in the file.
 - **Function import conflict handling.** When a different function with the same short name is already imported, completing a namespaced function now inserts the fully-qualified name instead of the ambiguous short name.

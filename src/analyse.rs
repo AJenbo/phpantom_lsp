@@ -306,7 +306,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         if i >= file_count {
                             break;
                         }
-                        let (uri, content) = match &file_data[i] {
+                        let (uri, original_content) = match &file_data[i] {
                             Some(pair) => (&pair.0, &pair.1),
                             None => continue, // file that failed to read
                         };
@@ -321,10 +321,10 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 blade_content = vc.clone();
                                 &blade_content
                             } else {
-                                content
+                                original_content
                             }
                         } else {
-                            content
+                            original_content
                         };
 
                         // Activate ONE parse cache for the entire file so
@@ -494,6 +494,12 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 );
                             }
                         }
+
+                        // ── Apply @phpantom-ignore comment suppression ─────
+                        // Use original_content (not virtual PHP) because
+                        // diagnostic line numbers have already been translated
+                        // back to original file coordinates.
+                        crate::diagnostics::filter_ignored_by_comment(&mut raw, original_content);
 
                         // For Blade files, translate diagnostic ranges from
                         // virtual PHP coordinates back to original Blade

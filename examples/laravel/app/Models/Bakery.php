@@ -3,8 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Bakery extends Model
 {
@@ -42,29 +46,29 @@ class Bakery extends Model
         'gluten_free' => false,
     ];
 
-    /** @return \Illuminate\Database\Eloquent\Relations\HasMany<Loaf, $this> */
+    /** @return HasMany<Loaf, $this> */
     public function baguettes(): mixed { return $this->hasMany(Loaf::class); }
 
-    /** @return \Illuminate\Database\Eloquent\Relations\HasOne<Baker, $this> */
+    /** @return HasOne<Baker, $this> */
     public function headBaker(): mixed { return $this->hasOne(Baker::class); }
 
-    /** @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<BakeryRecipe, $this> */
+    /** @return BelongsToMany<BakeryRecipe, $this> */
     public function masterRecipe(): mixed { return $this->belongsToMany(BakeryRecipe::class); }
 
     public function vendor() { return $this->morphTo(); }
 
-    public function scopeTopping(\Illuminate\Database\Eloquent\Builder $query, string $type): void
+    public function scopeTopping(Builder $query, string $type): void
     {
         $query->where('topping', $type);
     }
 
-    public function scopeUnbaked(\Illuminate\Database\Eloquent\Builder $query): void
+    public function scopeUnbaked(Builder $query): void
     {
         $query->where('baked', false);
     }
 
     #[Scope]
-    protected function freshlyBaked(\Illuminate\Database\Eloquent\Builder $query): void
+    protected function freshlyBaked(Builder $query): void
     {
         $query->where('fresh', true);
     }

@@ -801,7 +801,15 @@ impl Backend {
 
         // ── Suppress imprecise overlaps and filter ──────────────────
         suppress_imprecise_overlaps(&mut full);
-        let full = self.filter_suppressed(full);
+        let mut full = self.filter_suppressed(full);
+
+        // ── Apply @phpantom-ignore comment suppression ─────────────
+        {
+            let content: Option<Arc<String>> = self.open_files.read().get(uri_str).cloned();
+            if let Some(ref text) = content {
+                filter_ignored_by_comment(&mut full, text);
+            }
+        }
 
         // If suppression removed any full-line PHPStan diagnostics
         // (because a precise native diagnostic covers the same line),
@@ -1888,6 +1896,105 @@ fn suppress_imprecise_overlaps(diagnostics: &mut Vec<Diagnostic>) {
 /// produce these ranges because they don't report column information.
 fn is_full_line_range(range: &Range) -> bool {
     range.start.line == range.end.line && range.start.character == 0 && range.end.character >= 1000
+}
+
+/// Remove diagnostics suppressed by `@phpantom-ignore` comments.
+///
+/// Supports two forms:
+/// - **Same-line:** `$x->foo; // @phpantom-ignore unknown_member`
+/// - **Next-line:** `// @phpantom-ignore unused_variable` on the line above.
+///
+/// Multiple codes can be comma-separated:
+/// `// @phpantom-ignore unknown_member, unused_variable`
+///
+/// A bare `@phpantom-ignore` (no codes) suppresses ALL diagnostics on
+/// that line.
+pub(crate) fn filter_ignored_by_comment(diagnostics: &mut Vec<Diagnostic>, content: &str) {
+    if diagnostics.is_empty() {
+        return;
+    }
+
+    // Pre-compute per-line ignore sets.  A `None` value means "ignore all".
+    // A `Some(set)` means only ignore those specific codes.
+    let lines: Vec<&str> = content.lines().collect();
+    let mut ignore_map: std::collections::HashMap<u32, Option<Vec<&str>>> =
+        std::collections::HashMap::new();
+
+    for (line_idx, line_text) in lines.iter().enumerate() {
+        if let Some(ignore_pos) = line_text.find("@phpantom-ignore") {
+            let after = &line_text[ignore_pos + "@phpantom-ignore".len()..];
+
+            // Check this isn't `@phpantom-ignore-` (future extensions).
+            if after.starts_with('-') {
+                continue;
+            }
+
+            let codes: Option<Vec<&str>> = {
+                let trimmed = after.trim();
+                if trimmed.is_empty() || trimmed.starts_with("*/") {
+                    None // bare ignore = suppress all
+                } else {
+                    // Strip trailing */ for block comments
+                    let trimmed = trimmed.trim_end_matches("*/").trim();
+                    Some(
+                        trimmed
+                            .split(',')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                            .collect(),
+                    )
+                }
+            };
+
+            // Determine whether this is a same-line or next-line ignore.
+            // If the comment is the only non-whitespace on the line
+            // (after stripping the `//` or `/*` prefix), it applies to
+            // the next line.  Otherwise it applies to the same line.
+            let before_comment = &line_text[..ignore_pos];
+            let is_standalone = before_comment
+                .trim()
+                .trim_start_matches("//")
+                .trim_start_matches("/*")
+                .trim_start_matches('*')
+                .trim()
+                .is_empty();
+
+            let target_line = if is_standalone {
+                line_idx as u32 + 1 // next line
+            } else {
+                line_idx as u32 // same line
+            };
+
+            ignore_map.insert(target_line, codes);
+        }
+    }
+
+    if ignore_map.is_empty() {
+        return;
+    }
+
+    diagnostics.retain(|d| {
+        let line = d.range.start.line;
+        if let Some(codes) = ignore_map.get(&line) {
+            match codes {
+                None => false, // suppress all
+                Some(code_list) => {
+                    // Check if this diagnostic's code is in the list.
+                    let diag_code = d.code.as_ref().and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.as_str()),
+                        _ => None,
+                    });
+                    if let Some(dc) = diag_code {
+                        !code_list.contains(&dc)
+                    } else {
+                        true // no code = can't suppress
+                    }
+                }
+            }
+        } else {
+            true
+        }
+    });
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

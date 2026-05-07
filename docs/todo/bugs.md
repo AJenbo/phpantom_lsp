@@ -21,14 +21,3 @@ handle this automatically.
 **Tests:** Assertion lines were removed from
 `tests/psalm_assertions/method_call.php` (out of scope until
 upstream stubs land).
-
-
-## B17. Blade `$loop` variable triggers unused-variable false positive
-
-The Blade preprocessor injects `$loop = new \stdClass();` inside
-`@foreach` / `@forelse` blocks to provide completion for the magic
-`$loop` variable. When the template does not actually reference
-`$loop`, the unused-variable diagnostic flags it. The injected
-assignment should either be suppressed from unused-variable checks
-(e.g. by marking it as a synthetic definition) or the preprocessor
-should only inject it when `$loop` is actually used in the block.
