@@ -25,6 +25,7 @@ within the same impact tier.
 
 | #   | Item                                                                                                                    | Impact      | Effort      |
 | --- | ----------------------------------------------------------------------------------------------------------------------- | ----------- | ------ |
+| P13 | [Tiered storage: drop per-file maps for non-open files](todo/performance.md#p13-tiered-storage-drop-per-file-maps-for-non-open-files) | Medium-High | Medium-High |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                                | Low         | Medium      |
 |     | **Release 0.8.0**                                                                                                       |             |             |
 

@@ -168,10 +168,15 @@ async fn test_did_close_removes_file() {
     };
     backend.did_close(close_params).await;
 
-    // AST map entry should be removed after close
+    // ast_map is dropped on close to free memory, but class_index
+    // is kept so GTD can still locate the file.
     assert!(
         backend.get_classes_for_uri(uri.as_ref()).is_none(),
-        "After close, AST map should not have an entry"
+        "After close, AST map should be cleared"
+    );
+    assert!(
+        backend.class_index().read().contains_key("Z"),
+        "class_index should retain entries after close"
     );
 }
 
@@ -283,7 +288,7 @@ async fn test_did_close_cleans_up_ast_map() {
     };
     backend.did_close(close_params).await;
 
-    // Verify ast_map entry was removed
+    // Verify ast_map entry is dropped on close to free memory
     assert!(
         backend.get_classes_for_uri(uri.as_ref()).is_none(),
         "ast_map should be cleaned up after did_close"

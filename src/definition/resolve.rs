@@ -13,6 +13,7 @@
 /// Variable definition resolution (`$var` → most recent assignment /
 /// declaration) is handled by the sibling [`super::variable`] module.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
 use tower_lsp::lsp_types::*;
@@ -683,7 +684,18 @@ impl Backend {
     ) -> Option<Location> {
         let sn = short_name(fqn);
 
-        let classes = self.ast_map.read().get(target_uri).cloned()?;
+        let classes = self.ast_map.read().get(target_uri).cloned().or_else(|| {
+            // The target file may have been closed (didClose clears
+            // ast_map).  Try fqn_index which retains ClassInfo across
+            // close, then fall back to re-parsing from disk (issue #99).
+            if let Some(cls) = self.fqn_index.read().get(fqn) {
+                return Some(vec![Arc::clone(cls)]);
+            }
+            let file_path = Url::parse(target_uri)
+                .ok()
+                .and_then(|u| u.to_file_path().ok())?;
+            self.parse_and_cache_file(&file_path)
+        })?;
 
         // Match by short name + namespace, same logic as
         // `find_definition_in_ast_map`.

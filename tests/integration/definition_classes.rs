@@ -200,6 +200,129 @@ async fn test_goto_definition_cross_file_psr4() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_after_target_did_close() {
+    // Regression test for issue #99: go-to-definition stops working
+    // after the target file is closed via textDocument/didClose.
+    let backend = create_test_backend();
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class ClassB {\n",
+        "    public function doSomething() {}\n",
+        "}\n",
+    );
+    std::fs::write(src_dir.join("ClassB.php"), text_b).unwrap();
+
+    let uri_b = Url::from_file_path(src_dir.join("ClassB.php")).unwrap();
+
+    // Open ClassB so it gets indexed.
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri_b.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text_b.to_string(),
+            },
+        })
+        .await;
+
+    // Close ClassB — simulates VS Code peek preview closing.
+    backend
+        .did_close(DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri_b.clone() },
+        })
+        .await;
+
+    // Open ClassA which references ClassB.
+    let uri_a = Url::from_file_path(src_dir.join("ClassA.php")).unwrap();
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "class ClassA {\n",
+        "    public function test() {\n",
+        "        $b = new ClassB();\n",
+        "        $b->doSomething();\n",
+        "    }\n",
+        "}\n",
+    );
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri_a.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text_a.to_string(),
+            },
+        })
+        .await;
+
+    // Go-to-definition on "ClassB" (line 5, char 21 = inside "ClassB")
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri_a.clone() },
+            position: Position {
+                line: 5,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Go-to-definition should work after target file is closed (issue #99)"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.uri, uri_b,
+                "Should jump to ClassB.php"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // Also test member access: $b->doSomething() (line 6, char 14)
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri_a },
+            position: Position {
+                line: 6,
+                character: 14,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Go-to-definition on member should work after target file is closed (issue #99)"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.uri, uri_b,
+                "Member definition should jump to ClassB.php"
+            );
+        }
+        other => panic!("Expected Scalar location for member, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_goto_definition_cross_file_with_use_statement() {
     let (backend, _dir) = create_psr4_workspace(
         r#"{
