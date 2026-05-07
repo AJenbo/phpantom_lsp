@@ -722,6 +722,13 @@ impl LanguageServer for Backend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = params.text_document.uri.to_string();
 
+        // Code actions are not yet Blade-aware (edits target virtual PHP
+        // coordinates and may insert code outside valid PHP regions).
+        // Disabled until Phase 2 component support lands.
+        if self.is_blade_file(&uri) {
+            return Ok(None);
+        }
+
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         tokio::task::spawn_blocking(move || {

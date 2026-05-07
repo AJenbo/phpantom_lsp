@@ -62,14 +62,16 @@ within the same impact tier.
 
 ## Sprint 8 — Blade support
 
-| #   | Item                                             | Impact | Effort    |
-| --- | ------------------------------------------------ | ------ | --------- |
-|     | Clear [refactoring gate](todo/refactor.md)       | —      | —         |
-| BL1 | [Blade template language support](todo/blade.md) | High   | Very High |
-
-The Blade sprint is a placeholder. Scope will be refined after Sprint 7
-ships. The goal is to provide a single-binary PHP + Blade language
-server with Blade intelligence.
+| #   | Item                                                                                                           | Impact | Effort |
+| --- | -------------------------------------------------------------------------------------------------------------- | ------ | ------ |
+|     | Clear [refactoring gate](todo/refactor.md)                                                                     | —      | —      |
+| BL1 | [Blade-aware code actions](todo/blade.md#8-blade-aware-code-actions)                                           | Medium | Medium |
+| BL2 | [Template and component file discovery](todo/blade.md#9-template-and-component-file-discovery)                  | High   | Medium |
+| BL3 | [Component tag parsing (`<x-...>`, `<livewire:...>`, `@props`)](todo/blade.md#10-x-component-tag-parsing-in-preprocessor) | High   | High   |
+| BL4 | [Component and view name completion](todo/blade.md#13-component-and-view-name-completion)                       | High   | Medium |
+| BL5 | [Go-to-definition for view names and components](todo/blade.md#15-go-to-definition-for-view-names-and-components) | Medium | Medium |
+| BL6 | [`@extends` signature merging and component class typing](todo/blade.md#16-signature-merging-for-extends)       | Medium | High   |
+| BL7 | [Blade directive completion](todo/blade.md#19-directive-name-completion)                                        | Medium | Low    |
 
 # Backlog
 

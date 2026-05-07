@@ -51,18 +51,20 @@ Blade templates into virtual PHP line-by-line, with a source map for
 coordinate translation. The LSP pipeline (`with_file_content`,
 `update_ast`, `did_close`) transparently handles Blade files.
 
-Known issues in the current implementation:
-
-### Code actions are not Blade-aware
-
-Code actions like "Import class" insert a `use` statement at the top
-of the file rather than inside a `@php` / `<?php` block. All code
-actions that produce text edits need their ranges translated, and
-actions that generate new code need to be aware of Blade structure.
-
 ---
 
 ## Phase 2: Component Support
+
+### 8. Blade-aware code actions
+
+Code actions are currently disabled for `.blade.php` files because
+text edits target virtual PHP coordinates and actions like "Import
+class" insert `use` statements at the top of the file rather than
+inside a `@php` / `<?php` block. Re-enable code actions with:
+
+- Range translation (virtual PHP → Blade) for all text edits.
+- Blade-aware code generation (e.g. insert `use` inside `@php`).
+- Filtering out actions that don't make sense in Blade context.
 
 ### 9. Template and component file discovery
 
@@ -431,19 +433,14 @@ Extend `tests/completion_blade.rs`:
 
 ## Implementation Sequence
 
-Steps 1-2 are complete. The remaining steps build on the existing
-preprocessor and LSP pipeline.
+Phase 1 is complete (steps 1-3): the preprocessor, LSP pipeline
+integration, source mapping, `$loop`/`@session`/`@error`/`@context`
+implicit variables, stub directives, verbatim regions, `languageId`
+check, and code action suppression are all shipped.
 
-### Step 3: Remaining Phase 1 items
+The remaining steps build on the existing preprocessor:
 
-Inject `$loop` inside `@foreach` blocks. Handle `@session`/`@error`/
-`@context` implicit variables. Implement stub directives and verbatim
-regions. Add `languageId` check.
-
-**Deliverable:** `$loop->first`, `$value` inside `@session` blocks,
-and `$message` inside `@error` blocks all produce completions.
-
-### Step 4: Discovery (item 9)
+### Step 4: Discovery (items 8-9)
 
 Implement `src/blade/discovery.rs`. Scan `resources/views/`,
 `app/View/Components/`, `app/Livewire/` at init time. Add the three
