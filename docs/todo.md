@@ -40,7 +40,6 @@ within the same impact tier.
 |     | Clear [refactoring gate](todo/refactor.md)                                                                            | —          | —      |
 | A35 | [Convert to arrow function](todo/actions.md#a35-convert-to-arrow-function) (only non-void single-expression closures) | Low-Medium | Low    |
 | C2  | [`#[ArrayShape]` return shapes on stub functions](todo/completion.md#c2-arrayshape-return-shapes-on-stub-functions)   | Medium     | Medium |
-| T7  | [`key-of<T>` and `value-of<T>` resolution](todo/type-inference.md#t7-key-oft-and-value-oft-resolution)                | Medium     | Medium |
 | A3  | Switch → match conversion                                                                                             | Low-Medium | Medium |
 | A10 | [Generate interface from class](todo/actions.md#a10-generate-interface-from-class)                                    | Low-Medium | Medium |
 
@@ -105,14 +104,12 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Low-Medium  |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Low-Medium  |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
-| D5  | Diagnostic suppression intelligence                                                                                                                                         | Medium      | Medium      |
+| D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                    | Low         | Low         |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
-| A42 | [Replace qualifier with import](todo/actions.md#a42-replace-qualifier-with-import)                                                                                          | Medium      | Low         |
-| A8  | [Update docblock to match signature](todo/actions.md#a8-update-docblock-to-match-signature)                                                                                 | Medium      | Medium      |
 | A16 | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Low-Medium  |
 | A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos--str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Low         |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
@@ -156,7 +153,6 @@ unlikely to move the needle for most users.
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Low         |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
 | L4  | Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`)                                                                                                           | Medium      | Medium      |
-| L2  | [`morphedByMany` missing from relationship method map](todo/laravel.md#l2-morphedbymany-missing-from-relationship-method-map)                                               | Low-Medium  | Low         |
 | L3  | `$dates` array (deprecated)                                                                                                                                                 | Low-Medium  | Low         |
 | L6  | Factory `has*`/`for*` relationship methods                                                                                                                                  | Low-Medium  | Medium      |
 | L7  | `$pivot` property on BelongsToMany                                                                                                                                          | Medium      | Medium-High |
@@ -196,4 +192,3 @@ unlikely to move the needle for most users.
 | N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | High        |
 | N2  | N-gram prediction from PHP corpus                                                                                                                                           | Medium      | Very High   |
 | N3  | Fine-tuned GGUF sidecar model                                                                                                                                               | Medium      | Very High   |
-

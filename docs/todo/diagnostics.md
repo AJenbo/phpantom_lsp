@@ -50,32 +50,21 @@ The following have been verified and are covered by tests:
 
 ---
 
-## D5. Diagnostic suppression intelligence
+## D5. External tool diagnostic suppression actions
 
-**Impact: Medium · Effort: Medium**
+**Impact: Low · Effort: Low (per tool, after proxy exists)**
 
-When PHPantom proxies diagnostics from external tools, users need a way
-to suppress specific warnings. Rather than forcing them to install a
-separate extension or memorise each tool's suppression syntax, PHPantom
-can offer **code actions to insert the correct suppression comment** for
-the tool that produced the diagnostic.
-
-PHPStan suppression is implemented: "Ignore PHPStan error" adds
-`// @phpstan-ignore <identifier>` (appending to existing ignores when
-present), and "Remove unnecessary @phpstan-ignore" cleans up unmatched
-ignores reported by PHPStan. What remains:
-
-### Remaining tools
+PHPantom's own inline suppression (`// @phpantom-ignore code`) has
+shipped. PHPStan suppression is also implemented ("Ignore PHPStan
+error" / "Remove unnecessary @phpstan-ignore"). What remains is
+wiring up suppression actions for additional external tool proxies:
 
 - PHPCS: `// phpcs:ignore [Sniff.Name]` or `// phpcs:disable` /
   `// phpcs:enable` blocks.
 - PHPMD (3.0): `#[SuppressWarnings(RuleName::class)]` as a PHP attribute.
-- For PHPantom's own diagnostics: support `@suppress phpantom.*`
-  in docblocks (matching PHP Tools' convention) and a config flag
-  `phpantom.diagnostics.enabled: bool` (default `true`).
 
-**Prerequisites:** Each tool needs a diagnostic proxy before its
-suppression actions can be wired up.
+Each tool needs its diagnostic proxy before its suppression action
+can be wired up (D10 for PHPMD; PHPCS proxy is not yet filed).
 
 ---
 
@@ -136,7 +125,7 @@ with `command`, `timeout`, and tool-specific options mirroring the
 
 - PHPMD 3.0 must be released. Current 2.x output formats and rule
   naming may change.
-- The diagnostic suppression code action (D5) should support PHPMD's
+- The diagnostic suppression code action (D5) can add PHPMD's
   `@SuppressWarnings(PHPMD.[RuleName])` syntax once the proxy exists.
 
 ### Implementation
@@ -258,14 +247,11 @@ narrowed before this call."
 
 Flag function and method parameters that are never read inside the
 body. This was intentionally excluded from D4 (unused variable
-diagnostic) because without suppression support (D5), false positives
-are unavoidable: callbacks, interface implementations, and framework
-conventions (e.g. Laravel event listeners) often require specific
-parameter signatures even when not all parameters are used.
-
-**Prerequisite:** D5 (diagnostic suppression intelligence) must ship
-first so users can silence false positives with `// @phpantom-ignore`
-or a configuration-level exclusion.
+diagnostic) because false positives are common for callbacks, interface
+implementations, and framework conventions (e.g. Laravel event
+listeners) that require specific parameter signatures even when not
+all parameters are used. Users can now silence false positives with
+`// @phpantom-ignore unused_parameter`.
 
 ### Scope
 

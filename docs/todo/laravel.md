@@ -238,27 +238,6 @@ today and what is still missing.
 
 ---
 
-#### L2. `morphedByMany` missing from relationship method map
-
-**Impact: Low-Medium · Effort: Low**
-
-Any model using `morphedByMany` (the inverse of a polymorphic
-many-to-many) gets no virtual property or `_count` property for that
-relationship. One-line addition to `RELATIONSHIP_METHOD_MAP`.
-
-`morphedByMany` is the inverse side of a polymorphic many-to-many
-relationship. It returns a `MorphToMany` instance (the same class as
-`morphToMany`), but the method name is not listed in
-`RELATIONSHIP_METHOD_MAP`. This means body inference
-(`infer_relationship_from_body`) does not recognise
-`$this->morphedByMany(Tag::class)` calls, so no virtual property or
-`_count` property is synthesized.
-
-**Where to change:** Add `("morphedByMany", "MorphToMany")` to
-`RELATIONSHIP_METHOD_MAP` in `src/virtual_members/laravel.rs`.
-No other changes needed since `MorphToMany` is already in
-`COLLECTION_RELATIONSHIPS`.
-
 #### L4. Custom Eloquent builders (`HasBuilder` / `#[UseEloquentBuilder]`)
 
 **Impact: High · Effort: Medium**

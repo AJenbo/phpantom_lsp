@@ -211,44 +211,6 @@ See `ClosureBindDynamicReturnTypeExtension` and
 
 ---
 
-## T7. `key-of<T>` and `value-of<T>` resolution
-**Impact: Medium · Effort: Medium**
-
-PHPantom already parses `key-of<T>` and `value-of<T>` as type keywords
-but does not resolve them to concrete types. When `T` is bound to a
-concrete array type, these utility types should resolve:
-
-- `value-of<array{a: string, b: int}>` → `string|int`
-- `key-of<array{a: string, b: int}>` → `'a'|'b'`
-- `value-of<array<string, User>>` → `User`
-- `key-of<array<string, User>>` → `string`
-
-These types commonly appear in PHPStan-typed libraries and in
-`@template` constraints. For example:
-
-```php
-/**
- * @template T of array
- * @param T $array
- * @return value-of<T>
- */
-function first(array $array): mixed;
-```
-
-**Implementation:** plug into the generic substitution pipeline in
-`inheritance.rs` / `completion/types/resolution.rs`. After template
-parameters are substituted with concrete types, detect `key-of<...>`
-and `value-of<...>` wrappers and resolve them by inspecting the inner
-type:
-
-- If the inner type is an `array{...}` shape, collect the key or value
-  types from the shape fields.
-- If the inner type is `array<K, V>`, extract `K` or `V` directly.
-- If the inner type is still an unresolved template parameter, leave
-  it as-is (it may resolve later in the chain).
-
----
-
 
 
 ## T9. Dead-code elimination after `never`-returning calls

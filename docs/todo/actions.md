@@ -95,77 +95,6 @@ but bounded in scope.
 
 
 
-## A8. Update Docblock to Match Signature
-
-**Impact: Medium · Effort: Medium**
-
-When a function or method signature changes (parameters added, removed,
-reordered, or type hints updated), the docblock often falls out of sync.
-This code action regenerates or patches the `@param`, `@return`, and
-`@throws` tags to match the current signature.
-
-### Behaviour
-
-- **Trigger:** Cursor is on a function/method declaration that has an
-  existing docblock. The code action appears when the docblock's `@param`
-  tags don't match the signature's parameters (by name, count, or order),
-  or when the `@return` tag contradicts the return type hint.
-- **Code action kind:** `quickfix` (when tags are clearly wrong) or
-  `source.fixAll.docblock` for a broader sweep.
-
-### What gets updated
-
-1. **`@param` tags:**
-   - Add missing `@param` for parameters present in the signature but
-     absent from the docblock.
-   - Remove `@param` for parameters no longer in the signature.
-   - Reorder `@param` tags to match signature order.
-   - Update the type if the signature has a type hint and the docblock
-     type contradicts it (e.g. docblock says `string`, signature says
-     `int`). If the docblock type is _more specific_ than the signature
-     (e.g. docblock says `non-empty-string`, signature says `string`),
-     keep the docblock type (it's a refinement, not a contradiction).
-   - Preserve existing descriptions after the type and variable name.
-
-2. **`@return` tag:**
-   - If the signature has a return type hint and the docblock `@return`
-     contradicts it, update the type. Same refinement rule: keep the
-     docblock type if it's more specific.
-   - If the signature has a return type but no `@return` tag exists,
-     do not add one (the type hint is sufficient). Only update or
-     remove existing tags.
-   - Remove `@return void` if redundant with a `: void` return type.
-
-3. **Preserve other tags:** `@throws`, `@template`, `@deprecated`,
-   `@see`, and any other tags are left untouched.
-
-### Edge cases
-
-- **Promoted constructor parameters:** Treat the same as regular
-  parameters for `@param` purposes.
-- **Variadic parameters:** `...$args` matches `@param type ...$args`.
-- **No existing docblock:** This action only patches existing docblocks.
-  PHPDoc generation on `/**` (F1) handles creating new ones.
-
-### Implementation
-
-- Parse the function signature to extract parameter names, types, and
-  order, plus the return type.
-- Parse the existing docblock to extract `@param` and `@return` tags
-  with their positions, types, variable names, and descriptions.
-- Diff the two lists to determine additions, removals, reorderings,
-  and type updates.
-- Build a `WorkspaceEdit` with targeted `TextEdit`s that modify only
-  the changed lines within the docblock, preserving formatting,
-  indentation, and unchanged tags.
-
-### Prerequisites
-
-| Feature                                   | What it contributes                                                 |
-| ----------------------------------------- | ------------------------------------------------------------------- |
-| Docblock tag parsing (`docblock/tags.rs`) | Extracts existing `@param`/`@return` tags with positions            |
-| Parser (`parser/functions.rs`)            | Extracts parameter names, types, and return type from the signature |
-
 ---
 
 ## A10. Generate Interface from Class
@@ -644,25 +573,6 @@ Phpactor has this.
 
 **Code action kind:** `quickfix`.
 **Trigger:** Unknown-class diagnostic.
-
----
-
-### A42. Replace qualifier with import
-
-**Impact: Medium · Effort: Low**
-
-Convert an inline fully-qualified name like `\Foo\Bar\Baz` to a
-`use` import plus the short name. A standalone code action
-(auto-import on completion already exists but this covers existing
-code). Phpactor has this.
-
-- Detect any fully-qualified class reference under the cursor.
-- Add a `use Foo\Bar\Baz;` statement to the file's import block.
-- Replace the inline FQN with the short name `Baz`.
-- Handle alias conflicts: if `Baz` is already imported with a
-  different FQN, prompt for an alias or skip.
-
-**Code action kind:** `refactor.rewrite`.
 
 ---
 
