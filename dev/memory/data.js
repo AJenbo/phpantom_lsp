@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778179197653,
+  "lastUpdate": 1778182869198,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7955,6 +7955,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 53,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bafba5ad5df8e2f120a68b5a6268820a1c06fdd2",
+          "message": "Add Blade diagnostics and improve template intelligence",
+          "timestamp": "2026-05-07T21:28:58+02:00",
+          "tree_id": "b763e7295cdb7ec8e84debb98c2936ecddccb85a",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/bafba5ad5df8e2f120a68b5a6268820a1c06fdd2"
+        },
+        "date": 1778182868521,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.2,
             "unit": "MiB"
           }
         ]
