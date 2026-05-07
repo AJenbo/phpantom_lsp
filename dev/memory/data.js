@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778188768789,
+  "lastUpdate": 1778189471028,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8125,6 +8125,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "af8ae58f874394e4f21a9a8c26b3d418a2119d5d",
+          "message": "Propagate variable rename into closure and arrow function captures",
+          "timestamp": "2026-05-07T23:19:12+02:00",
+          "tree_id": "9a3275bc5f2954244497ed3c692efd8723c0ac5b",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/af8ae58f874394e4f21a9a8c26b3d418a2119d5d"
+        },
+        "date": 1778189470391,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.6,
             "unit": "MiB"
           }
         ]
