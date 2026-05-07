@@ -90,6 +90,7 @@ mod promote_constructor_param;
 mod remove_unused_import;
 pub(crate) use remove_unused_import::build_line_deletion_edit;
 mod replace_deprecated;
+mod replace_fqcn;
 mod simplify_null;
 mod update_docblock;
 
@@ -173,6 +174,9 @@ impl Backend {
 
         // ── Import class ────────────────────────────────────────────────
         self.collect_import_class_actions(uri, content, params, &mut actions);
+
+        // ── Replace FQCN with import ────────────────────────────────────
+        self.collect_replace_fqcn_actions(uri, content, params, &mut actions);
 
         // ── Import all missing classes (bulk) ───────────────────────────
         self.collect_import_all_classes_action(uri, content, params, &mut actions);

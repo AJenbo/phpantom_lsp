@@ -4946,10 +4946,9 @@ class MyController {
     );
 
     let uri = "file:///src/Controller.php";
-    let content = std::fs::read_to_string(
-        std::path::Path::new(_dir.path()).join("src/Controller.php"),
-    )
-    .unwrap();
+    let content =
+        std::fs::read_to_string(std::path::Path::new(_dir.path()).join("src/Controller.php"))
+            .unwrap();
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &content);
     let with_diags: Vec<_> = diags
         .iter()
