@@ -1064,6 +1064,90 @@ async fn rename_class_with_collision_adds_alias() {
 }
 
 #[tokio::test]
+async fn rename_class_does_not_rename_self_static_parent() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Foo {\n",
+        "    public const BAR = 1;\n",
+        "    public static function create(): self {\n",
+        "        return new self();\n",
+        "    }\n",
+        "    public function check(): bool {\n",
+        "        return self::BAR === static::BAR;\n",
+        "    }\n",
+        "}\n",
+        "class Bar extends Foo {\n",
+        "    public function parentRef(): void {\n",
+        "        parent::create();\n",
+        "    }\n",
+        "}\n",
+        "function demo(Foo $f): void {\n",
+        "    $obj = new Foo();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename Foo -> Baz from the declaration.
+    let edit = rename(&backend, &uri, 1, 7, "Baz").await;
+    assert!(edit.is_some(), "Expected a workspace edit");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    // Class declaration and references should be renamed.
+    assert!(
+        result.contains("class Baz"),
+        "Declaration should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("new Baz()"),
+        "new expression should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("demo(Baz"),
+        "Type hint should be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("extends Baz"),
+        "extends should be renamed; got:\n{}",
+        result
+    );
+
+    // self, static, and parent keywords must NOT be renamed.
+    assert!(
+        result.contains("self::BAR"),
+        "self:: should not be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("static::BAR"),
+        "static:: should not be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("parent::create"),
+        "parent:: should not be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("new self()"),
+        "new self() should not be renamed; got:\n{}",
+        result
+    );
+    assert!(
+        result.contains("): self {"),
+        "return type self should not be renamed; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn rename_class_same_file_no_use_statement() {
     // Renaming a class in the same file (no use statement) should still work.
     let backend = Backend::new_test();

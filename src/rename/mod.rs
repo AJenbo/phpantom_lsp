@@ -444,6 +444,12 @@ impl Backend {
                     continue;
                 }
 
+                // self, static, and parent are keywords that should not
+                // be renamed when the class they resolve to is renamed.
+                if matches!(source_text.as_str(), "self" | "static" | "parent") {
+                    continue;
+                }
+
                 if source_text.contains('\\') {
                     // This is an inline FQN reference (e.g. `\Ns\Foo`).
                     // Replace only the last segment.

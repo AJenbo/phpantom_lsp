@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Rename class preserves `self`, `static`, and `parent` keywords.** Renaming a class no longer replaces occurrences of `self::`, `static::`, or `parent::` with the new class name.
 - **Rename propagates into closures and arrow functions.** Renaming a variable now follows explicit `use ($var)` captures into closure bodies and implicit captures into arrow function bodies, instead of leaving those occurrences unchanged.
 - **Spurious function auto-imports.** Import statements like `use function is_array;` were misidentified as function declarations, polluting the completion list with phantom entries that inserted incorrect imports.
 - **Duplicate `use function` insertion.** Accepting a function completion no longer inserts a `use function` statement when the exact import already exists in the file.
