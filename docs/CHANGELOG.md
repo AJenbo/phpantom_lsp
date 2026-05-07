@@ -55,9 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Blade diagnostics in `analyze` command.** Blade template files now receive full diagnostics (unknown members, unknown classes, unused variables, etc.) when running `phpantom_lsp analyze`.
-- **Blade unknown-member diagnostic positions.** Unknown-member diagnostics in Blade files now point to the correct line in the original template instead of the virtual PHP line number.
-- **False-positive unused `$loop` in Blade templates.** The `$loop` variable injected by `@foreach`/`@forelse` is no longer flagged as unused when the template body doesn't reference it.
+- **Rename propagates into closures and arrow functions.** Renaming a variable now follows explicit `use ($var)` captures into closure bodies and implicit captures into arrow function bodies, instead of leaving those occurrences unchanged.
 - **Spurious function auto-imports.** Import statements like `use function is_array;` were misidentified as function declarations, polluting the completion list with phantom entries that inserted incorrect imports.
 - **Duplicate `use function` insertion.** Accepting a function completion no longer inserts a `use function` statement when the exact import already exists in the file.
 - **Function import conflict handling.** When a different function with the same short name is already imported, completing a namespaced function now inserts the fully-qualified name instead of the ambiguous short name.
@@ -71,10 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Foreach narrowing with break in else.** The variable state from break paths is now included in the post-loop type.
 - **Foreach target type after non-empty literal array.** The pre-loop sentinel value no longer survives as a possible post-loop type.
 - **Foreach over `::class` literal arrays resolves static access.** `$className::CONST` and `$className::method()` no longer produce unresolved-member diagnostics.
-- **Foreach loop variable resolution in Blade.** Loop variables now resolve their element type correctly when the iterable is typed via a standalone `@var` docblock.
 - **Hover on reassigned variable shows post-assignment type.** Hovering on the left-hand side of a reassignment now shows the type produced by the assignment.
-- **Blade hover positions.** Hover ranges in `.blade.php` files now highlight the correct symbol under the cursor.
-- **Blade echo delimiter hover.** Hovering on `{{` or `}}` now shows hover for the `e()` function.
 - **Multi-namespace class resolution.** Short class names now resolve against the correct namespace for the current scope.
 - **Multi-namespace variable isolation.** Variable resolution now only considers the namespace block containing the cursor.
 - **Multi-namespace function return type resolution.** Function return types are now resolved against the function's own namespace.

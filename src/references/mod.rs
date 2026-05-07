@@ -30,7 +30,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::{
     build_fqn, collect_php_files_gitignore, find_class_at_offset, offset_to_position,
@@ -253,17 +253,18 @@ impl Backend {
             Err(_) => return locations,
         };
 
+        // Build the set of reachable scopes: the primary scope plus any
+        // closure/arrow-function scopes that capture this variable.
+        let reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+
         for span in &symbol_map.spans {
             if let SymbolKind::Variable { name } = &span.kind {
                 if name != var_name {
                     continue;
                 }
-                // Check that this variable is in the same scope.
-                // `find_variable_scope` correctly handles parameter
-                // spans and docblock `@param` mentions that sit before
-                // the body `{`.
+                // Check that this variable is in a reachable scope.
                 let span_scope = symbol_map.find_variable_scope(name, span.start);
-                if span_scope != scope_start {
+                if !reachable_scopes.contains(&span_scope) {
                     continue;
                 }
                 // Optionally skip declaration sites.
@@ -291,7 +292,7 @@ impl Backend {
 
             for def in &symbol_map.var_defs {
                 if def.name == var_name
-                    && def.scope_start == scope_start
+                    && reachable_scopes.contains(&def.scope_start)
                     && seen_offsets.insert(def.offset)
                 {
                     let start = offset_to_position(content, def.offset as usize);
@@ -316,6 +317,164 @@ impl Backend {
         });
 
         locations
+    }
+
+    /// Collect all scopes reachable from `root_scope` for `var_name`
+    /// through closure `use` captures and implicit arrow-function captures.
+    ///
+    /// Returns a set containing `root_scope` plus every nested
+    /// closure/arrow scope that captures the variable without shadowing
+    /// it with a new parameter of the same name.
+    fn collect_capture_scopes(
+        symbol_map: &SymbolMap,
+        var_name: &str,
+        root_scope: u32,
+    ) -> HashSet<u32> {
+        let mut reachable = HashSet::new();
+        reachable.insert(root_scope);
+
+        // Explicit closure captures: `function () use ($var) { … }`
+        // These have VarDefKind::ClosureCapture with scope_start
+        // pointing to the closure body.
+        for def in &symbol_map.var_defs {
+            if def.name != var_name || def.kind != VarDefKind::ClosureCapture {
+                continue;
+            }
+            // The `use ($var)` token sits physically in the outer scope.
+            // Check if the outer scope is already reachable.
+            let outer_scope = symbol_map.find_enclosing_scope(def.offset);
+            if reachable.contains(&outer_scope) {
+                reachable.insert(def.scope_start);
+            }
+        }
+
+        // Implicit arrow-function captures: `fn () => $var`
+        // Arrow functions have a scope entry but no ClosureCapture def.
+        // A variable is implicitly captured if:
+        //   1. The arrow scope is directly nested in a reachable scope.
+        //   2. There is no parameter with the same name in the arrow scope.
+        for &(scope_start, _scope_end) in &symbol_map.scopes {
+            if reachable.contains(&scope_start) {
+                continue; // Already reachable, skip.
+            }
+            // Find the parent scope of this scope.
+            let parent = symbol_map.find_enclosing_scope(scope_start.saturating_sub(1));
+            if !reachable.contains(&parent) {
+                continue;
+            }
+            // Check if this is an arrow function scope (no ClosureCapture
+            // or Parameter def that would indicate a closure with `use`).
+            // Arrow scopes don't have braces; their scope_start is the
+            // arrow function expression's start offset.
+            //
+            // Skip if there's a parameter with the same name (shadowed).
+            let has_shadowing_param = symbol_map.var_defs.iter().any(|d| {
+                d.name == var_name
+                    && d.scope_start == scope_start
+                    && d.kind == VarDefKind::Parameter
+            });
+            if has_shadowing_param {
+                continue;
+            }
+            // Check if this scope actually uses the variable (has a
+            // Variable span in it).  Only include it if the variable
+            // appears there to avoid false positives with unrelated
+            // nested functions.
+            //
+            // But we also need to check: is this scope a closure body
+            // (not an arrow function)?  Closures create new variable
+            // scopes and require explicit `use` — if there's no
+            // ClosureCapture def for this scope, the variable is NOT
+            // available inside a regular closure.  We only auto-include
+            // arrow function scopes.
+            //
+            // Heuristic: if there's any ClosureCapture or Parameter def
+            // for *any* variable scoped to this scope_start, and there's
+            // no ClosureCapture for *our* variable, this is likely a
+            // closure that didn't capture our variable — skip it.
+            let is_closure_scope = symbol_map
+                .var_defs
+                .iter()
+                .any(|d| d.scope_start == scope_start && d.kind == VarDefKind::ClosureCapture);
+            if is_closure_scope {
+                // It's a closure scope.  Our variable is not in the `use`
+                // list (we already handled ClosureCapture above), so the
+                // variable is not available here.
+                continue;
+            }
+            // This is an arrow function scope or similar transparent
+            // scope.  The variable is implicitly captured.
+            let has_usage = symbol_map.spans.iter().any(|s| {
+                if let SymbolKind::Variable { name } = &s.kind {
+                    name == var_name && symbol_map.find_variable_scope(name, s.start) == scope_start
+                } else {
+                    false
+                }
+            });
+            if has_usage {
+                reachable.insert(scope_start);
+            }
+        }
+
+        // Recurse: newly added scopes may themselves contain nested
+        // closures/arrows that capture the same variable.
+        // Fixed-point iteration until no new scopes are added.
+        let mut prev_len = 0;
+        while reachable.len() != prev_len {
+            prev_len = reachable.len();
+            let current: Vec<u32> = reachable.iter().copied().collect();
+
+            for def in &symbol_map.var_defs {
+                if def.name != var_name || def.kind != VarDefKind::ClosureCapture {
+                    continue;
+                }
+                if reachable.contains(&def.scope_start) {
+                    continue;
+                }
+                let outer_scope = symbol_map.find_enclosing_scope(def.offset);
+                if reachable.contains(&outer_scope) {
+                    reachable.insert(def.scope_start);
+                }
+            }
+
+            for &(scope_start, _scope_end) in &symbol_map.scopes {
+                if reachable.contains(&scope_start) {
+                    continue;
+                }
+                let parent = symbol_map.find_enclosing_scope(scope_start.saturating_sub(1));
+                if !current.contains(&parent) {
+                    continue;
+                }
+                let has_shadowing_param = symbol_map.var_defs.iter().any(|d| {
+                    d.name == var_name
+                        && d.scope_start == scope_start
+                        && d.kind == VarDefKind::Parameter
+                });
+                if has_shadowing_param {
+                    continue;
+                }
+                let is_closure_scope = symbol_map
+                    .var_defs
+                    .iter()
+                    .any(|d| d.scope_start == scope_start && d.kind == VarDefKind::ClosureCapture);
+                if is_closure_scope {
+                    continue;
+                }
+                let has_usage = symbol_map.spans.iter().any(|s| {
+                    if let SymbolKind::Variable { name } = &s.kind {
+                        name == var_name
+                            && symbol_map.find_variable_scope(name, s.start) == scope_start
+                    } else {
+                        false
+                    }
+                });
+                if has_usage {
+                    reachable.insert(scope_start);
+                }
+            }
+        }
+
+        reachable
     }
 
     /// Find all references to `$this` within the enclosing class body.

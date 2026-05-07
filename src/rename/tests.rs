@@ -2364,6 +2364,56 @@ async fn rename_closure_parameter_does_not_leak_to_outer_scope() {
     );
 }
 
+#[tokio::test]
+async fn rename_function_param_propagates_into_closure_use_and_arrow() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function test(string $param): void\n",
+        "{\n",
+        "    function () use ($param): void {\n",
+        "        echo $param;\n",
+        "    };\n",
+        "\n",
+        "    fn () => $param;\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Cursor on `$param` in the function parameter list (line 1, col 22).
+    let edit = rename(&backend, &uri, 1, 22, "$renamed").await;
+    assert!(edit.is_some(), "Expected a workspace edit");
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    // Function parameter should be renamed.
+    assert!(
+        result.contains("function test(string $renamed)"),
+        "Function parameter not renamed: {}",
+        result
+    );
+    // Closure use should be renamed.
+    assert!(
+        result.contains("use ($renamed)"),
+        "Closure use not renamed: {}",
+        result
+    );
+    // Variable inside closure body should be renamed.
+    assert!(
+        result.contains("echo $renamed;"),
+        "Closure body variable not renamed: {}",
+        result
+    );
+    // Arrow function body should be renamed.
+    assert!(
+        result.contains("fn () => $renamed;"),
+        "Arrow function body not renamed: {}",
+        result
+    );
+}
+
 // ─── Namespace rename tests ─────────────────────────────────────────────────
 
 #[tokio::test]
