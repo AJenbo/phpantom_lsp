@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778186620672,
+  "lastUpdate": 1778187248591,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8057,6 +8057,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 48.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "869aebe8a9039b97d7f03f7b4f15d086d6d693b3",
+          "message": "Expand Blade sprint with detailed tasks and update code action status",
+          "timestamp": "2026-05-07T22:41:49+02:00",
+          "tree_id": "81fb163f917d7b3c2af0ade5927c0acb14264ec0",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/869aebe8a9039b97d7f03f7b4f15d086d6d693b3"
+        },
+        "date": 1778187247332,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 51.8,
             "unit": "MiB"
           }
         ]
