@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778172133838,
+  "lastUpdate": 1778179197653,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7921,6 +7921,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 55,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "807e33d02004837c7660a0933a815f73b2f94e8a",
+          "message": "Add Laravel Pint formatting support with config option",
+          "timestamp": "2026-05-07T20:27:18+02:00",
+          "tree_id": "bdb7fee761c96aab8a2973cb9ff009ab7cd1008c",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/807e33d02004837c7660a0933a815f73b2f94e8a"
+        },
+        "date": 1778179196244,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 53,
             "unit": "MiB"
           }
         ]
