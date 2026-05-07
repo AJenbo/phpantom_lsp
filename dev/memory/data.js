@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778182869198,
+  "lastUpdate": 1778184303485,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7989,6 +7989,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 51.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a35f780f79370fd32f18356d9707896c7d1abd63",
+          "message": "Add report-magic-properties config option and diagnostic support",
+          "timestamp": "2026-05-07T21:53:07+02:00",
+          "tree_id": "a8c5590d7ac7e3e05613e00f3c22de8afc0c9aa3",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/a35f780f79370fd32f18356d9707896c7d1abd63"
+        },
+        "date": 1778184301835,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 31,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 54.3,
             "unit": "MiB"
           }
         ]
