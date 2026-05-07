@@ -20,6 +20,11 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
     virtual_php.push_str("$errors = new \\Illuminate\\Support\\ViewErrorBag();\n");
     virtual_php.push_str("/** @var \\Illuminate\\View\\Factory $__env */\n");
     virtual_php.push_str("$__env = new \\Illuminate\\View\\Factory();\n");
+    // Wrap the template body in a function so that diagnostic
+    // collectors (which only analyse function/method bodies) treat
+    // the Blade content as analysable code.  The closing brace is
+    // appended after the main loop.
+    virtual_php.push_str("function __blade_template() {\n");
 
     let mut in_php_directive_block = false;
     let mut mode = Mode::Html;
@@ -384,6 +389,9 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
         adjustments.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         source_map.adjustments.push(adjustments);
     }
+
+    // Close the wrapper function.
+    virtual_php.push_str("}\n");
 
     (virtual_php, source_map)
 }

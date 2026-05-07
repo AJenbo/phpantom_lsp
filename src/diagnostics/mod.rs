@@ -2711,7 +2711,7 @@ mod tests {
         let content = "Hello World";
         backend.update_ast(uri, content);
 
-        // First 5 lines are prologue.
+        // First 6 lines are prologue (including wrapper function declaration).
         let virtual_php = {
             let vc_handle = backend.blade_virtual_content.read();
             vc_handle
@@ -2720,11 +2720,11 @@ mod tests {
                 .expect("Virtual content should exist")
         };
 
-        // Find start of line 4 (0-indexed).
+        // Find start of line 5 (0-indexed).
         let mut offset = 0;
         let mut lines_seen = 0;
         for (i, ch) in virtual_php.char_indices() {
-            if lines_seen == 4 {
+            if lines_seen == 5 {
                 offset = i;
                 break;
             }
@@ -2737,11 +2737,11 @@ mod tests {
         let range = backend.offset_range_to_lsp_range(uri, content, offset, offset + 5);
         assert!(range.is_none(), "Diagnostic in prologue should be ignored");
 
-        // byte range after prologue (line 5+)
+        // byte range after prologue (line 6+)
         let mut after_offset = 0;
         let mut lines_seen = 0;
         for (i, ch) in virtual_php.char_indices() {
-            if lines_seen == 5 {
+            if lines_seen == 6 {
                 after_offset = i;
                 break;
             }

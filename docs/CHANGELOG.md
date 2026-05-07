@@ -52,6 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Blade diagnostics in `analyze` command.** Blade template files now receive full diagnostics (unknown members, unknown classes, unused variables, etc.) when running `phpantom_lsp analyze`. Previously, the analyzer passed raw Blade template content to diagnostic collectors instead of the preprocessed virtual PHP, so no diagnostics were produced.
+- **Blade unknown-member diagnostic positions.** Unknown-member diagnostics in Blade files now point to the correct line in the original template instead of the virtual PHP line number.
 - **Spurious function auto-imports.** Import statements like `use function is_array;` were misidentified as function declarations, polluting the completion list with phantom entries that inserted incorrect imports.
 - **Duplicate `use function` insertion.** Accepting a function completion no longer inserts a `use function` statement when the exact import already exists in the file.
 - **Function import conflict handling.** When a different function with the same short name is already imported, completing a namespaced function now inserts the fully-qualified name instead of the ambiguous short name.

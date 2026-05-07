@@ -10,6 +10,7 @@ features against a real Laravel installation.
 - **View navigation.** Go-to-definition for `view('welcome')` and `View::make('admin.users.index')` (resolves to Blade templates in `resources/views/`).
 - **Route navigation.** Go-to-definition for `route('home')` (resolves to `->name('home')` in route files).
 - **Translation navigation.** Go-to-definition for `__('messages.welcome')`, `trans('auth.failed')`, and `trans_choice(...)` (resolves to `lang/` PHP files).
+- **Blade template intelligence.** Variable completion and hover in `{{ }}` expressions (shown as `e()` calls), go-to-definition on `@include`/`@extends` view references, `@forelse`/`@empty` directives, implicit `$loop` variable in `@foreach`/`@forelse`, implicit `$message` in `@error`, implicit `$value` in `@session`, `@verbatim` block handling, and standalone `@var` docblocks for type narrowing.
 
 ## Getting started
 

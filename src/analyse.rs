@@ -311,6 +311,22 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             None => continue, // file that failed to read
                         };
 
+                        // For Blade files, use the preprocessed virtual PHP
+                        // content instead of the raw Blade template.  The
+                        // virtual content was produced by `update_ast` in
+                        // Phase 1 and stored in `blade_virtual_content`.
+                        let blade_content;
+                        let content = if crate::blade::is_blade_file(uri) {
+                            if let Some(vc) = backend.blade_virtual_content.read().get(uri.as_str()) {
+                                blade_content = vc.clone();
+                                &blade_content
+                            } else {
+                                content
+                            }
+                        } else {
+                            content
+                        };
+
                         // Activate ONE parse cache for the entire file so
                         // all collectors share the same parsed AST.  Each
                         // collector's own `with_parse_cache` call becomes
@@ -479,6 +495,16 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             }
                         }
 
+                        // For Blade files, translate diagnostic ranges from
+                        // virtual PHP coordinates back to original Blade
+                        // coordinates so line numbers match the source file.
+                        let is_blade = crate::blade::is_blade_file(uri);
+                        let source_map = if is_blade {
+                            backend.blade_source_maps.read().get(uri.as_str()).cloned()
+                        } else {
+                            None
+                        };
+
                         let mut filtered: Vec<FileDiagnostic> = raw
                             .into_iter()
                             .filter_map(|d| {
@@ -490,8 +516,13 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                     Some(NumberOrString::String(s)) => Some(s.clone()),
                                     _ => None,
                                 };
+                                let line = if let Some(ref map) = source_map {
+                                    map.php_to_blade(d.range.start).line + 1
+                                } else {
+                                    d.range.start.line + 1
+                                };
                                 Some(FileDiagnostic {
-                                    line: d.range.start.line + 1,
+                                    line,
                                     message: d.message,
                                     identifier,
                                     severity: sev,

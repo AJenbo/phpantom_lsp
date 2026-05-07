@@ -89,7 +89,6 @@ use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::{compute_existence_guards, find_innermost_enclosing_class, make_diagnostic};
-use super::offset_range_to_lsp_range;
 
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
@@ -554,6 +553,7 @@ impl Backend {
 
                 SubjectOutcome::Resolved(ref base_classes) => {
                     let (result, coarse_diags) = self.check_member_on_resolved_classes(
+                        uri,
                         base_classes,
                         member_name,
                         is_static,
@@ -591,6 +591,7 @@ impl Backend {
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {
                                 // Use the fresh diagnostics instead of the coarse ones.
                                 self.check_member_on_resolved_classes(
+                                    uri,
                                     fresh_classes,
                                     member_name,
                                     is_static,
@@ -642,6 +643,7 @@ impl Backend {
     #[allow(clippy::too_many_arguments)]
     fn check_member_on_resolved_classes(
         &self,
+        uri: &str,
         base_classes: &[Arc<ClassInfo>],
         member_name: &str,
         is_static: bool,
@@ -754,7 +756,8 @@ impl Backend {
         }
 
         // ── Member is unresolved on ALL branches — emit diagnostic ──
-        let range = match offset_range_to_lsp_range(content, start as usize, end as usize) {
+        let range = match self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+        {
             Some(r) => r,
             None => return (MemberCheckResult::Ok, diagnostics),
         };
