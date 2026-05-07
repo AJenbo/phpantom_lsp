@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778184303485,
+  "lastUpdate": 1778186620672,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8023,6 +8023,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 54.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "15e8fc8e0e81db3347dab24bdfb5be4b515b0c55",
+          "message": "Fix false-positive unused `$loop` in Blade and update Laravel demos",
+          "timestamp": "2026-05-07T22:31:19+02:00",
+          "tree_id": "adee7f1673c75dd67cb51828ba00e238f25479d1",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/15e8fc8e0e81db3347dab24bdfb5be4b515b0c55"
+        },
+        "date": 1778186619217,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 48.1,
             "unit": "MiB"
           }
         ]
