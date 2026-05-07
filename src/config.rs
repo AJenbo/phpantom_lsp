@@ -67,6 +67,18 @@ pub struct DiagnosticsConfig {
     /// you want stricter checking.
     #[serde(rename = "extra-arguments")]
     pub extra_arguments: Option<bool>,
+
+    /// Report property access on classes with `__get` when virtual
+    /// properties are defined.
+    ///
+    /// Off by default. When enabled, classes that have `__get` but
+    /// also declare virtual properties (via `@property` docblock tags,
+    /// Laravel Eloquent column inference, or any other virtual member
+    /// provider) will flag unknown property access instead of
+    /// suppressing it. This matches PHPStan's `reportMagicProperties`
+    /// behaviour.
+    #[serde(rename = "report-magic-properties")]
+    pub report_magic_properties: Option<bool>,
 }
 
 impl DiagnosticsConfig {
@@ -82,6 +94,13 @@ impl DiagnosticsConfig {
     /// Defaults to `false` (off) when not explicitly set.
     pub fn extra_arguments_enabled(&self) -> bool {
         self.extra_arguments.unwrap_or(false)
+    }
+
+    /// Whether magic property reporting is enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set.
+    pub fn report_magic_properties_enabled(&self) -> bool {
+        self.report_magic_properties.unwrap_or(false)
     }
 }
 
@@ -526,6 +545,7 @@ mod tests {
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
+        assert!(!config.diagnostics.report_magic_properties_enabled());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -554,6 +574,7 @@ mod tests {
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
+        assert!(!config.diagnostics.report_magic_properties_enabled());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -571,6 +592,7 @@ mod tests {
         assert!(config.php.version.is_none());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
+        assert!(!config.diagnostics.report_magic_properties_enabled());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Composer);
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
@@ -604,6 +626,24 @@ mod tests {
         std::fs::write(&path, "[diagnostics]\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(!config.diagnostics.unresolved_member_access_enabled());
+    }
+
+    #[test]
+    fn parses_report_magic_properties() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\nreport-magic-properties = true\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.diagnostics.report_magic_properties_enabled());
+    }
+
+    #[test]
+    fn report_magic_properties_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(!config.diagnostics.report_magic_properties_enabled());
     }
 
     #[test]
@@ -722,6 +762,7 @@ version = "8.2"
 [diagnostics]
 unresolved-member-access = true
 extra-arguments = true
+report-magic-properties = true
 
 [indexing]
 strategy = "self"
@@ -752,6 +793,7 @@ analyze-timeout = 45000
         assert_eq!(config.php.version.as_deref(), Some("8.2"));
         assert!(config.diagnostics.unresolved_member_access_enabled());
         assert!(config.diagnostics.extra_arguments_enabled());
+        assert!(config.diagnostics.report_magic_properties_enabled());
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(

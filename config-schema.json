@@ -29,6 +29,11 @@
           "type": "boolean",
           "description": "Report calls that pass more arguments than the function accepts. PHP silently ignores extra arguments to user-defined functions, and many libraries exploit this for flexible APIs.",
           "default": false
+        },
+        "report-magic-properties": {
+          "type": "boolean",
+          "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
+          "default": false
         }
       }
     },

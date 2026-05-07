@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`global` keyword variable resolution.** Variables imported with `global $var` now resolve to their top-level type, enabling completion, hover, and go-to-definition.
 - **`array_reduce`, `array_sum`, and `array_product` return type inference.** `array_reduce()` resolves to the type of its initial value argument. `array_sum()` and `array_product()` resolve to `int|float`.
 - **Machine-readable CLI output.** Both `analyze` and `fix` accept a `--format` flag with `table`, `github`, and `json` options. When `GITHUB_ACTIONS` is set, table output automatically includes GitHub annotations.
+- **Magic property diagnostics.** New `report-magic-properties` option under `[diagnostics]` in `.phpantom.toml`. When enabled, classes with `__get` that also have virtual properties (from `@property` docblock tags, Laravel Eloquent column inference, or other providers) will flag unknown property access instead of silently allowing it.
 
 ### Changed
 
@@ -52,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Blade diagnostics in `analyze` command.** Blade template files now receive full diagnostics (unknown members, unknown classes, unused variables, etc.) when running `phpantom_lsp analyze`. Previously, the analyzer passed raw Blade template content to diagnostic collectors instead of the preprocessed virtual PHP, so no diagnostics were produced.
+- **Blade diagnostics in `analyze` command.** Blade template files now receive full diagnostics (unknown members, unknown classes, unused variables, etc.) when running `phpantom_lsp analyze`.
 - **Blade unknown-member diagnostic positions.** Unknown-member diagnostics in Blade files now point to the correct line in the original template instead of the virtual PHP line number.
 - **Spurious function auto-imports.** Import statements like `use function is_array;` were misidentified as function declarations, polluting the completion list with phantom entries that inserted incorrect imports.
 - **Duplicate `use function` insertion.** Accepting a function completion no longer inserts a `use function` statement when the exact import already exists in the file.

@@ -656,6 +656,8 @@ impl Backend {
         end: u32,
     ) -> (MemberCheckResult, Vec<Diagnostic>) {
         let mut diagnostics = Vec::new();
+        let report_magic = self.config().diagnostics.report_magic_properties_enabled();
+
         // ── Quick check on pre-resolved base classes ────────────────
         // `resolve_target_classes` already returns fully-resolved
         // classes in many code paths (e.g. `type_hint_to_classes_typed`
@@ -675,7 +677,7 @@ impl Backend {
         if !is_method_call
             && base_classes
                 .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, false))
+                .any(|c| has_magic_method_for_access(c, is_static, false, report_magic))
         {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -709,7 +711,7 @@ impl Backend {
         if !is_method_call
             && resolved_classes
                 .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, false))
+                .any(|c| has_magic_method_for_access(c, is_static, false, report_magic))
         {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -737,10 +739,10 @@ impl Backend {
         let has_magic_call = is_method_call
             && (base_classes
                 .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, true))
+                .any(|c| has_magic_method_for_access(c, is_static, true, report_magic))
                 || resolved_classes
                     .iter()
-                    .any(|c| has_magic_method_for_access(c, is_static, true)));
+                    .any(|c| has_magic_method_for_access(c, is_static, true, report_magic)));
 
         // ── SoapClient: suppress diagnostic entirely ────────────────
         // SoapClient is a SOAP proxy where any method name is valid
@@ -949,7 +951,18 @@ fn member_exists(
 /// Check whether the class has a magic method that would handle the
 /// member access at runtime, making the "unknown member" diagnostic
 /// a false positive.
-fn has_magic_method_for_access(class: &ClassInfo, is_static: bool, is_method_call: bool) -> bool {
+///
+/// For property access, `__get` only suppresses the diagnostic when
+/// the class has no `@property` annotations.  When `@property` tags
+/// exist, they define the expected property surface and unknown
+/// properties should be flagged (matching PHPStan's behaviour with
+/// `reportMagicProperties: true`).
+fn has_magic_method_for_access(
+    class: &ClassInfo,
+    is_static: bool,
+    is_method_call: bool,
+    report_magic_properties: bool,
+) -> bool {
     if is_method_call {
         let magic = if is_static { "__callStatic" } else { "__call" };
         return class
@@ -959,11 +972,24 @@ fn has_magic_method_for_access(class: &ClassInfo, is_static: bool, is_method_cal
     }
 
     if !is_static {
-        // Instance property access — `__get` handles arbitrary property names.
-        return class
+        // Instance property access — `__get` handles arbitrary property
+        // names.  When `report_magic_properties` is enabled and any
+        // virtual member provider has added properties to the class
+        // (@property docblock tags, Laravel Eloquent column inference,
+        // etc.), do not suppress — let normal member checking flag
+        // unknowns.  When disabled (the default), `__get` always
+        // suppresses.
+        let has_get = class
             .methods
             .iter()
             .any(|m| m.name.eq_ignore_ascii_case("__get"));
+        if has_get {
+            if report_magic_properties {
+                let has_virtual_properties = class.properties.iter().any(|p| p.is_virtual);
+                return !has_virtual_properties;
+            }
+            return true;
+        }
     }
 
     false
