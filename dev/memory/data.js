@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778203534875,
+  "lastUpdate": 1778203627265,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8261,6 +8261,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3e07c35290566435962b57ef2e93e76979a5f79e",
+          "message": "Reduce redundant file parsing by deduplicating concurrent parses",
+          "timestamp": "2026-05-08T03:15:08+02:00",
+          "tree_id": "79ff6f863239ab18ec45b6ec500517af007b4f40",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/3e07c35290566435962b57ef2e93e76979a5f79e"
+        },
+        "date": 1778203626120,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 56.9,
             "unit": "MiB"
           }
         ]
