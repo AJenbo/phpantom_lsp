@@ -277,19 +277,49 @@ impl Backend {
             let phar_path = Path::new(&path_str[..sep]);
             let internal_path = &path_str[sep + 1..];
 
-            let archives = self.phar_archives.read();
-            let archive = archives.get(phar_path)?;
-            let bytes = archive.read_file(internal_path)?;
-            let content = std::str::from_utf8(bytes).ok()?;
-
             let uri = format!("phar://{}/{}", phar_path.display(), internal_path);
-            return self.parse_and_cache_content(content, &uri);
+
+            // Deduplicate concurrent parses of the same phar entry.
+            if !self.parse_inflight.lock().insert(uri.clone()) {
+                return self.wait_for_cached_result(&uri);
+            }
+            let result = (|| {
+                let archives = self.phar_archives.read();
+                let archive = archives.get(phar_path)?;
+                let bytes = archive.read_file(internal_path)?;
+                let content = std::str::from_utf8(bytes).ok()?;
+                self.parse_and_cache_content(content, &uri)
+            })();
+            self.parse_inflight.lock().remove(&uri);
+            return result;
         }
 
         // ── Regular file path ───────────────────────────────────
-        let content = std::fs::read_to_string(file_path).ok()?;
         let uri = crate::util::path_to_uri(file_path);
-        self.parse_and_cache_content(&content, &uri)
+
+        // Deduplicate concurrent parses of the same file.
+        if !self.parse_inflight.lock().insert(uri.clone()) {
+            return self.wait_for_cached_result(&uri);
+        }
+        let content = std::fs::read_to_string(file_path).ok();
+        let result = content.and_then(|c| self.parse_and_cache_content(&c, &uri));
+        self.parse_inflight.lock().remove(&uri);
+        result
+    }
+
+    /// Spin-wait for another thread to finish parsing a file and return
+    /// the cached result from `ast_map`.
+    fn wait_for_cached_result(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        for _ in 0..200 {
+            // Check if parsing is complete (URI removed from inflight set).
+            if !self.parse_inflight.lock().contains(uri) {
+                return self.ast_map.read().get(uri).cloned();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        // Timeout: the other thread is still parsing.  Return whatever is
+        // in ast_map (may be stale or None).
+        self.ast_map.read().get(uri).cloned()
     }
 
     /// Parse PHP source text, cache the results in

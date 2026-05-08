@@ -220,27 +220,6 @@ path).
 
 ---
 
-## P10. Redundant `parse_and_cache_file` from multiple threads
-
-**Impact: Medium · Effort: Low**
-
-When two threads simultaneously try to resolve the same vendor
-class, both miss `fqn_index`, both call `parse_and_cache_file`,
-and both parse the same file. The second parse is wasted work.
-This is most visible during the Phase 2 diagnostic pass when many
-threads resolve vendor classes for the first time.
-
-### Fix
-
-Add a `DashSet<String>` (or similar) of "currently being parsed"
-URIs. Before calling `parse_and_cache_file`, insert the URI into
-the set. If the insert fails (another thread is already parsing
-it), spin-wait or skip and let the other thread's result propagate
-through `fqn_index`. Remove the URI from the set after parsing
-completes.
-
----
-
 ## P11. Uncached base-resolution in `build_scope_methods_for_builder`
 
 **Impact: Low-Medium · Effort: Low**
