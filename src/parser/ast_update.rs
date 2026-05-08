@@ -516,6 +516,7 @@ impl Backend {
             uri_string.clone(),
             classes.into_iter().map(Arc::new).collect(),
         );
+        self.parsed_uris.write().insert(uri_string.clone());
 
         // Populate the global method store for O(1) method lookup.
         self.evict_methods_for_fqns(&old_fqns);

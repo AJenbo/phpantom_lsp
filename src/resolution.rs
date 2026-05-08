@@ -435,11 +435,17 @@ impl Backend {
         // Wrap each ClassInfo in Arc before inserting into the maps.
         let arc_classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();
 
-        // Check whether this URI already has an ast_map entry before
-        // we overwrite it.  Used below to decide whether resolved-class
-        // cache eviction is needed (only on re-parse, not first load).
-        let was_already_parsed = self.ast_map.read().contains_key(uri);
+        // Check whether this URI already has been parsed before.
+        // Used below to decide whether resolved-class cache eviction
+        // is needed (only on re-parse, not first load).
+        let was_already_parsed = self.parsed_uris.read().contains(uri);
 
+        // Record that this URI has been parsed.
+        self.parsed_uris.write().insert(uri.to_owned());
+
+        // Store in ast_map for wait_for_cached_result (concurrent
+        // parse deduplication) and for consumers that iterate classes
+        // by URI.  The memory cost is negligible (just Arc pointers).
         self.ast_map
             .write()
             .insert(uri.to_owned(), arc_classes.clone());
@@ -447,7 +453,7 @@ impl Backend {
         // for lazily-loaded files (vendor, stubs, PSR-4).  These maps
         // are only needed for files open in the editor (populated by
         // update_ast_inner).  Skipping them reduces memory usage across
-        // thousands of vendor files.  See P13 (tiered storage).
+        // thousands of vendor files.  See P13.
 
         // Populate the fqn_index so that `find_class_in_ast_map` can
         // resolve these classes via O(1) hash lookup.
@@ -595,7 +601,7 @@ impl Backend {
                 // Skip files that have already been fully parsed (their
                 // functions are already in global_functions via Phase 1).
                 let uri = crate::util::path_to_uri(path);
-                if self.ast_map.read().contains_key(&uri) {
+                if self.parsed_uris.read().contains(&uri) {
                     continue;
                 }
 

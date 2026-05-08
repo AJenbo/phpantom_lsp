@@ -343,6 +343,14 @@ pub struct Backend {
     /// classmap contains a phar-based path (detected by a `!` separator,
     /// e.g. `/path/to/phpstan.phar!src/Type/Type.php`).
     pub(crate) phar_archives: Arc<RwLock<HashMap<PathBuf, phar::PharArchive>>>,
+    /// Set of file URIs that have been fully parsed at least once.
+    ///
+    /// Used as a lightweight "has this file been parsed?" check by
+    /// consumers that need to skip redundant re-parsing (e.g.
+    /// `find_or_load_function`, `resolve_constant_definition`,
+    /// `find_implementors`).  Populated in `update_ast_inner` and
+    /// `parse_and_cache_content_versioned`.
+    pub(crate) parsed_uris: Arc<RwLock<HashSet<String>>>,
     /// Set of file URIs currently being parsed by another thread.
     ///
     /// Used by [`parse_and_cache_file`](Self::parse_and_cache_file) to avoid
@@ -655,6 +663,7 @@ impl Backend {
             class_not_found_cache: Arc::new(RwLock::new(HashSet::new())),
             classmap: Arc::new(RwLock::new(HashMap::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
+            parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(Mutex::new(HashSet::new())),
             stub_index: RwLock::new(stubs::build_stub_class_index()),
             stub_function_index: RwLock::new(stubs::build_stub_function_index()),
@@ -732,6 +741,7 @@ impl Backend {
             class_not_found_cache: Arc::new(RwLock::new(HashSet::new())),
             classmap: Arc::new(RwLock::new(HashMap::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
+            parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(Mutex::new(HashSet::new())),
             stub_index: RwLock::new(HashMap::new()),
             stub_function_index: RwLock::new(HashMap::new()),
@@ -1081,6 +1091,7 @@ impl Backend {
             fqn_index: Arc::clone(&self.fqn_index),
             classmap: Arc::clone(&self.classmap),
             phar_archives: Arc::clone(&self.phar_archives),
+            parsed_uris: Arc::clone(&self.parsed_uris),
             parse_inflight: Arc::clone(&self.parse_inflight),
             class_not_found_cache: Arc::clone(&self.class_not_found_cache),
             stub_index: RwLock::new(self.stub_index.read().clone()),

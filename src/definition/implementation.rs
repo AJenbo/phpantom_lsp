@@ -707,7 +707,7 @@ impl Backend {
         // Phase 1 and can be skipped.
         let classmap_paths: HashSet<PathBuf> = self.classmap.read().values().cloned().collect();
 
-        let loaded_uris: HashSet<String> = self.ast_map.read().keys().cloned().collect();
+        let loaded_uris: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
 
         for path in &classmap_paths {
             let uri = crate::util::path_to_uri(path);
@@ -802,8 +802,7 @@ impl Backend {
                     .collect()
             };
 
-            // Refresh loaded URIs — Phase 3 may have added entries.
-            let loaded_uris_p5: HashSet<String> = self.ast_map.read().keys().cloned().collect();
+            let loaded_uris_p5: HashSet<String> = self.parsed_uris.read().iter().cloned().collect();
 
             for dir in &psr4_dirs {
                 for php_file in collect_php_files(dir, &vendor_dir_paths) {

@@ -512,7 +512,7 @@ impl Backend {
             let mut lazy_result = None;
             for path in &paths {
                 let uri = crate::util::path_to_uri(path);
-                if self.ast_map.read().contains_key(&uri) {
+                if self.parsed_uris.read().contains(&uri) {
                     continue;
                 }
 
@@ -655,13 +655,11 @@ impl Backend {
     ) -> Option<Location> {
         let target_uri_string = crate::util::path_to_uri(file_path);
 
-        // Ensure the file is parsed and cached.  If the file is already in
-        // `ast_map` (opened via `did_open`, loaded from autoload files, or
-        // parsed in a previous cross-file jump), `parse_and_cache_file`
-        // will re-parse it — but the cost is negligible compared to the
-        // disk I/O we'd do anyway.  A future optimisation can skip the
-        // re-parse when an `ast_map` entry already exists.
-        let already_cached = self.ast_map.read().contains_key(&target_uri_string);
+        // Ensure the file is parsed and cached.  If the file has
+        // already been parsed (opened via `did_open`, loaded from
+        // autoload files, or parsed in a previous cross-file jump),
+        // skip re-parsing.
+        let already_cached = self.parsed_uris.read().contains(&target_uri_string);
 
         if !already_cached {
             self.parse_and_cache_file(file_path);

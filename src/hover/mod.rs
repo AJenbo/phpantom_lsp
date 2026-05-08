@@ -864,7 +864,7 @@ impl Backend {
             let paths = self.autoload_file_paths.read().clone();
             for path in &paths {
                 let uri = crate::util::path_to_uri(path);
-                if self.ast_map.read().contains_key(&uri) {
+                if self.parsed_uris.read().contains(&uri) {
                     continue;
                 }
                 if let Ok(content) = std::fs::read_to_string(path) {
