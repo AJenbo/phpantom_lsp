@@ -1728,9 +1728,18 @@ impl Backend {
         client.publish_diagnostics(uri, Vec::new(), None).await;
 
         if self.supports_pull_diagnostics.load(Ordering::Acquire) {
-            // Also send a refresh so the editor re-pulls (and gets
-            // empty results for the now-closed file).
-            let _ = client.workspace_diagnostic_refresh().await;
+            // Tell the editor to re-pull diagnostics.  We spawn this
+            // as a detached task instead of awaiting it because
+            // workspace_diagnostic_refresh is a server-to-client
+            // *request* that blocks until the client responds.  When
+            // the editor closes many files in a burst, each didClose
+            // handler would await a response while the client is busy
+            // sending more messages, deadlocking the tower-lsp
+            // service loop.
+            let client = client.clone();
+            tokio::spawn(async move {
+                let _ = client.workspace_diagnostic_refresh().await;
+            });
         }
     }
 }

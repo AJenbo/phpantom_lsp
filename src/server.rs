@@ -597,24 +597,30 @@ impl LanguageServer for Backend {
 
         // Run on a blocking thread so the async runtime stays free to
         // flush progress notifications to the client.
+        //
+        // Wrapped in tokio::spawn for cancellation safety (see references handler).
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            backend.handle_with_position(
-                "goto_implementation",
-                &uri_clone,
-                position,
-                |content, pos| {
-                    backend
-                        .resolve_implementation(&uri_clone, content, pos)
-                        .map(|locs| {
-                            locs.into_iter()
-                                .map(|l| backend.translate_location(l))
-                                .collect()
-                        })
-                        .and_then(wrap_locations)
-                },
-            )
+        let result = tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                backend.handle_with_position(
+                    "goto_implementation",
+                    &uri_clone,
+                    position,
+                    |content, pos| {
+                        backend
+                            .resolve_implementation(&uri_clone, content, pos)
+                            .map(|locs| {
+                                locs.into_iter()
+                                    .map(|l| backend.translate_location(l))
+                                    .collect()
+                            })
+                            .and_then(wrap_locations)
+                    },
+                )
+            })
+            .await
+            .unwrap_or(Ok(None))
         })
         .await
         .unwrap_or(Ok(None));
@@ -720,18 +726,29 @@ impl LanguageServer for Backend {
 
         // Run on a blocking thread so the async runtime stays free to
         // flush progress notifications to the client.
+        //
+        // We wrap spawn_blocking inside tokio::spawn so the blocking
+        // task is always awaited to completion even if tower-lsp
+        // cancels this handler future via $/cancelRequest.  Without
+        // this wrapper, dropping the handler future detaches the
+        // spawn_blocking JoinHandle, and tower-lsp 0.20 may corrupt
+        // its internal state when the orphaned task completes.
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            backend.handle_with_position("references", &uri_clone, position, |content, pos| {
-                backend
-                    .find_references(&uri_clone, content, pos, include_declaration)
-                    .map(|locs| {
-                        locs.into_iter()
-                            .map(|l| backend.translate_location(l))
-                            .collect()
-                    })
+        let result = tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                backend.handle_with_position("references", &uri_clone, position, |content, pos| {
+                    backend
+                        .find_references(&uri_clone, content, pos, include_declaration)
+                        .map(|locs| {
+                            locs.into_iter()
+                                .map(|l| backend.translate_location(l))
+                                .collect()
+                        })
+                })
             })
+            .await
+            .unwrap_or(Ok(None))
         })
         .await
         .unwrap_or(Ok(None));
@@ -1055,9 +1072,14 @@ impl LanguageServer for Backend {
                 .await;
         }
 
-        let result = tokio::task::spawn_blocking(move || backend.subtypes_impl(&item))
-            .await
-            .unwrap_or(None);
+        // Wrapped in tokio::spawn for cancellation safety (see references handler).
+        let result = tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || backend.subtypes_impl(&item))
+                .await
+                .unwrap_or(None)
+        })
+        .await
+        .unwrap_or(None);
 
         if let Some(ref tok) = token {
             self.progress_end(tok, Some("Done".to_string())).await;

@@ -1719,11 +1719,21 @@ impl Backend {
         let params = WorkDoneProgressCreateParams {
             token: token.clone(),
         };
-        client
-            .send_request::<WorkDoneProgressCreate>(params)
-            .await
-            .ok()?;
-        Some(token)
+        // Use a timeout to avoid deadlocking the service loop.
+        // progress_create is a server-to-client request; if the
+        // client is busy (e.g. flooding didClose/hover), awaiting
+        // indefinitely could block the handler and starve other
+        // requests.  Progress reporting is best-effort, so timing
+        // out is harmless.
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.send_request::<WorkDoneProgressCreate>(params),
+        )
+        .await
+        {
+            Ok(Ok(())) => Some(token),
+            _ => None,
+        }
     }
 
     /// Send a `WorkDoneProgressBegin` notification for the given token.

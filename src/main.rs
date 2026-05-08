@@ -283,6 +283,12 @@ async fn main() {
                 let (read, write) = tokio::io::split(stream);
                 let (service, socket) = LspService::build(Backend::new).finish();
                 Server::new(read, write, socket).serve(service).await;
+                // The serve loop exited (client disconnected or an
+                // internal error occurred).  Exit the process so the
+                // editor can restart us instead of leaving a zombie
+                // that consumes no CPU but never responds.
+                tracing::warn!("tower-lsp serve loop exited (TCP), shutting down");
+                std::process::exit(0);
             } else {
                 // Default: run the LSP server over stdin/stdout.
                 let stdin = tokio::io::stdin();
@@ -290,6 +296,12 @@ async fn main() {
 
                 let (service, socket) = LspService::build(Backend::new).finish();
                 Server::new(stdin, stdout, socket).serve(service).await;
+                // Same as above: the serve loop exited.  Without this
+                // explicit exit, the process hangs because the tokio
+                // blocking stdin reader thread keeps the runtime alive
+                // even though no tasks are consuming the data.
+                tracing::warn!("tower-lsp serve loop exited (stdio), shutting down");
+                std::process::exit(0);
             }
         }
     }

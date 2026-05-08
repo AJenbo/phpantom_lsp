@@ -21,3 +21,4 @@ handle this automatically.
 **Tests:** Assertion lines were removed from
 `tests/psalm_assertions/method_call.php` (out of scope until
 upstream stubs land).
+

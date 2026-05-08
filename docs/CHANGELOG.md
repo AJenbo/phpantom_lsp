@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LSP no longer freezes under heavy editor activity.** Server-to-client requests (diagnostic refresh, progress token creation) could deadlock the service loop when the editor was simultaneously sending bursts of open/close/hover messages. All server-to-client requests are now either fire-and-forget or time-bounded, long-running handlers are cancellation-safe, and the process exits cleanly if the service loop ever terminates unexpectedly.
 - **Rename class preserves `self`, `static`, and `parent` keywords.** Renaming a class no longer replaces occurrences of `self::`, `static::`, or `parent::` with the new class name.
 - **Rename propagates into closures and arrow functions.** Renaming a variable now follows explicit `use ($var)` captures into closure bodies and implicit captures into arrow function bodies, instead of leaving those occurrences unchanged.
 - **Spurious function auto-imports.** Import statements like `use function is_array;` were misidentified as function declarations, polluting the completion list with phantom entries that inserted incorrect imports.
