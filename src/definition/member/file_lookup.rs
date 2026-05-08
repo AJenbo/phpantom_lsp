@@ -114,9 +114,7 @@ impl Backend {
         }
         // Fallback: the target file may have been closed (didClose clears
         // ast_map).  Check class_index which survives close (issue #99).
-        .or_else(|| {
-            self.class_index.read().get(class_name).cloned()
-        })?;
+        .or_else(|| self.class_index.read().get(class_name).cloned())?;
 
         // Get the file content.
         let file_content = if uri == current_uri {

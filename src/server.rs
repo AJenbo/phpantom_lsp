@@ -140,7 +140,7 @@ impl LanguageServer for Backend {
                 }),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                    TextDocumentSyncKind::INCREMENTAL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -469,29 +469,53 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
-        if let Some(change) = params.content_changes.first() {
-            let text = Arc::new(change.text.clone());
+        if params.content_changes.is_empty() {
+            return;
+        }
 
-            // Update stored content
-            self.open_files
-                .write()
-                .insert(uri.clone(), Arc::clone(&text));
+        // Apply incremental edits to the current content.
+        // Each change event either has a range (incremental) or replaces
+        // the entire document (range is None).
+        let text = {
+            let open_files = self.open_files.read();
+            let mut current = open_files
+                .get(&uri)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            drop(open_files);
 
-            // Re-parse and update AST map, use map, and namespace map
-            let signature_changed = self.update_ast(&uri, &text);
-
-            // Schedule diagnostics in a background task with debouncing.
-            // This returns immediately so that completion, hover, and
-            // signature help are never blocked by diagnostic computation.
-            self.schedule_diagnostics(uri.clone());
-
-            // When a class signature changed (method/property added,
-            // removed, or modified; class renamed; parent changed; etc.)
-            // other open files may have stale diagnostics that reference
-            // the affected classes.  Queue them all for a re-check.
-            if signature_changed {
-                self.schedule_diagnostics_for_open_files(&uri);
+            for change in &params.content_changes {
+                if let Some(range) = change.range {
+                    let start = crate::util::position_to_byte_offset(&current, range.start);
+                    let end = crate::util::position_to_byte_offset(&current, range.end);
+                    current.replace_range(start..end, &change.text);
+                } else {
+                    // Full content replacement (fallback)
+                    current = change.text.clone();
+                }
             }
+            Arc::new(current)
+        };
+
+        // Update stored content
+        self.open_files
+            .write()
+            .insert(uri.clone(), Arc::clone(&text));
+
+        // Re-parse and update AST map, use map, and namespace map
+        let signature_changed = self.update_ast(&uri, &text);
+
+        // Schedule diagnostics in a background task with debouncing.
+        // This returns immediately so that completion, hover, and
+        // signature help are never blocked by diagnostic computation.
+        self.schedule_diagnostics(uri.clone());
+
+        // When a class signature changed (method/property added,
+        // removed, or modified; class renamed; parent changed; etc.)
+        // other open files may have stale diagnostics that reference
+        // the affected classes.  Queue them all for a re-check.
+        if signature_changed {
+            self.schedule_diagnostics_for_open_files(&uri);
         }
     }
 

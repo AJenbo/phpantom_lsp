@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Incremental text sync.** The server now uses incremental document sync, receiving only changed ranges from the editor instead of the full file content on every keystroke.
 - **Replace FQCN with import.** Now replaces all occurrences of the same FQCN throughout the file in one action, not just the one under the cursor. A new "Replace all FQCNs with imports" action appears when the file contains multiple distinct FQCNs, replacing all of them at once (skipping those with import conflicts).
 - **LSP responsiveness.** Hover, go-to-definition, signature help, code actions, rename, and other handlers now run on background threads. Slow requests no longer block other requests or cancellations.
 - **Faster analysis.** Analysis time cut significantly on large projects.

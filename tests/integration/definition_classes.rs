@@ -284,10 +284,7 @@ async fn test_goto_definition_after_target_did_close() {
 
     match result.unwrap() {
         GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(
-                location.uri, uri_b,
-                "Should jump to ClassB.php"
-            );
+            assert_eq!(location.uri, uri_b, "Should jump to ClassB.php");
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
     }

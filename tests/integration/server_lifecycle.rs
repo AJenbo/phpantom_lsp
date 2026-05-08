@@ -294,3 +294,122 @@ async fn test_did_close_cleans_up_ast_map() {
         "ast_map should be cleaned up after did_close"
     );
 }
+
+#[tokio::test]
+async fn test_did_change_incremental_sync() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///incremental.php").unwrap();
+    //                     0123456789...
+    let initial = "<?php\nclass A {\n    function first() {}\n}\n".to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: initial,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
+    assert_eq!(classes[0].methods.len(), 1);
+
+    // Send an incremental change: insert a second method before the closing brace.
+    // The closing "}\n" is at line 3, col 0. Insert before it.
+    let change_params = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position {
+                    line: 3,
+                    character: 0,
+                },
+                end: Position {
+                    line: 3,
+                    character: 0,
+                },
+            }),
+            range_length: None,
+            text: "    function second() {}\n".to_string(),
+        }],
+    };
+    backend.did_change(change_params).await;
+
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
+    assert_eq!(classes[0].methods.len(), 2);
+    let names: Vec<&str> = classes[0].methods.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"first"));
+    assert!(names.contains(&"second"));
+}
+
+#[tokio::test]
+async fn test_did_change_incremental_multiple_edits() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///multi_edit.php").unwrap();
+    let initial = "<?php\nclass B {\n    function alpha() {}\n}\n".to_string();
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: initial,
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Two incremental edits in one event: rename "alpha" to "beta" and add a method.
+    // "alpha" starts at line 2, char 13, ends at char 18.
+    // After that edit the file is: "<?php\nclass B {\n    function beta() {}\n}\n"
+    // Then insert before closing brace (now line 3, char 0).
+    let change_params = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![
+            TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 2,
+                        character: 13,
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 18,
+                    },
+                }),
+                range_length: None,
+                text: "beta".to_string(),
+            },
+            TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position {
+                        line: 3,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 3,
+                        character: 0,
+                    },
+                }),
+                range_length: None,
+                text: "    function gamma() {}\n".to_string(),
+            },
+        ],
+    };
+    backend.did_change(change_params).await;
+
+    let classes = backend.get_classes_for_uri(uri.as_ref()).unwrap();
+    assert_eq!(classes[0].methods.len(), 2);
+    let names: Vec<&str> = classes[0].methods.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"beta"));
+    assert!(names.contains(&"gamma"));
+    assert!(!names.contains(&"alpha"));
+}
