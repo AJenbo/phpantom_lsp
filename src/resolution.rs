@@ -443,15 +443,11 @@ impl Backend {
         self.ast_map
             .write()
             .insert(uri.to_owned(), arc_classes.clone());
-        self.use_map.write().insert(uri.to_owned(), file_use_map);
-        self.namespace_map.write().insert(
-            uri.to_owned(),
-            vec![crate::types::NamespaceSpan {
-                namespace: file_namespace.clone(),
-                start: 0,
-                end: content.len() as u32,
-            }],
-        );
+        // NOTE: use_map and namespace_map are intentionally NOT stored
+        // for lazily-loaded files (vendor, stubs, PSR-4).  These maps
+        // are only needed for files open in the editor (populated by
+        // update_ast_inner).  Skipping them reduces memory usage across
+        // thousands of vendor files.  See P13 (tiered storage).
 
         // Populate the fqn_index so that `find_class_in_ast_map` can
         // resolve these classes via O(1) hash lookup.
@@ -476,6 +472,7 @@ impl Backend {
             self.evict_methods_for_fqns(&fqns);
         }
         self.populate_method_store(&arc_classes);
+        self.populate_gti_index(&arc_classes);
 
         // Remove newly-discovered FQNs from the negative-result cache.
         {

@@ -519,8 +519,10 @@ impl Backend {
 
         // Populate the global method store for O(1) method lookup.
         self.evict_methods_for_fqns(&old_fqns);
+        self.evict_gti_for_fqns(&old_fqns);
         if let Some(arc_classes) = self.ast_map.read().get(&uri_string) {
             self.populate_method_store(arc_classes);
+            self.populate_gti_index(arc_classes);
         }
 
         self.symbol_maps

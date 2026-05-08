@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Diagnostic delivery model.** Editors that support pull diagnostics now get diagnostics on first file open without waiting for a debounce timer. Updates from external tools no longer re-run the entire native diagnostic pipeline.
 - **Virtual member resolution.** Mixins and virtual accessors are now resolved completely on every class, eliminating cases where they were missing after edits.
 - **Diagnostic code identifiers.** All diagnostic codes now use a consistent `snake_case` noun-phrase scheme: `unknown_variable`, `type_mismatch_argument`, `argument_count_mismatch`, `deprecated_usage`, `missing_implementation`. Users with editor filters matching on these codes will need to update them.
+- **Lower memory usage for lazily-loaded files.** Vendor and stub files no longer store per-file import tables and namespace maps after parsing, and go-to-implementation uses a dedicated reverse-inheritance index instead of scanning all parsed files.
 - **Lower memory usage for variable type tracking.**
 - **Updated embedded phpstorm-stubs.**
 

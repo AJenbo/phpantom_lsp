@@ -376,6 +376,16 @@ pub struct Backend {
     /// inside `ClassInfo.methods`; future phases will make this the
     /// authoritative source and shrink `ClassInfo.methods` to just names.
     pub(crate) method_store: types::MethodStore,
+    /// Reverse inheritance index: parent FQN → list of child FQNs.
+    ///
+    /// For each class/interface/trait, maps the FQNs of its parents
+    /// (parent_class, interfaces, used_traits) to the child's FQN.
+    /// Used by `find_implementors` for O(1) lookup of direct children
+    /// instead of scanning all `ast_map` entries.
+    ///
+    /// Populated incrementally in `update_ast_inner` and
+    /// `parse_and_cache_content_versioned` as files are parsed.
+    pub(crate) gti_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Embedded PHP stubs for built-in functions (e.g. `array_map`,
     /// `str_contains`, …).  Maps function name → raw PHP source code.
     ///
@@ -651,6 +661,7 @@ impl Backend {
             stub_constant_index: RwLock::new(stubs::build_stub_constant_index()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             method_store: Arc::new(RwLock::new(HashMap::new())),
+            gti_index: Arc::new(RwLock::new(HashMap::new())),
             php_version: Mutex::new(types::PhpVersion::default()),
             diag_version: Arc::new(AtomicU64::new(0)),
             diag_notify: Arc::new(tokio::sync::Notify::new()),
@@ -727,6 +738,7 @@ impl Backend {
             stub_constant_index: RwLock::new(HashMap::new()),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             method_store: Arc::new(RwLock::new(HashMap::new())),
+            gti_index: Arc::new(RwLock::new(HashMap::new())),
             php_version: Mutex::new(types::PhpVersion::default()),
             diag_version: Arc::new(AtomicU64::new(0)),
             diag_notify: Arc::new(tokio::sync::Notify::new()),
@@ -977,6 +989,57 @@ impl Backend {
         }
     }
 
+    /// Populate the GTI (go-to-implementation) reverse inheritance index
+    /// for the given classes.  For each class, inserts the class's FQN
+    /// into the child list of every parent (parent_class, interfaces,
+    /// used_traits).
+    pub(crate) fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
+        let mut gti = self.gti_index.write();
+        for cls in classes {
+            if cls.name.starts_with("__anonymous@") {
+                continue;
+            }
+            let child_fqn = cls.fqn().to_string();
+
+            if let Some(ref parent) = cls.parent_class {
+                let parent_str = parent.to_string();
+                let children = gti.entry(parent_str).or_default();
+                if !children.contains(&child_fqn) {
+                    children.push(child_fqn.clone());
+                }
+            }
+            for iface in &cls.interfaces {
+                let iface_str = iface.to_string();
+                let children = gti.entry(iface_str).or_default();
+                if !children.contains(&child_fqn) {
+                    children.push(child_fqn.clone());
+                }
+            }
+            for tr in &cls.used_traits {
+                let tr_str = tr.to_string();
+                let children = gti.entry(tr_str).or_default();
+                if !children.contains(&child_fqn) {
+                    children.push(child_fqn.clone());
+                }
+            }
+        }
+    }
+
+    /// Remove all GTI entries where `child_fqn` appears as a child.
+    /// Called before re-populating when a file is re-parsed.
+    pub(crate) fn evict_gti_for_fqns(&self, fqns: &[String]) {
+        if fqns.is_empty() {
+            return;
+        }
+        let fqn_set: HashSet<&str> = fqns.iter().map(|s| s.as_str()).collect();
+        let mut gti = self.gti_index.write();
+        for children in gti.values_mut() {
+            children.retain(|child| !fqn_set.contains(child.as_str()));
+        }
+        // Remove empty entries to avoid unbounded growth.
+        gti.retain(|_, v| !v.is_empty());
+    }
+
     /// Create a shallow clone of this `Backend` that shares every
     /// `Arc`-wrapped field with the original.
     ///
@@ -1023,6 +1086,7 @@ impl Backend {
             stub_index: RwLock::new(self.stub_index.read().clone()),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             method_store: Arc::clone(&self.method_store),
+            gti_index: Arc::clone(&self.gti_index),
             stub_function_index: RwLock::new(self.stub_function_index.read().clone()),
             stub_constant_index: RwLock::new(self.stub_constant_index.read().clone()),
             php_version: Mutex::new(self.php_version()),

@@ -625,28 +625,49 @@ impl Backend {
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
 
-        // ── Phase 1: scan ast_map ───────────────────────────────────────
-        // Collect all candidate classes first, then drop the lock before
-        // calling class_loader (which may re-lock ast_map).
-        let ast_candidates: Vec<ClassInfo> = {
-            let map = self.ast_map.read();
-            map.values()
-                .flat_map(|classes| classes.iter().map(|c| ClassInfo::clone(c)))
-                .collect()
+        // ── Phase 1: GTI index lookup ───────────────────────────────────
+        // Use the reverse inheritance index for O(1) lookup of classes
+        // that directly extend/implement/use the target.  Then
+        // recursively collect transitive children.
+        let gti_candidates: Vec<String> = {
+            let gti = self.gti_index.read();
+            if direct_only {
+                gti.get(target_fqn).cloned().unwrap_or_default()
+            } else {
+                // Transitive: BFS collecting all descendants.
+                let mut all_children: Vec<String> = Vec::new();
+                let mut queue: Vec<String> = vec![target_fqn.to_string()];
+                let mut visited: HashSet<String> = HashSet::new();
+                visited.insert(target_fqn.to_string());
+                while let Some(parent) = queue.pop() {
+                    if let Some(children) = gti.get(&parent) {
+                        for child in children {
+                            if visited.insert(child.clone()) {
+                                all_children.push(child.clone());
+                                queue.push(child.clone());
+                            }
+                        }
+                    }
+                }
+                all_children
+            }
         };
 
-        for cls in &ast_candidates {
-            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-            if self.class_implements_or_extends(
-                cls,
-                target_short,
-                target_fqn,
-                class_loader,
-                include_abstract,
-                direct_only,
-            ) && seen_fqns.insert(cls_fqn)
-            {
-                result.push(cls.clone());
+        for child_fqn in &gti_candidates {
+            if seen_fqns.contains(child_fqn) {
+                continue;
+            }
+            if let Some(cls) = class_loader(child_fqn) {
+                if !direct_only {
+                    if cls.kind == ClassLikeKind::Interface {
+                        continue;
+                    }
+                    if cls.is_abstract && !include_abstract {
+                        continue;
+                    }
+                }
+                seen_fqns.insert(child_fqn.clone());
+                result.push(Arc::unwrap_or_clone(cls));
             }
         }
 
