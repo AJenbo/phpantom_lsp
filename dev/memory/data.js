@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778207021604,
+  "lastUpdate": 1778211529621,
   "repoUrl": "https://github.com/AJenbo/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8363,6 +8363,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 49.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7d3d6ea90b1ce13430f7f5c3d05bd06dc9dd5b9b",
+          "message": "Fix LSP deadlocks and hangs under heavy editor activity",
+          "timestamp": "2026-05-08T05:26:47+02:00",
+          "tree_id": "b728465c39697a690f56552ac612a3bce3c6478d",
+          "url": "https://github.com/AJenbo/phpantom_lsp/commit/7d3d6ea90b1ce13430f7f5c3d05bd06dc9dd5b9b"
+        },
+        "date": 1778211528317,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 30.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 52.3,
             "unit": "MiB"
           }
         ]
