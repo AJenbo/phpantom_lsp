@@ -155,15 +155,10 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
-
-        locations.dedup();
+        for loc in self.framework_class_reference_locations(target) {
+            push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
+        }
+        sort_locations_for_references(&mut locations);
         locations
     }
 

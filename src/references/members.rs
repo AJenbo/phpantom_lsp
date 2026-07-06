@@ -714,13 +714,10 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        for loc in self.framework_member_reference_locations(target_member, hierarchy) {
+            push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
+        }
+        sort_locations_for_references(&mut locations);
 
         locations
     }
@@ -867,6 +864,17 @@ impl Backend {
             function_loader: &function_loader,
         };
 
+        let doctrine_repository_fqns = self.resolve_doctrine_repository_subject_to_fqns(
+            subject_text,
+            ctx,
+            access_offset,
+            content,
+            &class_loader,
+        );
+        if !doctrine_repository_fqns.is_empty() {
+            return doctrine_repository_fqns;
+        }
+
         match crate::type_engine::subject_resolution::resolve_subject_type(
             subject_text,
             is_static,
@@ -898,6 +906,130 @@ impl Backend {
                 &class_loader,
             ),
         }
+    }
+
+    fn resolve_doctrine_repository_subject_to_fqns(
+        &self,
+        subject_text: &str,
+        ctx: &crate::types::FileContext,
+        access_offset: u32,
+        content: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
+        let mut candidates = self.doctrine_repository_fqns_from_expr(
+            &expr,
+            &ctx.use_map,
+            &ctx.namespace,
+            &ctx.classes,
+            access_offset,
+            class_loader,
+        );
+
+        if candidates.is_empty()
+            && let crate::type_engine::subject_expr::SubjectExpr::Variable(var_name) = &expr
+            && let Some(assigned_expr) =
+                last_assignment_expression_before(content, access_offset, var_name)
+        {
+            let assigned = crate::type_engine::subject_expr::SubjectExpr::parse(assigned_expr);
+            candidates = self.doctrine_repository_fqns_from_expr(
+                &assigned,
+                &ctx.use_map,
+                &ctx.namespace,
+                &ctx.classes,
+                access_offset,
+                class_loader,
+            );
+        }
+
+        candidates
+    }
+
+    fn doctrine_repository_fqns_from_expr(
+        &self,
+        expr: &crate::type_engine::subject_expr::SubjectExpr,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+        local_classes: &[Arc<ClassInfo>],
+        access_offset: u32,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let crate::type_engine::subject_expr::SubjectExpr::CallExpr { callee, args_text } = expr
+        else {
+            return Vec::new();
+        };
+        let crate::type_engine::subject_expr::SubjectExpr::MethodCall { method, .. } =
+            callee.as_ref()
+        else {
+            return Vec::new();
+        };
+        if !method.eq_ignore_ascii_case("getRepository") {
+            return Vec::new();
+        }
+
+        let Some(entity_fqn) = doctrine_repository_entity_arg(
+            args_text,
+            use_map,
+            namespace,
+            local_classes,
+            access_offset,
+        ) else {
+            return Vec::new();
+        };
+
+        self.doctrine_repository_fqns_for_entity(&entity_fqn, class_loader)
+    }
+
+    pub(crate) fn doctrine_repository_fqns_for_entity(
+        &self,
+        entity_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let entity = normalize_fqn(entity_fqn);
+        let entity_short = crate::util::short_name(&entity);
+        let repository_short = doctrine_repository_short_name(entity_short);
+        let mut candidate_fqns = self.framework_doctrine_repository_fqns_for_entity(&entity);
+        candidate_fqns.extend(doctrine_repository_convention_candidates(
+            &entity,
+            &repository_short,
+        ));
+
+        {
+            let class_index = self.symbols.fqn_class_index.read();
+            for (class_fqn, class_info) in class_index.iter() {
+                if crate::util::short_name(class_fqn).eq_ignore_ascii_case(&repository_short)
+                    && looks_like_doctrine_repository(class_info)
+                {
+                    candidate_fqns.push(normalize_fqn(class_fqn));
+                }
+            }
+        }
+
+        for fallback in [
+            "Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository",
+            "Doctrine\\ORM\\EntityRepository",
+            "Doctrine\\Persistence\\ObjectRepository",
+            "ServiceEntityRepository",
+            "EntityRepository",
+            "ObjectRepository",
+        ] {
+            candidate_fqns.push(fallback.to_string());
+        }
+
+        let mut resolved = Vec::new();
+        for candidate in candidate_fqns {
+            let normalized = normalize_fqn(&candidate);
+            if resolved
+                .iter()
+                .any(|known: &String| known.eq_ignore_ascii_case(&normalized))
+            {
+                continue;
+            }
+            if let Some(class_info) = class_loader(&normalized) {
+                resolved.push(normalize_fqn(&class_info.fqn()));
+            }
+        }
+        resolved
     }
 
     fn resolve_static_laravel_builder_subject_to_fqns(
@@ -945,7 +1077,7 @@ impl Backend {
     /// - All ancestor FQNs (parent chain, interfaces, traits)
     /// - All descendant FQNs (classes that extend/implement any class in
     ///   the hierarchy)
-    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
+    pub(super) fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
         let mut hierarchy = HashSet::new();
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
@@ -1046,7 +1178,7 @@ impl Backend {
         hierarchy
     }
 
-    fn collect_member_receiver_scope(
+    pub(super) fn collect_member_receiver_scope(
         &self,
         seed_fqns: &[String],
         member_name: &str,
@@ -1378,4 +1510,100 @@ impl Backend {
             }
         }
     }
+}
+
+fn doctrine_repository_entity_arg(
+    args_text: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    local_classes: &[Arc<ClassInfo>],
+    access_offset: u32,
+) -> Option<String> {
+    let first_arg = crate::type_engine::conditional_resolution::split_text_args(args_text)
+        .into_iter()
+        .next()?
+        .trim();
+    let class_expr = first_arg.strip_suffix("::class")?.trim();
+    let class_expr = class_expr.trim_start_matches('\\');
+    if class_expr.is_empty() {
+        return None;
+    }
+
+    match class_expr {
+        "self" | "static" => {
+            let current = find_class_at_offset(local_classes, access_offset)?;
+            Some(current.fqn().to_string())
+        }
+        "parent" => {
+            let current = find_class_at_offset(local_classes, access_offset)?;
+            current.parent_class.map(|parent| parent.to_string())
+        }
+        _ => Some(Backend::resolve_to_fqn(class_expr, use_map, namespace)),
+    }
+}
+
+fn doctrine_repository_short_name(entity_short: &str) -> String {
+    let stem = entity_short
+        .strip_suffix("Entity")
+        .or_else(|| entity_short.strip_suffix("Impl"))
+        .unwrap_or(entity_short);
+    format!("{stem}Repository")
+}
+
+fn doctrine_repository_convention_candidates(
+    entity_fqn: &str,
+    repository_short: &str,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some((entity_ns, _)) = entity_fqn.rsplit_once('\\') {
+        candidates.push(format!("{entity_ns}\\{repository_short}"));
+
+        for marker in ["\\Entity\\", "\\Entities\\", "\\Model\\", "\\Models\\"] {
+            if let Some((root, _tail)) = entity_fqn.rsplit_once(marker) {
+                candidates.push(format!("{root}\\Repository\\{repository_short}"));
+                candidates.push(format!("{root}\\Repositories\\{repository_short}"));
+            }
+        }
+
+        for suffix in ["\\Entity", "\\Entities", "\\Model", "\\Models"] {
+            if let Some(root) = entity_ns.strip_suffix(suffix) {
+                candidates.push(format!("{root}\\Repository\\{repository_short}"));
+                candidates.push(format!("{root}\\Repositories\\{repository_short}"));
+            }
+        }
+    } else {
+        candidates.push(repository_short.to_string());
+    }
+
+    candidates
+}
+
+fn looks_like_doctrine_repository(class_info: &ClassInfo) -> bool {
+    if class_info.name.to_string().ends_with("Repository") {
+        return true;
+    }
+    class_info.parent_class.as_ref().is_some_and(|parent| {
+        let short = crate::util::short_name(parent);
+        matches!(
+            short,
+            "ServiceEntityRepository" | "EntityRepository" | "ObjectRepository"
+        )
+    })
+}
+
+fn last_assignment_expression_before<'a>(
+    content: &'a str,
+    access_offset: u32,
+    var_name: &str,
+) -> Option<&'a str> {
+    let prefix = content.get(..access_offset as usize)?;
+    let pattern = format!("{var_name} =");
+    let assign_start = prefix.rfind(&pattern)?;
+    let after_equals = prefix[assign_start + pattern.len()..].trim_start();
+    let end = after_equals
+        .find(';')
+        .or_else(|| after_equals.find('\n'))
+        .unwrap_or(after_equals.len());
+    let expr = after_equals[..end].trim();
+    if expr.is_empty() { None } else { Some(expr) }
 }

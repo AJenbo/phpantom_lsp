@@ -44,6 +44,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
+use crate::framework::FrameworkReferenceKind;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::SymbolMap;
 use crate::util::strip_fqn_prefix;

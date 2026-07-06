@@ -481,6 +481,14 @@ impl LanguageServer for Backend {
                 }
             }
 
+            let framework_count = self.index_framework_workspace();
+            if framework_count > 0 {
+                tracing::info!(
+                    "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
+                    framework_count
+                );
+            }
+
             if let Some(poller) = poller {
                 poller.finish().await;
             }
@@ -607,6 +615,20 @@ impl LanguageServer for Backend {
                 },
             ]);
         }
+        watchers.extend([
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yaml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.xml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+        ]);
 
         registrations.push(Registration {
             id: "workspace/didChangeWatchedFiles".to_string(),
@@ -751,8 +773,15 @@ impl LanguageServer for Backend {
         // Resource documents are not PHP source. Build a lightweight symbol
         // map so navigation, references, rename, and PHP declaration lenses
         // all consume the same indexed occurrences.
-        if crate::resource_navigation::is_resource_document(&uri) {
-            self.update_resource_symbol_index(&uri, &text);
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            }
+            if is_framework_resource {
+                self.index_framework_uri_content(&uri, &text);
+            }
             self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
                 .await;
             return;
@@ -837,8 +866,15 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
-        if crate::resource_navigation::is_resource_document(&uri) {
-            self.update_resource_symbol_index(&uri, &text);
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            }
+            if is_framework_resource {
+                self.index_framework_uri_content(&uri, &text);
+            }
             if self.supports_code_lens_refresh.load(Ordering::Acquire)
                 && let Some(ref client) = self.client
             {
@@ -952,15 +988,25 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
-        if crate::resource_navigation::is_resource_document(&uri) {
-            if let Some(content) = self.get_file_content(&uri) {
-                self.update_resource_symbol_index(&uri, &content);
-            } else {
-                self.clear_file_maps(&uri);
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                if let Some(content) = self.get_file_content(&uri) {
+                    self.update_resource_symbol_index(&uri, &content);
+                } else {
+                    self.clear_file_maps(&uri);
+                }
             }
-        } else {
-            self.clear_file_maps(&uri);
+            if is_framework_resource {
+                self.reindex_framework_uri_from_disk(&uri);
+            }
+            self.log(MessageType::INFO, format!("Closed resource file: {}", uri))
+                .await;
+            return;
         }
+
+        self.clear_file_maps(&uri);
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
