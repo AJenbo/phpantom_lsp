@@ -14,7 +14,7 @@
         <link rel="prev" href="../editor-setup/">
       
       
-        <link rel="next" href="../configuration/">
+        <link rel="next" href="../installation/">
       
       
         
@@ -321,33 +321,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Installation
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../editor-setup/" class="md-nav__link">
         
   
@@ -384,6 +357,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -400,6 +390,75 @@
 
       </a>
       
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Claude Code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opencode" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Opencode
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1259,6 +1318,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1270,6 +1334,36 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Claude Code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opencode" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Opencode
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1294,27 +1388,16 @@
 
 <h1 id="agent-setup">Agent Setup<a class="headerlink" href="#agent-setup" title="Permanent link">&para;</a></h1>
 <p>AI coding agents can use PHPantom for the same code intelligence editors get. The agent starts <code>phpantom_lsp</code> over LSP and consults it (diagnostics, go-to-definition, hover types) as it reads and edits PHP, so its changes are grounded in real type information instead of guesses.</p>
-<details>
-<summary><b>Claude Code</b></summary>
-
-Install the PHPantom plugin from its marketplace:
-
+<h2 id="claude-code">Claude Code<a class="headerlink" href="#claude-code" title="Permanent link">&para;</a></h2>
+<p>Install the PHPantom plugin from its marketplace:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>/plugin marketplace add PHPantom-dev/phpantom_claude
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>/plugin install phpantom@phpantom
 </code></pre></div>
-
-Restart Claude Code, then open a PHP file. The plugin starts the language server automatically, downloading the correct `phpantom_lsp` binary for your platform on first use (or using one already on your `PATH`). No Docker, PHP, or Rust toolchain is required.
-
-Beyond per-file code intelligence, the plugin puts `phpantom_lsp` on the agent's `PATH` and bundles a skill that tells Claude when to use its project-wide CLI, so it can run `phpantom_lsp analyze` (type-coverage report) and `phpantom_lsp fix` (automated fixes across the codebase) on its own. It also runs `php -l` after each edit to catch syntax errors immediately.
-
-To use a specific binary instead of the downloaded one, set the `PHPANTOM_SERVER_PATH` environment variable to its path, or put `phpantom_lsp` on your `PATH`.
-
-</details>
-
-<details>
-<summary><b>Opencode</b></summary>
-You can add this to your `opencode.json` file, it will be invoked when the AI uses the edit tool to edit a PHP file from within opencode.
-
+<p>Restart Claude Code, then open a PHP file. The plugin starts the language server automatically, downloading the correct <code>phpantom_lsp</code> binary for your platform on first use (or using one already on your <code>PATH</code>). No Docker, PHP, or Rust toolchain is required.</p>
+<p>Beyond per-file code intelligence, the plugin puts <code>phpantom_lsp</code> on the agent's <code>PATH</code> and bundles a skill that tells Claude when to use its project-wide CLI, so it can run <code>phpantom_lsp analyze</code> (type-coverage report) and <code>phpantom_lsp fix</code> (automated fixes across the codebase) on its own. It also runs <code>php -l</code> after each edit to catch syntax errors immediately.</p>
+<p>To use a specific binary instead of the downloaded one, set the <code>PHPANTOM_SERVER_PATH</code> environment variable to its path, or put <code>phpantom_lsp</code> on your <code>PATH</code>.</p>
+<h2 id="opencode">Opencode<a class="headerlink" href="#opencode" title="Permanent link">&para;</a></h2>
+<p>Add this to your <code>opencode.json</code> file. It will be invoked when the AI uses the edit tool to edit a PHP file from within Opencode.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;$schema&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://opencode.ai/config.json&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;lsp&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
@@ -1325,9 +1408,7 @@ You can add this to your `opencode.json` file, it will be invoked when the AI us
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">}</span>
 </code></pre></div>
-
-You can add additional extensions to invoke it on if appropriate for your project.
-</details>
+<p>You can add additional extensions to invoke it on if appropriate for your project.</p>
 
 
 

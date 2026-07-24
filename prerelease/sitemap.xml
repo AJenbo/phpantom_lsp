@@ -4,13 +4,13 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/</loc>
       </url>
       <url>
-        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/installation/</loc>
-      </url>
-      <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/editor-setup/</loc>
       </url>
       <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/agent-setup/</loc>
+      </url>
+      <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/installation/</loc>
       </url>
       <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/configuration/</loc>

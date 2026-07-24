@@ -11,10 +11,10 @@
         <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/prerelease/installation/">
       
       
-        <link rel="prev" href="./..">
+        <link rel="prev" href="../agent-setup/">
       
       
-        <link rel="next" href="../editor-setup/">
+        <link rel="next" href="../configuration/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Installation - PHPantom Docs</title>
+        <title>Manual Installation - PHPantom Docs</title>
       
     
     
@@ -81,7 +81,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#installation" class="md-skip">
+        <a href="#manual-installation" class="md-skip">
           Skip to content
         </a>
       
@@ -120,7 +120,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Installation
+              Manual Installation
             
           </span>
         </div>
@@ -318,43 +318,6 @@
                 
   
   
-    
-  
-  
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      
-      
-      
-        
-      
-      
-      <a href="././" class="md-nav__link md-nav__link--active">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Installation
-
-    
-  </span>
-  
-  
-
-      </a>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
   
   
     <li class="md-nav__item">
@@ -400,6 +363,113 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#latest-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Latest Release
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#latest-main-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Latest Main (Unreleased)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Build from Source
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1259,6 +1329,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1270,6 +1345,47 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#latest-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Latest Release
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#latest-main-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Latest Main (Unreleased)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Build from Source
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1292,8 +1408,10 @@
   
 
 
-<h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:4"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Cargo</label><label for="__tabbed_1_2">Homebrew</label><label for="__tabbed_1_3">Pre-built Binary</label><label for="__tabbed_1_4">Build from Source</label></div>
+<h1 id="manual-installation">Manual Installation<a class="headerlink" href="#manual-installation" title="Permanent link">&para;</a></h1>
+<p>Most editors install PHPantom automatically (see <a href="../editor-setup/">Editor Setup</a>). Use these methods when your editor doesn't manage the binary for you, or when you want a specific version.</p>
+<h2 id="latest-release">Latest Release<a class="headerlink" href="#latest-release" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:4"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Cargo</label><label for="__tabbed_1_2">Cargo binstall</label><label for="__tabbed_1_3">Homebrew</label><label for="__tabbed_1_4">Pre-built Binary</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>phpantom_lsp<span class="w"> </span>--locked
@@ -1301,7 +1419,14 @@
 <p>See <a href="https://crates.io/crates/phpantom_lsp">phpantom_lsp on crates.io</a>.</p>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>brew<span class="w"> </span>install<span class="w"> </span>phpantom-lsp
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>binstall<span class="w"> </span>phpantom_lsp
+</code></pre></div>
+<p><a href="https://github.com/cargo-bins/cargo-binstall">cargo-binstall</a> downloads
+pre-built binaries instead of compiling from source, so installation
+takes seconds instead of minutes.</p>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>brew<span class="w"> </span>install<span class="w"> </span>phpantom-lsp
 </code></pre></div>
 <p>Available on macOS and Linux.</p>
 </div>
@@ -1322,14 +1447,20 @@ old-glibc systems (RHEL/CentOS 8, Debian 11) and musl-based ones
 (Alpine). The <code>-unknown-linux-gnu</code> name is retained for compatibility
 with existing installers.</p>
 </div>
-<div class="tabbed-block">
-<p>See <a href="../BUILDING/">Building from Source</a> for full instructions. Quick version:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># Binary is at target/release/phpantom_lsp</span>
+</div>
+</div>
+<h2 id="latest-main-unreleased">Latest Main (Unreleased)<a class="headerlink" href="#latest-main-unreleased" title="Permanent link">&para;</a></h2>
+<p>Install the latest <code>main</code> branch to get fixes and features that haven't
+been released yet. Useful for verifying bug fixes or testing new features.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>--git<span class="w"> </span>https://github.com/PHPantom-dev/phpantom_lsp<span class="w"> </span>--branch<span class="w"> </span>main<span class="w"> </span>phpantom_lsp
 </code></pre></div>
-</div>
-</div>
-</div>
+<h2 id="build-from-source">Build from Source<a class="headerlink" href="#build-from-source" title="Permanent link">&para;</a></h2>
+<p>See <a href="../BUILDING/">Building from Source</a> for full instructions. Quick version:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/PHPantom-dev/phpantom_lsp
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">cd</span><span class="w"> </span>phpantom_lsp
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Binary is at target/release/phpantom_lsp</span>
+</code></pre></div>
 <p>Once installed, see <a href="../editor-setup/">Editor Setup</a> to configure your editor.</p>
 
 
