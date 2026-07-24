@@ -2134,3 +2134,228 @@ async fn test_completion_no_access_operator_shows_fallback() {
     // Without `->` or `::`, no class members should be suggested
     assert!(result.is_none(), "No access operator should return None");
 }
+
+#[tokio::test]
+async fn test_completion_suggests_trait_method_overrides() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_override.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Bar {\n",
+        "    protected function overrideMe(): void {}\n",
+        "    public function anotherMethod(): string { return ''; }\n",
+        "    private function traitSecret(): void {}\n",
+        "}\n",
+        "class Foo {\n",
+        "    use Bar;\n",
+        "    protected function o\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 8,
+                    character: 26,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let filter_names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        filter_names.contains(&"overrideMe"),
+        "should suggest trait method overrideMe, got: {filter_names:?}",
+    );
+    assert!(
+        !filter_names.contains(&"traitSecret"),
+        "must not suggest private trait method, got: {filter_names:?}",
+    );
+
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("overrideMe"))
+        .expect("overrideMe item");
+    assert!(
+        item.additional_text_edits.is_none()
+            || item
+                .additional_text_edits
+                .as_ref()
+                .is_some_and(|edits| edits.is_empty()),
+        "trait method should NOT have #[\\Override] attribute, got: {:?}",
+        item.additional_text_edits
+    );
+    assert!(
+        item.detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("trait")),
+        "detail should say 'trait' not 'override', got: {:?}",
+        item.detail
+    );
+}
+
+#[tokio::test]
+async fn test_completion_suggests_trait_method_overrides_trait_only_class() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///trait_only.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait Baz {\n",
+        "    public function doSomething(): void {}\n",
+        "}\n",
+        "class TraitOnly {\n",
+        "    use Baz;\n",
+        "    public function d\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 6,
+                    character: 24,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let filter_names: Vec<&str> = items
+        .iter()
+        .filter_map(|i| i.filter_text.as_deref())
+        .collect();
+
+    assert!(
+        filter_names.contains(&"doSomething"),
+        "class with only traits should still suggest trait methods, got: {filter_names:?}",
+    );
+}
+
+#[tokio::test]
+async fn test_completion_shared_trait_on_parent_and_child_uses_override() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///shared_trait.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "trait SharedTrait {\n",
+        "    public function sharedMethod(): void {}\n",
+        "}\n",
+        "class ParentClass {\n",
+        "    use SharedTrait;\n",
+        "}\n",
+        "class ChildClass extends ParentClass {\n",
+        "    use SharedTrait;\n",
+        "    public function shared\n",
+        "}\n",
+    )
+    .to_string();
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 28,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let item = items
+        .iter()
+        .find(|i| i.filter_text.as_deref() == Some("sharedMethod"))
+        .expect("sharedMethod should be suggested");
+
+    assert!(
+        item.detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("override")),
+        "method from shared trait should say 'override' (exists on parent), got: {:?}",
+        item.detail
+    );
+    assert!(
+        item.additional_text_edits.is_some()
+            && item
+                .additional_text_edits
+                .as_ref()
+                .is_some_and(|edits| !edits.is_empty()),
+        "method from shared trait should have #[\\Override] (exists on parent), got: {:?}",
+        item.additional_text_edits
+    );
+}
