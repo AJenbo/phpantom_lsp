@@ -91,14 +91,7 @@ PHPantom understands Composer projects out of the box, but works without setup o
 
 ## Documentation
 
-- **[Installation & Configuration](docs/SETUP.md).** Editor setup, project configuration (`.phpantom.toml`), and formatting.
-- **[CLI Reference](docs/CLI.md).** Batch diagnostics (`analyze`), automated fixes (`fix`), and CI integration.
-- **[Building from Source](docs/BUILDING.md).** Build, test, and debug instructions.
-- **[Architecture](docs/ARCHITECTURE.md).** Symbol resolution, stub loading, and inheritance merging.
-- **[Contributing](docs/CONTRIBUTING.md)**
-- **[Changelog](docs/CHANGELOG.md)**
-- **Benchmarks.** [Latency](https://phpantom-dev.github.io/phpantom_lsp/dev/bench/) and [memory usage](https://phpantom-dev.github.io/phpantom_lsp/dev/memory/) tracked on every commit.
-- **[Roadmap](docs/todo.md).** Planned features and domain-specific plans.
+**[Read the docs](https://phpantom-dev.github.io/phpantom_lsp/)** -- installation, editor setup, configuration reference, CLI usage, benchmarks, and more.
 
 ## Acknowledgements
 

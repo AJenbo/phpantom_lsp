@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Bundled Zed extension.** PHPantom's plain-PHP wiring has merged into Zed's official PHP extension, so a separate PHPantom extension is no longer needed. See [SETUP.md](SETUP.md) for the updated Zed configuration.
+- **Bundled Zed extension.** PHPantom's plain-PHP wiring has merged into Zed's official PHP extension, so a separate PHPantom extension is no longer needed. See [Editor Setup](editor-setup.md) for the updated Zed configuration.
 
 ### Fixed
 
@@ -824,7 +824,8 @@ Initial release.
 - **Embedded phpstorm-stubs.**
 - **Zed editor extension.**
 
-[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.8.0...HEAD
+[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.6.0...0.7.0
 [0.6.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.5.0...0.6.0

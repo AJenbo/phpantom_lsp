@@ -272,8 +272,8 @@ not overwrite).
 phpantom_lsp init
 ```
 
-See [Project Configuration](SETUP.md#project-configuration) for details
-on available settings.
+See the [Configuration Reference](configuration.md) for details on
+available settings.
 
 ---
 

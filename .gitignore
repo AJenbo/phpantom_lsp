@@ -9,3 +9,5 @@ sandbox.php
 examples/laravel/.codelite/laravel.session
 .codelite/
 examples/laravel/.codelite/
+/site/
+/.venv/

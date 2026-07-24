@@ -45,6 +45,35 @@ See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 
 Update [CHANGELOG.md](CHANGELOG.md) when your PR adds, changes, or fixes something a user would notice. Add entries under `## [Unreleased]` in the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, or `### Removed`). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched. See the existing entries for the style and level of detail expected.
 
+## Documentation
+
+The documentation site is built with [Zensical](https://zensical.org/).
+The only dependency you need is [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+Preview the docs locally with live reload:
+
+```bash
+uv run zensical serve
+```
+
+Then open `http://127.0.0.1:8000` in your browser. Changes to files in
+`docs/` and `zensical.toml` are reflected immediately. If port 8000 is
+already in use, pick a different one:
+
+```bash
+uv run zensical serve -a 127.0.0.1:8200
+```
+
+Build the docs for offline use:
+
+```bash
+uv run zensical build
+```
+
+The output is written to `site/` (gitignored). `uv` handles creating
+a virtual environment and installing all Python dependencies
+automatically on first run.
+
 ## Reporting Issues
 
 Open an issue on GitHub with:

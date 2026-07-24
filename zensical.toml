@@ -1,0 +1,103 @@
+[project]
+site_name = "PHPantom Docs"
+site_url = "https://phpantom-dev.github.io/phpantom_lsp/"
+repo_url = "https://github.com/PHPantom-dev/phpantom_lsp"
+repo_name = "PHPantom-dev/phpantom_lsp"
+edit_uri = "edit/main/docs/"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = [
+    { "Installation" = "installation.md" },
+    { "Editor Setup" = "editor-setup.md" },
+    { "Agent Setup" = "agent-setup.md" },
+  ]},
+  { "Reference" = [
+    { "Configuration" = "configuration.md" },
+    { "CLI" = "cli.md" },
+  ]},
+  { "Development" = [
+    { "Building from Source" = "BUILDING.md" },
+    { "Architecture" = "ARCHITECTURE.md" },
+    { "Contributing" = "CONTRIBUTING.md" },
+    { "Roadmap" = [
+      { "Overview" = "todo.md" },
+      { "Actions" = "todo/actions.md" },
+      { "Blade" = "todo/blade.md" },
+      { "Bugs" = "todo/bugs.md" },
+      { "Completion" = "todo/completion.md" },
+      { "Diagnostics" = "todo/diagnostics.md" },
+      { "Eager Resolution" = "todo/eager-resolution.md" },
+      { "External Stubs" = "todo/external-stubs.md" },
+      { "Fix CLI" = "todo/fix-cli.md" },
+      { "Indexing" = "todo/indexing.md" },
+      { "Inline Completion" = "todo/inline-completion.md" },
+      { "Laravel" = "todo/laravel.md" },
+      { "LSP Features" = "todo/lsp-features.md" },
+      { "Performance" = "todo/performance.md" },
+      { "PHPStan Actions" = "todo/phpstan-actions.md" },
+      { "Refactoring" = "todo/refactor.md" },
+      { "Signature Help" = "todo/signature-help.md" },
+      { "Type Inference" = "todo/type-inference.md" },
+    ]},
+  ]},
+  { "Benchmarks" = "benchmarks.md" },
+  { "Changelog" = "CHANGELOG.md" },
+]
+
+[project.theme]
+logo = "assets/spookaphant.svg"
+favicon = "assets/spookaphant.svg"
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "content.tabs.link",
+  "navigation.instant",
+  "navigation.top",
+  "search.highlight",
+  "search.suggest",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "material/brightness-auto"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "indigo"
+accent = "deep purple"
+toggle.icon = "material/brightness-7"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "indigo"
+accent = "deep purple"
+toggle.icon = "material/brightness-4"
+toggle.name = "Switch to system preference"
+
+[project.extra.version]
+provider = "mike"
+alias = true
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.emoji]
+emoji_index = "zensical.extensions.emoji.twemoji"
+emoji_generator = "zensical.extensions.emoji.to_svg"
+[project.markdown_extensions.tables]

@@ -1,0 +1,63 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'zensical.toml'
+      - 'pyproject.toml'
+      - '.github/workflows/docs.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Only deploy from the upstream repo, not from forks (forks don't
+  # have write access to gh-pages and would fail).
+  deploy-prerelease:
+    if: github.repository_owner == 'PHPantom-dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy prerelease docs
+        env:
+          MKDOCS_SITE_NAME: "PHPantom Docs (prerelease)"
+          MKDOCS_PRIMARY_COLOR: "blue grey"
+        run: uv run -- mike deploy --push --update-aliases prerelease
+
+  deploy-release:
+    if: github.repository_owner == 'PHPantom-dev' && github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy versioned docs
+        run: |
+          version="${GITHUB_REF_NAME}"
+          uv run -- mike deploy --push --update-aliases "$version" latest
+          uv run -- mike set-default --push latest

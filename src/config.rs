@@ -519,7 +519,7 @@ pub const DEFAULT_CONFIG_CONTENT: &str = r#"#:schema https://github.com/PHPantom
 # PHPantom configuration: only add settings you want to override.
 # Editors with TOML schema support (Zed, VS Code + Even Better TOML, Neovim)
 # provide autocomplete and hover documentation for all available options.
-# Full reference: https://github.com/PHPantom-dev/phpantom_lsp/blob/main/docs/SETUP.md#project-configuration
+# Full reference: https://phpantom-dev.github.io/phpantom_lsp/configuration/
 "#;
 
 /// Return the path to the global config file, if the platform's config

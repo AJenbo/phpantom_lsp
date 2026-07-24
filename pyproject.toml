@@ -1,0 +1,15 @@
+[project]
+name = "phpantom-docs"
+description = "Sets up MkDocs and related Python tools for building PHPantom documentation"
+requires-python = ">=3.10"
+version = "0.1.0"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "zensical>=0.0.50",
+    "mike @ git+https://github.com/squidfunk/mike.git",
+]
+
+[tool.uv]
+package = false
