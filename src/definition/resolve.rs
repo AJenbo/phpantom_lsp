@@ -266,41 +266,48 @@ impl Backend {
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
                 .map(|loc| vec![loc]),
 
-            SymbolKind::ClassDeclaration { name }
-            | SymbolKind::MemberDeclaration { name, .. }
-            | SymbolKind::NamespaceDeclaration { name } => {
-                // The cursor is on a declaration name, so "go to
-                // definition" has nowhere to jump — we are already at the
-                // definition.  Implement "Declaration or Usages" by
-                // returning the symbol's usages instead.
-                //
-                // VS Code achieves this by detecting "definition ==
-                // current position" and running Find References itself
-                // (editor.gotoLocation.alternativeDefinitionCommand), but
-                // PHPStorm simply navigates to the returned location and
-                // stops.  Returning the usages directly makes the feature
-                // work uniformly across clients.
-                let usages = self.find_references(uri, content, position, false);
-                if let Some(usages) = usages
-                    && !usages.is_empty()
+            SymbolKind::MemberDeclaration { name, .. } => {
+                // If this method/property overrides a parent or implements
+                // an interface member, jump to the prototype declaration.
+                let ctx = self.file_context(uri);
+                let class_loader = self.class_loader(&ctx);
+                let current_class =
+                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
+                if let Some(cls) = current_class
+                    && let Some(locs) =
+                        self.resolve_reverse_implementation(uri, content, cls, name, &class_loader)
+                    && !locs.is_empty()
                 {
-                    return Some(usages);
+                    return Some(locs);
                 }
 
-                // No usages found: fall back to the declaration's own
-                // location so clients that rely on the self-location
-                // signal (VS Code) still trigger their reference fallback.
-                let parsed_uri = Url::parse(uri).ok()?;
-                let start =
-                    crate::text_position::offset_to_position(content, cursor_offset as usize);
-                let end = crate::text_position::offset_to_position(
-                    content,
-                    cursor_offset as usize + name.len(),
-                );
-                Some(vec![Location {
-                    uri: parsed_uri,
-                    range: Range { start, end },
-                }])
+                self.declaration_or_usages(uri, content, cursor_offset, name)
+            }
+
+            SymbolKind::ClassDeclaration { name } => {
+                // If this class extends a parent, jump to the parent
+                // class declaration.
+                let ctx = self.file_context(uri);
+                let current_class =
+                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
+                if let Some(cls) = current_class
+                    && let Some(ref parent_name) = cls.parent_class
+                    && let Some(loc) = self.resolve_class_reference(
+                        uri,
+                        content,
+                        parent_name,
+                        parent_name.contains('\\'),
+                        cursor_offset,
+                    )
+                {
+                    return Some(vec![loc]);
+                }
+
+                self.declaration_or_usages(uri, content, cursor_offset, name)
+            }
+
+            SymbolKind::NamespaceDeclaration { name } => {
+                self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
             SymbolKind::FunctionCall { name, .. } => {
@@ -354,6 +361,27 @@ impl Backend {
     /// When `is_fqn` is `true`, the name is already fully-qualified
     /// (the original PHP source used a leading `\`) and should be used
     /// as-is without namespace resolution.
+    fn declaration_or_usages(
+        &self,
+        uri: &str,
+        content: &str,
+        cursor_offset: u32,
+        name: &str,
+    ) -> Option<Vec<Location>> {
+        // Return the declaration's own location.  Editors detect
+        // "definition == current position" and offer Find References
+        // as a fallback (e.g. VS Code's
+        // editor.gotoLocation.alternativeDefinitionCommand).
+        let parsed_uri = Url::parse(uri).ok()?;
+        let start = crate::text_position::offset_to_position(content, cursor_offset as usize);
+        let end =
+            crate::text_position::offset_to_position(content, cursor_offset as usize + name.len());
+        Some(vec![Location {
+            uri: parsed_uri,
+            range: Range { start, end },
+        }])
+    }
+
     pub(super) fn resolve_class_reference(
         &self,
         uri: &str,

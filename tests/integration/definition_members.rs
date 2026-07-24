@@ -2597,7 +2597,7 @@ async fn test_goto_definition_method_declaration_returns_self_location() {
 /// Ctrl+Click on a class name at its own declaration site returns the
 /// self-location when the class has no usages, so editors can fall back
 /// to Find References.  (When there are usages, they are returned
-/// directly — see `test_goto_definition_interface_declaration_returns_usages`.)
+/// directly — see `test_goto_definition_interface_declaration_returns_own_location`.)
 #[tokio::test]
 async fn test_goto_definition_class_declaration_returns_self_location() {
     let backend = create_test_backend();
@@ -2649,7 +2649,7 @@ async fn test_goto_definition_class_declaration_returns_self_location() {
 /// navigates to the returned location, so we must return the usages
 /// directly rather than the self-location.
 #[tokio::test]
-async fn test_goto_definition_interface_declaration_returns_usages() {
+async fn test_goto_definition_interface_declaration_returns_own_location() {
     let (backend, dir) = create_psr4_workspace(
         r#"{
             "autoload": { "psr-4": { "Test\\": "src/" } }
@@ -2681,9 +2681,7 @@ async fn test_goto_definition_interface_declaration_returns_usages() {
     );
 
     let iface_path = dir.path().join("src/EventListenerInterface.php");
-    let test_path = dir.path().join("src/Test.php");
     let iface_uri = Url::from_file_path(&iface_path).unwrap();
-    let test_uri = Url::from_file_path(&test_path).unwrap();
     let iface_content = std::fs::read_to_string(&iface_path).unwrap();
 
     backend
@@ -2697,8 +2695,6 @@ async fn test_goto_definition_interface_declaration_returns_usages() {
         })
         .await;
 
-    // Click on "EventListenerInterface" in `interface EventListenerInterface`
-    // (line 2, inside the name).
     let params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier {
@@ -2717,16 +2713,13 @@ async fn test_goto_definition_interface_declaration_returns_usages() {
     let locations = match result {
         Some(GotoDefinitionResponse::Array(locs)) => locs,
         Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
-        other => panic!("Expected usage locations, got: {other:?}"),
+        other => panic!("Expected own location, got: {other:?}"),
     };
 
-    assert!(
-        locations.iter().any(|loc| loc.uri == test_uri),
-        "Expected the `implements EventListenerInterface` usage in Test.php, got: {locations:#?}"
-    );
-    assert!(
-        !locations.iter().any(|loc| loc.uri == iface_uri),
-        "Should not return the declaration's own location when usages exist: {locations:#?}"
+    assert_eq!(locations.len(), 1, "should return exactly one location");
+    assert_eq!(
+        locations[0].uri, iface_uri,
+        "should return the declaration's own location so the editor can offer Find References"
     );
 }
 
