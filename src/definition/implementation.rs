@@ -994,8 +994,10 @@ impl Backend {
         // Build the FQN of the candidate class for comparison.
         let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
 
-        // Skip the target class itself.
-        if cls_fqn == target_fqn || cls.name == target_short {
+        // Skip the target class itself — compare by FQN so that
+        // classes in different namespaces that share the same short
+        // name are not incorrectly excluded.
+        if cls_fqn == target_fqn {
             return false;
         }
 
@@ -1231,8 +1233,9 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<Location> {
+        let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
         let (class_uri, class_content) =
-            self.find_class_file_content(&cls.name, current_uri, current_content)?;
+            self.find_class_file_content(&cls_fqn, current_uri, current_content)?;
 
         if cls.keyword_offset == 0 {
             return None;
@@ -1398,5 +1401,58 @@ mod tests {
             "ready non-full indexing should return GTI results without falling back to vendor scans"
         );
         assert_eq!(locations[0].uri, user_impl_uri);
+    }
+
+    #[test]
+    fn same_short_name_interface_and_implementation_found() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let src = dir.path().join("src");
+        fs::create_dir_all(src.join("Contracts")).expect("contracts dir");
+        fs::create_dir_all(src.join("Foo")).expect("foo dir");
+
+        let interface_php = concat!(
+            "<?php\n",
+            "namespace App\\Contracts;\n",
+            "interface HttpClient {}\n",
+        );
+        let impl_php = concat!(
+            "<?php\n",
+            "namespace App\\Foo;\n",
+            "use App\\Contracts\\HttpClient as HttpClientInterface;\n",
+            "class HttpClient implements HttpClientInterface {}\n",
+        );
+
+        let interface_path = src.join("Contracts/HttpClient.php");
+        let impl_path = src.join("Foo/HttpClient.php");
+        fs::write(&interface_path, interface_php).expect("interface file");
+        fs::write(&impl_path, impl_php).expect("impl file");
+
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+        let mut config = Config::default();
+        config.indexing.strategy = Some(IndexingStrategy::Full);
+        backend.set_config(config);
+
+        let interface_uri = Url::from_file_path(&interface_path).expect("interface uri");
+        let impl_uri = Url::from_file_path(&impl_path).expect("impl uri");
+        backend.update_ast(interface_uri.as_str(), interface_php);
+        backend.update_ast(impl_uri.as_str(), impl_php);
+
+        let locations = backend
+            .resolve_implementation(
+                interface_uri.as_str(),
+                interface_php,
+                Position {
+                    line: 2,
+                    character: 12,
+                },
+            )
+            .expect("implementation with same short name should be found");
+
+        assert_eq!(
+            locations.len(),
+            1,
+            "should find exactly one implementation: {locations:?}",
+        );
+        assert_eq!(locations[0].uri, impl_uri);
     }
 }

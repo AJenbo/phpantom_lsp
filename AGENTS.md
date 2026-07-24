@@ -31,10 +31,11 @@ full set of CI checks, testing conventions, and code style rules.
   introduce regressions in startup time or memory usage.
 - **Run the full lint pipeline.** `cargo clippy` and `cargo fmt` must
   pass with zero warnings before every commit. Do not skip this.
-- **Update the changelog.** When a change affects user-visible
-  behaviour, add an entry under `## [Unreleased]` in
-  `docs/CHANGELOG.md`. Write for end users, not developers. Include
-  `Contributed by @username` with the GitHub username of the author.
+- **Update the changelog.** Add an entry under `## [Unreleased]` in
+  `docs/CHANGELOG.md` for bug fixes and new features. Skip purely
+  internal refactors that don't change observable behaviour. Write
+  for end users, not developers. Include `Contributed by @username`
+  with the GitHub username of the author.
 - **Reference issues in commits.** When fixing a GitHub issue, include
   `Closes #123` in the commit message body.
 - **Prefer single tests.** Run individual tests (`cargo test test_name`)

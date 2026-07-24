@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Go-to-implementation works when interface and class share the same short name.** An interface and its implementing class in different namespaces but with the same class name (e.g. `App\Contracts\HttpClient` and `App\Foo\HttpClient`) now resolves correctly instead of returning no results. Contributed by @calebdw.
 - **Static method calls resolve return types as accurately as instance calls.** `Foo::bar()` previously missed inference that `$foo->bar()` already had: return types behind a `@phpstan-type` alias, inherited return types substituted through a generic interface or trait, and the `__callStatic()` magic-method fallback. These now resolve the same way for both call styles.
 - **Facade static calls keep concrete method return types.** Static calls on Laravel-style facades now resolve missing methods through `getFacadeAccessor()` and facade `@mixin` targets before falling back to `__callStatic()`, so values like `Driver::details()` keep the concrete provider method return type instead of degrading to the facade's broad magic-call return. Contributed by @calebdw.
 - **`class-string<static>` parameters no longer reject sibling subclass constants.** Static helper calls from a shared base class that pass concrete `::class` constants for sibling subclasses no longer report false argument-type mismatches against `class-string<static>`. Contributed by @calebdw.
