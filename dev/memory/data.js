@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784921354849,
+  "lastUpdate": 1784922804252,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20273,6 +20273,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 96.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "ad2ec8a5532c6c29df3bb9bcd9fec519337f16ea",
+          "message": "fix: go-to-implementation with same-named interface and class\n\nWhen an interface and its implementing class shared the same short\nname (e.g. App\\Contracts\\HttpClient and App\\Foo\\HttpClient),\ngo-to-implementation returned no results or pointed to the interface\nitself instead of the concrete class.\n\nTwo places in the implementation resolver compared by short name\ninstead of fully-qualified name, causing false matches when classes\nin different namespaces shared a name:\n\n- class_implements_or_extends excluded any candidate whose short name\n  matched the target, even when the FQNs differed.  Now compares by\n  FQN only.\n- locate_class_declaration looked up the class file by short name, so\n  it returned the first file containing that name rather than the\n  correct namespace.  Now builds the FQN from the class's namespace\n  before lookup.\n\nCloses #279",
+          "timestamp": "2026-07-24T14:36:52-05:00",
+          "tree_id": "fc1d5533683405dbb5414dba07dd5f744c7d2a9c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ad2ec8a5532c6c29df3bb9bcd9fec519337f16ea"
+        },
+        "date": 1784922800909,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.8,
             "unit": "MiB"
           }
         ]
