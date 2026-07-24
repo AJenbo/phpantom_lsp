@@ -1,4 +1,4 @@
-# PHPantom -- a PHP language server
+# PHPantom: a PHP language server
 
 <p align="center">
   <img src="assets/spookaphant.svg" alt="PHPantom" width="200" />
