@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784917322627,
+  "lastUpdate": 1784920038902,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20205,6 +20205,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "eb6090df6ffbbffad98fa25b4f225e6d634e4d4b",
+          "message": "docs: improve editor setup and installation pages\n\n- Reorder nav: Editor Setup before Manual Installation, since most\n  editors auto-install PHPantom.\n- Split editor setup into Automatic Installation (Zed, VS Code) and\n  Manual Installation sections so users can quickly find their editor.\n- Convert editor and agent setup pages from HTML <details> dropdowns\n  to proper markdown headers for better navigation and rendering.\n- Clean up PHPStorm instructions (remove redundant download step).\n- Restructure installation page with Latest Release (tabbed), Latest\n  Main (cargo install --git for testing fixes), and Build from Source.\n- Add cargo-binstall as an installation option.\n- Remove redundant Zed binary note (covered by section intro).\n- Remove navigation.expand so sidebar sections start collapsed.",
+          "timestamp": "2026-07-24T13:50:42-05:00",
+          "tree_id": "9582f4b8aec0f39b0cd340df4ed5ba4ab8c7c547",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/eb6090df6ffbbffad98fa25b4f225e6d634e4d4b"
+        },
+        "date": 1784920034738,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 92.7,
             "unit": "MiB"
           }
         ]
