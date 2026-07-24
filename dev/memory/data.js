@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784922804252,
+  "lastUpdate": 1784925382218,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20307,6 +20307,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 93.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "e7cbe8cd4571f3b45b0ea3ef5b893400dbb5c61c",
+          "message": "feat: suggest trait member overrides in completion\n\nTyping a method or property name in a class body that uses a trait\nnow suggests the trait's public and protected members as candidates,\nmatching the existing override completion for parent classes and\ninterfaces.\n\nTrait method replacements intentionally omit #[\\Override] because\nPHP treats trait methods as copied into the class — adding the\nattribute on a trait-only method is a compile error. The completion\ndetail shows 'trait' instead of 'override' to reflect this.\n\nPreviously, classes that only used traits (no parent class, no\ninterfaces) received no override suggestions at all because the\nhandler bailed out early. That guard now also checks used_traits.\n\nCloses #276",
+          "timestamp": "2026-07-24T15:20:26-05:00",
+          "tree_id": "8e503d5809d7abca6cb5e5173f79199218c64a2c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e7cbe8cd4571f3b45b0ea3ef5b893400dbb5c61c"
+        },
+        "date": 1784925379379,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 94,
             "unit": "MiB"
           }
         ]
