@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784909577891,
+  "lastUpdate": 1784917322627,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20171,6 +20171,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 67.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "0eda82fe9af9f114b3481c7f7f936091beef67ba",
+          "message": "docs: add Zensical documentation site with versioned deployment\n\nSet up a documentation website using Zensical (the actively maintained\ndrop-in replacement for MkDocs, by the mkdocs-material team) with\nversioned docs deployed to GitHub Pages via squidfunk's mike fork.\n\n- Add zensical.toml with collapsible nav, light/dark toggle, search,\n  and version switching via mike.\n- Add pyproject.toml for uv-managed Python dependencies (zensical,\n  squidfunk/mike fork). Contributors preview docs with\n  `uv run zensical serve`.\n- Add .github/workflows/docs.yml with two deployment paths: prerelease\n  docs on push to main, versioned docs on GitHub release publication.\n  Skipped on forks.\n- Split SETUP.md into installation.md (tabbed install options),\n  editor-setup.md, and agent-setup.md for cleaner navigation.\n- Add docs/configuration.md as a dedicated config reference with\n  complete tables for all config sections.\n- Add docs/benchmarks.md with comparison table and links to live\n  latency and memory charts.\n- Add docs/index.md landing page with centered logo, key features,\n  and version jump links.\n- Rename project-specific docs to lowercase (cli.md, configuration.md).\n- Fix all 25 broken anchor links in roadmap docs.\n- Fix missing 0.9.0 link reference in CHANGELOG.md.\n- Add roadmap sub-pages and benchmarks to navigation.\n- Add formatting.pint to config-schema.json (was missing from schema).\n- Add .github/PULL_REQUEST_TEMPLATE.md with contributor checklist.\n- Update DEFAULT_CONFIG_CONTENT with helpful comments and docs link.\n- Simplify README.md documentation section to link to docs site.\n- Update docs/CONTRIBUTING.md with docs build instructions.\n- Add site/ and .venv/ to .gitignore.",
+          "timestamp": "2026-07-24T13:07:18-05:00",
+          "tree_id": "60b030de458fafe9137f232d8056cd73e2e7ae67",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0eda82fe9af9f114b3481c7f7f936091beef67ba"
+        },
+        "date": 1784917320281,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 49.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95.6,
             "unit": "MiB"
           }
         ]
