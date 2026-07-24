@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784902016737,
+  "lastUpdate": 1784905558567,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20069,6 +20069,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 96,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "de648397cfb9a91d3d44c99ffc148e3b99f8c608",
+          "message": "docs: update init command docs, config reference, and add PR template\n\nThe `init` command creates a minimal .phpantom.toml with just a JSON\nschema directive, but the documentation promised \"all options documented\nand commented out.\" This corrects that mismatch and brings the config\ndocumentation up to date.\n\n- Update DEFAULT_CONFIG_CONTENT to include helpful comments pointing\n  users to the schema and configuration reference, rather than leaving\n  a bare schema line.\n- Rewrite the CLI.md init section to accurately describe the minimal\n  file that gets created and explain the schema-driven discoverability\n  approach.\n- Rewrite the SETUP.md Project Configuration section with complete\n  reference tables for every config section: php, diagnostics (including\n  ignore rules), indexing, formatting, phpstan, phpcs, mago, and laravel\n  (schema and migrations). The previous version only covered php,\n  diagnostics (partially), indexing, and formatting.\n- Add formatting.pint to config-schema.json, which was present in the\n  Rust config struct but missing from the schema.\n- Add a PR template with a contributor checklist (inspired by jj-vcs)\n  to remind contributors to update docs, schema, changelog, and tests.\n- Update README.md documentation link to mention configuration.\n\nCloses #275",
+          "timestamp": "2026-07-24T09:49:32-05:00",
+          "tree_id": "eb738eb9951a6fd5df616c278662d47360ad23eb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/de648397cfb9a91d3d44c99ffc148e3b99f8c608"
+        },
+        "date": 1784905556569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.5,
             "unit": "MiB"
           }
         ]
