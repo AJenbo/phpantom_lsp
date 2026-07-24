@@ -199,27 +199,18 @@ impl Backend {
         let start_pos = offset_to_position(content, info.docblock_start);
         let end_pos = offset_to_position(content, info.docblock_end);
 
-        let mut changes = HashMap::new();
-        changes.insert(
-            doc_uri,
-            vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: new_docblock,
-            }],
-        );
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Update docblock to match signature".to_string(),
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            }),
+            edit: Some(crate::code_actions::single_edit(
+                doc_uri,
+                Range {
+                    start: start_pos,
+                    end: end_pos,
+                },
+                new_docblock,
+            )),
             command: None,
             is_preferred: Some(true),
             disabled: None,

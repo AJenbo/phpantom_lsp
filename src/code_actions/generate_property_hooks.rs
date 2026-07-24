@@ -18,8 +18,6 @@
 //! - **Default values** are preserved when rewriting.
 //! - **Constructor-promoted properties** are supported.
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::modifier::Modifier;
@@ -363,18 +361,14 @@ impl Backend {
                 new_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate get hook".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -399,18 +393,14 @@ impl Backend {
                 new_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate set hook".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -435,18 +425,11 @@ impl Backend {
                 new_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate get and set hooks".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,

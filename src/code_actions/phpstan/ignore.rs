@@ -175,14 +175,7 @@ impl Backend {
         let edit = build_add_ignore_edit(content, line, line_text, identifier);
 
         let doc_uri: Url = data.uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, vec![edit]);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 
     /// Resolve a deferred "Remove unnecessary @phpstan-ignore" code action
@@ -204,14 +197,7 @@ impl Backend {
             build_remove_ignore_edit(content, message_line, diagnostic_line, ignore_id.as_deref())?;
 
         let doc_uri: Url = data.uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, vec![edit]);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }
 

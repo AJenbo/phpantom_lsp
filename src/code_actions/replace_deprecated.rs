@@ -231,23 +231,15 @@ fn emit_action(
         Err(_) => return,
     };
 
-    let edit = TextEdit {
-        range,
-        new_text: replacement.to_string(),
-    };
-
-    let mut changes = HashMap::new();
-    changes.insert(doc_uri, vec![edit]);
-
     out.push(CodeActionOrCommand::CodeAction(CodeAction {
         title,
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: None,
-        edit: Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }),
+        edit: Some(crate::code_actions::single_edit(
+            doc_uri,
+            range,
+            replacement.to_string(),
+        )),
         command: None,
         is_preferred: Some(false),
         disabled: None,

@@ -163,9 +163,6 @@ impl Backend {
 
                 let title = format!("Import `{}`", fqn);
 
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri.clone(), edits);
-
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
@@ -174,11 +171,10 @@ impl Backend {
                     } else {
                         Some(matching_diagnostics.clone())
                     },
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        document_changes: None,
-                        change_annotations: None,
-                    }),
+                    edit: Some(crate::code_actions::single_file_edit(
+                        doc_uri.clone(),
+                        edits,
+                    )),
                     command: None,
                     is_preferred: if candidates.len() == 1 {
                         Some(true)
@@ -303,18 +299,14 @@ impl Backend {
 
                 let title = format!("Import `{}`", fqn);
 
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri.clone(), edits);
-
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
                     diagnostics: None,
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        document_changes: None,
-                        change_annotations: None,
-                    }),
+                    edit: Some(crate::code_actions::single_file_edit(
+                        doc_uri.clone(),
+                        edits,
+                    )),
                     command: None,
                     is_preferred: if candidates.len() == 1 {
                         Some(true)
@@ -743,14 +735,7 @@ impl Backend {
             return None;
         }
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, all_edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, all_edits))
     }
 
     /// Find all unresolved class names in a file.

@@ -14,8 +14,6 @@
 //! - The `$this` variable is never offered for conversion.
 //! - Only works inside a method body of a class-like declaration.
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
@@ -511,14 +509,7 @@ impl Backend {
                 .then(a.range.start.character.cmp(&b.range.start.character))
         });
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

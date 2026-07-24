@@ -16,8 +16,6 @@
 //! the same as regular properties. If a `getX()` or `setX()` method
 //! already exists, the corresponding action is not offered.
 
-use std::collections::HashMap;
-
 #[cfg(test)]
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
@@ -189,18 +187,14 @@ impl Backend {
                 new_text: methods_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate getter".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -225,18 +219,14 @@ impl Backend {
                 new_text: methods_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate setter".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -264,18 +254,11 @@ impl Backend {
                 new_text: methods_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate getter and setter".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,

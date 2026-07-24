@@ -12,8 +12,6 @@
 //!
 //! Only ternary expressions are handled (not if-statement patterns).
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
@@ -87,27 +85,18 @@ impl Backend {
             }
         };
 
-        let mut changes = HashMap::new();
-        changes.insert(
-            doc_uri,
-            vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: replacement,
-            }],
-        );
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title,
             kind: Some(CodeActionKind::new("refactor.rewrite")),
             diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            }),
+            edit: Some(crate::code_actions::single_edit(
+                doc_uri,
+                Range {
+                    start: start_pos,
+                    end: end_pos,
+                },
+                replacement,
+            )),
             command: None,
             is_preferred: Some(true),
             disabled: None,

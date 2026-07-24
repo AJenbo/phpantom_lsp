@@ -18,8 +18,6 @@
 //! `edit`.  Phase 2 (`resolve_add_return_type_will_change`) computes
 //! the workspace edit on demand when the user picks the action.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use super::{InsertionPoint, find_method_insertion_point};
@@ -142,14 +140,7 @@ impl Backend {
         }];
 
         let doc_uri: Url = uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

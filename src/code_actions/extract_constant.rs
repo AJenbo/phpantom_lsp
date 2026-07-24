@@ -10,8 +10,6 @@
 //! emits a lightweight stub with no edit, Phase 2 computes the full
 //! workspace edit when the user picks the action.
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::*;
@@ -322,16 +320,9 @@ fn literal_type_name(value: &str) -> Option<PhpType> {
 /// Ensure the generated name doesn't collide with existing constants.
 /// If it does, append a numeric suffix.
 fn deduplicate_constant_name(name: &str, existing: &[String]) -> String {
-    if !existing.iter().any(|e| e == name) {
-        return name.to_string();
-    }
-    for i in 1u32.. {
-        let candidate = format!("{}_{}", name, i);
-        if !existing.iter().any(|e| e == &candidate) {
-            return candidate;
-        }
-    }
-    unreachable!()
+    crate::code_actions::naming::deduplicate_name(name, "_", |candidate| {
+        existing.iter().any(|e| e == candidate)
+    })
 }
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
@@ -819,14 +810,7 @@ impl Backend {
                 });
             }
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, edits);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {
             // ── Single occurrence mode ──────────────────────────────
             let edit_insert = TextEdit {
@@ -842,14 +826,10 @@ impl Backend {
                 new_text: replacement,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![edit_insert, edit_replace]);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(
+                doc_uri,
+                vec![edit_insert, edit_replace],
+            ))
         }
     }
 }

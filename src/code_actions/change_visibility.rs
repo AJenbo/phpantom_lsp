@@ -24,7 +24,6 @@
 //! This is a single-file edit — it does not update call sites or
 //! subclass overrides in other files.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -227,23 +226,14 @@ impl Backend {
         let end_pos = offset_to_position(content, vis_end);
 
         let doc_uri: Url = uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(
+        Some(crate::code_actions::single_edit(
             doc_uri,
-            vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: target_vis.to_string(),
-            }],
-        );
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+            Range {
+                start: start_pos,
+                end: end_pos,
+            },
+            target_vis.to_string(),
+        ))
     }
 
     // ── Private helpers ─────────────────────────────────────────────────

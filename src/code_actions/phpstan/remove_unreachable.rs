@@ -28,8 +28,6 @@
 //! - [`build_remove_unreachable_block_edit`] removes everything from
 //!   a line to the enclosing block's closing `}`.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -120,13 +118,7 @@ impl Backend {
             ACTION_KIND => {
                 let diag_line = extra.get("diagnostic_line")?.as_u64()? as usize;
                 let edit = build_remove_unreachable_block_edit(content, diag_line)?;
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, vec![edit]);
-                Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                })
+                Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
             }
             _ => None,
         }

@@ -103,18 +103,11 @@ impl Backend {
             Err(_) => return,
         };
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, vec![edit]);
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title,
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            }),
+            edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
             command: None,
             is_preferred: Some(true),
             disabled: None,

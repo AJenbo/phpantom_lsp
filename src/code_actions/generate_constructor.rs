@@ -11,8 +11,6 @@
 //!
 //! **Code action kind:** `refactor.rewrite` (both).
 
-use std::collections::HashMap;
-
 #[cfg(test)]
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
@@ -138,18 +136,14 @@ impl Backend {
                 new_text: constructor_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate constructor".to_string(),
                 kind: Some(CodeActionKind::REFACTOR_REWRITE),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -188,18 +182,11 @@ impl Backend {
                 new_text: constructor_text,
             });
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, edits);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate promoted constructor".to_string(),
                 kind: Some(CodeActionKind::REFACTOR_REWRITE),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(doc_uri, edits)),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,

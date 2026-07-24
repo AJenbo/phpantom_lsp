@@ -398,35 +398,28 @@ pub(crate) fn detect_single_call(body: &str) -> Option<String> {
 ///
 /// For methods, checks against sibling method names in the class.
 /// For functions, checks against `function <name>` patterns in the file.
+///
+/// Unlike the variable/constant deduplicators, the first numbered
+/// candidate is `base2` (index `1` is skipped): a second extracted
+/// function reads better as `extracted2` than `extracted1`.
 pub(crate) fn deduplicate_name(base: &str, content: &str, ctx: &EnclosingContext) -> String {
-    let mut name = base.to_string();
-    let mut counter = 1u32;
+    let collides = |candidate: &str| match ctx.target {
+        // Check against sibling method names in the class.
+        ExtractionTarget::Method => ctx.sibling_method_names.iter().any(|n| n == candidate),
+        // Check against function declarations in the file.
+        ExtractionTarget::Function => content.contains(&format!("function {candidate}")),
+    };
 
-    match ctx.target {
-        ExtractionTarget::Method => {
-            // Check against sibling method names in the class.
-            loop {
-                if !ctx.sibling_method_names.contains(&name) {
-                    break;
-                }
-                counter += 1;
-                name = format!("{}{}", base, counter);
-            }
-        }
-        ExtractionTarget::Function => {
-            // Check against function declarations in the file.
-            loop {
-                let pattern_fn = format!("function {}", name);
-                if !content.contains(&pattern_fn) {
-                    break;
-                }
-                counter += 1;
-                name = format!("{}{}", base, counter);
-            }
+    if !collides(base) {
+        return base.to_string();
+    }
+    for counter in 2u32.. {
+        let candidate = format!("{base}{counter}");
+        if !collides(&candidate) {
+            return candidate;
         }
     }
-
-    name
+    base.to_string()
 }
 
 // ─── Selection trimming ────────────────────────────────────────────────────
@@ -459,34 +452,6 @@ pub(crate) fn trim_selection(content: &str, start: usize, end: usize) -> Option<
 
 // ─── Indentation helpers ────────────────────────────────────────────────────
 
-/// Detect the indentation of the line containing the given offset.
-///
-/// Returns only the leading whitespace of that line, without adding
-/// an extra indent level.
-pub(crate) fn detect_line_indent(content: &str, offset: usize) -> String {
-    let before = &content[..offset];
-    let line_start = before.rfind('\n').map_or(0, |p| p + 1);
-    let line = &content[line_start..offset];
-    line.chars().take_while(|c| c.is_whitespace()).collect()
-}
-
-/// Detect whether the file uses tabs or spaces (and how many spaces).
-pub(crate) fn detect_indent_unit(content: &str) -> &str {
-    for line in content.lines() {
-        if line.starts_with('\t') {
-            return "\t";
-        }
-        let spaces: usize = line.chars().take_while(|c| *c == ' ').count();
-        if spaces >= 2 {
-            if spaces.is_multiple_of(4) {
-                return "    ";
-            }
-            return "  ";
-        }
-    }
-    "    "
-}
-
 /// Find the end of the line containing `offset` (after the `\n`).
 pub(crate) fn find_line_end(content: &str, offset: usize) -> usize {
     match content[offset..].find('\n') {
@@ -498,11 +463,4 @@ pub(crate) fn find_line_end(content: &str, offset: usize) -> usize {
 /// Find the start of the line containing `offset`.
 pub(crate) fn find_line_start(content: &str, offset: usize) -> usize {
     content[..offset].rfind('\n').map_or(0, |p| p + 1)
-}
-
-/// Extract the indentation (leading whitespace) of the line at `offset`.
-pub(crate) fn indent_at(content: &str, offset: usize) -> String {
-    let line_start = find_line_start(content, offset);
-    let rest = &content[line_start..];
-    rest.chars().take_while(|c| c.is_whitespace()).collect()
 }

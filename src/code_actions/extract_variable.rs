@@ -5,8 +5,6 @@
 //! immediately before the enclosing statement, and replaces the selection
 //! with the new variable reference.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -496,20 +494,9 @@ fn strip_accessor_prefix(name: &str) -> &str {
 /// If `$name` already exists, tries `$name1`, `$name2`, etc.
 /// `existing_vars` should contain names WITH `$` prefix.
 fn deduplicate_name(name: &str, existing_vars: &[String]) -> String {
-    let candidate = format!("${}", name);
-    if !existing_vars.contains(&candidate) {
-        return name.to_string();
-    }
-
-    for i in 1..100 {
-        let numbered = format!("${}{}", name, i);
-        if !existing_vars.contains(&numbered) {
-            return format!("{}{}", name, i);
-        }
-    }
-
-    // Extremely unlikely fallback
-    name.to_string()
+    crate::code_actions::naming::deduplicate_name(name, "", |candidate| {
+        existing_vars.contains(&format!("${candidate}"))
+    })
 }
 
 // ─── Insertion point ────────────────────────────────────────────────────────
@@ -815,14 +802,7 @@ impl Backend {
                 });
             }
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, edits);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {
             // ── Single occurrence mode ──────────────────────────────
             let (line_start, indentation) = find_enclosing_statement_line(content, start_offset);
@@ -842,14 +822,10 @@ impl Backend {
                 new_text: replacement_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![edit_insert, edit_replace]);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(
+                doc_uri,
+                vec![edit_insert, edit_replace],
+            ))
         }
     }
 }

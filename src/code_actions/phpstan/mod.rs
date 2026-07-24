@@ -71,6 +71,7 @@ pub(crate) mod remove_unused_return_type;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::CodeActionData;
 
 // ── Method-insertion-point helpers ──────────────────────────────────────────
 //
@@ -478,6 +479,115 @@ impl Backend {
 
         // ── Remove unreachable statement ────────────────────────────
         self.collect_remove_unreachable_actions(uri, content, params, out);
+    }
+
+    /// Expand `action.diagnostics` with sibling `missingType.checkedException`
+    /// diagnostics for the same exception class within the same function body.
+    ///
+    /// When the user applies "Add @throws RuntimeException", PHPStan will
+    /// have reported a separate diagnostic for every `throw new RuntimeException`
+    /// in that method.  Adding the `@throws` tag fixes all of them, so we
+    /// find those siblings in the cached diagnostics and add them to the
+    /// action's diagnostic list.  The normal clearing logic then removes
+    /// them all in one go.
+    pub(crate) fn expand_sibling_checked_exception_diags(
+        &self,
+        data: &CodeActionData,
+        content: &str,
+        action: &mut CodeAction,
+    ) {
+        use crate::code_actions::phpstan::add_throws::{
+            extract_exception_fqn, find_enclosing_function_line_range,
+        };
+
+        let diag_message = match data
+            .extra
+            .get("diagnostic_message")
+            .and_then(|v| v.as_str())
+        {
+            Some(m) => m,
+            None => return,
+        };
+        let exception_fqn = match extract_exception_fqn(diag_message) {
+            Some(fqn) => fqn,
+            None => return,
+        };
+        let diag_line = match data.extra.get("diagnostic_line").and_then(|v| v.as_u64()) {
+            Some(l) => l as usize,
+            None => return,
+        };
+
+        // Find the function body that contains the triggering diagnostic.
+        let (func_start, func_end) = match find_enclosing_function_line_range(content, diag_line) {
+            Some(range) => range,
+            None => return,
+        };
+
+        let existing_diags = action.diagnostics.get_or_insert_with(Vec::new);
+
+        let cache = self.phpstan_tool.last_diags.lock();
+        let cached = match cache.get(&data.uri) {
+            Some(c) => c,
+            None => return,
+        };
+
+        for cached_d in cached {
+            // Must be the same identifier.
+            let ident = match &cached_d.code {
+                Some(NumberOrString::String(s)) => s.as_str(),
+                _ => continue,
+            };
+            if ident != "missingType.checkedException" {
+                continue;
+            }
+
+            // Must be for the same exception class.
+            let cached_fqn: String = match extract_exception_fqn(&cached_d.message) {
+                Some(fqn) => fqn,
+                None => continue,
+            };
+            if !cached_fqn.eq_ignore_ascii_case(&exception_fqn) {
+                continue;
+            }
+
+            let line = cached_d.range.start.line as usize;
+
+            // Must be within the same function body.
+            if line < func_start || line > func_end {
+                continue;
+            }
+
+            // Skip if already in the list.
+            let already_present = existing_diags.iter().any(|d| {
+                d.range == cached_d.range
+                    && d.message == cached_d.message
+                    && d.code == cached_d.code
+            });
+            if already_present {
+                continue;
+            }
+
+            existing_diags.push(cached_d.clone());
+        }
+    }
+
+    /// Remove specific diagnostics from the PHPStan cache after a
+    /// quickfix has been applied via `codeAction/resolve`.
+    pub(crate) fn clear_phpstan_diagnostics_after_resolve(
+        &self,
+        uri: &str,
+        resolved_diags: &[Diagnostic],
+    ) {
+        let mut cache = self.phpstan_tool.last_diags.lock();
+        if let Some(cached) = cache.get_mut(uri) {
+            cached.retain(|cached_d| {
+                !resolved_diags.iter().any(|resolved_d| {
+                    cached_d.range == resolved_d.range
+                        && cached_d.message == resolved_d.message
+                        && cached_d.code == resolved_d.code
+                })
+            });
+        }
     }
 }
 

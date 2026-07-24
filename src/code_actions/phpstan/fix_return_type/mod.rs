@@ -45,8 +45,6 @@ mod message_parse;
 
 pub(crate) use inference::enrichment_return_type;
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -331,25 +329,13 @@ impl Backend {
         match data.action_kind.as_str() {
             ACTION_KIND_STRIP_EXPR => {
                 let edit = build_strip_return_expr_edit(content, diag_line)?;
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, vec![edit]);
-                Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                })
+                Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
             }
             ACTION_KIND_CHANGE_TYPE_TO_ACTUAL => {
                 let actual_type_str = extra.get("actual_type")?.as_str()?;
                 let actual_type = PhpType::parse(actual_type_str);
                 let edits = build_change_return_type_edits_to(content, diag_line, &actual_type)?;
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, edits);
-                Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                })
+                Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             ACTION_KIND_UPDATE_RETURN_TYPE => {
                 let diag_msg = extra.get("message")?.as_str()?;
@@ -386,24 +372,12 @@ impl Backend {
                     build_update_return_type_edits(content, diag_line, &tip_type)?
                 };
 
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, edits);
-                Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                })
+                Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             ACTION_KIND_CHANGE_TYPE => {
                 let void = PhpType::void();
                 let edits = build_change_return_type_edits_to(content, diag_line, &void)?;
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, edits);
-                Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                })
+                Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             ACTION_KIND_ADD_TYPE => {
                 // Infer the type now (deferred from collect phase).
@@ -515,13 +489,7 @@ impl Backend {
                     }
                 }
 
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, edits);
-                Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                })
+                Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             _ => None,
         }

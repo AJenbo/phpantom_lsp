@@ -20,7 +20,7 @@
 //! is applied.
 
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;
 
@@ -155,14 +155,7 @@ impl Backend {
             // valid as we apply deletions from bottom to top.
             edits.sort_by_key(|e| Reverse(e.range.start));
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, edits);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {
             // Single-import removal: use the diagnostic range from the
             // action to build the deletion edit.
@@ -171,14 +164,10 @@ impl Backend {
             let removal_edit =
                 build_line_deletion_edit(content, &diag.range, &removed_import_lines);
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![removal_edit]);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(
+                doc_uri,
+                vec![removal_edit],
+            ))
         }
     }
 }
