@@ -211,7 +211,7 @@ impl Backend {
     /// `public function handle()` in a class that implements `Handler`),
     /// this finds the interface/abstract method declaration and returns
     /// its location.
-    fn resolve_reverse_implementation(
+    pub(super) fn resolve_reverse_implementation(
         &self,
         uri: &str,
         content: &str,

@@ -265,6 +265,10 @@ impl LanguageServer for Backend {
                 } else {
                     None
                 },
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec!["phpantom.navigateToPrototype".to_string()],
+                    ..ExecuteCommandOptions::default()
+                }),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -1355,6 +1359,31 @@ impl LanguageServer for Backend {
             })
         })
         .await
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command == "phpantom.navigateToPrototype"
+            && let [uri_val, pos_val] = params.arguments.as_slice()
+            && let Ok(uri) = serde_json::from_value::<Url>(uri_val.clone())
+            && let Ok(position) = serde_json::from_value::<Position>(pos_val.clone())
+            && let Some(ref client) = self.client
+        {
+            let _ = client
+                .show_document(ShowDocumentParams {
+                    uri,
+                    external: Some(false),
+                    take_focus: Some(true),
+                    selection: Some(Range {
+                        start: position,
+                        end: position,
+                    }),
+                })
+                .await;
+        }
+        Ok(None)
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
