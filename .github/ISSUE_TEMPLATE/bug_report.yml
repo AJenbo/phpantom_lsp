@@ -7,12 +7,26 @@ body:
       value: |
         Thanks for taking the time to report a bug! Please fill out the sections below so we can reproduce and fix the issue quickly.
 
+        **Before submitting**, please verify that the bug still occurs on the latest `main` branch. PHPantom is under active development and the issue may already be fixed. You can install the latest `main` with:
+
+        ```
+        cargo install --git https://github.com/PHPantom-dev/phpantom_lsp --branch main phpantom_lsp
+        ```
+
+  - type: checkboxes
+    id: latest-version
+    attributes:
+      label: Verified on latest main
+      options:
+        - label: I have confirmed this bug still occurs when built from the latest `main` branch.
+          required: true
+
   - type: input
     id: version
     attributes:
-      label: PHPantom version
+      label: PHPantom version / commit
       description: |
-        Paste the output of `phpantom_lsp --version`. This prints the exact release tag or commit hash.
+        Paste the output of `phpantom_lsp --version`. When built from source this includes the commit hash (e.g. `0.9.0-14-g3fdd93b`).
     validations:
       required: true
 
