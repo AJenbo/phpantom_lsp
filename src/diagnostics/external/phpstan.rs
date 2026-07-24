@@ -1,0 +1,185 @@
+//! PHPStan proxy diagnostics: schedule function and background worker.
+
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
+use tower_lsp::lsp_types::*;
+
+use crate::Backend;
+use crate::phpstan;
+
+impl Backend {
+    // ── PHPStan worker ──────────────────────────────────────────────
+
+    /// Schedule a PHPStan run for a single file.
+    ///
+    /// Only the most recent file is kept: if the user switches files or
+    /// saves rapidly, earlier requests are superseded.
+    pub(crate) fn schedule_phpstan(&self, uri: String) {
+        *self.phpstan_tool.pending_uri.lock() = Some(uri);
+        self.phpstan_tool.notify.notify_one();
+    }
+
+    /// Long-lived background task that runs PHPStan on pending files.
+    ///
+    /// Spawned once during `initialized`, alongside the main diagnostic
+    /// worker. This task is completely independent: native diagnostics
+    /// (phases 1 and 2) are never blocked by PHPStan.
+    ///
+    /// ## Serialization guarantee
+    ///
+    /// At most one PHPStan process runs at a time. The worker loop:
+    ///
+    /// 1. Wait for a notification (new edit arrived).
+    /// 2. Debounce: sleep [`PHPSTAN_DEBOUNCE_MS`], checking whether new
+    ///    edits arrived. If so, restart the debounce.
+    /// 3. Snapshot the pending URI and file content.
+    /// 4. Resolve the PHPStan binary (skip if not found / disabled).
+    /// 5. Run PHPStan (blocking — this is the slow part).
+    /// 6. Cache the results and re-publish diagnostics for the file.
+    /// 7. Loop back to step 1.
+    ///
+    /// If the user edits while step 5 is in progress, the pending URI
+    /// is updated. When step 5 finishes, the worker sees the new
+    /// notification and loops back to step 1, starting a fresh run
+    /// with the latest content.
+    pub(crate) async fn phpstan_worker(&self) {
+        loop {
+            if self.shutdown_flag.load(Ordering::Acquire) {
+                return;
+            }
+
+            // ── Step 1: wait for work ───────────────────────────────
+            self.phpstan_tool.notify.notified().await;
+
+            if self.shutdown_flag.load(Ordering::Acquire) {
+                return;
+            }
+
+            // Drain any extra stored permits so that notifications
+            // that arrived between the last run finishing and this
+            // `notified()` call don't cause an immediate second run.
+            let _ = tokio::time::timeout(
+                std::time::Duration::ZERO,
+                self.phpstan_tool.notify.notified(),
+            )
+            .await;
+
+            // ── Step 2: snapshot the pending URI ────────────────────
+            let uri = match self.phpstan_tool.pending_uri.lock().take() {
+                Some(u) => u,
+                None => continue,
+            };
+
+            // Snapshot the file content.
+            let content = {
+                let files = self.open_files.read();
+                match files.get(&uri) {
+                    Some(c) => c.clone(),
+                    None => continue,
+                }
+            };
+
+            // ── Step 4: resolve PHPStan binary ──────────────────────
+            let config = self.config();
+            if config.phpstan.is_disabled() {
+                continue;
+            }
+
+            let file_path = match uri.parse::<Url>().ok().and_then(|u| u.to_file_path().ok()) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let workspace_root = self.workspace_root.read().clone();
+            let workspace_root = match workspace_root {
+                Some(root) => root,
+                None => continue,
+            };
+
+            let bin_dir: Option<String> = crate::composer::read_composer_package(&workspace_root)
+                .map(|pkg| crate::composer::get_bin_dir(&pkg));
+
+            let resolved = match phpstan::resolve_phpstan(
+                Some(&workspace_root),
+                &config.phpstan,
+                bin_dir.as_deref(),
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            // ── Step 5: run PHPStan (the slow part) ─────────────────
+            // Move the blocking PHPStan execution onto a dedicated
+            // OS thread via `spawn_blocking`. This is critical:
+            // `run_phpstan` contains a poll loop that blocks the
+            // thread. If we ran it inline, the tokio runtime could
+            // schedule other futures (including a second iteration
+            // of this very worker) on other threads, breaking the
+            // "at most one PHPStan process" guarantee. By awaiting
+            // the `spawn_blocking` handle, this task is suspended
+            // (not occupying a runtime thread) and no re-entry can
+            // happen until the handle resolves.
+            let phpstan_config = config.phpstan.clone();
+            let shutdown_flag = Arc::clone(&self.shutdown_flag);
+            let phpstan_diags = {
+                let result = tokio::task::spawn_blocking(move || {
+                    phpstan::run_phpstan(
+                        &resolved,
+                        &content,
+                        &file_path,
+                        &workspace_root,
+                        &phpstan_config,
+                        &shutdown_flag,
+                    )
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(diags)) => diags,
+                    Ok(Err(_e)) => {
+                        // PHPStan failures are silently ignored to
+                        // avoid flooding the editor with errors when
+                        // PHPStan is misconfigured or the project
+                        // doesn't use it.
+                        continue;
+                    }
+                    Err(_join_err) => {
+                        // The blocking task panicked or was cancelled.
+                        continue;
+                    }
+                }
+            };
+
+            // ── Step 6: cache results and re-publish ────────────────
+            // Verify the file is still open *before* writing to the
+            // cache. If the file was closed while PHPStan was running,
+            // `clear_diagnostics_for_file` already purged the cache
+            // entry — writing it back would leave stale diagnostics
+            // that resurface on the next `did_open`.
+            {
+                let files = self.open_files.read();
+                if !files.contains_key(&uri) {
+                    continue;
+                }
+            }
+
+            {
+                let mut cache = self.phpstan_tool.last_diags.lock();
+                cache.insert(uri.clone(), phpstan_diags);
+            }
+
+            // Assemble and push so the editor sees fresh PHPStan
+            // results merged with cached native diagnostics.
+            self.assemble_and_push(&uri).await;
+
+            // In pull mode the editor must be told to re-pull so it
+            // picks up the new PHPStan results.
+            if self.supports_pull_diagnostics.load(Ordering::Acquire)
+                && let Some(client) = &self.client
+            {
+                let _ = client.workspace_diagnostic_refresh().await;
+            }
+        }
+    }
+}

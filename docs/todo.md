@@ -86,6 +86,7 @@ unlikely to move the needle for most users.
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | Medium      |
 | T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium      |
 | T25 | [Call-site template argument inference for callable parameters](todo/type-inference.md#t25-call-site-template-argument-inference-for-callable-parameters) (partially done)  | Medium      | Medium      |
+| T32 | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | Medium      |
 | T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Low         |
 | T24 | [`stdClass` dynamic property access](todo/type-inference.md#t24-stdclass-dynamic-property-access)                                                                           | Low-Medium  | Low         |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Low-Medium  |

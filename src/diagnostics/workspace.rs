@@ -154,7 +154,7 @@ impl WorkspaceDiagnostics {
                 out.extend(diags.iter().cloned());
             }
         }
-        super::suppress_imprecise_overlaps(&mut out);
+        super::suppression::suppress_imprecise_overlaps(&mut out);
         out
     }
 
@@ -445,8 +445,8 @@ impl Backend {
             self.collect_fast_diagnostics(uri, effective, &mut out);
             self.collect_slow_diagnostics(uri, effective, &mut out);
 
-            super::suppress_imprecise_overlaps(&mut out);
-            super::filter_ignored_by_comment(&mut out, effective);
+            super::suppression::suppress_imprecise_overlaps(&mut out);
+            super::suppression::filter_ignored_by_comment(&mut out, effective);
             if !ignore_rules.is_empty()
                 && let Some(relative) = self.workspace_relative_path(uri)
             {

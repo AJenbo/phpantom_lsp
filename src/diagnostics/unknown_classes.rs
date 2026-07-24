@@ -17,19 +17,14 @@
 //! `ClassReference` spans that fall on `use` statement lines are skipped
 //! because they are import declarations, not actual usages.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::names::OwnedResolvedNames;
 use crate::symbol_map::SymbolKind;
-use crate::types::ClassInfo;
 
 use super::helpers::{
-    ByteRange, compute_existence_guards, compute_use_line_ranges, is_offset_in_ranges,
-    make_diagnostic, resolve_to_fqn,
+    ByteRange, FileDiagnosticContext, compute_existence_guards, compute_use_line_ranges,
+    is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
 };
 
 /// Diagnostic code used for unknown-class diagnostics so that code
@@ -47,28 +42,28 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // ── Gather context under locks ──────────────────────────────────
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
+        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
+            return;
         };
+        self.collect_unknown_class_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let file_resolved_names: Option<Arc<OwnedResolvedNames>> =
-            self.resolved_names.read().get(uri).cloned();
-
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
-        let local_classes: Vec<ClassInfo> = self
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .map(|v| v.iter().map(|c| ClassInfo::clone(c)).collect())
-            .unwrap_or_default();
+    /// Same as [`Self::collect_unknown_class_diagnostics`] but reuses an
+    /// already-gathered [`FileDiagnosticContext`] instead of re-reading
+    /// the per-file locks. Used by `collect_slow_diagnostics` so all
+    /// slow collectors in the same pass share one consistent snapshot.
+    pub(crate) fn collect_unknown_class_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let file_resolved_names = &ctx.file.resolved_names;
+        let file_use_map = &ctx.file.use_map;
+        let file_namespace = &ctx.file.namespace;
+        let local_classes = &ctx.file.classes;
 
         // ── Collect type alias names from local classes ──────────────────
         // `@phpstan-type` / `@psalm-type` / `@phpstan-import-type` aliases
@@ -121,12 +116,12 @@ impl Backend {
             // `resolve_to_fqn` helper for files without resolved names.
             let fqn = if is_fqn {
                 ref_name.to_string()
-            } else if let Some(ref rn) = file_resolved_names {
+            } else if let Some(rn) = file_resolved_names {
                 rn.get(span.start)
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| resolve_to_fqn(ref_name, &file_use_map, &file_namespace))
+                    .unwrap_or_else(|| resolve_to_fqn(ref_name, file_use_map, file_namespace))
             } else {
-                resolve_to_fqn(ref_name, &file_use_map, &file_namespace)
+                resolve_to_fqn(ref_name, file_use_map, file_namespace)
             };
 
             // ── Skip @phpstan-type / @psalm-type aliases ────────────────

@@ -245,6 +245,17 @@ impl Backend {
             .unwrap_or_default()
     }
 
+    /// Look up the precomputed [`SymbolMap`](crate::symbol_map::SymbolMap)
+    /// for a file, without triggering any parsing.
+    ///
+    /// Returns `None` when the file has never been parsed (no `did_open`
+    /// / `update_ast` yet). Centralises the read-lock-and-clone
+    /// boilerplate that used to be duplicated at the top of every
+    /// diagnostic collector.
+    pub(crate) fn symbol_map_for(&self, uri: &str) -> Option<Arc<crate::symbol_map::SymbolMap>> {
+        self.symbol_maps.read().get(uri).cloned()
+    }
+
     /// Remove a file's entries from `uri_classes_index`, `use_map`, and `namespace_map`.
     ///
     /// This is the mirror of [`file_context`](Self::file_context): where that

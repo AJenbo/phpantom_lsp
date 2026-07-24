@@ -460,7 +460,10 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // Use original_content (not virtual PHP) because
                         // diagnostic line numbers have already been translated
                         // back to original file coordinates.
-                        crate::diagnostics::filter_ignored_by_comment(&mut raw, original_content);
+                        crate::diagnostics::suppression::filter_ignored_by_comment(
+                            &mut raw,
+                            original_content,
+                        );
 
                         // ── Apply [[diagnostics.ignore]] config rules ──────
                         if !ignore_rules.is_empty() {
