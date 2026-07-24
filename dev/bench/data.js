@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784909301180,
+  "lastUpdate": 1784917048606,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -113855,6 +113855,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.682,
             "range": "± 0.035",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "0eda82fe9af9f114b3481c7f7f936091beef67ba",
+          "message": "docs: add Zensical documentation site with versioned deployment\n\nSet up a documentation website using Zensical (the actively maintained\ndrop-in replacement for MkDocs, by the mkdocs-material team) with\nversioned docs deployed to GitHub Pages via squidfunk's mike fork.\n\n- Add zensical.toml with collapsible nav, light/dark toggle, search,\n  and version switching via mike.\n- Add pyproject.toml for uv-managed Python dependencies (zensical,\n  squidfunk/mike fork). Contributors preview docs with\n  `uv run zensical serve`.\n- Add .github/workflows/docs.yml with two deployment paths: prerelease\n  docs on push to main, versioned docs on GitHub release publication.\n  Skipped on forks.\n- Split SETUP.md into installation.md (tabbed install options),\n  editor-setup.md, and agent-setup.md for cleaner navigation.\n- Add docs/configuration.md as a dedicated config reference with\n  complete tables for all config sections.\n- Add docs/benchmarks.md with comparison table and links to live\n  latency and memory charts.\n- Add docs/index.md landing page with centered logo, key features,\n  and version jump links.\n- Rename project-specific docs to lowercase (cli.md, configuration.md).\n- Fix all 25 broken anchor links in roadmap docs.\n- Fix missing 0.9.0 link reference in CHANGELOG.md.\n- Add roadmap sub-pages and benchmarks to navigation.\n- Add formatting.pint to config-schema.json (was missing from schema).\n- Add .github/PULL_REQUEST_TEMPLATE.md with contributor checklist.\n- Update DEFAULT_CONFIG_CONTENT with helpful comments and docs link.\n- Simplify README.md documentation section to link to docs site.\n- Update docs/CONTRIBUTING.md with docs build instructions.\n- Add site/ and .venv/ to .gitignore.",
+          "timestamp": "2026-07-24T13:07:18-05:00",
+          "tree_id": "60b030de458fafe9137f232d8056cd73e2e7ae67",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0eda82fe9af9f114b3481c7f7f936091beef67ba"
+        },
+        "date": 1784917046043,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4.728,
+            "range": "± 0.247",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.031,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.077,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.111,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.179,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.212,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.901,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.754,
+            "range": "± 0.052",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.082,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.039,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.035,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.043,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 4.64,
+            "range": "± 0.025",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.127,
+            "range": "± 0.026",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.222,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.048,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.033,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.086,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.075,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.059,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.148,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.84,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 4.805,
+            "range": "± 0.178",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.848,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.035,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.033,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 64.042,
+            "range": "± 1.137",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.215,
+            "range": "± 0.047",
             "unit": "ms"
           }
         ]
