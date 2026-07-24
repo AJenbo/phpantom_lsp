@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784901708086,
+  "lastUpdate": 1784905240283,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -113279,6 +113279,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.693,
             "range": "± 0.022",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "de648397cfb9a91d3d44c99ffc148e3b99f8c608",
+          "message": "docs: update init command docs, config reference, and add PR template\n\nThe `init` command creates a minimal .phpantom.toml with just a JSON\nschema directive, but the documentation promised \"all options documented\nand commented out.\" This corrects that mismatch and brings the config\ndocumentation up to date.\n\n- Update DEFAULT_CONFIG_CONTENT to include helpful comments pointing\n  users to the schema and configuration reference, rather than leaving\n  a bare schema line.\n- Rewrite the CLI.md init section to accurately describe the minimal\n  file that gets created and explain the schema-driven discoverability\n  approach.\n- Rewrite the SETUP.md Project Configuration section with complete\n  reference tables for every config section: php, diagnostics (including\n  ignore rules), indexing, formatting, phpstan, phpcs, mago, and laravel\n  (schema and migrations). The previous version only covered php,\n  diagnostics (partially), indexing, and formatting.\n- Add formatting.pint to config-schema.json, which was present in the\n  Rust config struct but missing from the schema.\n- Add a PR template with a contributor checklist (inspired by jj-vcs)\n  to remind contributors to update docs, schema, changelog, and tests.\n- Update README.md documentation link to mention configuration.\n\nCloses #275",
+          "timestamp": "2026-07-24T09:49:32-05:00",
+          "tree_id": "eb738eb9951a6fd5df616c278662d47360ad23eb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/de648397cfb9a91d3d44c99ffc148e3b99f8c608"
+        },
+        "date": 1784905237883,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 5.331,
+            "range": "± 0.356",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.038,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.099,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.142,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.239,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.274,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.166,
+            "range": "± 0.028",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.286,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.103,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.049,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.045,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.054,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 6.019,
+            "range": "± 0.034",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.164,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.298,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.06,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.041,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.112,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.09,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.075,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.189,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.071,
+            "range": "± 0.038",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 6.052,
+            "range": "± 0.208",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.078,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.045,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.043,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 81.7,
+            "range": "± 0.328",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.562,
+            "range": "± 0.033",
             "unit": "ms"
           }
         ]
