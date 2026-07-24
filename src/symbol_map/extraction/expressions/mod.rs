@@ -323,8 +323,11 @@ pub(super) fn extract_from_expression<'a>(
             extract_partial_application_expr(partial, ctx, scope_start)
         }
 
-        // Non-navigable expressions (literals, etc.) are intentionally ignored.
-        _ => {}
+        // Any expression variant without an explicit arm: descend generically
+        // so nested expressions/statements still get extracted.  Non-navigable
+        // leaves (literals, etc.) have no such children, so this is a no-op for
+        // them.
+        _ => descend_unhandled(Node::Expression(expr), ctx, scope_start),
     }
 }
 

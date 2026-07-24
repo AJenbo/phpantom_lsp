@@ -359,7 +359,9 @@ pub(super) fn extract_from_statement<'a>(
         Statement::Goto(goto_stmt) => {
             emit_keyword(&goto_stmt.goto, ctx);
         }
-        _ => {}
+        // Any statement variant without an explicit arm: descend generically so
+        // nested expressions/statements still get extracted.
+        _ => descend_unhandled(Node::Statement(stmt), ctx, scope_start),
     }
 }
 

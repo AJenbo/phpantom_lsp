@@ -214,112 +214,143 @@ Each item must include:
 
 # Outstanding items
 
-## Shared AST walker — remaining candidates (needs a decision)
+Recommended order: do tasks 2 → 3 → 4 in that order (4 renames fields
+across the whole crate, so it goes last to avoid churning code that 2
+and 3 are about to move).
 
-**Done so far.** The stateless boolean/name-set/collection walkers have
-been migrated to the generated `mago-syntax` `Walker` trait (each is now
-a small visitor over a shared traversal): the six detector pairs in
-`diagnostics/undefined_variables/` (dynamic-vars, `extract()`,
-`compact()`, `get_defined_vars()`, `@`-suppression, isset/empty guards),
-the statement-dispatch halves of `diagnostics/unused_variables.rs` and
-`diagnostics/type_errors.rs`, and the anonymous-class walker in
-`parser/anonymous.rs`. That removed ~1,900 lines of hand-rolled
-traversal.
+All three tasks are pure internal refactors. None of them gets a
+changelog entry unless the work uncovers and fixes a concrete
+user-visible bug. Run the Rust CI checks (`cargo nextest run`, `cargo
+clippy -- -D warnings`, `cargo clippy --tests -- -D warnings`, `cargo
+fmt`) after each task.
 
-**What remains — and why it is not a clean fit.** The remaining
-hand-rolled walkers are *not* stateless collectors; they are
-positional/order-sensitive, which the typed `Walker` cannot express
-without re-typing per-node logic (it has no single "visit any node"
-hook, only per-node-type `walk_in_*`):
+## 2. Split `diagnostics/mod.rs` around its thin orchestrator
 
-- `selection_range.rs` pushes **synthetic** spans (brace pairs, paren
-  pairs, block interiors) that are not AST-node spans, and would need a
-  `walk_in_*` override for essentially every node type to reproduce
-  them — no net reduction.
-- `symbol_map/extraction.rs` records position-keyed symbol spans and
-  subject text; order and per-kind span shaping dominate, so the same
-  per-node-override problem applies.
-- The `property_access.rs` / `property_narrowing.rs` pair walk **from
-  the method start down to the cursor**, accumulating narrowing state in
-  source order with early returns. That interleaved-mutation,
-  cursor-bounded shape is exactly why the forward walker is out of scope
-  (below).
+**What to do.** The actual orchestrator (`collect_slow_diagnostics`,
+at ~line 240, ~85 lines) is fine, but it is buried in a 3,391-line
+`src/diagnostics/mod.rs`. This is pure code motion plus one shared
+context struct — no behavior changes. Rust allows `impl Backend`
+blocks in any file of the crate, so moving a method means moving it
+into a new `impl Backend` block in the new file; nothing needs to
+become free functions.
 
-The forward walker is explicitly out of scope (its traversal is
-interleaved with scope-state mutation).
+**Step 1 — external-tool pipelines → `diagnostics/external/`.**
+Create `src/diagnostics/external/{mod,phpstan,phpcs,mago}.rs` and move
+the four subprocess spawn/debounce/parse pipelines out of `mod.rs`:
+`schedule_phpstan` (~line 1299), `schedule_phpcs` (~1474),
+`schedule_mago_lint` (~1632), and `schedule_mago_analyze` (~1764,
+both mago pipelines go in `mago.rs`) — roughly 730 lines — each with
+the private helpers only it uses. Helpers shared by two or more
+pipelines go in `external/mod.rs`. Do **not** move
+`schedule_diagnostics`, `schedule_external_diagnostics`, or
+`schedule_diagnostics_for_open_files` (~1077–1298): those are the
+native debounce orchestration and stay in `mod.rs`.
 
-**Decision needed.** These three are arguably better left as-is: the
-`Walker` migration's payoff (delete child-dispatch boilerplate) does not
-apply when the walk pushes synthetic/positional data or mutates state in
-source order. If the goal is purely "one traversal so new AST variants
-can't create blind spots," a thin `visit_all_nodes(&Node, &mut FnMut)`
-helper over mago's `Node` enum would serve `selection_range` and
-`symbol_map/extraction` better than the typed `Walker`. Confirm whether
-to (a) leave these as-is, (b) migrate `selection_range` /
-`symbol_map/extraction` via a `Node`-enum visitor, or (c) migrate the
-property pair despite the state-threading cost.
+**Step 2 — staleness reconciliation → `diagnostics/stale.rs`.**
+Move `is_stale_phpstan_diagnostic` (~line 467) plus every helper only
+it uses (~335 lines reconciling cached external diagnostics with
+edits).
 
-**Why it matters.** Every new mago AST node variant (new PHP syntax)
-still needs matching arms in these remaining walkers; missing one
-produces a silent blind spot in exactly one feature.
+**Step 3 — post-processing policy → `diagnostics/suppression.rs`.**
+Move `filter_suppressed` (~line 2034), `suppress_imprecise_overlaps`
+(~2071), and `is_full_line_range` (~2159) — ~230 lines.
 
----
-
-## `diagnostics/mod.rs` is a grab-bag around a thin orchestrator
-
-**What to do.** The actual orchestrator
-(`collect_slow_diagnostics`, ~85 lines) is fine, but it is buried in
-2,928 lines of unrelated logic. Carve out of `src/diagnostics/mod.rs`:
-
-- `external/{phpstan,phpcs,mago}.rs` — the four `schedule_*`
-  subprocess spawn/debounce/parse pipelines (~700 lines, self-contained).
-- `stale.rs` — `is_stale_phpstan_diagnostic` plus its helpers
-  (~335 lines reconciling cached external diagnostics with edits).
-- `suppression.rs` — `filter_suppressed`,
-  `suppress_imprecise_overlaps`, `is_full_line_range` (~230 lines of
-  post-processing policy).
-
-While in there, introduce a shared `FileDiagnosticContext` built once
-in `collect_slow_diagnostics` and passed to collectors — seven
-symbol-span collectors (`unknown_classes.rs`, `unknown_functions.rs`,
+**Step 4 — shared `FileDiagnosticContext`.** Seven symbol-span
+collectors (`unknown_classes.rs`, `unknown_functions.rs`,
 `deprecated.rs`, `implementation_errors.rs`, `invalid_class_kind.rs`,
-`unknown_members/mod.rs`, `unused_imports.rs`) currently open with a
-near-verbatim 15-20 line lock-gathering preamble (symbol map, resolved
-names, use map, namespace, local classes), and a shared snapshot also
-guarantees they observe consistent state.
+`unknown_members/mod.rs`, `unused_imports.rs`) open with variations of
+the same lock-gathering preamble. Define, next to the existing
+`diagnostics/helpers.rs` utilities, a struct holding the per-file
+snapshot they gather: `symbol_map: Arc<SymbolMap>`,
+`resolved_names: Option<Arc<OwnedResolvedNames>>`, the file's use map
+(from `file_imports`), its `Vec<NamespaceSpan>` (from
+`file_namespaces`), and its local classes (from `uri_classes_index`).
+Give it a constructor like `FileDiagnosticContext::gather(&Backend,
+uri) -> Option<Self>` (returning `None` when no symbol map exists,
+which is every collector's current early-out). Build it **once** in
+`collect_slow_diagnostics` and pass `&FileDiagnosticContext` to the
+seven collectors; collectors that need only some fields just ignore
+the rest. Before changing collector signatures, grep for callers
+outside `collect_slow_diagnostics` (the `analyse/` CLI path, code
+actions, and tests call some collectors directly); any such caller
+builds its own context via `gather`. Besides deduplication, the shared
+snapshot guarantees all collectors observe consistent state instead of
+re-reading locks that a concurrent parse may update between
+collectors.
 
-Also split `src/diagnostics/type_errors.rs`: `is_type_compatible` is a
-single ~607-line function (plus four helper predicates) implementing
-the diagnostic-policy layer over `util::is_subtype_of_typed`. Move it
-to `type_errors/compatibility.rs`, and audit whether some of its
-"MAYBE escape hatches" (IntRange, union handling, Generic/Traversable)
-belong in `is_subtype_of_typed` where all callers would benefit.
+**Step 5 — split `type_errors.rs`.** Convert
+`src/diagnostics/type_errors.rs` (1,538 lines) into a directory and
+move `is_type_compatible` (starts at ~line 76, ~730 lines) plus the
+predicates only it uses (`is_bare_array`, `is_refined_scalar_pair`,
+etc.) to `type_errors/compatibility.rs`. It is the diagnostic-policy
+layer over `crate::class_lookup::is_subtype_of_typed`.
+
+**Step 6 — file the MAYBE audit, do not act on it.** While moving
+`is_type_compatible`, list its "MAYBE escape hatches" (IntRange,
+union handling, iterable/Traversable, bare Closure/callable, bare
+array, nullable → non-nullable) and assess which ones describe real
+subtype relationships that belong in
+`class_lookup::is_subtype_of_typed` where all callers would benefit,
+versus diagnostic-only leniency that must stay in the policy layer.
+Do **not** move any semantics in this task — file the candidates with
+reasoning in `docs/todo/type-inference.md`.
+
+**Acceptance.** `cargo nextest run` passes with no test edits (except
+mechanical import-path updates); `mod.rs` shrinks to the orchestrator,
+scheduling, and publishing logic; behavior is unchanged.
 
 **Why it matters.** Diagnostics is the most actively developed area;
 new collectors keep landing in a module whose entry file is 75%
-unrelated scheduling and filtering code.
+unrelated scheduling and filtering code. The `external/` split also
+directly de-risks the scheduled D10 task (PHPMD proxy — a fifth
+external-tool pipeline that gets a formulaic home instead of growing
+`mod.rs` further).
 
 ---
 
-## `server.rs` carries a ~950-line workspace-init block
+## 3. Move workspace init/indexing out of `server.rs` and `references/mod.rs`
 
-**What to do.** `src/server.rs` (2,821 lines) contains an
-`impl Backend` block of workspace initialization and indexing that has
-nothing to do with LSP dispatch: `init_single_project`,
-`init_monorepo`, `init_no_composer`, `add_vendor_dir`,
-`apply_watched_file_changes`, `rescan_composer_indexes`,
-`scan_autoload_files`, `preload_autoload_files`, `scan_phar_archive`,
-`build_self_scan_composer`, `populate_autoload_indices`. Move it to a
-dedicated module (e.g. `src/workspace_init.rs` or `src/indexing/`).
-`warm_laravel_completion_cache` belongs in `virtual_members/laravel/`.
-Also move the pull-diagnostics resultId-cache logic embedded in the
-`diagnostic` and `workspace_diagnostic` handlers into `diagnostics/`,
-leaving the handlers as thin delegations like the rest.
+**What to do.** `src/server.rs` (4,007 lines) ends with an
+`impl Backend` block of workspace initialization and indexing
+(~lines 2696–4007, ~1,300 lines) that has nothing to do with LSP
+dispatch, and `src/references/mod.rs` hosts workspace-indexing
+functions that have nothing to do with reference finding. Consolidate
+both into a new `src/indexing/` module (declare `mod indexing;` in
+`lib.rs`). Pure code motion via `impl Backend` blocks in the new
+files; approximate current line numbers given for finding things.
 
-Relatedly, `references/mod.rs` hosts `ensure_workspace_indexed`,
-`parse_files_parallel`, and `parse_paths_parallel` — workspace
-indexing, not reference finding. They should land in the same new
-module.
+- `indexing/init.rs` — `init_single_project` (~2696),
+  `init_monorepo` (~2933), `init_no_composer` (~3102).
+- `indexing/scan.rs` — `add_vendor_dir` (~3153),
+  `rescan_composer_indexes` (~3374), `scan_autoload_files` (~3469),
+  `scan_phar_archive` (~3686), `build_self_scan_composer` (~3776),
+  `populate_autoload_indices` (~3877).
+- `indexing/preload.rs` — `preload_autoload_files` (~3608) and
+  `preload_autoload_files_with_progress` (~3614) from `server.rs`,
+  plus from `src/references/mod.rs`: `ensure_workspace_indexed`
+  (~125), `ensure_workspace_indexed_for_request` (~137),
+  `ensure_workspace_indexed_with_progress` (~166),
+  `parse_files_parallel_with_progress` (~314), and
+  `parse_paths_parallel_with_progress` (~430).
+- `indexing/watch.rs` — `apply_watched_file_changes` (~3194).
+
+Two more relocations while in there:
+
+- `warm_laravel_completion_cache` (`server.rs` ~2081) belongs in
+  `src/virtual_members/laravel/`.
+- The pull-diagnostics resultId-cache logic embedded in the
+  `diagnostic` (~1589) and `workspace_diagnostic` (~1651) handlers
+  belongs in a new `src/diagnostics/pull.rs`, leaving both handlers
+  as thin delegations like the rest of `server.rs`.
+
+**Constraint.** Several of these functions spawn threads sized with
+`PARSE_WORKER_STACK_SIZE` (see the "Performance Anti-Patterns" §3
+note in `CLAUDE.md`). Move that code verbatim — do not "simplify"
+thread spawning or stack sizing while relocating it.
+
+**Acceptance.** `cargo nextest run` passes with no test edits (except
+import paths); `server.rs` is reduced to protocol handlers and
+dispatch (~1,700 lines); behavior is unchanged.
 
 **Why it matters.** Full background indexing has already shipped on
 top of init logic scattered across `server.rs` and
@@ -328,26 +359,57 @@ sprawl as the feature continues to grow.
 
 ---
 
-## Group `Backend`'s remaining fields into sub-systems
+## 4. Group `Backend`'s remaining fields into sub-systems
 
-**What to do.** `struct Backend` in `src/lib.rs` still has fields that
-cluster into implicit sub-systems (the four external-tool field triples
-have already been consolidated into an `ExternalToolWorker` struct —
-`phpstan_tool`, `phpcs_tool`, `mago_lint_tool`, `mago_analyze_tool`):
+**What to do.** `struct Backend` in `src/lib.rs` (starts at ~line 377)
+still has fields that cluster into implicit sub-systems. The four
+external-tool fields are already grouped (`ExternalToolWorker`); this
+task introduces three more groups. It is a mechanical, crate-wide
+field rename — do it as three separate passes (one per group), running
+`cargo check` between passes, and run it as the **sole active agent**
+(no parallel sub-agents; see "Never run project-wide rewrites in
+parallel" in `CLAUDE.md`).
 
-1. Diagnostic state (`diag_version`, `diag_notify`, `diag_pending_uris`,
-   `diag_last_*`, `diag_result_ids`, `diag_suppressed`) →
-   `DiagnosticState`.
-2. Symbol/class indexes (`uri_classes_index`, `fqn_class_index`,
-   `fqn_uri_index`, `gti_index`, `method_store`, `global_functions`,
-   …) → `SymbolIndex`.
-3. Workspace config (`workspace_root`, `psr4_mappings`, `vendor_*`,
-   `php_version`, `config`) → `WorkspaceConfig`.
+For each group: define the struct with a `fn new()` used by both
+`Backend` constructors (~lines 1096 and 1206) and include the group in
+the per-request clone (~line 1836); the `Arc`/`Mutex` wrappers move
+into the new struct unchanged (clone semantics of a `Backend` clone
+must not change).
 
-**Why it matters.** Item 1 directly de-risks the scheduled D10 task;
+**Group 1 — `DiagnosticState`** (define it in `src/diagnostics/`,
+field name e.g. `diag`): `diag_version`, `diag_notify`,
+`diag_pending_uris`, `diag_last_slow`, `diag_last_fast`,
+`diag_last_full`, `diag_result_ids`, `diag_suppressed`,
+`workspace_diags`, `workspace_diag_pass_started`. Drop the `diag_`
+prefix on the struct's fields (`self.diag_version` →
+`self.diag.version`). Leave `supports_pull_diagnostics` with the other
+client-capability flags.
+
+**Group 2 — `SymbolIndex`** (field name e.g. `symbols`):
+`uri_classes_index`, `fqn_uri_index`, `fqn_origin_index`,
+`fqn_class_index`, `class_not_found_cache`, `gti_index`,
+`method_store`, `global_functions`, `global_defines`,
+`uri_globals_index`, `autoload_function_index`,
+`autoload_function_origin_index`, `autoload_constant_index`,
+`autoload_constant_origin_index`, `autoload_file_paths`. Do **not**
+pull in the per-file parse artifacts (`symbol_maps`, `resolved_names`,
+`file_imports`, `file_namespaces`, `parse_errors`, `parsed_uris`,
+`parse_inflight`, `phar_archives`) or the `stub_*` indexes — they have
+a different lifecycle and are out of scope here.
+
+**Group 3 — `WorkspaceEnv`** (field name e.g. `workspace` — not
+"WorkspaceConfig", to avoid colliding with the existing
+`config: Mutex<config::Config>` field, which becomes a member of this
+group): `workspace_root`, `psr4_mappings`, `vendor_uri_prefixes`,
+`vendor_dir_paths`, `vendor_package_origin_roots`, `php_version`,
+`config`.
+
+**Acceptance.** Pure renames: `cargo nextest run` passes with only
+mechanical field-path updates in tests; no lock types, wrapper types,
+or clone semantics change.
+
+**Why it matters.** Group 1 directly de-risks the scheduled D10 task;
 the rest makes the Backend's state graph legible and shrinks the
-constructor.
+constructors.
 
 ---
-
-

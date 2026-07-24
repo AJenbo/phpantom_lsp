@@ -97,6 +97,23 @@ use laravel::*;
 use statements::*;
 use subject_text::*;
 
+/// Descend generically through a node the typed dispatchers have no arm for,
+/// re-entering the typed extractors at the next expression or statement
+/// boundary so new AST variants cannot create blind spots.
+///
+/// The explicit dispatchers thread real scope state (`scope_start`,
+/// conditional nesting, the various `*_scopes` vectors); this fallback does
+/// not reproduce it.  It only rescues variants that would otherwise contribute
+/// nothing at all, so partial coverage (symbol spans, but no keyword emission
+/// or var-def sites) is the intended result for those.
+fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_start: u32) {
+    node.visit_children(|child| match child {
+        Node::Expression(e) => extract_from_expression(e, ctx, scope_start),
+        Node::Statement(s) => extract_from_statement(s, ctx, scope_start),
+        other => descend_unhandled(other, ctx, scope_start),
+    });
+}
+
 // ─── AST extraction ─────────────────────────────────────────────────────────
 
 /// Build a [`SymbolMap`] from a parsed PHP program.
