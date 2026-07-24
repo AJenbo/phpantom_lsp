@@ -34,8 +34,7 @@ jobs:
           mkdir -p .cargo
           printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
-      - run: cargo clippy --tests -- -D warnings
+      - run: cargo clippy --all-targets -- -D warnings
 
   test:
     name: Test

@@ -14,8 +14,7 @@ All six CI checks must pass with zero warnings and zero failures:
 
 ```bash
 cargo test
-cargo clippy -- -D warnings
-cargo clippy --tests -- -D warnings
+cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 php -l examples/demo.php
 php -d zend.assertions=1 examples/demo.php

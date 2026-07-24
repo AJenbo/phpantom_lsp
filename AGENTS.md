@@ -53,13 +53,11 @@ round it out.
 Always run these checks before considering any change complete:
 
 ```bash
-cargo clippy -- -D warnings
-cargo clippy --tests -- -D warnings
+cargo clippy --fix --allow-dirty -- -D warnings
 cargo fmt
 ```
 
-Clippy runs twice: once for library code, once including tests. Run
-`cargo fmt` after clippy, not before -- clippy fixes can affect
+Run `cargo fmt` after clippy, not before -- clippy fixes can affect
 formatting.
 
 ## Contributing Guidelines

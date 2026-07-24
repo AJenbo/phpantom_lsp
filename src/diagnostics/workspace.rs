@@ -331,7 +331,6 @@ impl Backend {
                 last_delivery = Instant::now();
             }
         }
-
         done
     }
 
