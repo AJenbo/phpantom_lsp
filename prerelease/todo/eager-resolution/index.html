@@ -1,0 +1,2176 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/eager-resolution/">
+      
+      
+        <link rel="prev" href="../diagnostics/">
+      
+      
+        <link rel="next" href="../external-stubs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Eager Class Resolution - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-eager-class-resolution" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Eager Class Resolution
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Eager Resolution
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Eager Resolution
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-core-problem-resolution-is-called-per-expression-not-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The core problem: resolution is called per expression, not once
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The core problem: resolution is called per expression, not once">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-mago-avoids-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How Mago avoids this
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#er5-mago-style-separated-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        ER5 — Mago-style separated metadata
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ER5 — Mago-style separated metadata">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#completed-phases-1-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Completed (Phases 1-3)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-phase-4-separated-storage-with-pre-populated-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Remaining — Phase 4: Separated storage with pre-populated metadata
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remaining — Phase 4: Separated storage with pre-populated metadata">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-4a-method-index-on-classinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4a: Method index on ClassInfo ✓
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4b-eliminate-double-scope-walk" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4b: Eliminate double scope walk ✓
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4c-eliminate-classinfo-cloning" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4c: Eliminate ClassInfo cloning
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4d-reduce-string-formatting-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4d: Reduce string formatting overhead
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profiling-data-current-release-build-examplesdemophp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Profiling data (current, release build, examples/demo.php)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Profiling data (current, release build, examples&#x2f;demo.php)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4f-remove-inflated-stack-sizes-absorbs-p25" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4f: Remove inflated stack sizes (absorbs P25)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#success-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Success criteria
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-core-problem-resolution-is-called-per-expression-not-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The core problem: resolution is called per expression, not once
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The core problem: resolution is called per expression, not once">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-mago-avoids-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How Mago avoids this
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#er5-mago-style-separated-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        ER5 — Mago-style separated metadata
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ER5 — Mago-style separated metadata">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#completed-phases-1-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Completed (Phases 1-3)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remaining-phase-4-separated-storage-with-pre-populated-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Remaining — Phase 4: Separated storage with pre-populated metadata
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Remaining — Phase 4: Separated storage with pre-populated metadata">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-4a-method-index-on-classinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4a: Method index on ClassInfo ✓
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4b-eliminate-double-scope-walk" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4b: Eliminate double scope walk ✓
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4c-eliminate-classinfo-cloning" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4c: Eliminate ClassInfo cloning
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4d-reduce-string-formatting-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4d: Reduce string formatting overhead
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profiling-data-current-release-build-examplesdemophp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Profiling data (current, release build, examples/demo.php)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Profiling data (current, release build, examples&#x2f;demo.php)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4f-remove-inflated-stack-sizes-absorbs-p25" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4f: Remove inflated stack sizes (absorbs P25)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#success-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Success criteria
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/eager-resolution.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-eager-class-resolution">PHPantom — Eager Class Resolution<a class="headerlink" href="#phpantom-eager-class-resolution" title="Permanent link">&para;</a></h1>
+<p>The stack overflow in <code>resolve_class_fully_inner</code> (caused by unbounded
+mutual recursion between the lazy resolution pipeline and virtual
+member providers) has been fixed via topological sort with eager cache
+pre-population (ER1) plus recursion/depth guards throughout the
+resolution pipeline (ER2). Virtual member application is now fully
+iterative (ER3): providers read from the resolved-class cache instead
+of resolving dependencies recursively, and topological population
+order guarantees all dependencies are already cached. The depth guards
+from ER2 remain as safety nets that never fire in practice.
+Incremental repopulation on file change (ER4) ensures evicted classes
+are eagerly re-populated in dependency order. String interning (ER6)
+makes all symbol name comparisons pointer-sized and gives identity
+hashing on hot-path lookups.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Effort</strong></td>
+<td><strong>Low</strong> (≤ 1 day), <strong>Medium</strong> (2-5 days), <strong>Medium-High</strong> (1-2 weeks), <strong>High</strong> (2-4 weeks), <strong>Very High</strong> (&gt; 1 month)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="the-core-problem-resolution-is-called-per-expression-not-once">The core problem: resolution is called per expression, not once<a class="headerlink" href="#the-core-problem-resolution-is-called-per-expression-not-once" title="Permanent link">&para;</a></h2>
+<p>PHPantom's diagnostic pipeline calls <code>resolve_class_fully_inner</code>
+(which runs <code>resolve_class_with_inheritance</code> + virtual member
+application + interface merging) every time a variable's type needs
+to be resolved during analysis. On the <code>shared</code> project (~36k PHP
+files), a single <code>analyze</code> run triggers <strong>251,032 calls</strong> to
+<code>resolve_class_with_inheritance</code> in the diagnostic phase alone.</p>
+<p>The resolved-class cache mitigates this for repeated lookups of the
+same class, but the forward walker (<code>build_diagnostic_scopes</code>) still
+pays the cost of cache-key construction, lock acquisition, and
+context setup on every expression. On <code>examples/demo.php</code> (~6 000 lines,
+~300 classes), <code>build_diagnostic_scopes</code> alone takes <strong>35.6 seconds</strong>
+(78% of total analysis time in debug builds). The diagnostic
+collectors add another 9.8 seconds (21%). Everything else (init,
+parse, eager populate) is under 1 second.</p>
+<h3 id="how-mago-avoids-this">How Mago avoids this<a class="headerlink" href="#how-mago-avoids-this" title="Permanent link">&para;</a></h3>
+<p>Mago (<code>mago/crates/codex/src/</code>) uses a fundamentally different
+architecture:</p>
+<ol>
+<li>
+<p><strong>Separated method storage.</strong> <code>ClassLikeMetadata.methods</code> is an
+   <code>AtomSet</code> (just names). The actual method metadata lives in a
+   global <code>CodebaseMetadata.function_likes: HashMap&lt;(Atom, Atom),
+   FunctionLikeMetadata&gt;</code> keyed by <code>(declaring_class, method_name)</code>.
+   During inheritance, Mago copies only lightweight <code>Atom</code> identifiers
+   (interned string pointers). It never clones method metadata.</p>
+</li>
+<li>
+<p><strong>One-pass population.</strong> <code>populate_codebase()</code> toposorts classes,
+   then walks each one iteratively, merging trait/parent/interface
+   members by copying <code>MethodIdentifier</code> atoms. After population the
+   <code>CodebaseMetadata</code> is immutable. The analyzer just reads from it.</p>
+</li>
+<li>
+<p><strong>O(1) method resolution.</strong> The analyzer resolves a method call
+   with two hash lookups: get class metadata, get method by
+   identifier. No inheritance walk, no merging, no virtual member
+   application. Everything was pre-computed.</p>
+</li>
+<li>
+<p><strong>String interning (<code>Atom</code>).</strong> All names are interned. Equality
+   is a pointer comparison. HashMap lookups use identity hashing.</p>
+</li>
+<li>
+<p><strong>Single-pass analysis.</strong> The analyzer walks the AST once,
+   resolving types and emitting diagnostics inline. There is no
+   separate "build scope cache" pass followed by diagnostic
+   collectors. Each statement is analyzed as it is encountered.</p>
+</li>
+</ol>
+<hr />
+<h2 id="er5-mago-style-separated-metadata">ER5 — Mago-style separated metadata<a class="headerlink" href="#er5-mago-style-separated-metadata" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Effort: High</strong></p>
+<p>Restructure PHPantom's class/method storage to match Mago's
+architecture. This is the single highest-impact change for analysis
+performance: it eliminates the per-expression resolution cost that
+dominates analysis time.</p>
+<h3 id="completed-phases-1-3">Completed (Phases 1-3)<a class="headerlink" href="#completed-phases-1-3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Phase 1: MethodStore infrastructure.</strong> Added
+  <code>Backend.method_store: MethodStore</code> (an
+  <code>Arc&lt;RwLock&lt;HashMap&lt;(String, String), Arc&lt;MethodInfo&gt;&gt;&gt;&gt;</code>)
+  populated alongside <code>fqn_class_index</code> in <code>update_ast_inner</code> and
+  <code>parse_and_cache_content_versioned</code>. Eviction on re-parse
+  via <code>evict_methods_for_fqns</code>.</li>
+<li><strong>Phase 2: Centralised lookup helpers.</strong> Added
+  <code>ClassInfo::get_method()</code>, <code>get_method_ci()</code>,
+  <code>get_method_arc()</code>, and <code>has_method()</code>. Migrated all ~60
+  non-test call sites from
+  <code>.methods.iter().find(|m| m.name == X)</code> /
+  <code>.methods.iter().any(|m| m.name == X)</code> to these helpers.
+  Future phases can swap the linear scan for an O(1) index
+  without touching call sites again.</li>
+<li><strong>Phase 3: Arc-wrapped methods.</strong> Changed
+  <code>ClassInfo.methods</code> from <code>SharedVec&lt;MethodInfo&gt;</code> to
+  <code>SharedVec&lt;Arc&lt;MethodInfo&gt;&gt;</code>. Inheritance merge now uses
+  <code>Arc::clone</code> (refcount bump) when no generic substitution
+  is needed, avoiding deep clones of the full <code>MethodInfo</code>
+  struct. When substitution IS needed, <code>Arc::make_mut</code> gives
+  copy-on-write semantics.</li>
+<li><strong>Phase 3.5: Atom-based FQN and cache keys.</strong> Changed
+  <code>ClassInfo::fqn()</code> to return <code>Atom</code> (interned string,
+  Copy, pointer-sized equality) instead of allocating a new
+  <code>String</code> on every call. Changed <code>ResolvedClassCacheKey</code>
+  from <code>(String, Vec&lt;String&gt;)</code> to <code>(Atom, Vec&lt;String&gt;)</code>.
+  This eliminates the FQN string allocation on every cache
+  lookup (previously ~251K allocations per diagnostic pass
+  on the <code>shared</code> project). Cache key construction for the
+  common non-generic case is now allocation-free (just a
+  Copy of the <code>Atom</code> + an empty <code>Vec::new()</code>).</li>
+</ul>
+<h3 id="remaining-phase-4-separated-storage-with-pre-populated-metadata">Remaining — Phase 4: Separated storage with pre-populated metadata<a class="headerlink" href="#remaining-phase-4-separated-storage-with-pre-populated-metadata" title="Permanent link">&para;</a></h3>
+<p><strong>Reference implementation:</strong> <code>mago/crates/codex/src/</code></p>
+<p>The goal is to make the resolved codebase metadata <strong>immutable after
+population</strong> so that the diagnostic/analysis pass never calls
+<code>resolve_class_with_inheritance</code> at all. Instead, it reads from a
+pre-populated, flat metadata store using O(1) lookups.</p>
+<p>Phase 4 is broken into sub-phases:</p>
+<h4 id="phase-4a-method-index-on-classinfo">Phase 4a: Method index on ClassInfo ✓<a class="headerlink" href="#phase-4a-method-index-on-classinfo" title="Permanent link">&para;</a></h4>
+<p>Added <code>method_index: AtomMap&lt;u32&gt;</code> and <code>indexed_method_count: u32</code>
+to <code>ClassInfo</code>. The <code>get_method</code>, <code>get_method_arc</code>, and <code>has_method</code>
+helpers use O(1) hash lookup when the index is valid, falling back
+to linear scan when the class has been mutated after indexing
+(detected via <code>indexed_method_count</code> mismatch). The index is rebuilt
+once in <code>resolve_class_fully_inner</code> right before the resolved class
+is cached, ensuring all cached classes have a valid index while
+classes under construction safely use the linear-scan fallback.</p>
+<h4 id="phase-4b-eliminate-double-scope-walk">Phase 4b: Eliminate double scope walk ✓<a class="headerlink" href="#phase-4b-eliminate-double-scope-walk" title="Permanent link">&para;</a></h4>
+<p>Fixed a bug where <code>build_diagnostic_scopes</code> ran twice per file in
+release builds: once explicitly in the analyze loop, and again
+inside <code>collect_slow_diagnostics</code>. Added an early-return guard that
+skips the walk when the scope cache is already populated. This cut
+<code>slow</code> time from 9.4s to 0.6s on examples/demo.php.</p>
+<h4 id="phase-4c-eliminate-classinfo-cloning">Phase 4c: Eliminate ClassInfo cloning<a class="headerlink" href="#phase-4c-eliminate-classinfo-cloning" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Critical. Effort: Medium-High.</strong></p>
+<p>Fresh profiling (perf, release build, examples/demo.php) shows the
+dominant cost is <strong>ClassInfo cloning and allocation churn</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Self %</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_int_malloc</code></td>
+<td>7.3%</td>
+<td>heap allocation</td>
+</tr>
+<tr>
+<td><code>__memmove_avx_unaligned_erms</code></td>
+<td>5.7%</td>
+<td>memcpy from clones</td>
+</tr>
+<tr>
+<td><code>ClassInfo::clone</code></td>
+<td>4.2%</td>
+<td>deep-clone of ClassInfo</td>
+</tr>
+<tr>
+<td><code>_int_free_chunk</code></td>
+<td>4.2%</td>
+<td>heap deallocation</td>
+</tr>
+<tr>
+<td><code>cfree</code></td>
+<td>3.6%</td>
+<td>free()</td>
+</tr>
+<tr>
+<td><code>drop_in_place&lt;ClassInfo&gt;</code></td>
+<td>3.3%</td>
+<td>destructor</td>
+</tr>
+<tr>
+<td><code>core::fmt::write</code></td>
+<td>3.0%</td>
+<td>string formatting</td>
+</tr>
+<tr>
+<td><code>malloc_consolidate</code></td>
+<td>2.8%</td>
+<td>allocator bookkeeping</td>
+</tr>
+<tr>
+<td><code>Vec::clone</code></td>
+<td>2.4%</td>
+<td>vector cloning</td>
+</tr>
+<tr>
+<td><code>String::clone</code></td>
+<td>2.2%</td>
+<td>string cloning</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Combined: ~38% of total CPU in allocation, cloning, and dropping.</strong></p>
+<p>The root cause: <code>type_hint_to_classes_typed</code> returns
+<code>Vec&lt;ClassInfo&gt;</code> (owned). Every caller that has an
+<code>Arc&lt;ClassInfo&gt;</code> must deep-clone the struct (which contains
+<code>SharedVec&lt;Arc&lt;MethodInfo&gt;&gt;</code>, <code>SharedVec&lt;PropertyInfo&gt;</code>, multiple
+<code>Vec&lt;Atom&gt;</code>, <code>AtomMap</code> fields, etc.) just to pass it through
+the resolution pipeline.</p>
+<p><strong>Plan:</strong></p>
+<ol>
+<li>
+<p>✓ Change <code>ResolvedType.class_info</code> from <code>Option&lt;ClassInfo&gt;</code> to
+   <code>Option&lt;Arc&lt;ClassInfo&gt;&gt;</code>. This propagates Arc sharing through
+   the entire variable resolution pipeline. Added <code>from_arc()</code> and
+   <code>from_both_arc()</code> constructors for zero-clone creation.</p>
+</li>
+<li>
+<p>✓ Changed <code>type_hint_to_classes_typed</code> to return
+   <code>Vec&lt;Arc&lt;ClassInfo&gt;&gt;</code>. Callers that need mutation (generic
+   substitution, scope injection) clone only when necessary
+   via <code>Arc::make_mut</code> or <code>Arc::unwrap_or_clone</code>.</p>
+</li>
+<li>
+<p>✓ <code>ResolvedType::into_arced_classes</code> now returns inner <code>Arc</code>s
+   directly (zero-cost, no <code>Arc::new</code> wrapping). <code>into_classes</code>
+   kept for the few callers needing owned <code>ClassInfo</code>.</p>
+</li>
+<li>
+<p>✓ <code>resolve_rhs_method_call_inner</code> and <code>resolve_rhs_property_access</code>
+   now use <code>Vec&lt;Arc&lt;ClassInfo&gt;&gt;</code> for owner classes, eliminating
+   deep clones on every method/property access in the hot path.
+   Remaining <code>Arc::unwrap_or_clone</code> sites (~40) are in cold paths
+   (definition lookup, hover, narrowing) or require deeper
+   signature changes.</p>
+</li>
+<li>
+<p>✓ <code>find_class_by_name</code> callers in <code>resolver.rs</code> now use
+   <code>Arc::clone</code> + <code>from_arc</code> (refcount bump) instead of
+   <code>ClassInfo::clone</code> (deep copy). 11 call sites converted.</p>
+</li>
+</ol>
+<p><strong>Expected impact:</strong> Eliminates ~10-15% of total CPU (clone +
+drop + associated malloc/free). Combined with the double-walk
+fix, should bring examples/demo.php from ~9.5s to ~5-6s.</p>
+<h4 id="phase-4d-reduce-string-formatting-overhead">Phase 4d: Reduce string formatting overhead<a class="headerlink" href="#phase-4d-reduce-string-formatting-overhead" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium. Effort: Low-Medium.</strong></p>
+<p>3% self-time in <code>core::fmt::write</code> + 1.4% in <code>format_inner</code> +
+1.3% in <code>Ustr::from</code> (atom interning). These come from:</p>
+<ul>
+<li><code>format!("{}\\{}", ns, name)</code> in <code>ClassInfo::fqn()</code> — called
+  on every resolution. Already mitigated by returning <code>Atom</code> but
+  the initial intern still allocates.</li>
+<li>Type string construction during template substitution.</li>
+<li><code>name.to_string()</code> calls throughout the resolution pipeline.</li>
+</ul>
+<p>Plan: audit hot-path <code>format!()</code> calls and replace with
+pre-computed or cached values where possible.</p>
+<h3 id="profiling-data-current-release-build-examplesdemophp">Profiling data (current, release build, examples/demo.php)<a class="headerlink" href="#profiling-data-current-release-build-examplesdemophp" title="Permanent link">&para;</a></h3>
+<p>Measured after Phase 4a + double-walk fix:</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Wall time</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Init + parse + eager populate</td>
+<td>&lt; 1s</td>
+<td>negligible</td>
+</tr>
+<tr>
+<td><code>build_diagnostic_scopes</code></td>
+<td><strong>8.9s</strong></td>
+<td>forward walker</td>
+</tr>
+<tr>
+<td>Fast diagnostics</td>
+<td>0.0s</td>
+<td></td>
+</tr>
+<tr>
+<td>Slow diagnostics</td>
+<td>0.6s</td>
+<td>(was 9.4s before double-walk fix)</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>~9.5s</strong></td>
+<td>target: &lt; 3s</td>
+</tr>
+</tbody>
+</table>
+<p>Instrumentation data from the scope walk:</p>
+<ul>
+<li>8,726 calls to <code>resolve_rhs_expression</code> (8.3s top-level time)</li>
+<li>5,559 resolved-class cache hits, 396 misses</li>
+<li>Subject pipeline fallback: 1 call (negligible)</li>
+</ul>
+<p>The 8.3s is dominated by allocation churn (ClassInfo cloning)
+inside the type resolution pipeline, not by resolution logic.</p>
+<hr />
+<h4 id="phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22">Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)<a class="headerlink" href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium-High. Effort: Medium.</strong></p>
+<p>Once Phase 4d (or earlier) makes the resolved codebase metadata
+immutable after population, the re-entrant resolution that currently
+requires thread-local recursion guards cannot occur. This phase
+removes those guards and the depth caps they protect:</p>
+<ol>
+<li>
+<p><strong><code>RESOLVING</code> set and <code>MAX_RESOLVE_DEPTH</code> (30) in
+   <code>virtual_members/mod.rs</code>.</strong> Thread-local set of class FQNs
+   currently being resolved. When a class is already in the set,
+   re-entrant calls return a partial result (base inheritance only,
+   no virtual members). This produces non-deterministic results:
+   whichever class in a mutual dependency (e.g. Model/Builder) is
+   resolved first gets full virtual members, the other gets degraded.
+   After eager population, all classes are resolved before any
+   consumer queries them, so re-entry cannot happen.</p>
+</li>
+<li>
+<p><strong><code>RESOLVE_DEPTH</code> and <code>MAX_RESOLVE_TARGET_DEPTH</code> (60) in
+   <code>completion/resolver.rs</code>.</strong> Thread-local depth counter for
+   <code>resolve_target_classes_expr_inner</code>. Guards against mutual
+   recursion between subject resolution, call-return resolution,
+   and variable resolution. The limit of 60 (vs typical chain
+   depth of 5-10) indicates the recursion is caused by accidental
+   re-entry into class resolution, not by the problem size. Once
+   class resolution is a cache lookup, this re-entry path vanishes.</p>
+</li>
+<li>
+<p><strong>LSP server eager population.</strong> The <code>analyse.rs</code> CLI already
+   runs <code>populate_from_sorted</code> before diagnostics. The LSP server's
+   Tokio threads do not. Extend eager population to run on file
+   change in the LSP server (incrementally, not full re-population)
+   so that interactive requests also benefit from pre-resolved
+   metadata.</p>
+</li>
+</ol>
+<p><strong>How the reference projects avoid this problem:</strong></p>
+<ul>
+<li>
+<p><strong>Mago:</strong> topologically sorts classes (<code>codex/src/populator/
+  sorter.rs</code>) using a DFS with <code>visited</code> + <code>visiting</code> sets. Cycles
+  are broken silently when <code>visiting.contains(&amp;class_like)</code>. Each
+  class is then populated exactly once by
+  <code>populate_class_like_metadata_iterative</code> (non-recursive, assumes
+  dependencies are done). No re-entrant resolution is possible.</p>
+</li>
+<li>
+<p><strong>PHPStan:</strong> member lookup on <code>ClassReflection</code> delegates to
+  <code>PhpClassReflectionExtension</code>, which calls PHP's native
+  <code>ReflectionClass</code> (already resolved by the runtime). Each class
+  has a single canonical instance via <code>MemoizingReflectionProvider</code>
+  (keyed by lowercase name), so re-entrant lookups hit the same
+  cached object. Explicit cycle guards exist only for specific
+  features: <code>$resolvingTypeAliasImports</code> for <code>@type-import</code> cycles,
+  <code>$inferClassConstructorPropertyTypesInProcess</code> for constructor
+  property inference.</p>
+</li>
+<li>
+<p><strong>Phpactor:</strong> three independent cycle-protection layers.
+  (1) <code>ClassHierarchyResolver::doResolve()</code> passes a <code>$resolved</code>
+  map by value; if a class name is already a key, recursion stops.
+  (2) Every reflection object carries a <code>$visited</code> array through its
+  constructor; <code>reflectClassLike()</code> throws <code>CycleDetected</code> on
+  re-entry. (3) Direct self-reference guards in <code>parent()</code> and
+  <code>ancestors()</code>.</p>
+</li>
+</ul>
+<p><strong>Success criteria:</strong>
+- <code>RESOLVING</code>, <code>RESOLVE_DEPTH</code>, <code>MAX_RESOLVE_DEPTH</code>, and
+  <code>MAX_RESOLVE_TARGET_DEPTH</code> are removed from the codebase.
+- <code>mark_resolving</code> / <code>unmark_resolving</code> functions are removed.
+- No test regressions.
+- LSP server runs eager population incrementally on file change.</p>
+<h4 id="phase-4f-remove-inflated-stack-sizes-absorbs-p25">Phase 4f: Remove inflated stack sizes (absorbs P25)<a class="headerlink" href="#phase-4f-remove-inflated-stack-sizes-absorbs-p25" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium. Effort: Low.</strong></p>
+<p>After Phase 4e eliminates re-entrant class resolution and P20
+eliminates exponential forward-walker blowup, the 32 MB stack
+threads in <code>analyse.rs</code> (index workers, eager population, diagnostic
+workers) and the 16 MB stack threads in <code>references/mod.rs</code> (parallel
+parsing) should no longer be necessary.</p>
+<ul>
+<li>Run the full test suite and <code>analyse</code> on the largest available
+  project with default 8 MB stacks.</li>
+<li>Remove each <code>stack_size</code> call that no longer causes overflow.</li>
+<li>The reference parsing threads (16 MB) may still be needed for
+  pathological PHP files with extreme nesting; verify separately.</li>
+</ul>
+<p>Note: Mago's <code>build.rs</code> uses a 36 MB stack for prelude parsing, so
+inflated stacks are not inherently wrong for one-off build tasks.
+The problem is needing them for every runtime analysis thread.</p>
+<p><strong>Success criteria:</strong>
+- All <code>stack_size</code> calls in <code>analyse.rs</code> removed.
+- <code>references/mod.rs</code> <code>PARSE_STACK_SIZE</code> reduced to 8 MB or removed.
+- No stack overflows on the full test suite or the largest available
+  project.</p>
+<hr />
+<h2 id="success-criteria">Success criteria<a class="headerlink" href="#success-criteria" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>phpantom_lsp analyze --project-root . examples/demo.php</code> completes
+  in under 2 seconds (release build).</li>
+<li>Analysis time for examples/demo.php (~300 classes) approaches Mago's
+  speed (sub-second).</li>
+<li>No test regressions in the existing test suite.</li>
+<li>Memory usage for the populated metadata is within 2x of the
+  current <code>uri_classes_index</code> + <code>fqn_uri_index</code> combined size.</li>
+<li>The diagnostic/analysis pass never calls
+  <code>resolve_class_with_inheritance</code>. All class metadata is
+  pre-populated and immutable during analysis.</li>
+<li>All thread-local recursion guards (<code>RESOLVING</code>, <code>RESOLVE_DEPTH</code>)
+  and depth caps (<code>MAX_RESOLVE_DEPTH</code>, <code>MAX_RESOLVE_TARGET_DEPTH</code>)
+  are removed (Phase 4e).</li>
+<li>All inflated <code>stack_size</code> calls are removed or reduced to default
+  (Phase 4f).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>
