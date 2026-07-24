@@ -29,7 +29,7 @@ You may want to jump to:
 
 ## Useful Links
 
-- [Installation](installation.md) and [Editor Setup](editor-setup.md)
+- [Editor Setup](editor-setup.md) and [Manual Installation](installation.md)
 - [Configuration Reference](configuration.md)
 - [CLI Reference](cli.md)
 - [Development Roadmap](todo.md)

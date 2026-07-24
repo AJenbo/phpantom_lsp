@@ -2,8 +2,7 @@
 
 AI coding agents can use PHPantom for the same code intelligence editors get. The agent starts `phpantom_lsp` over LSP and consults it (diagnostics, go-to-definition, hover types) as it reads and edits PHP, so its changes are grounded in real type information instead of guesses.
 
-<details>
-<summary><b>Claude Code</b></summary>
+## Claude Code
 
 Install the PHPantom plugin from its marketplace:
 
@@ -18,11 +17,9 @@ Beyond per-file code intelligence, the plugin puts `phpantom_lsp` on the agent's
 
 To use a specific binary instead of the downloaded one, set the `PHPANTOM_SERVER_PATH` environment variable to its path, or put `phpantom_lsp` on your `PATH`.
 
-</details>
+## Opencode
 
-<details>
-<summary><b>Opencode</b></summary>
-You can add this to your `opencode.json` file, it will be invoked when the AI uses the edit tool to edit a PHP file from within opencode.
+Add this to your `opencode.json` file. It will be invoked when the AI uses the edit tool to edit a PHP file from within Opencode.
 
 ```json
 {
@@ -37,4 +34,3 @@ You can add this to your `opencode.json` file, it will be invoked when the AI us
 ```
 
 You can add additional extensions to invoke it on if appropriate for your project.
-</details>

@@ -1,4 +1,8 @@
-# Installation
+# Manual Installation
+
+Most editors install PHPantom automatically (see [Editor Setup](editor-setup.md)). Use these methods when your editor doesn't manage the binary for you, or when you want a specific version.
+
+## Latest Release
 
 === "Cargo"
 
@@ -7,6 +11,16 @@
     ```
 
     See [phpantom_lsp on crates.io](https://crates.io/crates/phpantom_lsp).
+
+=== "Cargo binstall"
+
+    ```bash
+    cargo binstall phpantom_lsp
+    ```
+
+    [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) downloads
+    pre-built binaries instead of compiling from source, so installation
+    takes seconds instead of minutes.
 
 === "Homebrew"
 
@@ -34,13 +48,24 @@
     (Alpine). The `-unknown-linux-gnu` name is retained for compatibility
     with existing installers.
 
-=== "Build from Source"
+## Latest Main (Unreleased)
 
-    See [Building from Source](BUILDING.md) for full instructions. Quick version:
+Install the latest `main` branch to get fixes and features that haven't
+been released yet. Useful for verifying bug fixes or testing new features.
 
-    ```bash
-    cargo build --release
-    # Binary is at target/release/phpantom_lsp
-    ```
+```bash
+cargo install --git https://github.com/PHPantom-dev/phpantom_lsp --branch main phpantom_lsp
+```
+
+## Build from Source
+
+See [Building from Source](BUILDING.md) for full instructions. Quick version:
+
+```bash
+git clone https://github.com/PHPantom-dev/phpantom_lsp
+cd phpantom_lsp
+cargo build --release
+# Binary is at target/release/phpantom_lsp
+```
 
 Once installed, see [Editor Setup](editor-setup.md) to configure your editor.

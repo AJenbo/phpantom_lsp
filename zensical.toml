@@ -8,9 +8,9 @@ edit_uri = "edit/main/docs/"
 nav = [
   { "Home" = "index.md" },
   { "Getting Started" = [
-    { "Installation" = "installation.md" },
     { "Editor Setup" = "editor-setup.md" },
     { "Agent Setup" = "agent-setup.md" },
+    { "Manual Installation" = "installation.md" },
   ]},
   { "Reference" = [
     { "Configuration" = "configuration.md" },
