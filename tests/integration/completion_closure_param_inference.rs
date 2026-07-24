@@ -2761,3 +2761,48 @@ async fn test_multiple_static_returns_preserve_generic_type_string() {
         props,
     );
 }
+
+// ─── Standalone function template binding via named arguments ──────────────
+
+/// A standalone function's `@template T` bound from a `class-string<T>`
+/// argument must resolve correctly when an earlier named argument is
+/// passed out of declaration order.  The `class` and `flag` arguments
+/// are named and swapped relative to their declared order; the
+/// argument text passed to template-binding resolution must carry the
+/// `name:` prefix so `T` binds from the `class` argument's value
+/// (`Product::class`) rather than from whichever argument happens to
+/// share its declared position.
+#[tokio::test]
+async fn test_function_template_binding_via_named_args_out_of_order() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/named_args_template_binding.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",                                                              // 0
+        "class Product {\n",                                                    // 1
+        "    public function getSku(): string { return ''; }\n",                // 2
+        "}\n",                                                                  // 3
+        "/**\n",                                                                // 4
+        " * @template T\n",                                                     // 5
+        " * @param bool $flag\n",                                               // 6
+        " * @param class-string<T> $class\n",                                   // 7
+        " * @param callable(T): void $cb\n",                                    // 8
+        " */\n",                                                                // 9
+        "function process(bool $flag, string $class, callable $cb): void {}\n", // 10
+        "\n",                                                                   // 11
+        "process(class: Product::class, flag: true, function ($p) {\n",         // 12
+        "    $p->\n",                                                           // 13
+        "});\n",                                                                // 14
+    );
+
+    // Line 13: `    $p->` — cursor right after `->`.
+    let items = complete_at(&backend, &uri, src, 13, 8).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getSku"),
+        "Expected 'getSku' from Product bound to T via the 'class' named \
+         argument, even though 'class' and 'flag' are passed out of \
+         declaration order, got: {:?}",
+        names,
+    );
+}

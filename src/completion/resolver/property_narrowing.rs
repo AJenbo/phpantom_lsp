@@ -126,22 +126,10 @@ fn walk_property_narrowing_in_members<'b>(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) {
-    use mago_syntax::cst::class_like::member::ClassLikeMember;
-    use mago_syntax::cst::class_like::method::MethodBody;
-
-    for member in members {
-        if let ClassLikeMember::Method(method) = member {
-            let body = match &method.body {
-                MethodBody::Concrete(block) => block,
-                _ => continue,
-            };
-            let body_start = body.left_brace.start.offset;
-            let body_end = body.right_brace.end.offset;
-            if ctx.cursor_offset >= body_start && ctx.cursor_offset <= body_end {
-                walk_property_narrowing_stmts(body.statements.iter(), ctx, results);
-                return;
-            }
-        }
+    if let Some(block) =
+        crate::util::find_enclosing_method_block_in_members(members, ctx.cursor_offset)
+    {
+        walk_property_narrowing_stmts(block.statements.iter(), ctx, results);
     }
 }
 

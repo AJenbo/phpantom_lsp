@@ -382,7 +382,7 @@ impl Backend {
             // Static call: `User::with(...)` — subject is the class name.
             let fqn = self.resolve_class_name_to_fqn(subject, ctx)?;
             class_loader(&fqn)
-        } else if subject == "$this" || subject == "static" || subject == "self" {
+        } else if crate::class_lookup::is_self_or_static(subject) {
             // Inside the model class itself.
             let cursor_offset = position_to_offset(content, position);
             let current_class =

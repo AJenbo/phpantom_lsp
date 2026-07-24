@@ -309,11 +309,13 @@ pub(crate) fn simplify_class_hierarchy_unions(
 }
 
 /// Check whether `child` is a subclass (direct or transitive) of
-/// `parent` by walking the inheritance chain via the class loader.
+/// `parent`, including implemented interfaces.
 ///
-/// Returns `false` if either class cannot be loaded or if there is
-/// no inheritance relationship.  Limits the chain walk to 20 steps
-/// to avoid infinite loops on cyclic hierarchies.
+/// Returns `false` if `child` cannot be loaded or if there is no
+/// inheritance relationship.  Delegates to the shared nominal subtype
+/// walk ([`crate::class_lookup::is_subtype_of`]), which handles
+/// transitive interface extension, FQN normalisation, and cycle
+/// detection.
 pub(crate) fn is_subclass_of(
     child: &str,
     parent: &str,
@@ -322,28 +324,10 @@ pub(crate) fn is_subclass_of(
     if child.eq_ignore_ascii_case(parent) {
         return false; // same class, not a subclass
     }
-    let mut current = child.to_string();
-    for _ in 0..20 {
-        let cls = match class_loader(&current) {
-            Some(c) => c,
-            None => return false,
-        };
-        // Check implemented interfaces at every level.
-        for iface in &cls.interfaces {
-            if iface.as_str().eq_ignore_ascii_case(parent) {
-                return true;
-            }
-        }
-        if let Some(ref p) = cls.parent_class {
-            if p.as_str().eq_ignore_ascii_case(parent) {
-                return true;
-            }
-            current = p.to_string();
-        } else {
-            return false;
-        }
+    match class_loader(child) {
+        Some(child_class) => crate::class_lookup::is_subtype_of(&child_class, parent, class_loader),
+        None => false,
     }
-    false
 }
 
 /// Context for the forward walk.

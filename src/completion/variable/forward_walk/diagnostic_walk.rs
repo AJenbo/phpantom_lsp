@@ -412,7 +412,7 @@ pub(crate) fn walk_closures_in_call<'b>(
                     infer_callable_params_from_function_fw(
                         name,
                         arg_idx,
-                        &fc.argument_list.arguments,
+                        &fc.argument_list,
                         outer_scope,
                         ctx,
                     )

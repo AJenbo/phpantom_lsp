@@ -69,8 +69,9 @@ impl Backend {
                 diagnostics: Vec::new(),
             };
 
+            let walker = UnusedVariableWalker;
             for stmt in program.statements.iter() {
-                collect_from_statement(stmt, &mut ctx);
+                mago_syntax::walker::Walker::walk_statement(&walker, stmt, &mut ctx);
             }
 
             out.extend(ctx.diagnostics);
@@ -90,75 +91,60 @@ struct DiagnosticCtx<'a> {
 
 // ─── AST walking ────────────────────────────────────────────────────────────
 
-fn collect_from_statement(stmt: &Statement<'_>, ctx: &mut DiagnosticCtx<'_>) {
-    match stmt {
-        Statement::Function(func) => {
-            let body_start = func.body.left_brace.start.offset;
-            let body_end = func.body.right_brace.end.offset;
-            let compact_vars = collect_compact_vars(func.body.statements.as_slice());
-            let has_get_defined = has_get_defined_vars(func.body.statements.as_slice());
-            let scope = collect_function_scope_with_resolver(
-                &func.parameter_list,
-                func.body.statements.as_slice(),
-                body_start,
-                body_end,
-                None,
-            );
-            check_scope(&scope, ctx, None, &compact_vars, has_get_defined);
-        }
-        Statement::Class(class) => {
-            collect_from_class_members(class.members.as_slice(), ctx);
-        }
-        Statement::Trait(tr) => {
-            collect_from_class_members(tr.members.as_slice(), ctx);
-        }
-        Statement::Enum(en) => {
-            collect_from_class_members(en.members.as_slice(), ctx);
-        }
-        Statement::Interface(_) => {
-            // Interfaces don't have method bodies.
-        }
-        Statement::Namespace(ns) => {
-            for inner in ns.statements().iter() {
-                collect_from_statement(inner, ctx);
-            }
-        }
-        _ => {
-            // Top-level code — don't diagnose (global scope has
-            // too many implicit variable definitions).
-        }
+/// Walker that runs unused-variable analysis on every function and method
+/// body it encounters. The generated traversal reaches bodies at any depth
+/// (top-level, class members, nested functions, anonymous-class methods),
+/// so no node kind needs an explicit dispatch arm. Closures and arrow
+/// functions are not visited as their own scopes here; their frames are
+/// analysed as part of the enclosing function/method scope by the scope
+/// collector.
+struct UnusedVariableWalker;
+
+impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'a>>
+    for UnusedVariableWalker
+{
+    fn walk_in_function(&self, func: &'ast Function<'arena>, ctx: &mut DiagnosticCtx<'a>) {
+        let body_start = func.body.left_brace.start.offset;
+        let body_end = func.body.right_brace.end.offset;
+        let compact_vars = collect_compact_vars(func.body.statements.as_slice());
+        let has_get_defined = has_get_defined_vars(func.body.statements.as_slice());
+        let scope = collect_function_scope_with_resolver(
+            &func.parameter_list,
+            func.body.statements.as_slice(),
+            body_start,
+            body_end,
+            None,
+        );
+        check_scope(&scope, ctx, None, &compact_vars, has_get_defined);
     }
-}
 
-fn collect_from_class_members(members: &[ClassLikeMember<'_>], ctx: &mut DiagnosticCtx<'_>) {
-    for member in members.iter() {
-        if let ClassLikeMember::Method(method) = member
-            && let MethodBody::Concrete(block) = &method.body
-        {
-            let body_start = block.left_brace.start.offset;
-            let body_end = block.right_brace.end.offset;
+    fn walk_in_method(&self, method: &'ast Method<'arena>, ctx: &mut DiagnosticCtx<'a>) {
+        let MethodBody::Concrete(block) = &method.body else {
+            return;
+        };
+        let body_start = block.left_brace.start.offset;
+        let body_end = block.right_brace.end.offset;
 
-            // Collect promoted parameter names so we can exclude them.
-            let promoted_params = collect_promoted_params(&method.parameter_list);
+        // Collect promoted parameter names so we can exclude them.
+        let promoted_params = collect_promoted_params(&method.parameter_list);
 
-            let compact_vars = collect_compact_vars(block.statements.as_slice());
-            let has_get_defined = has_get_defined_vars(block.statements.as_slice());
-            let scope = collect_function_scope_with_kind(
-                &method.parameter_list,
-                block.statements.as_slice(),
-                body_start,
-                body_end,
-                FrameKind::Method,
-            );
+        let compact_vars = collect_compact_vars(block.statements.as_slice());
+        let has_get_defined = has_get_defined_vars(block.statements.as_slice());
+        let scope = collect_function_scope_with_kind(
+            &method.parameter_list,
+            block.statements.as_slice(),
+            body_start,
+            body_end,
+            FrameKind::Method,
+        );
 
-            check_scope(
-                &scope,
-                ctx,
-                Some(&promoted_params),
-                &compact_vars,
-                has_get_defined,
-            );
-        }
+        check_scope(
+            &scope,
+            ctx,
+            Some(&promoted_params),
+            &compact_vars,
+            has_get_defined,
+        );
     }
 }
 

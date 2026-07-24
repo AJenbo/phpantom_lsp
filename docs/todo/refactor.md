@@ -214,79 +214,54 @@ Each item must include:
 
 # Outstanding items
 
-## Deduplicate parallel helpers inside the resolution pipeline
+## Shared AST walker — remaining candidates (needs a decision)
 
-**What to do.** The resolution files contain several
-copies-for-another-code-path that should collapse onto one
-implementation (do this after — or as part of — the splits above):
+**Done so far.** The stateless boolean/name-set/collection walkers have
+been migrated to the generated `mago-syntax` `Walker` trait (each is now
+a small visitor over a shared traversal): the six detector pairs in
+`diagnostics/undefined_variables/` (dynamic-vars, `extract()`,
+`compact()`, `get_defined_vars()`, `@`-suppression, isset/empty guards),
+the statement-dispatch halves of `diagnostics/unused_variables.rs` and
+`diagnostics/type_errors.rs`, and the anonymous-class walker in
+`parser/anonymous.rs`. That removed ~1,900 lines of hand-rolled
+traversal.
 
-1. **Callable-param inference.** The `*_fw`-suffixed family in
-   `forward_walk/` parallels the logic in
-   `completion/variable/closure_resolution.rs`. The suffix itself marks
-   a copy; unify them.
-2. **`$this`/`self`/`static` resolution.** ~32 call sites spread across
-   `util.rs` (`is_self_or_static`, `resolve_class_keyword`),
-   `call_resolution/callable_target.rs` (`resolve_class_name_keyword`),
-   `resolver/mod.rs` (`resolve_static_owner_class`), and `forward_walk/`
-   (`seed_this`), plus hand-rolled `== "$this"` checks. Back them with
-   one helper module.
-3. **Subclass checks.** `is_subclass_of` (`forward_walk/`),
-   `is_type_subclass_of` and `is_valid_virtual_narrowing`
-   (`call_resolution/return_types.rs`), and `util::is_subtype_of*`
-   overlap; route through the `util`/`php_type` versions.
-4. **Property-assignment scanning.** The
-   `find_*_this_property_assignment*` family
-   (`rhs_resolution/property_access.rs`) and the
-   `walk_property_narrowing_*` family (`resolver/property_narrowing.rs`)
-   walk class members and statements with near-identical skeletons for
-   different outputs. Share the traversal.
-5. **Argument-text extraction.** `extract_argument_texts_fw` /
-   `extract_first_arg_string_fw` (`forward_walk/`) vs
-   `extract_first_arg_text` / `resolve_inline_arg_raw_type`
-   (`call_resolution/arg_type_resolution.rs`) vs
-   `resolve_arg_text_to_type` (`call_resolution/template_subs.rs`) vs
-   `resolve_arg_raw_type` (`resolution.rs`).
+**What remains — and why it is not a clean fit.** The remaining
+hand-rolled walkers are *not* stateless collectors; they are
+positional/order-sensitive, which the typed `Walker` cannot express
+without re-typing per-node logic (it has no single "visit any node"
+hook, only per-node-type `walk_in_*`):
 
-**Why it matters.** These duplications are exactly the "parallel type
-resolution systems" the conventions forbid, just internal to the
-pipeline: a narrowing or generics fix applied to one copy silently
-misses the others.
+- `selection_range.rs` pushes **synthetic** spans (brace pairs, paren
+  pairs, block interiors) that are not AST-node spans, and would need a
+  `walk_in_*` override for essentially every node type to reproduce
+  them — no net reduction.
+- `symbol_map/extraction.rs` records position-keyed symbol spans and
+  subject text; order and per-kind span shaping dominate, so the same
+  per-node-override problem applies.
+- The `property_access.rs` / `property_narrowing.rs` pair walk **from
+  the method start down to the cursor**, accumulating narrowing state in
+  source order with early returns. That interleaved-mutation,
+  cursor-bounded shape is exactly why the forward walker is out of scope
+  (below).
 
----
+The forward walker is explicitly out of scope (its traversal is
+interleaved with scope-state mutation).
 
-## Shared AST walker for the hand-rolled traversals
-
-**What to do.** At least six modules hand-roll the same giant
-`match` over `Statement`/`Expression` variants, each independently
-re-typing the `IfBody`/`ForeachBody`/`WhileBody`/`SwitchBody` recursion:
-`symbol_map/extraction.rs` (28 statement / 101 expression matches),
-`selection_range.rs` (33/34), the anonymous-class walker in
-`parser/classes.rs` (33/36), `completion/types/narrowing.rs` (64
-expression matches), and the six boolean/name-set detector walker pairs
-in `diagnostics/undefined_variables.rs` (dynamic-vars, extract(),
-compact(), get_defined_vars(), `@`-suppression, isset/empty guards)
-plus the structural halves of `unused_variables.rs` and
-`type_errors.rs`.
-
-`mago-syntax` already ships a generated `Walker` trait
-(`walker/mod.rs`, per-node `walk_in_*`/`walk_out_*` hooks with full
-recursive traversal) that none of these use. Migrate incrementally,
-starting where the payoff is largest and the risk lowest:
-
-1. The six detector pairs in `undefined_variables.rs` — each becomes a
-   ~10-line visitor, removing ~1,400 lines of traversal boilerplate.
-2. The statement-dispatch halves of `unused_variables.rs` and
-   `type_errors.rs`.
-3. The anonymous-class walker in `parser/classes.rs` (~1,000 lines).
-4. `symbol_map/extraction.rs` and `selection_range.rs` as follow-ups.
-
-The forward walker is explicitly out of scope here (its traversal is
-interleaved with scope-state mutation; see the split item above).
+**Decision needed.** These three are arguably better left as-is: the
+`Walker` migration's payoff (delete child-dispatch boilerplate) does not
+apply when the walk pushes synthetic/positional data or mutates state in
+source order. If the goal is purely "one traversal so new AST variants
+can't create blind spots," a thin `visit_all_nodes(&Node, &mut FnMut)`
+helper over mago's `Node` enum would serve `selection_range` and
+`symbol_map/extraction` better than the typed `Walker`. Confirm whether
+to (a) leave these as-is, (b) migrate `selection_range` /
+`symbol_map/extraction` via a `Node`-enum visitor, or (c) migrate the
+property pair despite the state-threading cost.
 
 **Why it matters.** Every new mago AST node variant (new PHP syntax)
-currently needs matching arms added in six places; missing one produces
-silent blind spots in exactly one feature. One traversal, many small
-visitors is the structure all three reference projects use.
+still needs matching arms in these remaining walkers; missing one
+produces a silent blind spot in exactly one feature.
 
 ---
 

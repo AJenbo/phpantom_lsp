@@ -496,6 +496,71 @@ fn closure_this_from_function_params(
     resolve_closure_this_type(php_type, None, ctx)
 }
 
+// ─── Shared receiver resolution ─────────────────────────────────────────
+//
+// These helpers resolve "the receiver/owner class of a call's method"
+// from the AST, independent of what the caller extracts from the target
+// method once found.  Both the `@param-closure-this` resolution above
+// and the callable-parameter inference in
+// `forward_walk/callable_inference.rs` need this same receiver
+// resolution; they differ only in what they pull out of the matched
+// method (`closure_this_type` vs. `callable(...)` parameter types).
+
+/// Resolve the receiver classes of an instance/nullsafe method call from
+/// its object span.
+///
+/// Overrides `cursor_offset` to the object's start so that variable
+/// resolution looks up the scope snapshot *before* the call (where the
+/// receiver variable is actually in scope), not at a position inside a
+/// later closure argument where the variable doesn't exist yet.
+pub(in crate::completion) fn resolve_receiver_types(
+    obj_start: u32,
+    obj_end: u32,
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let start = obj_start as usize;
+    let end = obj_end as usize;
+    if end > ctx.content.len() {
+        return vec![];
+    }
+    let obj_text = ctx.content[start..end].trim();
+    let obj_ctx = ResolutionCtx {
+        cursor_offset: obj_start,
+        ..*ctx
+    };
+    crate::completion::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, &obj_ctx)
+}
+
+/// Resolve the class name referenced by a static-call receiver
+/// expression (`self`, `static`, `parent`, or a class identifier).
+pub(in crate::completion) fn static_receiver_class_name(
+    class_expr: &Expression<'_>,
+    current_class: Option<&ClassInfo>,
+) -> Option<String> {
+    match class_expr {
+        Expression::Self_(_) | Expression::Static(_) => current_class.map(|cc| cc.name.to_string()),
+        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+        Expression::Parent(_) => {
+            current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Look up a class by name: local classes first, then the cross-file
+/// loader.
+pub(in crate::completion) fn find_owner_by_name(
+    name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<ClassInfo> {
+    all_classes
+        .iter()
+        .find(|c| c.name == name)
+        .map(|c| ClassInfo::clone(c))
+        .or_else(|| class_loader(name).map(Arc::unwrap_or_clone))
+}
+
 /// Look up `closure_this_type` on an instance method's parameter at
 /// `arg_idx`, resolving the receiver from the source span.
 fn closure_this_from_receiver(
@@ -505,23 +570,8 @@ fn closure_this_from_receiver(
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<ClassInfo> {
-    let start = obj_start as usize;
-    let end = obj_end as usize;
-    if end > ctx.content.len() {
-        return None;
-    }
-    let obj_text = ctx.content[start..end].trim();
-    // Use the object's own offset as cursor_offset so that variable
-    // resolution looks up the scope snapshot *before* the closure body
-    // (where the variable is actually in scope), not at the diagnostic
-    // offset inside the closure where the variable doesn't exist.
-    let obj_ctx = ResolutionCtx {
-        cursor_offset: obj_start,
-        ..*ctx
-    };
-    let receiver_classes = ResolvedType::into_arced_classes(
-        crate::completion::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, &obj_ctx),
-    );
+    let receiver_classes =
+        ResolvedType::into_arced_classes(resolve_receiver_types(obj_start, obj_end, ctx));
     for cls in &receiver_classes {
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             cls,
@@ -546,16 +596,7 @@ fn closure_this_from_static_receiver(
     arg_idx: usize,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<ClassInfo> {
-    let class_name = match class_expr {
-        Expression::Self_(_) | Expression::Static(_) => {
-            ctx.current_class.map(|cc| cc.name.to_string())
-        }
-        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-        Expression::Parent(_) => ctx
-            .current_class
-            .and_then(|cc| cc.parent_class.map(|a| a.to_string())),
-        _ => None,
-    }?;
+    let class_name = static_receiver_class_name(class_expr, ctx.current_class)?;
 
     if method_name.eq_ignore_ascii_case("macro")
         && arg_idx == 1
@@ -571,12 +612,7 @@ fn closure_this_from_static_receiver(
         ));
     }
 
-    let owner = ctx
-        .all_classes
-        .iter()
-        .find(|c| c.name == class_name)
-        .map(|c| ClassInfo::clone(c))
-        .or_else(|| (ctx.class_loader)(&class_name).map(Arc::unwrap_or_clone))?;
+    let owner = find_owner_by_name(&class_name, ctx.all_classes, ctx.class_loader)?;
 
     let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
         &owner,

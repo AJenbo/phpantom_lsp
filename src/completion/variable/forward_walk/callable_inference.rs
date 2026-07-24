@@ -8,22 +8,26 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
-use crate::types::{AccessKind, ClassInfo, ResolvedType};
+use crate::types::{ClassInfo, ResolvedType};
 
 // ─── Callable parameter inference for the forward walker ────────────────────
 //
-// These functions mirror the inference logic in `closure_resolution.rs`
-// but operate with a `ForwardWalkCtx` + `ScopeState` instead of a
-// `VarResolutionCtx`.  They build a temporary `VarResolutionCtx` with
-// a scope-based variable resolver injected so that variable lookups
-// during receiver resolution read from the forward walker's scope.
+// These functions extract `callable(...)`/`Closure(...)` parameter types
+// from a call's target method/function, reusing the receiver and static-
+// receiver resolution shared with `closure_resolution.rs`'s
+// `@param-closure-this` lookup (`resolve_receiver_types`,
+// `static_receiver_class_name`, `find_owner_by_name`).  They operate with
+// a `ForwardWalkCtx` + `ScopeState` instead of a `VarResolutionCtx`,
+// building a temporary `VarResolutionCtx` with a scope-based variable
+// resolver injected so that variable lookups during receiver resolution
+// read from the forward walker's scope.
 
 /// Infer callable parameter types for a closure passed at position
 /// `arg_idx` to a standalone function call.
 pub(crate) fn infer_callable_params_from_function_fw(
     func_name: &str,
     arg_idx: usize,
-    arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
+    argument_list: &ArgumentList<'_>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
@@ -46,7 +50,10 @@ pub(crate) fn infer_callable_params_from_function_fw(
 
         if !params.is_empty() && !fi.template_params.is_empty() && !fi.template_bindings.is_empty()
         {
-            let arg_texts = extract_argument_texts_fw(arguments, ctx.content);
+            let arg_texts = super::super::raw_type_inference::extract_arg_texts_from_ast(
+                argument_list,
+                ctx.content,
+            );
             let subs =
                 super::super::rhs_resolution::build_function_template_subs(&fi, &arg_texts, &rctx);
             if !subs.is_empty() {
@@ -71,12 +78,6 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let start = obj_start as usize;
-    let end = obj_end as usize;
-    if end > ctx.content.len() {
-        return vec![];
-    }
-    let obj_text = ctx.content[start..end].trim();
     let scope_locals = &scope.locals;
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
         scope_locals
@@ -90,7 +91,7 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     // the receiver's type_string (e.g. `Builder<Product>` carries the
     // concrete `Product` arg that must substitute `TModel`).
     let resolved_types =
-        crate::completion::resolver::resolve_target_classes(obj_text, AccessKind::Arrow, &rctx);
+        super::super::closure_resolution::resolve_receiver_types(obj_start, obj_end, &rctx);
     let receiver_classes = ResolvedType::into_arced_classes(resolved_types.clone());
 
     // For relation-query methods (whereHas, etc.), override the closure
@@ -304,19 +305,16 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
 ) -> Vec<PhpType> {
     let _ = scope; // scope not needed for static receiver resolution
 
-    let class_name = match class_expr {
-        Expression::Self_(_) => Some(ctx.current_class.name.to_string()),
-        Expression::Static(_) => Some(ctx.current_class.name.to_string()),
-        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-        _ => None,
-    };
-    let owner = class_name.and_then(|name| {
-        ctx.all_classes
-            .iter()
-            .find(|c| c.name == name)
-            .map(|c| ClassInfo::clone(c))
-            .or_else(|| (ctx.class_loader)(&name).map(Arc::unwrap_or_clone))
+    let owner = super::super::closure_resolution::static_receiver_class_name(
+        class_expr,
+        Some(ctx.current_class),
+    )
+    .and_then(|name| {
+        super::super::closure_resolution::find_owner_by_name(
+            &name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )
     });
     if let Some(ref cls) = owner {
         // For relation-query methods, override with Builder<RelatedModel>.
@@ -456,29 +454,6 @@ pub(crate) fn extract_callable_params_at_fw(
     vec![]
 }
 
-/// Extract the text of each argument from a call's argument list.
-pub(crate) fn extract_argument_texts_fw(
-    arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
-    content: &str,
-) -> Vec<String> {
-    arguments
-        .iter()
-        .map(|arg| {
-            let span = match arg {
-                Argument::Positional(pos) => pos.value.span(),
-                Argument::Named(named) => named.value.span(),
-            };
-            let start = span.start.offset as usize;
-            let end = span.end.offset as usize;
-            if end <= content.len() {
-                content[start..end].to_string()
-            } else {
-                String::new()
-            }
-        })
-        .collect()
-}
-
 /// Extract the text of the first positional argument, stripping quotes.
 pub(crate) fn extract_first_arg_string_fw(
     arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
@@ -542,13 +517,7 @@ pub(crate) fn infer_callable_params_for_call(
                 _ => None,
             };
             if let Some(ref name) = func_name {
-                infer_callable_params_from_function_fw(
-                    name,
-                    arg_idx,
-                    &fc.argument_list.arguments,
-                    scope,
-                    ctx,
-                )
+                infer_callable_params_from_function_fw(name, arg_idx, &fc.argument_list, scope, ctx)
             } else {
                 vec![]
             }

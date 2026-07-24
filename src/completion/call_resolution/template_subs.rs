@@ -632,22 +632,21 @@ impl Backend {
         {
             // self::class / static::class / parent::class resolve relative
             // to the class at the call site.
-            let class_named =
-                if name.eq_ignore_ascii_case("self") || name.eq_ignore_ascii_case("static") {
-                    ctx.current_class
-                        .map(|c| PhpType::Named(c.fqn().to_string()))
-                } else if name.eq_ignore_ascii_case("parent") {
-                    ctx.current_class
-                        .and_then(|c| c.parent_class.as_ref())
-                        .map(|p| PhpType::Named(p.to_string()))
+            let class_named = if is_self_or_static(name) {
+                ctx.current_class
+                    .map(|c| PhpType::Named(c.fqn().to_string()))
+            } else if name.eq_ignore_ascii_case("parent") {
+                ctx.current_class
+                    .and_then(|c| c.parent_class.as_ref())
+                    .map(|p| PhpType::Named(p.to_string()))
+            } else {
+                let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
+                    cls.fqn().to_string()
                 } else {
-                    let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
-                        cls.fqn().to_string()
-                    } else {
-                        name.to_string()
-                    };
-                    Some(PhpType::Named(resolved_name))
+                    name.to_string()
                 };
+                Some(PhpType::Named(resolved_name))
+            };
             return class_named.map(|n| PhpType::ClassString(Some(Box::new(n))));
         }
 
