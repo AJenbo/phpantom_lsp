@@ -263,46 +263,116 @@ PHPantom works best with Composer projects. It reads `composer.json` to discover
 
 ### `.phpantom.toml`
 
-PHPantom supports an optional per-project configuration file for settings like PHP version overrides and diagnostic toggles.
+PHPantom supports an optional per-project configuration file. A global
+config can also be placed at `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml`
+(typically `~/.config/phpantom_lsp/.phpantom.toml` on Linux). Project
+settings override global settings.
 
-To generate a default config file with all options documented and commented out:
+To generate a starter config file:
 
 ```bash
 phpantom_lsp init
 ```
 
-This creates a `.phpantom.toml` in the current directory. Currently supported settings:
+This creates a minimal `.phpantom.toml` with a JSON schema directive.
+Editors with TOML schema support (Zed, VS Code + Even Better TOML,
+Neovim) provide autocomplete and hover documentation for every option
+via the schema. Only add settings you want to override — when absent,
+all settings use their defaults.
+
+The full schema is at [`config-schema.json`](../config-schema.json).
+
+#### `[php]`
+
+| Key       | Type   | Default                     | Description |
+| --------- | ------ | --------------------------- | ----------- |
+| `version` | string | Inferred from composer.json | Override the detected PHP version (e.g. `"8.3"`). |
+
+#### `[diagnostics]`
+
+| Key                        | Type   | Default | Description |
+| -------------------------- | ------ | ------- | ----------- |
+| `unresolved-member-access` | bool   | `false` | Report `->`, `?->`, `::` on subjects whose type could not be resolved. Useful for type coverage, noisy on untyped codebases. |
+| `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
+| `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
+| `workspace`                | bool   | `true`  | Compute diagnostics for the whole workspace in the background after startup. Requires the default `full` indexing strategy. |
+| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. |
+
+##### `[[diagnostics.ignore]]`
+
+Rules that suppress matching diagnostics, similar to PHPStan's
+`ignoreErrors`. Each rule may constrain by `message` (regex), `path`
+(glob relative to workspace root), and/or `identifier` (diagnostic
+code). A diagnostic is suppressed when it matches every constraint
+present on a rule; omitted constraints match anything.
 
 ```toml
-[php]
-# Override the detected PHP version (default: inferred from composer.json, or 8.5).
-# version = "8.5"
+[[diagnostics.ignore]]
+path = "tests/**"
 
-[diagnostics]
-# Report member access on subjects whose type could not be resolved.
-# Useful for discovering gaps in type coverage. Off by default.
-# unresolved-member-access = true
-
-[indexing]
-# How PHPantom discovers classes across the workspace.
-#   "full"     (default) - scan PHP files and background-parse user files
-#   "composer"           - use Composer classmap, self-scan on fallback
-#   "self"               - always self-scan, ignore Composer classmap
-#   "none"               - no proactive scanning, Composer classmap only
-# strategy = "full"
-
-[formatting]
-# Explicit path to an external formatter: always use this tool and skip
-# require-dev auto-detection. Set to "" to disable that tool entirely.
-# pint = "/usr/local/bin/pint"
-# php-cs-fixer = "/usr/local/bin/php-cs-fixer"
-# phpcbf = "/usr/local/bin/phpcbf"
-
-# Timeout for external formatters, in milliseconds (default: 10000).
-# timeout = 10000
+[[diagnostics.ignore]]
+identifier = "deprecated_usage"
+message = "^Call to deprecated function some_legacy_helper\\(\\)"
 ```
 
-The file is optional. When absent, all settings use their defaults. New settings will be added as features land. Unknown keys are silently ignored, so the file is forward-compatible.
+#### `[indexing]`
+
+| Key        | Type   | Default  | Description |
+| ---------- | ------ | -------- | ----------- |
+| `strategy` | string | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
+
+#### `[formatting]`
+
+| Key            | Type    | Default | Description |
+| -------------- | ------- | ------- | ----------- |
+| `pint`         | string  | unset   | Command or path for Laravel Pint. Unset: auto-detect from `require-dev`. `""`: disable. |
+| `php-cs-fixer` | string  | unset   | Command or path for php-cs-fixer. Unset: auto-detect from `require-dev`. `""`: disable. |
+| `phpcbf`       | string  | unset   | Command or path for phpcbf. Unset: auto-detect from `require-dev`. `""`: disable. |
+| `timeout`      | integer | `10000` | Max runtime in milliseconds per external formatting tool. |
+
+#### `[phpstan]`
+
+| Key            | Type    | Default  | Description |
+| -------------- | ------- | -------- | ----------- |
+| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` then `$PATH`. `""`: disable. |
+| `memory-limit` | string  | `"1G"`   | Memory limit passed to PHPStan via `--memory-limit`. |
+| `timeout`      | integer | `60000`  | Max runtime in milliseconds before PHPStan is killed. |
+
+#### `[phpcs]`
+
+| Key        | Type    | Default | Description |
+| ---------- | ------- | ------- | ----------- |
+| `command`  | string  | unset   | Command or path for PHPCS. Unset: auto-detect via `vendor/bin/phpcs` then `$PATH`. `""`: disable. |
+| `standard` | string  | unset   | Coding standard to enforce (e.g. `"PSR12"`). Unset: PHPCS uses its own default detection. |
+| `timeout`  | integer | `30000` | Max runtime in milliseconds before PHPCS is killed. |
+
+#### `[mago]`
+
+Mago is only activated when `mago.toml` exists at the workspace root.
+
+| Key               | Type    | Default | Description |
+| ----------------- | ------- | ------- | ----------- |
+| `command`         | string  | unset   | Command or path for Mago. Unset: auto-detect via `vendor/bin/mago` then `$PATH`. `""`: disable. |
+| `lint-timeout`    | integer | `30000` | Max runtime in milliseconds before `mago lint` is killed. |
+| `analyze-timeout` | integer | `60000` | Max runtime in milliseconds before `mago analyze` is killed. |
+
+#### `[laravel]`
+
+##### `[laravel.schema]`
+
+| Key     | Type     | Default              | Description |
+| ------- | -------- | -------------------- | ----------- |
+| `enabled` | bool   | `true`               | Enable Laravel schema dump scanning for Eloquent model property inference. |
+| `paths`   | string[] | `["database/schema"]` | Schema dump files or directories to scan, relative to the workspace root. |
+
+##### `[laravel.migrations]`
+
+| Key     | Type     | Default | Description |
+| ------- | -------- | ------- | ----------- |
+| `enabled` | bool   | `true`  | Enable Laravel migration scanning for Eloquent model property inference. |
+| `paths`   | string[] | unset  | Migration files or directories to scan. Defaults to non-vendor `database/migrations` directories. |
+
+The file is optional. Unknown keys are silently ignored, so the file is forward-compatible.
 
 ### Code Formatting
 

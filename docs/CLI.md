@@ -260,9 +260,13 @@ writes nothing.
 
 ## `init`
 
-Creates a default `.phpantom.toml` in the current directory with all
-options documented and commented out. Safe to run if the file already
-exists (it will not overwrite).
+Creates a `.phpantom.toml` in the current directory with a JSON schema
+directive and a link to the configuration reference. The file is
+intentionally minimal — add only the settings you want to override.
+Editors with TOML schema support (Zed, VS Code + Even Better TOML,
+Neovim) provide autocomplete and hover documentation for all available
+options via the schema. Safe to run if the file already exists (it will
+not overwrite).
 
 ```sh
 phpantom_lsp init
