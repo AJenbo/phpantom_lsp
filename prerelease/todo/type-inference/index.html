@@ -1470,6 +1470,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T32. Audit <code>is_type_compatible</code>'s MAYBE escape hatches for core-engine gaps
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="T32. Audit is_type_compatible&#x27;s MAYBE escape hatches for core-engine gaps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#candidates-to-move-sound-currently-diagnostic-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Candidates to move (sound, currently diagnostic-only)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#must-stay-genuine-diagnostic-only-leniency" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Must stay (genuine diagnostic-only leniency)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#needs-deeper-look-before-deciding" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Needs deeper look before deciding
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1848,6 +1898,56 @@
       </span>
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T32. Audit <code>is_type_compatible</code>'s MAYBE escape hatches for core-engine gaps
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="T32. Audit is_type_compatible&#x27;s MAYBE escape hatches for core-engine gaps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#candidates-to-move-sound-currently-diagnostic-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Candidates to move (sound, currently diagnostic-only)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#must-stay-genuine-diagnostic-only-leniency" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Must stay (genuine diagnostic-only leniency)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#needs-deeper-look-before-deciding" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Needs deeper look before deciding
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2500,6 +2600,106 @@ call-site inference work in T25.</p>
 - PHPStan: closure return type inference in
   <code>ClosureReturnStatementsNode</code> / <code>TypeSpecifyingExtension</code> flow.
 - Psalm: <code>ClosureAnalyzer</code> return-type widening.</p>
+<hr />
+<h2 id="t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps">T32. Audit <code>is_type_compatible</code>'s MAYBE escape hatches for core-engine gaps<a class="headerlink" href="#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><code>is_type_compatible</code> (<code>src/diagnostics/type_errors/compatibility.rs</code>,
+moved there from <code>type_errors.rs</code> as part of a refactor split) is the
+diagnostic-policy layer over <code>class_lookup::is_subtype_of_typed</code>. It
+mixes two kinds of checks: sound subtype facts that happen to be
+implemented here instead of in the core engine, and genuine "MAYBE"
+leniency — cases where the types <em>might</em> be compatible at runtime but
+cannot be proven so statically, so the diagnostic stays silent to
+avoid false positives.</p>
+<p>The sound facts are candidates to move into
+<code>class_lookup::is_subtype_of_typed</code>, where every caller benefits
+(completion filtering, hover, other diagnostics), not just argument
+type mismatch. The MAYBE leniency must stay here — moving it into the
+core engine would make <code>is_subtype_of_typed</code> unsound for every other
+consumer. This item is the audit only; no semantics changed while
+filing it. Verify each candidate against <code>is_subtype_of_typed</code>'s
+current implementation before moving anything (it may already cover
+some of these).</p>
+<h3 id="candidates-to-move-sound-currently-diagnostic-only">Candidates to move (sound, currently diagnostic-only)<a class="headerlink" href="#candidates-to-move-sound-currently-diagnostic-only" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>param.is_object() &amp;&amp; arg.base_name().is_some()</code> → YES.</strong> Every
+  class/interface/enum instance is an <code>object</code>. Universally true, not
+  diagnostic-specific.</li>
+<li><strong><code>iterable</code>/<code>Traversable</code> generic params accept array-like or
+  <code>Traversable</code>-subtype args.</strong> <code>iterable</code> is <code>array|Traversable</code> in
+  PHP's type system; an array-like value or a <code>Traversable</code> subclass
+  always satisfies it. Not tagged MAYBE in the source — the code
+  already treats it as sound, just not in the core engine.</li>
+<li><strong>Closure/callable-string args → <code>callable</code> param.</strong> The
+  <code>arg_type.is_closure() || arg_type.is_callable()</code> half of the
+  "bare Closure/callable → callable" check is a direct fact. (The
+  "object-like might implement <code>__invoke</code>" half of the same check is
+  genuine MAYBE leniency — see below — so this rule needs to be split
+  before moving.)</li>
+<li><strong>Stringable objects → <code>string</code> param.</strong> When the class provably
+  implements <code>\Stringable</code> or declares <code>__toString()</code>, PHP performs
+  the conversion; this is a real, checkable fact via
+  <code>class_lookup::is_subtype_of(&amp;cls, "Stringable", …)</code> plus a
+  <code>__toString()</code> method-existence check, not a guess.</li>
+<li><strong>Non-nullable arg → nullable param: <code>X</code> satisfies <code>?X</code>.</strong> Basic
+  nullable subtyping, always true.</li>
+<li><strong><code>array&lt;K,V&gt;</code> → <code>array&lt;V&gt;</code> (2-param to 1-param).</strong> <code>array&lt;V&gt;</code> means
+  <code>array&lt;mixed,V&gt;</code>; a 2-param array's value type always fits when the
+  value types are individually compatible. Structural, not MAYBE.</li>
+<li><strong><code>array&lt;int,X&gt;</code>/generic array → <code>X[]</code> (array slice).</strong> The value
+  type of the generic form is always at least as specific as the
+  slice form.</li>
+<li><strong><code>list&lt;X&gt;</code> → <code>X[]</code>.</strong> A list is a stricter array (sequential int
+  keys from 0); it always satisfies the weaker slice constraint.</li>
+</ul>
+<h3 id="must-stay-genuine-diagnostic-only-leniency">Must stay (genuine diagnostic-only leniency)<a class="headerlink" href="#must-stay-genuine-diagnostic-only-leniency" title="Permanent link">&para;</a></h3>
+<p>Everything else tagged <code>MAYBE</code> in the source, notably:</p>
+<ul>
+<li>Refined-scalar-pair leniency (<code>string</code> → <code>non-empty-string</code>, <code>int</code>
+  → <code>positive-int</code>, etc.) and the <code>int</code> → <code>int&lt;min..max&gt;</code> case — the
+  base type is not actually a subtype of the refinement; we simply
+  cannot disprove it holds at runtime.</li>
+<li>Union-argument "any member compatible" handling — intentionally
+  unsound (documented as such: "the developer may have narrowed the
+  type in a way we can't see"). A sound union-argument rule requires
+  <em>every</em> member to be compatible.</li>
+<li>Bare <code>array</code> ↔ typed array/shape (both directions), <code>X[]</code> ↔
+  <code>array&lt;K,V&gt;</code> reverse direction, <code>X[]</code> ↔ <code>list&lt;X&gt;</code> reverse direction,
+  and array-shape superset/subset acceptance — these accept without
+  checking value-type compatibility in several cases and are
+  explicitly approximate ("arrays are open by convention").</li>
+<li>The reverse-direction class hierarchy MAYBE (accepting a broader
+  declared type where a narrower one might hold at runtime unless the
+  arg's class is <code>final</code>) — an intentional PHPStan-incompatible
+  leniency for resolver under-narrowing, documented at length in the
+  source. This is PHPantom-specific diagnostic policy, not a type
+  fact.</li>
+<li>Arrayable/<code>ArrayAccess</code> arg → bare <code>array</code> param — structural
+  substitutability, not actual PHP array subtyping.</li>
+<li><code>strict_types</code>-conditional PHP type-juggling rules (int/float →
+  string, numeric-string → int/float, <code>numeric</code> → int/float) — these
+  depend on a per-file <code>declare(strict_types=…)</code> setting that
+  <code>is_subtype_of_typed</code> has no parameter for today. Could be
+  revisited if the core engine ever gains strict-types awareness, but
+  that is a larger structural change out of scope here.</li>
+<li><code>model-property&lt;Model&gt;</code> string-literal validation — Larastan/Laravel
+  convention, framework-specific, not general PHP typing.</li>
+<li>Same-base generic covariance and the union/intersection-parameter
+  recursive checks — these recurse into <code>is_type_compatible</code> itself
+  (not <code>is_subtype_of_typed</code>) specifically so nested positions get the
+  MAYBE rules too; they are structural glue, not a separable fact.</li>
+</ul>
+<h3 id="needs-deeper-look-before-deciding">Needs deeper look before deciding<a class="headerlink" href="#needs-deeper-look-before-deciding" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Array-shape-superset-accepts-subset and <code>ArrayShape</code> ↔ typed-array
+  rules currently return <code>true</code> without checking that shared/known
+  value types are actually compatible (e.g. <code>array{id: string}</code> would
+  be accepted for <code>array&lt;string,int&gt;</code> unconditionally). Even if kept
+  as diagnostic-only leniency, tightening these to check per-key/
+  per-value compatibility instead of blanket-accepting would reduce
+  false negatives without introducing false positives — a smaller,
+  separate follow-up from the move-to-core question above.</li>
+</ul>
 
 
 

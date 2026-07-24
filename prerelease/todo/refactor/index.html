@@ -1838,87 +1838,15 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>Recommended order: do tasks 2 → 3 → 4 in that order (4 renames fields
-across the whole crate, so it goes last to avoid churning code that 2
-and 3 are about to move).</p>
-<p>All three tasks are pure internal refactors. None of them gets a
+<p>Recommended order: 3 → 4 → 5. Tasks 4 and 5 both churn the whole crate
+(4 renames <code>Backend</code> fields, 5 moves the type-engine modules), so they
+go last to avoid re-touching code that 3 moves; do 4 before 5 so 5's
+module moves don't collide with 4's field renames.</p>
+<p>All three remaining tasks are pure internal refactors. None gets a
 changelog entry unless the work uncovers and fixes a concrete
 user-visible bug. Run the Rust CI checks (<code>cargo nextest run</code>, <code>cargo
 clippy -- -D warnings</code>, <code>cargo clippy --tests -- -D warnings</code>, <code>cargo
 fmt</code>) after each task.</p>
-<h2 id="2-split-diagnosticsmodrs-around-its-thin-orchestrator">2. Split <code>diagnostics/mod.rs</code> around its thin orchestrator<a class="headerlink" href="#2-split-diagnosticsmodrs-around-its-thin-orchestrator" title="Permanent link">&para;</a></h2>
-<p><strong>What to do.</strong> The actual orchestrator (<code>collect_slow_diagnostics</code>,
-at ~line 240, ~85 lines) is fine, but it is buried in a 3,391-line
-<code>src/diagnostics/mod.rs</code>. This is pure code motion plus one shared
-context struct — no behavior changes. Rust allows <code>impl Backend</code>
-blocks in any file of the crate, so moving a method means moving it
-into a new <code>impl Backend</code> block in the new file; nothing needs to
-become free functions.</p>
-<p><strong>Step 1 — external-tool pipelines → <code>diagnostics/external/</code>.</strong>
-Create <code>src/diagnostics/external/{mod,phpstan,phpcs,mago}.rs</code> and move
-the four subprocess spawn/debounce/parse pipelines out of <code>mod.rs</code>:
-<code>schedule_phpstan</code> (~line 1299), <code>schedule_phpcs</code> (~1474),
-<code>schedule_mago_lint</code> (~1632), and <code>schedule_mago_analyze</code> (~1764,
-both mago pipelines go in <code>mago.rs</code>) — roughly 730 lines — each with
-the private helpers only it uses. Helpers shared by two or more
-pipelines go in <code>external/mod.rs</code>. Do <strong>not</strong> move
-<code>schedule_diagnostics</code>, <code>schedule_external_diagnostics</code>, or
-<code>schedule_diagnostics_for_open_files</code> (~1077–1298): those are the
-native debounce orchestration and stay in <code>mod.rs</code>.</p>
-<p><strong>Step 2 — staleness reconciliation → <code>diagnostics/stale.rs</code>.</strong>
-Move <code>is_stale_phpstan_diagnostic</code> (~line 467) plus every helper only
-it uses (~335 lines reconciling cached external diagnostics with
-edits).</p>
-<p><strong>Step 3 — post-processing policy → <code>diagnostics/suppression.rs</code>.</strong>
-Move <code>filter_suppressed</code> (~line 2034), <code>suppress_imprecise_overlaps</code>
-(~2071), and <code>is_full_line_range</code> (~2159) — ~230 lines.</p>
-<p><strong>Step 4 — shared <code>FileDiagnosticContext</code>.</strong> Seven symbol-span
-collectors (<code>unknown_classes.rs</code>, <code>unknown_functions.rs</code>,
-<code>deprecated.rs</code>, <code>implementation_errors.rs</code>, <code>invalid_class_kind.rs</code>,
-<code>unknown_members/mod.rs</code>, <code>unused_imports.rs</code>) open with variations of
-the same lock-gathering preamble. Define, next to the existing
-<code>diagnostics/helpers.rs</code> utilities, a struct holding the per-file
-snapshot they gather: <code>symbol_map: Arc&lt;SymbolMap&gt;</code>,
-<code>resolved_names: Option&lt;Arc&lt;OwnedResolvedNames&gt;&gt;</code>, the file's use map
-(from <code>file_imports</code>), its <code>Vec&lt;NamespaceSpan&gt;</code> (from
-<code>file_namespaces</code>), and its local classes (from <code>uri_classes_index</code>).
-Give it a constructor like <code>FileDiagnosticContext::gather(&amp;Backend,
-uri) -&gt; Option&lt;Self&gt;</code> (returning <code>None</code> when no symbol map exists,
-which is every collector's current early-out). Build it <strong>once</strong> in
-<code>collect_slow_diagnostics</code> and pass <code>&amp;FileDiagnosticContext</code> to the
-seven collectors; collectors that need only some fields just ignore
-the rest. Before changing collector signatures, grep for callers
-outside <code>collect_slow_diagnostics</code> (the <code>analyse/</code> CLI path, code
-actions, and tests call some collectors directly); any such caller
-builds its own context via <code>gather</code>. Besides deduplication, the shared
-snapshot guarantees all collectors observe consistent state instead of
-re-reading locks that a concurrent parse may update between
-collectors.</p>
-<p><strong>Step 5 — split <code>type_errors.rs</code>.</strong> Convert
-<code>src/diagnostics/type_errors.rs</code> (1,538 lines) into a directory and
-move <code>is_type_compatible</code> (starts at ~line 76, ~730 lines) plus the
-predicates only it uses (<code>is_bare_array</code>, <code>is_refined_scalar_pair</code>,
-etc.) to <code>type_errors/compatibility.rs</code>. It is the diagnostic-policy
-layer over <code>crate::class_lookup::is_subtype_of_typed</code>.</p>
-<p><strong>Step 6 — file the MAYBE audit, do not act on it.</strong> While moving
-<code>is_type_compatible</code>, list its "MAYBE escape hatches" (IntRange,
-union handling, iterable/Traversable, bare Closure/callable, bare
-array, nullable → non-nullable) and assess which ones describe real
-subtype relationships that belong in
-<code>class_lookup::is_subtype_of_typed</code> where all callers would benefit,
-versus diagnostic-only leniency that must stay in the policy layer.
-Do <strong>not</strong> move any semantics in this task — file the candidates with
-reasoning in <code>docs/todo/type-inference.md</code>.</p>
-<p><strong>Acceptance.</strong> <code>cargo nextest run</code> passes with no test edits (except
-mechanical import-path updates); <code>mod.rs</code> shrinks to the orchestrator,
-scheduling, and publishing logic; behavior is unchanged.</p>
-<p><strong>Why it matters.</strong> Diagnostics is the most actively developed area;
-new collectors keep landing in a module whose entry file is 75%
-unrelated scheduling and filtering code. The <code>external/</code> split also
-directly de-risks the scheduled D10 task (PHPMD proxy — a fifth
-external-tool pipeline that gets a formulaic home instead of growing
-<code>mod.rs</code> further).</p>
-<hr />
 <h2 id="3-move-workspace-initindexing-out-of-serverrs-and-referencesmodrs">3. Move workspace init/indexing out of <code>server.rs</code> and <code>references/mod.rs</code><a class="headerlink" href="#3-move-workspace-initindexing-out-of-serverrs-and-referencesmodrs" title="Permanent link">&para;</a></h2>
 <p><strong>What to do.</strong> <code>src/server.rs</code> (4,007 lines) ends with an
 <code>impl Backend</code> block of workspace initialization and indexing
@@ -2010,6 +1938,57 @@ or clone semantics change.</p>
 <p><strong>Why it matters.</strong> Group 1 directly de-risks the scheduled D10 task;
 the rest makes the Backend's state graph legible and shrinks the
 constructors.</p>
+<hr />
+<h2 id="5-extract-the-shared-type-engine-out-of-completion">5. Extract the shared type engine out of <code>completion/</code><a class="headerlink" href="#5-extract-the-shared-type-engine-out-of-completion" title="Permanent link">&para;</a></h2>
+<p><strong>What to do.</strong> Despite the name, <code>src/completion/</code> houses the
+project's single type-resolution engine — the code that answers "what
+is the type of this expression here?" — consumed by diagnostics, hover,
+go-to-definition, and signature help, not just completion. The name
+misleads every new contributor and buries the most load-bearing
+subsystem inside a feature module. Move the engine into a top-level
+module (proposed <code>src/type_engine/</code>; name negotiable but <strong>not</strong>
+<code>resolve</code>/<code>resolution</code>, which collide with the existing <code>resolution.rs</code>
+class/function <em>name</em> lookup), leaving <code>completion/</code> with only
+completion-specific code. This is pure code motion — <code>impl Backend</code>
+blocks can live in any file of the crate, so methods move without
+becoming free functions.</p>
+<p><strong>Engine subtrees to move</strong> (whole directories): <code>completion/resolver/</code>,
+<code>completion/call_resolution/</code>, <code>completion/types/</code>, and the
+type-resolution half of <code>completion/variable/</code> — <code>resolution.rs</code>,
+<code>forward_walk/</code>, <code>rhs_resolution/</code>, <code>foreach_resolution.rs</code>,
+<code>closure_resolution.rs</code>, <code>class_string_resolution.rs</code>,
+<code>raw_type_inference.rs</code>. The root-level <code>subject_expr.rs</code>,
+<code>subject_extraction.rs</code>, and <code>subject_resolution.rs</code> are part of the
+engine too — fold them in.</p>
+<p><strong>Stays in <code>completion/</code>:</strong> <code>handler/</code>, <code>context/</code>, <code>phpdoc/</code>,
+<code>builder.rs</code>, <code>target.rs</code>, <code>array_shape.rs</code>, <code>array_callable.rs</code>,
+<code>named_args.rs</code>, <code>use_edit.rs</code>, <code>eloquent_string.rs</code>,
+<code>laravel_route_controller.rs</code>, <code>laravel_string_keys.rs</code>, and the one
+non-clean split: <code>completion/variable/completion.rs</code> is variable <em>name</em>
+completion (scope collection for the completion list), not type
+resolution, so it stays while its sibling type-resolution files move.</p>
+<p><strong>Steps.</strong>
+1. Create the new module and move the engine subtrees into it, updating
+   <code>mod</code>/<code>use</code> declarations.
+2. Split <code>completion/variable/</code>: keep <code>completion.rs</code> (and any
+   scope-collection helpers only it uses) under <code>completion/</code>; move the
+   rest under <code>&lt;engine&gt;/variable/</code>.
+3. Update imports crate-wide (<code>crate::completion::resolver::…</code> →
+   <code>crate::type_engine::resolver::…</code>, etc.). Add thin <code>pub use</code>
+   re-exports in <code>completion/mod.rs</code> only if they meaningfully shrink
+   the diff; otherwise fix call sites directly.
+4. Update the module map and the "shared type engine lives under
+   <code>completion/</code>" note in <code>docs/ARCHITECTURE.md</code>, and the Project
+   Structure landmark in <code>AGENTS.md</code>, to point at the new module.</p>
+<p><strong>Acceptance.</strong> <code>cargo nextest run</code> passes with only mechanical
+import-path updates; behavior is unchanged; <code>completion/</code> contains only
+completion features; the type engine has one obvious top-level home.</p>
+<p><strong>Why it matters.</strong> Anti-pattern #6 in <code>AGENTS.md</code> ("do not build a
+second type-resolution path") depends on the engine being
+discoverable. While it hides under <code>completion/</code>, contributors reach
+for a "simpler" local resolver instead of finding the shared one. This
+is the largest churn of the set (crate-wide import moves), so it goes
+last.</p>
 <hr />
 
 
