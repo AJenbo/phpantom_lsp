@@ -322,7 +322,10 @@ impl Backend {
         ) {
             return None;
         }
-        if class.parent_class.is_none() && class.interfaces.is_empty() {
+        if class.parent_class.is_none()
+            && class.interfaces.is_empty()
+            && class.used_traits.is_empty()
+        {
             return None;
         }
 
