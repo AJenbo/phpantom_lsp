@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784920038902,
+  "lastUpdate": 1784921354849,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20239,6 +20239,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 92.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "517879c7efbd2c50e3717a4a74ba12f36b640152",
+          "message": "docs: center README badges and promote documentation link\n\nMove badges into the centered icon block so they render beneath the\nlogo instead of left-aligned. Add a documentation link above the\nfeature table so new visitors find the docs site immediately rather\nthan scrolling past the comparison matrix first.",
+          "timestamp": "2026-07-24T14:13:52-05:00",
+          "tree_id": "a77a00ee2f72509b36dce212cfca43624782e591",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/517879c7efbd2c50e3717a4a74ba12f36b640152"
+        },
+        "date": 1784921351935,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 96.4,
             "unit": "MiB"
           }
         ]
