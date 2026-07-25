@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784968018349,
+  "lastUpdate": 1784972321698,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21259,6 +21259,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "468a0e16abaa7a90b25f67a161f86b9eeb933de1",
+          "message": "Lower memory use when flattening generic class hierarchies",
+          "timestamp": "2026-07-25T11:21:44+02:00",
+          "tree_id": "fc69942cb0003ea327952df16b10f551bdfed7d1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/468a0e16abaa7a90b25f67a161f86b9eeb933de1"
+        },
+        "date": 1784972318931,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.5,
             "unit": "MiB"
           }
         ]
