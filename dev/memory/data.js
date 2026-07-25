@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784942026242,
+  "lastUpdate": 1784943197279,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20443,6 +20443,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 97.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "eba0193372c3ac554605b440c922cbe1545377d2",
+          "message": "Move the type engine out of the compleation module",
+          "timestamp": "2026-07-25T03:16:52+02:00",
+          "tree_id": "89a7ef001fadce4e2086aa923bd133b1cb7a8574",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/eba0193372c3ac554605b440c922cbe1545377d2"
+        },
+        "date": 1784943194995,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 48,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 98.3,
             "unit": "MiB"
           }
         ]
