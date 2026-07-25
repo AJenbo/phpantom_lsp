@@ -193,14 +193,14 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
     // `write()` on the same index, which blocks forever waiting for this
     // thread's own outstanding reader (a temporary in a `match` scrutinee
     // lives to the end of the `match`).
-    let indexed = backend.fqn_uri_index.read().get(fqn).cloned();
+    let indexed = backend.symbols.fqn_uri_index.read().get(fqn).cloned();
     let uri = match indexed {
         Some(uri) => uri,
         None => {
             // Not yet in the class index (e.g. a lazily-loaded PSR-4 project).
             // Parsing the class populates its FQN → URI entry.
             backend.find_or_load_class(fqn)?;
-            backend.fqn_uri_index.read().get(fqn).cloned()?
+            backend.symbols.fqn_uri_index.read().get(fqn).cloned()?
         }
     };
     if let Some(content) = backend.get_file_content(&uri) {
@@ -213,7 +213,7 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
 /// Read a `config/*.php` file, preferring an open editor buffer over disk.
 /// Mirrors the auth-config reader so in-editor edits take effect immediately.
 fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
-    let root = backend.workspace_root.read().clone()?;
+    let root = backend.workspace.workspace_root.read().clone()?;
     let path = root.join("config").join(file_name);
     if !path.is_file() {
         return None;
@@ -316,7 +316,7 @@ fn parse_config_facade_aliases(content: &str) -> HashMap<String, String> {
 }
 
 /// What a facade's `getFacadeAccessor()` returns.
-enum FacadeAccessor {
+pub(crate) enum FacadeAccessor {
     /// A container-binding string (`return 'view';`), looked up in the core
     /// container alias table to find the concrete class.
     Alias(String),
@@ -330,7 +330,7 @@ enum FacadeAccessor {
 /// Facades declare `protected static function getFacadeAccessor()` returning
 /// either a container-binding string or a `::class` reference. Returns `None`
 /// when the method is absent or returns anything else (e.g. a computed value).
-fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
+pub(crate) fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
     with_parsed(content, |program, resolved| {
         let return_value = find_facade_accessor_return(Node::Program(program))?;
         if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
@@ -338,6 +338,48 @@ fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
         }
         class_const_fqn(return_value, resolved).map(FacadeAccessor::Class)
     })
+}
+
+/// Like [`parse_facade_accessor`] but scoped to the class named
+/// `class_name` within `content`.
+///
+/// A single file may declare several facades (or a facade alongside
+/// unrelated classes), so resolving the accessor for a specific facade
+/// must not pick up the first `getFacadeAccessor()` in the file. Returns
+/// `None` when no class of that name is present (e.g. the facade lives in
+/// another file).
+pub(crate) fn parse_facade_accessor_for_class(
+    content: &str,
+    class_name: &str,
+) -> Option<FacadeAccessor> {
+    with_parsed(content, |program, resolved| {
+        let return_value =
+            find_facade_accessor_return_in_class(Node::Program(program), class_name)?;
+        if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
+            return Some(FacadeAccessor::Alias(text.to_string()));
+        }
+        class_const_fqn(return_value, resolved).map(FacadeAccessor::Class)
+    })
+}
+
+/// Find the `getFacadeAccessor()` return value inside the class named
+/// `class_name` reachable from `node`.
+fn find_facade_accessor_return_in_class<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    class_name: &str,
+) -> Option<&'ast Expression<'arena>> {
+    if let Node::Class(class) = node
+        && bytes_to_str(class.name.value).eq_ignore_ascii_case(class_name)
+    {
+        return find_facade_accessor_return(node);
+    }
+    let mut found = None;
+    node.visit_children(|child| {
+        if found.is_none() {
+            found = find_facade_accessor_return_in_class(child, class_name);
+        }
+    });
+    found
 }
 
 /// Find the first return-statement value inside a `getFacadeAccessor()` method

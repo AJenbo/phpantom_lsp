@@ -20,12 +20,12 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::names::OwnedResolvedNames;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 
 use super::helpers::{
-    compute_use_line_ranges, is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
+    FileDiagnosticContext, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic,
+    resolve_to_fqn,
 };
 
 /// Diagnostic code used for invalid-class-kind diagnostics.
@@ -46,31 +46,33 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
+        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
+            return;
         };
+        self.collect_invalid_class_kind_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let file_resolved_names: Option<Arc<OwnedResolvedNames>> =
-            self.resolved_names.read().get(uri).cloned();
-
-        let file_use_map = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
-        let local_classes: Vec<Arc<ClassInfo>> = self
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
+    /// Same as [`Self::collect_invalid_class_kind_diagnostics`] but
+    /// reuses an already-gathered [`FileDiagnosticContext`] instead of
+    /// re-reading the per-file locks. Used by `collect_slow_diagnostics`
+    /// so all slow collectors in the same pass share one consistent
+    /// snapshot.
+    pub(crate) fn collect_invalid_class_kind_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let file_resolved_names = &ctx.file.resolved_names;
+        let file_use_map = &ctx.file.use_map;
+        let file_namespace = &ctx.file.namespace;
+        let local_classes = &ctx.file.classes;
 
         let use_line_ranges = compute_use_line_ranges(content);
 
-        let ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&ctx);
+        let class_loader = self.class_loader(&ctx.file);
 
         for span in &symbol_map.spans {
             let (ref_name, is_fqn, ref_ctx) = match &span.kind {
@@ -105,12 +107,12 @@ impl Backend {
             // Resolve to FQN.
             let fqn = if is_fqn {
                 ref_name.to_string()
-            } else if let Some(ref rn) = file_resolved_names {
+            } else if let Some(rn) = file_resolved_names {
                 rn.get(span.start)
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| resolve_to_fqn(ref_name, &file_use_map, &file_namespace))
+                    .unwrap_or_else(|| resolve_to_fqn(ref_name, file_use_map, file_namespace))
             } else {
-                resolve_to_fqn(ref_name, &file_use_map, &file_namespace)
+                resolve_to_fqn(ref_name, file_use_map, file_namespace)
             };
 
             // Try to load the class.  If it's not found, skip — the

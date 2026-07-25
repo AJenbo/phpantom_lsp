@@ -10,7 +10,7 @@
 // Re-export SubjectExpr and BracketSegment from their canonical module
 // so that existing `use crate::types::{SubjectExpr, BracketSegment, …}`
 // paths continue to work.
-pub use crate::subject_expr::{BracketSegment, SubjectExpr};
+pub use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -46,7 +46,7 @@ pub type MethodStore = Arc<parking_lot::RwLock<HashMap<MethodStoreKey, Arc<Metho
 ///
 /// Used by docblock generation and throws analysis to look up cross-file
 /// function metadata.
-pub type FunctionLoader<'a> = Option<&'a dyn Fn(&str) -> Option<FunctionInfo>>;
+pub type FunctionLoader<'a> = Option<&'a dyn Fn(&str, u32) -> Option<FunctionInfo>>;
 
 // ─── PHP Version ────────────────────────────────────────────────────────────
 
@@ -1797,6 +1797,21 @@ pub struct ClassInfo {
     /// defaults, column names). `None` for non-Laravel classes to avoid
     /// per-class allocation overhead.
     pub laravel: Option<Box<LaravelMetadata>>,
+    /// Cached fully-qualified name, populated by [`cache_fqn`] once the
+    /// namespace has been stamped onto the class (see `parser/ast_update.rs`
+    /// and `resolution.rs`). `name` and `file_namespace` are never mutated
+    /// after that point, so the cache never goes stale.
+    ///
+    /// `None` for classes whose FQN has not been cached (synthetic classes,
+    /// classes still under construction); [`fqn`] falls back to computing it
+    /// on demand, which is what every caller did unconditionally before.
+    ///
+    /// Kept out of [`signature_eq`] because it is derived from `name` +
+    /// `file_namespace`, both of which are already compared there.
+    ///
+    /// Construct with `fqn: None` and populate via [`cache_fqn`]; never set a
+    /// value here directly.
+    pub fqn: Option<Atom>,
 }
 
 // ─── ClassInfo helpers ──────────────────────────────────────────────────────
@@ -1808,10 +1823,28 @@ impl ClassInfo {
     /// (e.g. `"App\\Models\\User"`).  When no namespace is set, returns
     /// the short name as-is.
     pub fn fqn(&self) -> Atom {
+        match self.fqn {
+            Some(fqn) => fqn,
+            None => self.compute_fqn(),
+        }
+    }
+
+    /// Compute the FQN from `name` + `file_namespace` without consulting the
+    /// cache. Allocates a temporary `String` to intern the joined name when a
+    /// namespace is present; returns `name` as-is otherwise (no allocation).
+    fn compute_fqn(&self) -> Atom {
         match &self.file_namespace {
             Some(ns) if !ns.is_empty() => crate::atom::atom(&format!("{}\\{}", ns, self.name)),
             _ => self.name,
         }
+    }
+
+    /// Populate the cached FQN. Call this once the namespace has been stamped
+    /// onto the class (parse/index load), after which `name` and
+    /// `file_namespace` are immutable, so the cache cannot go stale.
+    #[inline]
+    pub fn cache_fqn(&mut self) {
+        self.fqn = Some(self.compute_fqn());
     }
 
     /// Rebuild the `method_index` from the current `methods` vec.

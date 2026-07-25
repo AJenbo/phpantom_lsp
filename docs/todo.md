@@ -25,14 +25,13 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-|     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5-mago-style-separated-metadata)                                                                                | High        | High        |
 | P31 | [Reference index stores per-span entries when consumers only read distinct URIs](todo/performance.md#p31-reference-index-stores-per-span-entries-when-consumers-only-read-distinct-uris)          | Medium      | Low-Medium  |
 | P33 | [Workspace diagnostics leaves the whole project fully resolved in memory](todo/performance.md#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory) | High        | Medium-High |
-| P9  | [`resolved_class_cache` generic-arg specialisation](todo/performance.md#p9-resolved_class_cache-generic-arg-specialisation) | Medium      | Medium      |
 | X10 | [Interactive requests block on the workspace index lock during initial indexing](todo/indexing.md#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing) | Medium      | Medium      |
 | L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |
-| L18 | [`Macroable::mixin()` registrations](todo/laravel.md#l18-macroablemixin-registrations)                                                                          | Low         | Medium      |
-| L1  | [Facade completion](todo/laravel.md#l1-facade-completion--upstream-method-template-improvement)                                                                 | High        | High        |
+| L18 | [`Macroable::mixin()` registrations](todo/laravel.md)                                                                          | Low         | Medium      |
+| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -70,7 +69,7 @@ unlikely to move the needle for most users.
 |     | **[Completion](todo/completion.md)**                                                                                                                                        |             |             |
 | C1  | Array functions needing new code paths                                                                                                                                      | Medium      | High        |
 | C9  | [Lazy documentation via `completionItem/resolve`](todo/completion.md#c9-lazy-documentation-via-completionitemresolve)                                                       | Medium      | Medium      |
-| C11 | [Smarter member ordering after `->` / `::`](todo/completion.md#c11-smarter-member-ordering-after----)                                                                       | Medium      | Medium      |
+| C11 | [Smarter member ordering after `->` / `::`](todo/completion.md#c11-smarter-member-ordering-after-)                                                                       | Medium      | Medium      |
 | C8  | [Filesystem proximity as an affinity tiebreaker](todo/completion.md#c8-filesystem-proximity-as-an-affinity-tiebreaker)                                                      | Low-Medium  | Low         |
 | C3  | Go-to-definition for array shape keys via bracket access                                                                                                                    | Low-Medium  | Medium      |
 | C7  | `class_alias()` support                                                                                                                                                     | Low-Medium  | Medium      |
@@ -86,6 +85,7 @@ unlikely to move the needle for most users.
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | Medium      |
 | T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium      |
 | T25 | [Call-site template argument inference for callable parameters](todo/type-inference.md#t25-call-site-template-argument-inference-for-callable-parameters) (partially done)  | Medium      | Medium      |
+| T32 | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | Medium      |
 | T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Low         |
 | T24 | [`stdClass` dynamic property access](todo/type-inference.md#t24-stdclass-dynamic-property-access)                                                                           | Low-Medium  | Low         |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Low-Medium  |
@@ -101,21 +101,20 @@ unlikely to move the needle for most users.
 | D14 | [Tighten argument type mismatch diagnostic (Phase 2)](todo/diagnostics.md#d14-tighten-argument-type-mismatch-diagnostic-phase-2)                                            | High        | Medium      |
 | D13 | [Unify diagnostic subject resolution with completion/hover](todo/diagnostics.md#d13-unify-diagnostic-subject-resolution-with-completionhover)                              | Medium      | Medium      |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Low         |
-| D3  | [Deprecated rendering — chain subject resolution](todo/diagnostics.md#d3-deprecated-rendering--chain-subject-resolution)                                                    | Low-Medium  | Medium      |
+| D3  | [Deprecated rendering — chain subject resolution](todo/diagnostics.md#d3-deprecated-rendering-chain-subject-resolution)                                                    | Low-Medium  | Medium      |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B1  | [`resolve_function_name` guesses a single namespace, missing same-file multi-namespace declarations](todo/bugs.md#b1-resolve_function_name-guesses-a-single-namespace-missing-same-file-multi-namespace-declarations) | Low-Medium  | Medium      |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
 | A16 | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Low-Medium  |
-| A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos--str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Low         |
+| A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos-str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Low         |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
 | A29 | [Simplify boolean return](todo/actions.md#a29-simplify-boolean-return) (`if (cond) return true; return false;` → `return cond;`)                                            | Low-Medium  | Medium      |
 | A31 | [Remove always-else](todo/actions.md#a31-remove-always-else-extract-guard-clause) (extract guard clause)                                                                    | Low-Medium  | Medium      |
 | A34 | [Unified code action handler architecture](todo/actions.md#a34-unified-code-action-handler-architecture) (closure-based resolve, unified fix type)                          | Medium      | Medium-High |
-| A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with---nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium      |
+| A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with-nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium      |
 | A38 | [Convert if/elseif chain to switch](todo/actions.md#a38-convert-ifelseif-chain-to-switch)                                                                                   | Low-Medium  | Medium      |
 | A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 | A43 | [Update docblock generics](todo/actions.md#a43-update-docblock-generics)                                                                                                    | Low         | Low-Medium  |
@@ -129,16 +128,16 @@ unlikely to move the needle for most users.
 | H23 | `instanceof.alwaysTrue` — remove redundant instanceof check                                                                                                                 | Low         | Low         |
 | H24 | `catch.neverThrown` — remove unnecessary catch clause                                                                                                                       | Low         | Low         |
 |     | **[CLI Fix Rules](todo/fix-cli.md)**                                                                                                                                        |             |             |
-| FX1 | [`deprecated` — replace deprecated symbol usage](todo/fix-cli.md#fx1-deprecated--replace-deprecated-symbol-usage)                                                           | Medium      | Medium      |
-| FX2 | [`unused_variable` — remove unused variables](todo/fix-cli.md#fx2-unused_variable--remove-unused-variables)                                                                 | Medium      | Medium      |
-| FX3 | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype--remove-unused-type-from-return-union)                     | Medium      | Medium      |
-| FX4 | [`phpstan.missingType.iterableValue` — add `@return` with iterable type](todo/fix-cli.md#fx4-phpstanmissingtypeiterablevalue--add-return-with-iterable-type)                | Medium      | Medium      |
-| FX5 | [`phpstan.property.unused` / `phpstan.method.unused` — remove unused member](todo/fix-cli.md#fx5-phpstanpropertyunused--phpstanmethodunused--remove-unused-member)          | Low         | Low         |
-| FX6 | [`phpstan.generics.callSiteVarianceRedundant` — remove redundant variance](todo/fix-cli.md#fx6-phpstangenericscallsitevarianceredundant--remove-redundant-variance)         | Low         | Low         |
-| FX7 | [`add_return_type` — generate `@return` docblocks from function bodies](todo/fix-cli.md#fx7-add_return_type--generate-return-docblocks-from-function-bodies)                | Medium-High | Medium      |
+| FX1 | [`deprecated` — replace deprecated symbol usage](todo/fix-cli.md#fx1-deprecated-replace-deprecated-symbol-usage)                                                           | Medium      | Medium      |
+| FX2 | [`unused_variable` — remove unused variables](todo/fix-cli.md#fx2-unused_variable-remove-unused-variables)                                                                 | Medium      | Medium      |
+| FX3 | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union)                     | Medium      | Medium      |
+| FX4 | [`phpstan.missingType.iterableValue` — add `@return` with iterable type](todo/fix-cli.md#fx4-phpstanmissingtypeiterablevalue-add-return-with-iterable-type)                | Medium      | Medium      |
+| FX5 | [`phpstan.property.unused` / `phpstan.method.unused` — remove unused member](todo/fix-cli.md#fx5-phpstanpropertyunused-phpstanmethodunused-remove-unused-member)          | Low         | Low         |
+| FX6 | [`phpstan.generics.callSiteVarianceRedundant` — remove redundant variance](todo/fix-cli.md#fx6-phpstangenericscallsitevarianceredundant-remove-redundant-variance)         | Low         | Low         |
+| FX7 | [`add_return_type` — generate `@return` docblocks from function bodies](todo/fix-cli.md#fx7-add_return_type-generate-return-docblocks-from-function-bodies)                | Medium-High | Medium      |
 |     | **[LSP Features](todo/lsp-features.md)**                                                                                                                                    |             |             |
 | F11 | [VS Code extension](todo/lsp-features.md#f11-vs-code-extension)                                                                                                              | High        | Medium      |
-| F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij--phpstorm-plugin)                                                                                            | High        | Medium      |
+| F12 | [IntelliJ / PHPStorm plugin](todo/lsp-features.md#f12-intellij-phpstorm-plugin)                                                                                            | High        | Medium      |
 | F13 | [Homebrew formula](todo/lsp-features.md#f13-homebrew-formula)                                                                                                                | Medium      | Low         |
 | F17 | [Class move with reference update](todo/lsp-features.md#f17-class-move-with-reference-update)                                                                               | Medium      | Medium-High |
 | F18 | [Fix namespace/class name from PSR-4](todo/lsp-features.md#f18-fix-namespaceclass-name-from-psr-4)                                                                          | Medium      | Medium      |
@@ -148,24 +147,24 @@ unlikely to move the needle for most users.
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr) (depends on F13)                                                                                            | Low-Medium  | Low         |
 | F3  | [Incremental text sync](todo/lsp-features.md#f3-incremental-text-sync)                                                                                                       | Low-Medium  | Medium      |
-| F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type--brace-de-indent)                                                                                            | Low         | Low         |
-| F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test--implementation-navigation-via-covers)                                                        | Low         | Medium      |
+| F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type-brace-de-indent)                                                                                            | Low         | Low         |
+| F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | F19 | [Connect to a remote/TCP language server](todo/lsp-features.md#f19-connect-to-a-remotetcp-language-server-vs-code-extension)                                               | Low         | Low-Medium  |
 |     | **[Signature Help](todo/signature-help.md)**                                                                                                                                |             |             |
 | S1  | [Attribute constructor signature help](todo/signature-help.md#s1-attribute-constructor-signature-help)                                                                      | Medium      | Medium      |
-| S2  | [Closure / arrow function parameter signature help](todo/signature-help.md#s2-closure--arrow-function-parameter-signature-help)                                             | Medium      | Medium      |
+| S2  | [Closure / arrow function parameter signature help](todo/signature-help.md#s2-closure-arrow-function-parameter-signature-help)                                             | Medium      | Medium      |
 | S3  | Multiple overloaded signatures                                                                                                                                              | Medium      | Medium-High |
 | S4  | Named argument awareness in active parameter                                                                                                                                | Low-Medium  | Medium      |
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Low         |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
-| L14 | [Diagnostics for Laravel string keys](todo/laravel.md#l14-diagnostics-for-laravel-string-keys) (route/config/env/trans/view)                                                | High        | Medium      |
+| L14 | [Diagnostics for Laravel string keys](todo/laravel.md) (route/config/env/trans/view)                                                | High        | Medium      |
 | L22 | [Broaden recognized call sites for Laravel string keys](todo/laravel.md#l22-broaden-recognized-call-sites-for-laravel-string-keys)                                          | High        | Low-Medium  |
-| L15 | [Completion for Laravel string keys](todo/laravel.md#l15-completion-for-laravel-string-keys)                                                                                | High        | Medium      |
+| L15 | [Completion for Laravel string keys](todo/laravel.md)                                                                                | High        | Medium      |
 | L5  | [`abort_if`/`abort_unless` type narrowing](todo/laravel.md#l5-abort_ifabort_unless-type-narrowing)                                                                          | High        | Medium      |
 | L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium      |
 | L38 | [Typed `validated()` array shapes from rules](todo/laravel.md#l38-typed-validated-array-shapes-from-rules)                                                                  | Medium-High | Medium-High |
 | L26 | [Gate ability and policy strings](todo/laravel.md#l26-gate-ability-and-policy-strings)                                                                                      | Medium-High | Medium-High |
-| L16 | [Hover for Laravel string keys](todo/laravel.md#l16-hover-for-laravel-string-keys)                                                                                          | Medium      | Low-Medium  |
+| L16 | [Hover for Laravel string keys](todo/laravel.md)                                                                                          | Medium      | Low-Medium  |
 | L23 | [Route parameter name completion](todo/laravel.md#l23-route-parameter-name-completion)                                                                                      | Medium      | Low-Medium  |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Low-Medium  |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Low-Medium  |
@@ -177,7 +176,7 @@ unlikely to move the needle for most users.
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names)                                                                                  | Low-Medium  | Medium      |
 | L33 | [Artisan command and signature strings](todo/laravel.md#l33-artisan-command-and-signature-strings)                                                                          | Low-Medium  | Medium      |
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
-| L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids--hasulids-trait--id-typed-as-string)                                                 | Low-Medium  | Low         |
+| L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
 | L6  | Factory `has*`/`for*` relationship methods                                                                                                                                  | Low-Medium  | Medium      |
 | L7  | `$pivot` property on BelongsToMany                                                                                                                                          | Medium      | Medium-High |
 | L13 | [Factory count-conditional return types](todo/laravel.md#l13-factory-count-conditional-return-types)                                                                       | Medium      | Medium-High |
@@ -190,21 +189,19 @@ unlikely to move the needle for most users.
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
 | BL8 | [Template signature resolution chain](todo/blade.md#21-template-signature-resolution-chain) (Bladestan-compatible contract model)                                           | High        | Medium      |
 | BL9 | [`view()` call-site validation](todo/blade.md#24-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
-| BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#22-cross-file-section--stack-name-intelligence)                                                         | Medium      | Medium      |
+| BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#22-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
 | BL11 | [Custom directive discovery](todo/blade.md#23-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
 | BL12 | [Call-site variable inference](todo/blade.md#25-call-site-variable-inference-late-addition) (late addition, lowest-priority source)                                         | Low-Medium  | Medium-High |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
 |     | **[Performance](todo/performance.md) / [Eager Resolution](todo/eager-resolution.md)**                                                                                       |             |             |
-| ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5--mago-style-separated-metadata)                                                                                | High        | High        |
 | P29 | [Migrate to `mago-phpdoc-syntax`](todo/performance.md#p29-migrate-to-mago-phpdoc-syntax) (drop deprecated `mago-docblock` / `mago-type-syntax`)                             | Medium      | Medium      |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (blocked on upstream API stabilizing — see triggers) | Medium-High | High        |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |
-| P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument--argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |
+| P25 | [`type_mismatch_argument` / `argument_count_mismatch` slow on large single files](todo/performance.md#p25-type_mismatch_argument-argument_count_mismatch-slow-on-large-single-files) | Medium      | Medium      |
 | P22 | [Signature change re-queues slow diagnostics for every open file](todo/performance.md#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file)                  | Medium-High | Medium      |
 | P14 | [Eager docblock parsing into structured fields](todo/performance.md#p14-eager-docblock-parsing-into-structured-fields)                                                      | Medium      | Medium      |
-| P9  | [`resolved_class_cache` generic-arg specialisation](todo/performance.md#p9-resolved_class_cache-generic-arg-specialisation)                                                 | Medium      | Medium      |
 | P27 | [`object`/`?object` call-return check re-resolves the subject a second time](todo/performance.md#p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time)  | Medium      | Low         |
 | P11 | [Uncached base-resolution in `build_scope_methods_for_builder`](todo/performance.md#p11-uncached-base-resolution-in-build_scope_methods_for_builder)                        | Low-Medium  | Low         |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium      |

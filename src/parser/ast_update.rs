@@ -590,6 +590,7 @@ impl Backend {
                 .map(|(c, ns)| {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
+                    cls.cache_fqn();
                     cls
                 })
                 .collect();
@@ -648,7 +649,7 @@ impl Backend {
         }
 
         let old_classes_by_update: Vec<Vec<ClassInfo>> = {
-            let uri_classes = self.uri_classes_index.read();
+            let uri_classes = self.symbols.uri_classes_index.read();
             updates
                 .iter()
                 .map(|update| {
@@ -672,7 +673,7 @@ impl Backend {
         // entry behind for the whole session (stale completion, hover, and
         // go-to-definition).
         let old_globals_by_update: Vec<(Vec<String>, Vec<String>)> = {
-            let uri_globals = self.uri_globals_index.read();
+            let uri_globals = self.symbols.uri_globals_index.read();
             updates
                 .iter()
                 .map(|update| uri_globals.get(&update.uri).cloned().unwrap_or_default())
@@ -738,8 +739,8 @@ impl Backend {
         }
 
         {
-            let mut idx = self.fqn_uri_index.write();
-            let mut fqn_idx = self.fqn_class_index.write();
+            let mut idx = self.symbols.fqn_uri_index.write();
+            let mut fqn_idx = self.symbols.fqn_class_index.write();
 
             for old_fqn in &all_old_fqns {
                 idx.remove(old_fqn);
@@ -759,10 +760,10 @@ impl Backend {
         }
 
         {
-            let nf_cache = self.class_not_found_cache.read();
+            let nf_cache = self.symbols.class_not_found_cache.read();
             if !nf_cache.is_empty() {
                 drop(nf_cache);
-                let mut nf_cache = self.class_not_found_cache.write();
+                let mut nf_cache = self.symbols.class_not_found_cache.write();
                 for fqn in &all_new_fqns {
                     nf_cache.remove(fqn);
                 }
@@ -775,7 +776,7 @@ impl Backend {
         // never had any — skips the snapshot scan below entirely.
         let mut any_function_changed = false;
         {
-            let mut fmap = self.global_functions.write();
+            let mut fmap = self.symbols.global_functions.write();
             for update in &mut prepared {
                 if update.functions.is_empty() && update.old_function_fqns.is_empty() {
                     continue;
@@ -869,7 +870,7 @@ impl Backend {
         }
 
         {
-            let mut dmap = self.global_defines.write();
+            let mut dmap = self.symbols.global_defines.write();
             for update in &mut prepared {
                 if update.defines.is_empty() && update.old_define_names.is_empty() {
                     continue;
@@ -902,7 +903,7 @@ impl Backend {
         // whatever it removes.  Drop the entry entirely when the file has
         // no globals, to avoid accumulating empty records for class files.
         {
-            let mut globals_index = self.uri_globals_index.write();
+            let mut globals_index = self.symbols.uri_globals_index.write();
             for update in &prepared {
                 if update.new_function_fqns.is_empty() && update.new_define_names.is_empty() {
                     globals_index.remove(&update.uri);
@@ -967,7 +968,7 @@ impl Backend {
         evicted_fqns.dedup();
 
         {
-            let mut uri_classes = self.uri_classes_index.write();
+            let mut uri_classes = self.symbols.uri_classes_index.write();
             let mut parsed_uris = self.parsed_uris.write();
             for update in &mut prepared {
                 uri_classes.insert(update.uri.clone(), std::mem::take(&mut update.classes));
@@ -991,7 +992,7 @@ impl Backend {
 
         if !evicted_fqns.is_empty() {
             let sorted = {
-                let uri_classes = self.uri_classes_index.read();
+                let uri_classes = self.symbols.uri_classes_index.read();
                 let iter = uri_classes
                     .values()
                     .flat_map(|classes| classes.iter())
@@ -1699,14 +1700,24 @@ mod tests {
         let v1 = "<?php\nfunction old_helper(): void {}\n";
         backend.update_ast(uri, v1);
         assert!(
-            backend.global_functions.read().get("old_helper").is_some(),
+            backend
+                .symbols
+                .global_functions
+                .read()
+                .get("old_helper")
+                .is_some(),
             "Function should be registered after first parse"
         );
 
         let v2 = "<?php\n// function removed\n";
         backend.update_ast(uri, v2);
         assert!(
-            backend.global_functions.read().get("old_helper").is_none(),
+            backend
+                .symbols
+                .global_functions
+                .read()
+                .get("old_helper")
+                .is_none(),
             "Stale function should be removed after re-parse"
         );
     }
@@ -1747,7 +1758,7 @@ class User extends Model {
 }
 ";
         backend.update_ast(uri, content);
-        let classes = backend.uri_classes_index.read();
+        let classes = backend.symbols.uri_classes_index.read();
         let user = classes
             .get(uri)
             .and_then(|c| c.iter().find(|c| c.name == "User"))
@@ -1791,7 +1802,7 @@ class User extends Model {
 
         // The open buffer's state must survive: the class still exposes
         // `edited`, not the stale `stale`.
-        let classes = backend.uri_classes_index.read();
+        let classes = backend.symbols.uri_classes_index.read();
         let widget = classes
             .get(uri)
             .and_then(|c| c.first())
@@ -1817,7 +1828,7 @@ class User extends Model {
         let result = backend.parse_ast_index_update_for_index(uri, content);
         backend.apply_ast_index_parse_results_batch(vec![result]);
 
-        let classes = backend.uri_classes_index.read();
+        let classes = backend.symbols.uri_classes_index.read();
         let gadget = classes
             .get(uri)
             .and_then(|c| c.first())

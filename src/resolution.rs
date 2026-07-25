@@ -265,7 +265,7 @@ impl Backend {
     pub(crate) fn rebuild_laravel_pivot_index(&self) {
         let index = if self.resolved_class_cache.read().is_laravel() {
             let classes: Vec<(String, Arc<ClassInfo>)> = {
-                let idx = self.uri_classes_index.read();
+                let idx = self.symbols.uri_classes_index.read();
                 idx.iter()
                     .flat_map(|(uri, list)| list.iter().map(move |c| (uri.clone(), Arc::clone(c))))
                     .collect()
@@ -308,7 +308,12 @@ impl Backend {
         };
 
         // ── Negative cache: skip the full multi-phase search ──
-        if self.class_not_found_cache.read().contains(class_name) {
+        if self
+            .symbols
+            .class_not_found_cache
+            .read()
+            .contains(class_name)
+        {
             return None;
         }
 
@@ -321,6 +326,26 @@ impl Backend {
             return Some(cls);
         }
 
+        // ── Phase 0.5: built-in names resolve to the embedded stubs ──
+        // A global-namespace class name that exists in the embedded
+        // stub index is a PHP built-in (core or bundled extension).
+        // Vendor code can only redeclare such a name inside a
+        // conditional block: a polyfill mirroring the built-in for
+        // older runtimes.  symfony/polyfill-php84, for example, ships
+        // two `RoundingMode` declarations — an enum and a pre-enum
+        // class whose "cases" are plain int constants.  Resolving the
+        // name through the classmap (Phase 1) would pick whichever
+        // polyfill file happened to be indexed first, which is
+        // nondeterministic when several files declare the name and
+        // wrong whenever a legacy variant wins (enum cases would
+        // resolve to int constants).  The stub is the authoritative
+        // definition of a built-in, so it wins over classmap entries.
+        if expected_ns.is_none()
+            && let Some(cls) = self.load_stub_class(last_segment)
+        {
+            return Some(cls);
+        }
+
         // ── Phase 1: Try the fqn_uri_index (FQN → URI) ───────────
         // The fqn_uri_index is populated by `scan_autoload_files` (Composer
         // `autoload_files.php` entries and their `require_once` chains),
@@ -329,7 +354,7 @@ impl Backend {
         // classes that don't follow PSR-4 conventions and aren't in the
         // Composer classmap — e.g. global-namespace classes like `Mockery`
         // that are loaded via Composer's `files` autoloading.
-        let class_index_uri = self.fqn_uri_index.read().get(class_name).cloned();
+        let class_index_uri = self.symbols.fqn_uri_index.read().get(class_name).cloned();
         if let Some(file_uri) = class_index_uri
             && let Some(file_path) = Url::parse(&file_uri)
                 .ok()
@@ -348,9 +373,9 @@ impl Backend {
         // vendor class is missing from the class index, it fails visibly
         // rather than being silently resolved, making stale classmaps
         // obvious (fix: run `composer dump-autoload`).
-        if let Some(workspace_root) = self.workspace_root.read().clone() {
+        if let Some(workspace_root) = self.workspace.workspace_root.read().clone() {
             let file_path = {
-                let mappings = self.psr4_mappings.read();
+                let mappings = self.workspace.psr4_mappings.read();
                 composer::resolve_class_path(&mappings, &workspace_root, class_name)
             };
             if let Some(file_path) = file_path
@@ -407,7 +432,10 @@ impl Backend {
 
         // Cache the negative result so subsequent lookups for the same
         // unknown class skip the expensive multi-phase search.
-        self.class_not_found_cache.write().insert(class_name);
+        self.symbols
+            .class_not_found_cache
+            .write()
+            .insert(class_name);
         None
     }
 
@@ -530,7 +558,7 @@ impl Backend {
     /// escape hatch.
     fn wait_for_cached_result(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
         self.parse_inflight.wait_until_released(uri);
-        self.uri_classes_index.read().get(uri).cloned()
+        self.symbols.uri_classes_index.read().get(uri).cloned()
     }
 
     /// Parse PHP source text, cache the results in
@@ -631,6 +659,7 @@ impl Backend {
                     .or(file_namespace.as_deref())
                     .map(crate::atom::atom);
             }
+            cls.cache_fqn();
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies
@@ -661,7 +690,8 @@ impl Backend {
         // leaves ghost entries that keep resolving from stale state and
         // pollute find_implementors / type hierarchy.
         let old_fqns: Vec<String> = if was_already_parsed {
-            self.uri_classes_index
+            self.symbols
+                .uri_classes_index
                 .read()
                 .get(uri)
                 .map(|v| {
@@ -681,7 +711,8 @@ impl Backend {
         // Store in uri_classes_index for wait_for_cached_result (concurrent
         // parse deduplication) and for consumers that iterate classes
         // by URI.  The memory cost is negligible (just Arc pointers).
-        self.uri_classes_index
+        self.symbols
+            .uri_classes_index
             .write()
             .insert(uri.to_owned(), arc_classes.clone());
         // NOTE: use_map and namespace_map are intentionally NOT stored
@@ -705,8 +736,8 @@ impl Backend {
                 .map(|cls| (cls.fqn().to_string(), Arc::clone(cls)))
                 .collect();
 
-            let mut class_idx = self.fqn_uri_index.write();
-            let mut fqn_idx = self.fqn_class_index.write();
+            let mut class_idx = self.symbols.fqn_uri_index.write();
+            let mut fqn_idx = self.symbols.fqn_class_index.write();
             // On re-parse, drop entries for classes that this file no
             // longer defines before re-inserting the current set.  This
             // repoints/removes the FQN → URI and FQN → ClassInfo mappings
@@ -737,10 +768,10 @@ impl Backend {
 
         // Remove newly-discovered FQNs from the negative-result cache.
         {
-            let nf_cache = self.class_not_found_cache.read();
+            let nf_cache = self.symbols.class_not_found_cache.read();
             if !nf_cache.is_empty() {
                 drop(nf_cache);
-                let mut nf_cache = self.class_not_found_cache.write();
+                let mut nf_cache = self.symbols.class_not_found_cache.write();
                 for cls in &arc_classes {
                     if cls.name.starts_with("__anonymous@") {
                         continue;
@@ -809,7 +840,7 @@ impl Backend {
     pub fn find_or_load_function(&self, candidates: &[&str]) -> Option<FunctionInfo> {
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             for &name in candidates {
                 if let Some((_, info)) = fmap.get(name) {
                     return Some(info.clone());
@@ -830,7 +861,7 @@ impl Backend {
         // is the same cost as opening the file.  This is acceptable
         // because it only happens once per function, on first access.
         {
-            let idx = self.autoload_function_index.read();
+            let idx = self.symbols.autoload_function_index.read();
             for &name in candidates {
                 if let Some(path) = idx.get(name) {
                     let path = path.clone();
@@ -841,7 +872,7 @@ impl Backend {
                         self.update_ast(&uri, &content);
 
                         // Re-check global_functions after parsing.
-                        let fmap = self.global_functions.read();
+                        let fmap = self.symbols.global_functions.read();
                         for &retry_name in candidates {
                             if let Some((_, info)) = fmap.get(retry_name) {
                                 return Some(info.clone());
@@ -862,7 +893,7 @@ impl Backend {
         // parsed at most once: subsequent lookups hit Phase 1
         // (`global_functions`).
         {
-            let paths = self.autoload_file_paths.read().clone();
+            let paths = self.symbols.autoload_file_paths.read().clone();
             for path in &paths {
                 // Skip files that have already been fully parsed (their
                 // functions are already in global_functions via Phase 1).
@@ -874,7 +905,7 @@ impl Backend {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     self.update_ast(&uri, &content);
 
-                    let fmap = self.global_functions.read();
+                    let fmap = self.symbols.global_functions.read();
                     for &name in candidates {
                         if let Some((_, info)) = fmap.get(name) {
                             return Some(info.clone());
@@ -910,7 +941,7 @@ impl Backend {
                 let mut result: Option<FunctionInfo> = None;
 
                 {
-                    let mut fmap = self.global_functions.write();
+                    let mut fmap = self.symbols.global_functions.write();
                     for func in &functions {
                         let fqn = if let Some(ref ns) = func.namespace {
                             format!("{}\\{}", ns, func.name)
@@ -944,7 +975,8 @@ impl Backend {
                     let class_uri = format!("phpantom-stub-fn://{}", name);
                     let arc_classes: Vec<Arc<ClassInfo>> =
                         classes.into_iter().map(Arc::new).collect();
-                    self.uri_classes_index
+                    self.symbols
+                        .uri_classes_index
                         .write()
                         .insert(class_uri, arc_classes);
                 }
@@ -1059,14 +1091,45 @@ impl Backend {
 
     /// Resolve a function name using use-map and namespace context.
     ///
-    /// Builds a list of candidate names (exact name, use-map resolved,
-    /// namespace-qualified) and tries each via `find_or_load_function`.
-    ///
-    /// This is the single canonical implementation of the "function_loader"
-    /// logic used by both the completion handler and definition resolver.
+    /// Equivalent to [`resolve_function_name_at`](Self::resolve_function_name_at)
+    /// with no per-offset name resolution.  Prefer the offset-aware
+    /// variant whenever the call expression's byte offset is available,
+    /// so functions declared in a different `namespace` block of the same
+    /// file resolve correctly.
     pub(crate) fn resolve_function_name(
         &self,
         name: &str,
+        file_use_map: &HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<FunctionInfo> {
+        self.resolve_function_name_at(name, None, 0, file_use_map, file_namespace)
+    }
+
+    /// Resolve a function name, consulting mago-names' per-offset
+    /// resolution for the authoritative fully-qualified name.
+    ///
+    /// A file may declare more than one `namespace` block.  The single
+    /// `file_namespace` describes only one of them, so a call to a
+    /// function declared in a *different* block would never build the
+    /// right candidate from the use-map / namespace guess alone.
+    /// `resolved_names` understands which block `offset` falls in and
+    /// qualifies the name accordingly (e.g. `foo()` inside `namespace A`
+    /// resolves to `A\foo`), so the FQN under which the function is
+    /// already stored in `global_functions` becomes a candidate.
+    ///
+    /// `offset` is the starting byte offset of the function-name
+    /// identifier in the source file.  Pass `0` (and/or `None`
+    /// `resolved_names`) when no offset is available; resolution then
+    /// behaves exactly like the plain use-map + namespace candidate list.
+    ///
+    /// Candidate order mirrors PHP's unqualified-call resolution: the
+    /// namespace-local name wins, with the bare name as the global
+    /// fallback, then the use-map alias and the single-namespace guess.
+    pub(crate) fn resolve_function_name_at(
+        &self,
+        name: &str,
+        resolved_names: Option<&crate::names::OwnedResolvedNames>,
+        offset: u32,
         file_use_map: &HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
@@ -1079,18 +1142,30 @@ impl Backend {
             return self.find_or_load_function(&[absolute]);
         }
 
-        // Build candidate names to try: exact name, use-map
-        // resolved name, and namespace-qualified name.
-        let mut candidates: Vec<&str> = vec![name];
+        // Offset-aware, multi-namespace-correct candidate from mago-names.
+        // `offset == 0` is the "no offset available" sentinel (no PHP
+        // function-call identifier ever starts at byte 0, before `<?php`).
+        let offset_resolved: Option<String> = if offset != 0 {
+            resolved_names
+                .and_then(|rn| rn.get(offset))
+                .map(str::to_owned)
+        } else {
+            None
+        };
 
         let use_resolved: Option<String> = file_use_map.get(name).cloned();
-        if let Some(ref fqn) = use_resolved {
-            candidates.push(fqn.as_str());
-        }
-
         let ns_qualified: Option<String> = file_namespace
             .as_ref()
             .map(|ns| format!("{}\\{}", ns, name));
+
+        let mut candidates: Vec<&str> = Vec::with_capacity(4);
+        if let Some(ref r) = offset_resolved {
+            candidates.push(r.as_str());
+        }
+        candidates.push(name);
+        if let Some(ref fqn) = use_resolved {
+            candidates.push(fqn.as_str());
+        }
         if let Some(ref nq) = ns_qualified {
             candidates.push(nq.as_str());
         }
@@ -1199,21 +1274,29 @@ impl Backend {
     pub(crate) fn function_loader<'a>(
         &'a self,
         ctx: &'a FileContext,
-    ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
-        self.function_loader_with(&ctx.use_map, &ctx.namespace)
+    ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
+        self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
     }
 
     /// Return a function-loader closure from individual file-context
     /// components.
     ///
     /// Useful when the caller does not have a full `FileContext` or
-    /// needs to use a different use-map / namespace.
+    /// needs to use a different use-map / namespace.  The closure's
+    /// second argument is the byte offset of the function-name
+    /// identifier; pass `0` when no offset is available.  Callers that
+    /// have per-offset name resolution should supply `resolved_names` so
+    /// functions declared in a different `namespace` block of the same
+    /// file resolve correctly.
     pub(crate) fn function_loader_with<'a>(
         &'a self,
+        resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
         use_map: &'a HashMap<String, String>,
         namespace: &'a Option<String>,
-    ) -> impl Fn(&str) -> Option<FunctionInfo> + 'a {
-        move |name: &str| self.resolve_function_name(name, use_map, namespace)
+    ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
+        move |name: &str, offset: u32| {
+            self.resolve_function_name_at(name, resolved_names, offset, use_map, namespace)
+        }
     }
 
     /// Check whether `cursor_offset` is inside a closure whose
@@ -1230,8 +1313,8 @@ impl Backend {
         content: &str,
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
-        use crate::completion::resolver::ResolutionCtx;
-        use crate::util::find_class_at_offset;
+        use crate::class_lookup::find_class_at_offset;
+        use crate::type_engine::resolver::ResolutionCtx;
 
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
@@ -1265,7 +1348,7 @@ impl Backend {
             is_in_static_method: false,
             preserve_static: false,
         };
-        crate::completion::variable::closure_resolution::find_closure_this_override(&rctx)
+        crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 
     /// Return a constant-value-loader closure.
@@ -1328,7 +1411,13 @@ mod tests {
 
         // Miss with one casing populates the negative cache…
         assert!(backend.find_or_load_class("app\\foo").is_none());
-        assert!(backend.class_not_found_cache.read().contains("APP\\FOO"));
+        assert!(
+            backend
+                .symbols
+                .class_not_found_cache
+                .read()
+                .contains("APP\\FOO")
+        );
 
         // …but once the class is parsed, every casing resolves again.
         backend.update_ast("file:///foo.php", "<?php namespace App; class Foo {}");
@@ -1412,15 +1501,26 @@ mod tests {
 
         // First parse populated every index.
         assert!(
-            backend.fqn_class_index.read().get("Lib\\Child").is_some(),
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Lib\\Child")
+                .is_some(),
             "Child should be in fqn_class_index after first parse"
         );
         assert!(
-            backend.fqn_uri_index.read().get("Lib\\Child").is_some(),
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Lib\\Child")
+                .is_some(),
             "Child should be in fqn_uri_index after first parse"
         );
         assert!(
             backend
+                .symbols
                 .gti_index
                 .read()
                 .values()
@@ -1429,6 +1529,7 @@ mod tests {
         );
         assert!(
             backend
+                .symbols
                 .method_store
                 .read()
                 .contains_key(&("Lib\\Child".to_string(), "ghost".to_string())),
@@ -1439,15 +1540,26 @@ mod tests {
         backend.parse_and_cache_content("<?php namespace Lib; class Base {}", uri);
 
         assert!(
-            backend.fqn_class_index.read().get("Lib\\Child").is_none(),
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Lib\\Child")
+                .is_none(),
             "Child must be evicted from fqn_class_index on re-parse"
         );
         assert!(
-            backend.fqn_uri_index.read().get("Lib\\Child").is_none(),
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Lib\\Child")
+                .is_none(),
             "Child must be evicted from fqn_uri_index on re-parse"
         );
         assert!(
             !backend
+                .symbols
                 .gti_index
                 .read()
                 .values()
@@ -1456,6 +1568,7 @@ mod tests {
         );
         assert!(
             !backend
+                .symbols
                 .method_store
                 .read()
                 .contains_key(&("Lib\\Child".to_string(), "ghost".to_string())),
@@ -1464,7 +1577,12 @@ mod tests {
 
         // Base, which the file still defines, must survive the re-parse.
         assert!(
-            backend.fqn_class_index.read().get("Lib\\Base").is_some(),
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Lib\\Base")
+                .is_some(),
             "Base should survive the re-parse"
         );
     }
@@ -1477,19 +1595,41 @@ mod tests {
         let uri = "file:///renamed.php";
 
         backend.parse_and_cache_content("<?php namespace Lib; class OldName {}", uri);
-        assert!(backend.fqn_uri_index.read().get("Lib\\OldName").is_some());
+        assert!(
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Lib\\OldName")
+                .is_some()
+        );
 
         backend.parse_and_cache_content("<?php namespace Lib; class NewName {}", uri);
         assert!(
-            backend.fqn_uri_index.read().get("Lib\\OldName").is_none(),
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Lib\\OldName")
+                .is_none(),
             "old name must be evicted after rename"
         );
         assert!(
-            backend.fqn_class_index.read().get("Lib\\OldName").is_none(),
+            backend
+                .symbols
+                .fqn_class_index
+                .read()
+                .get("Lib\\OldName")
+                .is_none(),
             "old ClassInfo must be evicted after rename"
         );
         assert!(
-            backend.fqn_uri_index.read().get("Lib\\NewName").is_some(),
+            backend
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get("Lib\\NewName")
+                .is_some(),
             "new name must be indexed after rename"
         );
     }

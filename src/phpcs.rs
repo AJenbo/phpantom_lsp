@@ -47,6 +47,7 @@ use std::time::Duration;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::config::PhpcsConfig;
+use crate::process::paths_match;
 
 /// Default PHPCS timeout in milliseconds (30 seconds).
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -80,57 +81,11 @@ pub(crate) fn resolve_phpcs(
         Some(cmd) => Some(ResolvedPhpcs {
             path: PathBuf::from(cmd),
         }),
-        // Auto-detect.
-        None => auto_detect(workspace_root, bin_dir),
+        // Auto-detect: `<bin_dir>/phpcs` under the workspace root,
+        // then `$PATH`.
+        None => crate::process::auto_detect_binary(workspace_root, bin_dir, "phpcs")
+            .map(|path| ResolvedPhpcs { path }),
     }
-}
-
-/// Auto-detect PHPCS by checking `<bin_dir>/phpcs` then `$PATH`.
-fn auto_detect(workspace_root: Option<&Path>, bin_dir: Option<&str>) -> Option<ResolvedPhpcs> {
-    // Check the Composer bin directory first.
-    if let Some(root) = workspace_root {
-        let bin = bin_dir.unwrap_or("vendor/bin");
-        let candidate = root.join(bin).join("phpcs");
-        if candidate.is_file() {
-            return Some(ResolvedPhpcs { path: candidate });
-        }
-    }
-
-    // Fall back to $PATH.
-    if let Ok(path) = which("phpcs") {
-        return Some(ResolvedPhpcs { path });
-    }
-
-    None
-}
-
-/// Simple `which`-like lookup: search `$PATH` for an executable with
-/// the given name.
-fn which(binary_name: &str) -> Result<PathBuf, String> {
-    let path_var = std::env::var("PATH").map_err(|_| "PATH not set".to_string())?;
-
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(binary_name);
-        if candidate.is_file() && is_executable(&candidate) {
-            return Ok(candidate);
-        }
-    }
-
-    Err(format!("{} not found on PATH", binary_name))
-}
-
-/// Check whether a file is executable.
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|m| m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(_path: &Path) -> bool {
-    true
 }
 
 // ── PHPCS execution ─────────────────────────────────────────────────
@@ -172,8 +127,13 @@ pub(crate) fn run_phpcs(
     // The buffer content is fed to PHPCS's stdin by the shared helper,
     // which drains stdout/stderr concurrently so a large JSON report
     // cannot deadlock against a full pipe buffer.
-    let result =
-        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, "PHPCS", Some(content));
+    let result = crate::process::run_command_with_timeout(
+        &mut cmd,
+        timeout,
+        cancelled,
+        "PHPCS",
+        Some(content),
+    );
 
     match result {
         Ok(output) => {
@@ -250,7 +210,7 @@ pub(crate) fn run_phpcs_workspace(
         cmd.arg(format!("--standard={}", standard));
     }
 
-    let output = crate::util::run_command_with_timeout(
+    let output = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,
@@ -433,27 +393,6 @@ fn parse_phpcs_message(msg: &serde_json::Value) -> Option<Diagnostic> {
     })
 }
 
-/// Check whether two file paths refer to the same file.
-///
-/// PHPCS may use the `--stdin-path` value as the key. We compare by
-/// checking suffix matches (one path ends with the other) to handle
-/// cases where one path is relative and the other is absolute, or
-/// where symlinks produce different prefixes.
-fn paths_match(a: &str, b: &str) -> bool {
-    if a == b {
-        return true;
-    }
-    // Normalize separators for comparison.
-    let a_norm = a.replace('\\', "/");
-    let b_norm = b.replace('\\', "/");
-    if a_norm == b_norm {
-        return true;
-    }
-    // Check suffix match (one is a suffix of the other), requiring a
-    // path separator boundary so that e.g. "AFoo.php" does not match "Foo.php".
-    a_norm.ends_with(&format!("/{}", b_norm)) || b_norm.ends_with(&format!("/{}", a_norm))
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -484,29 +423,6 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert_eq!(map[Path::new("/proj/src/A.php")][0].message, "Bad indent");
         assert_eq!(map[Path::new("/proj/src/B.php")][0].range.start.line, 7);
-    }
-
-    // ── paths_match ─────────────────────────────────────────────────
-
-    #[test]
-    fn paths_match_identical() {
-        assert!(paths_match(
-            "/home/user/project/src/Foo.php",
-            "/home/user/project/src/Foo.php"
-        ));
-    }
-
-    #[test]
-    fn paths_match_suffix() {
-        assert!(paths_match("/home/user/project/src/Foo.php", "src/Foo.php"));
-    }
-
-    #[test]
-    fn paths_match_different_files() {
-        assert!(!paths_match(
-            "/home/user/project/src/Foo.php",
-            "src/Bar.php"
-        ));
     }
 
     // ── parse_phpcs_json ────────────────────────────────────────────

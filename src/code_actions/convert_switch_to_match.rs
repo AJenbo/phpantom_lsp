@@ -9,14 +9,12 @@
 //! - No case body falls through to the next without `break`/`return`/`throw`.
 //! - The switch subject is a simple expression.
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::util::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 impl Backend {
     /// Collect "Convert to match expression" code actions for switch
@@ -60,27 +58,18 @@ impl Backend {
         let start_pos = offset_to_position(content, switch_start as usize);
         let end_pos = offset_to_position(content, switch_end as usize);
 
-        let mut changes = HashMap::new();
-        changes.insert(
-            doc_uri,
-            vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: replacement,
-            }],
-        );
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Convert to match expression".to_string(),
             kind: Some(CodeActionKind::new("refactor.rewrite")),
             diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            }),
+            edit: Some(crate::code_actions::single_edit(
+                doc_uri,
+                Range {
+                    start: start_pos,
+                    end: end_pos,
+                },
+                replacement,
+            )),
             command: None,
             is_preferred: Some(false),
             disabled: None,

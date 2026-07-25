@@ -204,25 +204,36 @@ the resolution pipeline.
 drop + associated malloc/free). Combined with the double-walk
 fix, should bring examples/demo.php from ~9.5s to ~5-6s.
 
-#### Phase 4d: Reduce string formatting overhead
+#### Phase 4d: Cache the FQN on ClassInfo ✓
 
-**Impact: Medium. Effort: Low-Medium.**
+Added a cached `fqn: Option<Atom>` field to `ClassInfo`. Every
+hot-path `.fqn()` call previously ran `format!("{}\\{}", ns, name)`
+plus an `Ustr::from` intern lookup for namespaced classes; the
+resulting `String` allocation/free showed up across the
+`malloc`/`memmove`/`free` self-time. `name` and `file_namespace` are
+only ever set at the two parse/index-load stamping sites
+(`parser/ast_update.rs`, `resolution.rs`) and never mutated
+afterwards, so `cache_fqn()` is called there once the namespace is
+final and the cache can never go stale. `fqn()` returns the cached
+value when present and falls back to computing it on demand for the
+handful of synthetic classes that never pass through a stamping site
+(`__object_shape`, `stdClass`, etc.), which behave exactly as before.
+Excluded from `signature_eq` since it is derived from `name` +
+`file_namespace`, both already compared there.
 
-3% self-time in `core::fmt::write` + 1.4% in `format_inner` +
-1.3% in `Ustr::from` (atom interning). These come from:
+Measured: `analyze examples/demo.php` dropped from ~1.75s to ~1.59s
+(release build), memory flat.
 
-- `format!("{}\\{}", ns, name)` in `ClassInfo::fqn()` — called
-  on every resolution. Already mitigated by returning `Atom` but
-  the initial intern still allocates.
-- Type string construction during template substitution.
-- `name.to_string()` calls throughout the resolution pipeline.
+The remaining string-formatting costs are structural rather than
+incidental and are split out into Phase 4g below.
 
-Plan: audit hot-path `format!()` calls and replace with
-pre-computed or cached values where possible.
+### Profiling data (release build, examples/demo.php)
 
-### Profiling data (current, release build, examples/demo.php)
-
-Measured after Phase 4a + double-walk fix:
+`analyze examples/demo.php` currently completes in **~1.6s** (release
+build) after Phases 4a–4d landed. The historical breakdown below was
+measured after Phase 4a + the double-walk fix, before the Phase 4c
+ClassInfo Arc-ification and the Phase 4d FQN cache eliminated most of
+the allocation churn that dominated it:
 
 | Phase | Wall time | Notes |
 |---|---|---|
@@ -232,13 +243,13 @@ Measured after Phase 4a + double-walk fix:
 | Slow diagnostics | 0.6s | (was 9.4s before double-walk fix) |
 | **Total** | **~9.5s** | target: < 3s |
 
-Instrumentation data from the scope walk:
+Instrumentation data from that scope walk:
 
 - 8,726 calls to `resolve_rhs_expression` (8.3s top-level time)
 - 5,559 resolved-class cache hits, 396 misses
 - Subject pipeline fallback: 1 call (negligible)
 
-The 8.3s is dominated by allocation churn (ClassInfo cloning)
+The 8.3s was dominated by allocation churn (ClassInfo cloning)
 inside the type resolution pipeline, not by resolution logic.
 
 ---
@@ -263,7 +274,7 @@ removes those guards and the depth caps they protect:
    consumer queries them, so re-entry cannot happen.
 
 2. **`RESOLVE_DEPTH` and `MAX_RESOLVE_TARGET_DEPTH` (60) in
-   `completion/resolver.rs`.** Thread-local depth counter for
+   `type_engine/resolver/`.** Thread-local depth counter for
    `resolve_target_classes_expr_inner`. Guards against mutual
    recursion between subject resolution, call-return resolution,
    and variable resolution. The limit of 60 (vs typical chain
@@ -337,6 +348,30 @@ The problem is needing them for every runtime analysis thread.
 - `references/mod.rs` `PARSE_STACK_SIZE` reduced to 8 MB or removed.
 - No stack overflows on the full test suite or the largest available
   project.
+
+#### Phase 4g: Carry `Atom` in `PhpType::Named`
+
+**Impact: Low-Medium. Effort: Medium.**
+
+Deferred from Phase 4d. With the FQN now cached, the residual
+per-substitution string cost is `PhpType::Named(cls.fqn().to_string())`
+(and the equivalent patterns in `template_subs.rs`, `return_types.rs`,
+`inheritance/mod.rs`, `forward_walk/scope_state.rs`,
+`rhs_resolution/mod.rs`, and the Laravel builder providers). Each of
+these turns a cached `Atom` back into an owned `String` because
+`PhpType::Named` holds a `String`.
+
+Changing `PhpType::Named` (and the analogous per-member cache keys such
+as `format!("{}::{}", class_fqn, method.name)` in `target_cache.rs` /
+`property_access.rs`) to carry `Atom` would let the resolution pipeline
+thread interned names end-to-end without re-allocating. This touches a
+core enum used throughout the type engine, so it is a standalone
+refactor rather than part of the 4d fqn-cache change.
+
+**Success criteria:**
+- `PhpType::Named` carries an interned name (no `String`
+  reallocation on the substitution hot path).
+- No test regressions.
 
 ---
 

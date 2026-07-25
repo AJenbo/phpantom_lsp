@@ -12,8 +12,8 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo, FileContext};
-use crate::util::position_to_offset;
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -227,7 +227,8 @@ impl Backend {
         } else {
             // Variable — resolve its type.
             let cursor_offset = position_to_offset(content, position);
-            let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset);
+            let current_class =
+                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
 
             if ac_ctx.subject == "$this" {
                 // `$this` — use the current class.
@@ -236,14 +237,14 @@ impl Backend {
                 // Other variable — try variable resolution.
                 let default_class = ClassInfo::default();
                 let current = current_class.unwrap_or(&default_class);
-                let results = crate::completion::variable::resolution::resolve_variable_types(
+                let results = crate::type_engine::variable::resolution::resolve_variable_types(
                     &ac_ctx.subject,
                     current,
                     &ctx.classes,
                     content,
                     cursor_offset,
                     &class_loader,
-                    crate::completion::resolver::Loaders::default(),
+                    crate::type_engine::resolver::Loaders::default(),
                 );
                 let mut resolved_class = None;
                 for rt in &results {
@@ -271,7 +272,7 @@ impl Backend {
         // case (controller actions, `$this`/`$obj` handlers).
         let candidates = vec![class_info];
         let cursor_offset = position_to_offset(content, position);
-        let current_class = crate::util::find_class_at_offset(&ctx.classes, cursor_offset);
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
         let mut items = super::builder::build_union_completion_items(
             &candidates,
             AccessKind::Arrow,

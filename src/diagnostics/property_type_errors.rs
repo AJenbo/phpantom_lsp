@@ -25,10 +25,10 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::completion::resolver::{Loaders, VarResolutionCtx};
-use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::PhpType;
+use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
 use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
@@ -62,7 +62,7 @@ struct PropertyCheckCtx<'a> {
     content: &'a str,
     file_ctx: &'a crate::types::FileContext,
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &'a dyn Fn(&str) -> Option<crate::types::FunctionInfo>,
+    function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
     constant_loader: &'a dyn Fn(&str) -> Option<Option<String>>,
     backend: &'a Backend,
     out: &'a mut Vec<ResolvedPropertyAssignment>,

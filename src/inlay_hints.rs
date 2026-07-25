@@ -13,13 +13,15 @@
 //! callable to obtain parameter metadata, and emits [`InlayHint`]
 //! entries for arguments that would benefit from a label.
 
+use std::sync::atomic::Ordering;
 use tower_lsp::jsonrpc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::{CallSite, UntypedClosureSite};
-use crate::types::FileContext;
-use crate::util::{offset_to_position, position_to_offset};
+use crate::text_position::{offset_to_position, position_to_offset};
+use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, Visibility};
 
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.
@@ -95,6 +97,8 @@ impl Backend {
             );
         }
 
+        self.emit_declaration_count_hints(uri, content, (range_start, range_end), &mut hints);
+
         // Translate hints back to Blade if needed.
         if self.is_blade_file(uri) {
             for hint in &mut hints {
@@ -103,6 +107,304 @@ impl Backend {
         }
 
         Some(hints)
+    }
+
+    fn emit_declaration_count_hints(
+        &self,
+        uri: &str,
+        content: &str,
+        range: (u32, u32),
+        hints: &mut Vec<InlayHint>,
+    ) {
+        if !self.workspace_indexed.load(Ordering::Acquire) {
+            return;
+        }
+
+        let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() else {
+            return;
+        };
+        let ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&ctx);
+
+        for class in &classes {
+            let class_fqn = class.fqn();
+
+            if class.keyword_offset != 0 && offset_in_range(class.keyword_offset, range) {
+                let ref_count = self.ref_count(&ReferenceIndexKey::Class(class_fqn.to_string()));
+                let mut label = reference_label(ref_count);
+
+                if class.kind == ClassLikeKind::Interface || class.is_abstract {
+                    let impls = self.find_implementors(
+                        &class.name,
+                        &class_fqn,
+                        &class_loader,
+                        false,
+                        false,
+                        true,
+                    );
+                    label.push_str(" | ");
+                    label.push_str(&implementation_label(impls.len()));
+                }
+
+                push_count_hint(
+                    hints,
+                    line_end_position(content, class.keyword_offset as usize),
+                    label,
+                );
+            }
+
+            for method in &class.methods {
+                if method.name_offset == 0
+                    || method.is_virtual
+                    || method.name.starts_with("__")
+                    || method.visibility == Visibility::Private
+                    || !offset_in_range(method.name_offset, range)
+                    || self.method_has_prototype(class, &method.name)
+                {
+                    continue;
+                }
+
+                let ref_count = self.ref_count(&ReferenceIndexKey::Member {
+                    name: method.name.to_string(),
+                    is_static: method.is_static,
+                });
+                push_count_hint(
+                    hints,
+                    line_end_position(content, method.name_offset as usize),
+                    reference_label(ref_count),
+                );
+            }
+
+            for prop in &class.properties {
+                if prop.name_offset == 0
+                    || prop.is_virtual
+                    || prop.visibility == Visibility::Private
+                    || !offset_in_range(prop.name_offset, range)
+                    || self.traits_have_property(&class.used_traits, &prop.name, 0)
+                    || self.ancestor_has_property(class, &prop.name)
+                {
+                    continue;
+                }
+
+                let ref_count = self.ref_count(&ReferenceIndexKey::Member {
+                    name: prop.name.to_string(),
+                    is_static: prop.is_static,
+                });
+                push_count_hint(
+                    hints,
+                    line_end_position(content, prop.name_offset as usize),
+                    reference_label(ref_count),
+                );
+            }
+
+            for constant in &class.constants {
+                if constant.name_offset == 0
+                    || constant.visibility == Visibility::Private
+                    || !offset_in_range(constant.name_offset, range)
+                    || self.traits_have_constant(&class.used_traits, &constant.name, 0)
+                    || self.ancestor_has_constant(class, &constant.name)
+                {
+                    continue;
+                }
+
+                let ref_count = self.ref_count(&ReferenceIndexKey::Member {
+                    name: constant.name.to_string(),
+                    is_static: true,
+                });
+                push_count_hint(
+                    hints,
+                    line_end_position(content, constant.name_offset as usize),
+                    reference_label(ref_count),
+                );
+            }
+        }
+    }
+
+    fn method_has_prototype(&self, class: &ClassInfo, method_name: &str) -> bool {
+        let mut current = class.clone();
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let parent_name = match current.parent_class {
+                Some(name) => name,
+                None => break,
+            };
+            let parent = match self.find_or_load_class(&parent_name) {
+                Some(p) => ClassInfo::clone(&p),
+                None => break,
+            };
+            if parent
+                .methods
+                .iter()
+                .any(|m| m.name == method_name && !m.is_virtual)
+                || self.traits_have_method(&parent.used_traits, method_name, 0)
+            {
+                return true;
+            }
+            current = parent;
+        }
+
+        self.traits_have_method(&class.used_traits, method_name, 0)
+            || self.interfaces_have_method(class, method_name)
+    }
+
+    fn traits_have_method(
+        &self,
+        trait_names: &[crate::atom::Atom],
+        method_name: &str,
+        depth: usize,
+    ) -> bool {
+        if depth > MAX_INHERITANCE_DEPTH as usize {
+            return false;
+        }
+
+        for trait_name in trait_names {
+            let Some(trait_info) = self.find_or_load_class(trait_name) else {
+                continue;
+            };
+            if trait_info
+                .methods
+                .iter()
+                .any(|m| m.name == method_name && !m.is_virtual)
+                || self.traits_have_method(&trait_info.used_traits, method_name, depth + 1)
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn interfaces_have_method(&self, class: &ClassInfo, method_name: &str) -> bool {
+        let mut current = Some(class.clone());
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let Some(cls) = current else {
+                break;
+            };
+            for iface_name in &cls.interfaces {
+                if self.interface_has_method(iface_name, method_name, 0) {
+                    return true;
+                }
+            }
+            current = cls.parent_class.as_deref().and_then(|parent| {
+                self.find_or_load_class(parent)
+                    .map(|p| ClassInfo::clone(&p))
+            });
+        }
+        false
+    }
+
+    fn interface_has_method(&self, iface_name: &str, method_name: &str, depth: usize) -> bool {
+        if depth > MAX_INHERITANCE_DEPTH as usize {
+            return false;
+        }
+        let Some(iface) = self.find_or_load_class(iface_name) else {
+            return false;
+        };
+        iface
+            .methods
+            .iter()
+            .any(|m| m.name == method_name && !m.is_virtual)
+            || iface
+                .interfaces
+                .iter()
+                .any(|parent| self.interface_has_method(parent, method_name, depth + 1))
+    }
+
+    fn ancestor_has_property(&self, class: &ClassInfo, prop_name: &str) -> bool {
+        let mut current = class.clone();
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let parent_name = match current.parent_class {
+                Some(name) => name,
+                None => return false,
+            };
+            let parent = match self.find_or_load_class(&parent_name) {
+                Some(p) => ClassInfo::clone(&p),
+                None => return false,
+            };
+            if parent.properties.iter().any(|p| p.name == prop_name)
+                || self.traits_have_property(&parent.used_traits, prop_name, 0)
+            {
+                return true;
+            }
+            current = parent;
+        }
+        false
+    }
+
+    fn traits_have_property(
+        &self,
+        trait_names: &[crate::atom::Atom],
+        prop_name: &str,
+        depth: usize,
+    ) -> bool {
+        if depth > MAX_INHERITANCE_DEPTH as usize {
+            return false;
+        }
+
+        for trait_name in trait_names {
+            let Some(trait_info) = self.find_or_load_class(trait_name) else {
+                continue;
+            };
+            if trait_info.properties.iter().any(|p| p.name == prop_name)
+                || self.traits_have_property(&trait_info.used_traits, prop_name, depth + 1)
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn ancestor_has_constant(&self, class: &ClassInfo, constant_name: &str) -> bool {
+        let mut current = class.clone();
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let parent_name = match current.parent_class {
+                Some(name) => name,
+                None => return false,
+            };
+            let parent = match self.find_or_load_class(&parent_name) {
+                Some(p) => ClassInfo::clone(&p),
+                None => return false,
+            };
+            if parent.constants.iter().any(|c| c.name == constant_name)
+                || self.traits_have_constant(&parent.used_traits, constant_name, 0)
+            {
+                return true;
+            }
+            current = parent;
+        }
+        false
+    }
+
+    fn traits_have_constant(
+        &self,
+        trait_names: &[crate::atom::Atom],
+        constant_name: &str,
+        depth: usize,
+    ) -> bool {
+        if depth > MAX_INHERITANCE_DEPTH as usize {
+            return false;
+        }
+
+        for trait_name in trait_names {
+            let Some(trait_info) = self.find_or_load_class(trait_name) else {
+                continue;
+            };
+            if trait_info.constants.iter().any(|c| c.name == constant_name)
+                || self.traits_have_constant(&trait_info.used_traits, constant_name, depth + 1)
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn ref_count(&self, key: &ReferenceIndexKey) -> usize {
+        self.reference_index
+            .read()
+            .get(key)
+            .map(|entries| entries.iter().filter(|e| !e.is_declaration).count())
+            .unwrap_or(0)
     }
 
     /// Emit parameter-name and by-reference hints for a single call site.
@@ -383,6 +685,51 @@ impl Backend {
     }
 }
 
+fn push_count_hint(hints: &mut Vec<InlayHint>, position: Position, label: String) {
+    hints.push(InlayHint {
+        position,
+        label: InlayHintLabel::String(format!(" {label}")),
+        kind: None,
+        text_edits: None,
+        tooltip: None,
+        padding_left: None,
+        padding_right: None,
+        data: None,
+    });
+}
+
+fn reference_label(count: usize) -> String {
+    if count == 1 {
+        "1 reference".to_string()
+    } else {
+        format!("{count} references")
+    }
+}
+
+fn implementation_label(count: usize) -> String {
+    if count == 1 {
+        "1 implementation".to_string()
+    } else {
+        format!("{count} implementations")
+    }
+}
+
+fn offset_in_range(offset: u32, range: (u32, u32)) -> bool {
+    offset >= range.0 && offset <= range.1
+}
+
+fn line_end_position(content: &str, byte_offset: usize) -> Position {
+    let line_end = content[byte_offset..]
+        .find('\n')
+        .map(|i| byte_offset + i)
+        .unwrap_or(content.len());
+
+    // Delegate to the canonical converter so the `character` column is
+    // counted in UTF-16 code units (per the LSP spec), consistent with
+    // every other position the server emits.
+    offset_to_position(content, line_end)
+}
+
 /// Check whether the argument at `arg_offset` is a simple variable whose
 /// name (without `$`) matches the parameter name, making a hint redundant.
 ///
@@ -639,6 +986,79 @@ fn is_obvious_single_param(call_expression: &str, _param_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declaration_count_hints_skip_magic_methods() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = r#"<?php
+class User {
+    public function __construct() {}
+    public function save(): void {}
+}
+"#;
+
+        backend.update_ast(uri, content);
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        let hints = backend
+            .handle_inlay_hints(
+                uri,
+                content,
+                Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 5,
+                        character: 0,
+                    },
+                },
+            )
+            .unwrap_or_default();
+
+        assert!(hints.iter().any(|hint| hint.position.line == 1));
+        assert!(hints.iter().any(|hint| hint.position.line == 3));
+        assert!(!hints.iter().any(|hint| hint.position.line == 2));
+    }
+
+    #[test]
+    fn declaration_count_hint_column_uses_utf16_units() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        // The declaration line ends with a non-BMP character (2 UTF-16
+        // code units, 1 Unicode scalar), so a chars-based column would be
+        // one short of the LSP-mandated UTF-16 column.
+        let content = "<?php\nclass User {} // \u{1F600}\n";
+
+        backend.update_ast(uri, content);
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        let hints = backend
+            .handle_inlay_hints(
+                uri,
+                content,
+                Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 0,
+                    },
+                },
+            )
+            .unwrap_or_default();
+
+        let class_hint = hints
+            .iter()
+            .find(|hint| hint.position.line == 1)
+            .expect("expected a reference-count hint on the class declaration line");
+        // "class User {} // " is 17 UTF-16 units; the emoji adds 2 → 19.
+        assert_eq!(class_hint.position.character, 19);
+    }
 
     #[test]
     fn test_should_suppress_simple_variable_match() {

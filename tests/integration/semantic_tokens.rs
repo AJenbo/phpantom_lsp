@@ -30,6 +30,7 @@ const TT_VARIABLE: u32 = 7;
 const TT_PROPERTY: u32 = 8;
 const TT_FUNCTION: u32 = 9;
 const TT_METHOD: u32 = 10;
+const TT_DECORATOR: u32 = 11;
 #[allow(dead_code)]
 const TT_ENUM_MEMBER: u32 = 12;
 #[allow(dead_code)]
@@ -111,6 +112,28 @@ class Foo {
         "expected declaration modifier"
     );
     assert_eq!(tok.length, 3);
+}
+
+#[test]
+fn phpstan_ignore_codes_are_semantic_tokens() {
+    let php = r#"<?php
+// @phpstan-ignore return.type (intentional), paramOut.type
+function foo(): void {}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+
+    let tag = find_decoded(&decoded, 1, 3).expect("expected token for @phpstan-ignore");
+    assert_eq!(tag.token_type, TT_KEYWORD);
+    assert_eq!(tag.length, 15);
+
+    let return_type = find_decoded(&decoded, 1, 19).expect("expected token for return.type");
+    assert_eq!(return_type.token_type, TT_ENUM_MEMBER);
+    assert_eq!(return_type.length, 11);
+
+    let param_out = find_decoded(&decoded, 1, 46).expect("expected token for paramOut.type");
+    assert_eq!(param_out.token_type, TT_ENUM_MEMBER);
+    assert_eq!(param_out.length, 13);
 }
 
 #[test]
@@ -203,6 +226,28 @@ function make() {
         !item_refs.is_empty(),
         "expected class reference for new Item()"
     );
+}
+
+#[test]
+fn attribute_class_reference_uses_decorator_token() {
+    let php = r#"<?php
+#[MyAttribute]
+class Example {}
+
+new MyAttribute();
+
+class MyAttribute {}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+
+    let attribute = find_decoded(&decoded, 1, 2).expect("expected token for attribute class");
+    assert_eq!(attribute.token_type, TT_DECORATOR);
+    assert_eq!(attribute.length, 11);
+
+    let new_expression = find_decoded(&decoded, 4, 4).expect("expected token for class reference");
+    assert_eq!(new_expression.token_type, TT_CLASS);
+    assert_eq!(new_expression.length, 11);
 }
 
 #[test]

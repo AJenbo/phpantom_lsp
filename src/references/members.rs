@@ -13,9 +13,11 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::class_lookup::find_class_at_offset;
+use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
+use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
-use crate::util::{find_class_at_offset, offset_to_position, push_unique_location};
 
 impl Backend {
     pub(super) fn find_laravel_macro_references(
@@ -477,6 +479,7 @@ impl Backend {
         mode: ReferenceSearchMode,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -513,6 +516,7 @@ impl Backend {
         mode: ReferenceSearchMode,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -551,7 +555,7 @@ impl Backend {
         let function_loader = self.function_loader(ctx);
         let use_map = &ctx.use_map;
         let namespace = &ctx.namespace;
-        let resolution_ctx = crate::subject_resolution::SubjectResolutionCtx {
+        let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map,
             namespace,
@@ -560,7 +564,7 @@ impl Backend {
             function_loader: &function_loader,
         };
 
-        match crate::subject_resolution::resolve_subject_type(
+        match crate::type_engine::subject_resolution::resolve_subject_type(
             subject_text,
             is_static,
             access_offset,
@@ -600,7 +604,7 @@ impl Backend {
         namespace: &Option<String>,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<String> {
-        let expr = crate::subject_expr::SubjectExpr::parse(subject_text);
+        let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
         let Some((class_name, method_name)) = static_call_root(&expr) else {
             return Vec::new();
         };
@@ -684,7 +688,7 @@ impl Backend {
             .collect();
         let mut model_seeds = Vec::new();
         {
-            let class_index = self.fqn_class_index.read();
+            let class_index = self.symbols.fqn_class_index.read();
             for (class_fqn, class_info) in class_index.iter() {
                 if let Some(laravel) = class_info.laravel() {
                     if let Some(normalized) = laravel
@@ -725,7 +729,7 @@ impl Backend {
             queue.push_back(normalize_fqn(model_fqn).to_string());
         }
 
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {
@@ -844,7 +848,7 @@ impl Backend {
 
         let mut model_roots = Vec::new();
         {
-            let class_index = self.fqn_class_index.read();
+            let class_index = self.symbols.fqn_class_index.read();
             for (class_fqn, class_info) in class_index.iter() {
                 if let Some(laravel) = class_info.laravel() {
                     if let Some(builder_fqn) = laravel
@@ -920,7 +924,7 @@ impl Backend {
     fn collect_descendants_for_roots(&self, roots: HashSet<String>) -> HashSet<String> {
         let mut scope = roots.clone();
         let mut queue: std::collections::VecDeque<String> = roots.into_iter().collect();
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {
@@ -963,7 +967,7 @@ impl Backend {
             .map(|fqn| normalize_fqn(fqn).to_string())
             .collect();
         let mut queue: std::collections::VecDeque<String> = scope.iter().cloned().collect();
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {

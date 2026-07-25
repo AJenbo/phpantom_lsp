@@ -13,23 +13,25 @@
 // whole shared import surface in with a single `use super::*;`.
 pub(crate) use mago_span::HasSpan;
 pub(crate) use mago_syntax::cst::*;
-pub(crate) use std::collections::HashMap;
 pub(crate) use std::sync::Arc;
 pub(crate) use tower_lsp::lsp_types::*;
 
 pub(crate) use crate::Backend;
 pub(crate) use crate::atom::bytes_to_str;
+pub(crate) use crate::class_lookup::find_class_at_offset;
 pub(crate) use crate::code_actions::cursor_context::{
     CursorContext, MemberContext, find_cursor_context,
 };
 pub(crate) use crate::code_actions::naming::capitalise;
-pub(crate) use crate::code_actions::{CodeActionData, make_code_action_data};
+pub(crate) use crate::code_actions::{
+    CodeActionData, indent_of_line_at, indent_unit, make_code_action_data,
+};
 pub(crate) use crate::completion::phpdoc::generation::enrichment_plain;
-pub(crate) use crate::completion::resolver::Loaders;
 pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
+use crate::text_position::{offset_to_position, position_to_byte_offset};
+pub(crate) use crate::type_engine::resolver::Loaders;
 pub(crate) use crate::types::ClassInfo;
-pub(crate) use crate::util::{find_class_at_offset, offset_to_position, position_to_byte_offset};
 
 mod codegen;
 mod context;
@@ -233,17 +235,17 @@ impl Backend {
             self.resolve_param_types(uri, content, start as u32, &classification.return_values);
 
         // ── Indentation ─────────────────────────────────────────────
-        let call_indent = indent_at(content, start);
+        let call_indent = indent_of_line_at(content, start);
         let (member_indent, body_indent) = match enclosing.target {
             ExtractionTarget::Method => {
-                let member = detect_line_indent(content, enclosing.body_start);
-                let unit = detect_indent_unit(content);
+                let member = indent_of_line_at(content, enclosing.body_start);
+                let unit = indent_unit(content);
                 let body = format!("{}{}", member, unit);
                 (member, body)
             }
             ExtractionTarget::Function => {
                 let member = String::new();
-                let unit = detect_indent_unit(content);
+                let unit = indent_unit(content);
                 (member, unit.to_string())
             }
         };
@@ -350,14 +352,7 @@ impl Backend {
             },
         ];
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

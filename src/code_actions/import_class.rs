@@ -19,9 +19,10 @@ use crate::Backend;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
 
+use crate::class_lookup::is_class_keyword;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::ClassLikeKind;
-use crate::util::{is_class_keyword, short_name};
+use crate::util::short_name;
 
 use super::make_code_action_data;
 
@@ -50,6 +51,7 @@ impl Backend {
         };
 
         let local_classes: Vec<crate::types::ClassInfo> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -61,8 +63,9 @@ impl Backend {
             .unwrap_or_default();
 
         // Convert LSP range to byte offsets for comparison with symbol spans.
-        let request_start = crate::util::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::util::position_to_byte_offset(content, params.range.end);
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
         // ── Find ClassReference spans overlapping the request range ─────
         let affinity_table = crate::completion::class_completion::build_affinity_table(
@@ -161,9 +164,6 @@ impl Backend {
 
                 let title = format!("Import `{}`", fqn);
 
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri.clone(), edits);
-
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
@@ -172,11 +172,10 @@ impl Backend {
                     } else {
                         Some(matching_diagnostics.clone())
                     },
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        document_changes: None,
-                        change_annotations: None,
-                    }),
+                    edit: Some(crate::code_actions::single_file_edit(
+                        doc_uri.clone(),
+                        edits,
+                    )),
                     command: None,
                     is_preferred: if candidates.len() == 1 {
                         Some(true)
@@ -301,18 +300,14 @@ impl Backend {
 
                 let title = format!("Import `{}`", fqn);
 
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri.clone(), edits);
-
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
                     diagnostics: None,
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        document_changes: None,
-                        change_annotations: None,
-                    }),
+                    edit: Some(crate::code_actions::single_file_edit(
+                        doc_uri.clone(),
+                        edits,
+                    )),
                     command: None,
                     is_preferred: if candidates.len() == 1 {
                         Some(true)
@@ -342,7 +337,7 @@ impl Backend {
 
         // ── 1. fqn_uri_index ──────────────────────────────────────────────
         {
-            let idx = self.fqn_uri_index.read();
+            let idx = self.symbols.fqn_uri_index.read();
             for fqn in idx.keys() {
                 if short_name(fqn).to_lowercase() == name_lower {
                     candidates.push(fqn.to_owned());
@@ -352,7 +347,7 @@ impl Backend {
 
         // ── 2. Class index ──────────────────────────────────────────────
         {
-            let cmap = self.fqn_uri_index.read();
+            let cmap = self.symbols.fqn_uri_index.read();
             for fqn in cmap.keys() {
                 if short_name(fqn).to_lowercase() == name_lower
                     && !candidates
@@ -366,7 +361,7 @@ impl Backend {
 
         // ── 3. uri_classes_index (already-parsed files) ───────────────────────────
         {
-            let amap = self.uri_classes_index.read();
+            let amap = self.symbols.uri_classes_index.read();
             for classes in amap.values() {
                 for cls in classes {
                     if cls.name.to_lowercase() == name_lower {
@@ -560,6 +555,7 @@ impl Backend {
         };
 
         let local_classes: Vec<crate::types::ClassInfo> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -570,8 +566,9 @@ impl Backend {
             })
             .unwrap_or_default();
 
-        let request_start = crate::util::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::util::position_to_byte_offset(content, params.range.end);
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
         for span in &symbol_map.spans {
             if span.start as usize >= request_end || span.end as usize <= request_start {
@@ -740,14 +737,7 @@ impl Backend {
             return None;
         }
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, all_edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, all_edits))
     }
 
     /// Find all unresolved class names in a file.
@@ -770,6 +760,7 @@ impl Backend {
         };
 
         let local_classes: Vec<crate::types::ClassInfo> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

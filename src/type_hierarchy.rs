@@ -10,9 +10,11 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind as MapSymbolKind};
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind};
-use crate::util::{find_class_at_offset, offset_to_position, position_to_offset, short_name};
+use crate::util::short_name;
 
 impl Backend {
     /// Prepare the type hierarchy for the symbol under the cursor.
@@ -44,6 +46,7 @@ impl Backend {
             }
             MapSymbolKind::SelfStaticParent(ssp_kind) => {
                 let classes: Vec<std::sync::Arc<ClassInfo>> = self
+                    .symbols
                     .uri_classes_index
                     .read()
                     .get(uri)
@@ -178,6 +181,7 @@ impl Backend {
                 // Last resort: try to find the URI from the fqn_uri_index
                 // and read from disk / open_files.
                 let uri = self
+                    .symbols
                     .fqn_uri_index
                     .read()
                     .get(fqn)

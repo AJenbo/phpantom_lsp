@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::unknown_members::member_exists;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
+use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 
 // ─── Token type indices ─────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ impl Backend {
         // Precompute line starts once: converting each span's byte offset to a
         // line/column independently would rescan the file from the start every
         // time, which is O(n²) on large files (the demo file alone takes ~17s).
-        let line_index = crate::util::LineIndex::new(content);
+        let line_index = crate::text_position::LineIndex::new(content);
 
         let is_blade = self.is_blade_file(uri);
 
@@ -258,7 +258,9 @@ impl Backend {
                     // already highlights the import prolog per name segment;
                     // a single token spanning the whole path (backslashes
                     // included) would visibly override that coloring.
-                    if *context == crate::symbol_map::ClassRefContext::UseImport {
+                    if *context == ClassRefContext::Attribute {
+                        (TT_DECORATOR, 0)
+                    } else if *context == ClassRefContext::UseImport {
                         if !is_blade {
                             continue;
                         }
@@ -414,6 +416,52 @@ impl Backend {
         // and @var keywords inside docblocks).  Without this, a single
         // comment token covering `/** @var \App\Foo $x */` would hide
         // the more specific inner tokens.
+        for span in crate::phpstan_ignore::phpstan_ignore_tag_spans(content) {
+            let length = span.end.saturating_sub(span.start) as u32;
+            if length == 0 {
+                continue;
+            }
+            let position = line_index.position(span.start);
+            if !crate::completion::comment_position::is_inside_non_doc_comment(content, position)
+                && !crate::completion::comment_position::is_inside_docblock(content, position)
+            {
+                continue;
+            }
+            if let Some(abs) = offset_to_absolute(
+                content,
+                &line_index,
+                span.start as u32,
+                length,
+                TT_KEYWORD,
+                0,
+            ) {
+                tokens.push(abs);
+            }
+        }
+
+        for span in crate::phpstan_ignore::phpstan_ignore_code_spans(content) {
+            let length = span.end.saturating_sub(span.start) as u32;
+            if length == 0 {
+                continue;
+            }
+            let position = line_index.position(span.start);
+            if !crate::completion::comment_position::is_inside_non_doc_comment(content, position)
+                && !crate::completion::comment_position::is_inside_docblock(content, position)
+            {
+                continue;
+            }
+            if let Some(abs) = offset_to_absolute(
+                content,
+                &line_index,
+                span.start as u32,
+                length,
+                TT_ENUM_MEMBER,
+                0,
+            ) {
+                tokens.push(abs);
+            }
+        }
+
         split_comments_around_inner(&mut tokens);
 
         tokens
@@ -1020,7 +1068,7 @@ fn utf16_col_at(chars: &[char], pos: usize) -> u32 {
 /// Returns `None` if the offset is beyond the content length.
 fn offset_to_absolute(
     content: &str,
-    line_index: &crate::util::LineIndex,
+    line_index: &crate::text_position::LineIndex,
     start_offset: u32,
     byte_length: u32,
     token_type: u32,

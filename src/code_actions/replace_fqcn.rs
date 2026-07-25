@@ -15,7 +15,8 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
 use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolSpan};
-use crate::util::{offset_to_position, position_to_byte_offset, short_name};
+use crate::text_position::position_to_byte_offset;
+use crate::util::short_name;
 
 /// Build a replacement `TextEdit` for a single FQN span, including the
 /// leading `\` if present in source.
@@ -31,10 +32,11 @@ fn fqn_replace_edit(span: &SymbolSpan, sn: &str, content: &str) -> TextEdit {
         span.start as usize
     };
     TextEdit {
-        range: Range {
-            start: offset_to_position(content, replace_start),
-            end: offset_to_position(content, span.end as usize),
-        },
+        range: crate::text_position::byte_range_to_lsp_range(
+            content,
+            replace_start,
+            span.end as usize,
+        ),
         new_text: sn.to_string(),
     }
 }
@@ -132,18 +134,14 @@ impl Backend {
                 format!("Replace FQCN `\\{}` with import", fqn)
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), edits);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title,
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    edits,
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -223,18 +221,11 @@ impl Backend {
             // FQCN).  If only one distinct FQCN survived conflict checks,
             // Action 1 already covers it.
             if distinct_replaced >= 2 {
-                let mut changes = HashMap::new();
-                changes.insert(doc_uri, all_edits);
-
                 out.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title: "Replace all FQCNs with imports".to_string(),
                     kind: Some(CodeActionKind::REFACTOR),
                     diagnostics: None,
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        document_changes: None,
-                        change_annotations: None,
-                    }),
+                    edit: Some(crate::code_actions::single_file_edit(doc_uri, all_edits)),
                     command: None,
                     is_preferred: Some(false),
                     disabled: None,
@@ -254,7 +245,7 @@ mod tests {
         let uri = "file:///test.php";
         backend.update_ast(uri, content);
 
-        let pos = crate::util::offset_to_position(content, cursor_offset);
+        let pos = crate::text_position::offset_to_position(content, cursor_offset);
         let params = CodeActionParams {
             text_document: TextDocumentIdentifier {
                 uri: uri.parse().unwrap(),

@@ -34,8 +34,9 @@ use crate::docblock::parser::{DocblockInfo, parse_docblock_for_tags};
 use crate::docblock::type_strings::split_type_token;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, FunctionLoader};
-use crate::util::{offset_to_position, short_name};
+use crate::util::short_name;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the function/method (and its docblock) under the cursor.
         // The returned info is owned, so the borrowed AST does not escape.
@@ -198,27 +199,18 @@ impl Backend {
         let start_pos = offset_to_position(content, info.docblock_start);
         let end_pos = offset_to_position(content, info.docblock_end);
 
-        let mut changes = HashMap::new();
-        changes.insert(
-            doc_uri,
-            vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: new_docblock,
-            }],
-        );
-
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Update docblock to match signature".to_string(),
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            }),
+            edit: Some(crate::code_actions::single_edit(
+                doc_uri,
+                Range {
+                    start: start_pos,
+                    end: end_pos,
+                },
+                new_docblock,
+            )),
             command: None,
             is_preferred: Some(true),
             disabled: None,

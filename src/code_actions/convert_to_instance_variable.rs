@@ -14,8 +14,6 @@
 //! - The `$this` variable is never offered for conversion.
 //! - Only works inside a method body of a class-like declaration.
 
-use std::collections::HashMap;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
@@ -30,7 +28,7 @@ use crate::code_actions::cursor_context::{CursorContext, MemberContext, find_cur
 use crate::code_actions::{CodeActionData, detect_indent_from_members, make_code_action_data};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::collect_function_scope;
-use crate::util::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 // ─── AST helpers ────────────────────────────────────────────────────────────
 
@@ -511,14 +509,7 @@ impl Backend {
                 .then(a.range.start.character.cmp(&b.range.start.character))
         });
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

@@ -41,7 +41,7 @@ use tower_lsp::lsp_types::*;
 use crate::analyse::OutputFormat;
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
-use crate::util::position_to_byte_offset;
+use crate::text_position::position_to_byte_offset;
 use crate::virtual_members::with_active_resolved_class_cache;
 use crate::{Backend, composer, config};
 
@@ -238,7 +238,7 @@ pub async fn run(options: FixOptions) -> i32 {
     // ── 2. Index project ────────────────────────────────────────────
     let backend = Backend::new_headless();
     *backend.workspace_root().write() = Some(root.to_path_buf());
-    *backend.config.lock() = cfg.clone();
+    *backend.workspace.config.lock() = cfg.clone();
 
     let composer_package = composer::read_composer_package(root);
 
@@ -697,7 +697,7 @@ mod tests {
     use super::*;
 
     // Re-import for tests that call position_to_byte_offset directly.
-    use crate::util::position_to_byte_offset as lsp_position_to_byte_offset;
+    use crate::text_position::position_to_byte_offset as lsp_position_to_byte_offset;
 
     #[test]
     fn apply_text_edits_removes_lines_bottom_to_top() {

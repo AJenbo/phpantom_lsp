@@ -70,8 +70,8 @@ impl Backend {
         let class_loader = self.class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         let constant_loader = self.constant_loader();
-        let loaders = crate::completion::resolver::Loaders {
-            function_loader: Some(&function_loader as &dyn Fn(&str) -> Option<FunctionInfo>),
+        let loaders = crate::type_engine::resolver::Loaders {
+            function_loader: Some(&function_loader as &dyn Fn(&str, u32) -> Option<FunctionInfo>),
             constant_loader: Some(&constant_loader),
         };
 
@@ -79,7 +79,7 @@ impl Backend {
         // parameters (e.g. `Generator<int, Pencil>`) and scalar types
         // (e.g. `int`) that the ClassInfo-based path would lose.
         if let Some(resolved_type) =
-            crate::completion::variable::resolution::resolve_variable_php_type(
+            crate::type_engine::variable::resolution::resolve_variable_php_type(
                 &var_name,
                 content,
                 cursor_offset,

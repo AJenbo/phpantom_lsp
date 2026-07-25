@@ -2,14 +2,14 @@
 ///
 /// This sub-module groups all completion logic:
 ///
+/// The subject-to-type resolution engine (subject extraction, `resolver`,
+/// `call_resolution`, `types`, and variable type resolution) lives in the
+/// shared `crate::type_engine` module, not here.
+///
 /// ## Top-level modules
 ///
 /// - **handler**: Top-level completion request orchestration
 /// - **target**: Extracting the completion target (access operator and subject)
-/// - **resolver**: Resolving the subject to a concrete class type
-/// - **call_resolution**: Call expression and callable target resolution (method
-///   calls, static calls, function calls, constructor calls, signature help,
-///   named-argument completion)
 /// - **builder**: Building LSP `CompletionItem`s from resolved class info
 /// - **named_args**: Named argument completion inside function/method call parens
 /// - **array_callable**: Method name completion inside array callable strings
@@ -22,25 +22,9 @@
 ///
 /// ## Sub-grouped modules
 ///
-/// ### `variable/` — Variable resolution
+/// ### `variable/` — Variable-name completion
 ///
-/// - **resolution**: Variable type resolution via assignment scanning
 /// - **completion**: Variable name completions and scope collection
-/// - **rhs_resolution**: Right-hand-side expression resolution for variable
-///   assignments (instantiation, array access, function/method/static calls,
-///   property access, match, ternary, clone)
-/// - **class_string_resolution**: Class-string variable resolution (`$cls = User::class`)
-/// - **raw_type_inference**: Raw type inference for variable assignments (array shapes,
-///   array functions, generator yields)
-/// - **foreach_resolution**: Foreach value/key and array destructuring type resolution
-/// - **closure_resolution**: Closure and arrow-function parameter resolution
-///
-/// ### `types/` — Type resolution
-///
-/// - **resolution**: Type-hint string to `ClassInfo` mapping (unions,
-///   intersections, generics, type aliases, object shapes, property types)
-/// - **narrowing**: instanceof / assert / custom type guard narrowing
-/// - **conditional**: PHPStan conditional return type resolution at call sites
 ///
 /// ### `context/` — Context-specific completion
 ///
@@ -76,7 +60,6 @@
 pub(crate) mod array_callable;
 pub mod array_shape;
 pub(crate) mod builder;
-pub(crate) mod call_resolution;
 pub(crate) mod command_params;
 pub(crate) mod eloquent_string;
 pub(crate) mod handler;
@@ -84,7 +67,6 @@ pub(crate) mod laravel_route_controller;
 pub(crate) mod laravel_string_keys;
 pub mod named_args;
 pub(crate) mod resolve;
-pub(crate) mod resolver;
 pub(crate) mod target;
 pub(crate) mod use_edit;
 
@@ -93,7 +75,6 @@ pub(crate) mod use_edit;
 pub(crate) mod context;
 pub mod phpdoc;
 pub(crate) mod source;
-pub mod types;
 pub(crate) mod variable;
 
 // ─── Backward-compatible re-exports ─────────────────────────────────────────
@@ -104,10 +85,6 @@ pub(crate) mod variable;
 
 // source/
 pub use source::comment_position;
-
-// types/
-pub use types::conditional as conditional_resolution;
-pub(crate) use types::resolution as type_resolution;
 
 // context/
 pub(crate) use context::catch_completion;

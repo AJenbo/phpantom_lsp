@@ -12,8 +12,8 @@
 //! call) or a property/promoted-parameter declaration.
 
 use crate::completion::named_args::{find_enclosing_open_paren, position_to_char_offset};
+use crate::text_position::position_to_offset;
 use crate::text_scan::skip_string_backward;
-use crate::util::position_to_offset;
 use tower_lsp::lsp_types::Position;
 
 /// PHP native types valid in type-hint positions (PHP 8.x).
@@ -243,10 +243,13 @@ pub(crate) fn is_function_or_const_name_position(content: &str, position: Positi
         return false;
     }
 
-    if check_keyword_ending_at_bytes(bytes, i, b"fn")
-        || check_keyword_ending_at_bytes(bytes, i, b"case")
-    {
+    if check_keyword_ending_at_bytes(bytes, i, b"fn") {
         return true;
+    }
+    // `case` names an enum case (a member) but also labels a `switch`
+    // branch, where a class/const/enum name completion is wanted.
+    if check_keyword_ending_at_bytes(bytes, i, b"case") {
+        return super::override_completion::case_is_enum_declaration(bytes, i);
     }
     // `function` / `const` declare member names, but not after `use`
     // (`use function foo`, `use const BAR` still need symbol completion).
@@ -342,23 +345,7 @@ fn preceded_by_use_keyword_bytes(bytes: &[u8], keyword_start: usize) -> bool {
 }
 
 fn has_const_keyword_before_name(bytes: &[u8], pos: usize) -> bool {
-    let mut line_start = pos;
-    while line_start > 0 && bytes[line_start - 1] != b'\n' {
-        line_start -= 1;
-    }
-    bytes[line_start..pos]
-        .windows(b"const".len())
-        .enumerate()
-        .any(|(idx, window)| {
-            if window != b"const" {
-                return false;
-            }
-            let start = line_start + idx;
-            let end = start + b"const".len();
-            (start == 0 || !is_ident_byte(bytes[start - 1]))
-                && (end >= bytes.len() || !is_ident_byte(bytes[end]))
-                && !preceded_by_use_keyword_bytes(bytes, start)
-        })
+    super::override_completion::has_const_keyword_before_name(bytes, pos)
 }
 
 // ─── Private helpers ────────────────────────────────────────────────────────

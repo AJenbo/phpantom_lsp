@@ -18,14 +18,24 @@ use std::sync::Arc;
 use crate::symbol_map::VarDefKind;
 use tower_lsp::lsp_types::*;
 
-use super::member::{MemberAccessHint, MemberDefinitionCtx};
+use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
 use super::point_location;
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::types::{AccessKind, ClassInfo};
-use crate::util::{find_class_at_offset, position_to_offset, short_name};
+use crate::text_position::position_to_offset;
+use crate::types::{AccessKind, ClassInfo, MAX_INHERITANCE_DEPTH};
+use crate::util::short_name;
 use crate::virtual_members::laravel;
+
+struct MemberPrototypeSearch<'a> {
+    member_name: &'a str,
+    kind: MemberKind,
+    uri: &'a str,
+    content: &'a str,
+    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+}
 
 impl Backend {
     /// Handle a "go to definition" request.
@@ -86,7 +96,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<crate::symbol_map::SymbolSpan> {
-        let offset = crate::util::position_to_offset(content, position);
+        let offset = crate::text_position::position_to_offset(content, position);
         self.lookup_symbol_map(uri, offset).or_else(|| {
             if offset > 0 {
                 self.lookup_symbol_map(uri, offset - 1)
@@ -189,8 +199,10 @@ impl Backend {
                         // site.  Return the symbol's own location so
                         // editors can fall back to Find References.
                         let parsed_uri = Url::parse(uri).ok()?;
-                        let start =
-                            crate::util::offset_to_position(content, cursor_offset as usize);
+                        let start = crate::text_position::offset_to_position(
+                            content,
+                            cursor_offset as usize,
+                        );
                         let end_offset = match kind {
                             SymbolKind::Variable { .. } => cursor_offset as usize + 1 + name.len(),
                             SymbolKind::CompactVariable { .. } => {
@@ -198,7 +210,7 @@ impl Backend {
                             }
                             _ => unreachable!(),
                         };
-                        let end = crate::util::offset_to_position(content, end_offset);
+                        let end = crate::text_position::offset_to_position(content, end_offset);
                         return Some(vec![Location {
                             uri: parsed_uri,
                             range: Range { start, end },
@@ -211,8 +223,9 @@ impl Backend {
                     let token_end = var_def.offset + 1 + var_def.name.len() as u32;
                     let target_uri = Url::parse(uri).ok()?;
                     let start_pos =
-                        crate::util::offset_to_position(content, var_def.offset as usize);
-                    let end_pos = crate::util::offset_to_position(content, token_end as usize);
+                        crate::text_position::offset_to_position(content, var_def.offset as usize);
+                    let end_pos =
+                        crate::text_position::offset_to_position(content, token_end as usize);
                     return Some(vec![Location {
                         uri: target_uri,
                         range: Range {
@@ -261,38 +274,62 @@ impl Backend {
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
                 .map(|loc| vec![loc]),
 
-            SymbolKind::ClassDeclaration { name }
-            | SymbolKind::MemberDeclaration { name, .. }
-            | SymbolKind::NamespaceDeclaration { name } => {
-                // The cursor is on a declaration name, so "go to
-                // definition" has nowhere to jump — we are already at the
-                // definition.  Implement "Declaration or Usages" by
-                // returning the symbol's usages instead.
-                //
-                // VS Code achieves this by detecting "definition ==
-                // current position" and running Find References itself
-                // (editor.gotoLocation.alternativeDefinitionCommand), but
-                // PHPStorm simply navigates to the returned location and
-                // stops.  Returning the usages directly makes the feature
-                // work uniformly across clients.
-                let usages = self.find_references(uri, content, position, false);
-                if let Some(usages) = usages
-                    && !usages.is_empty()
+            SymbolKind::MemberDeclaration { name, is_static } => {
+                // If this method/property overrides a parent or implements
+                // an interface member, jump to the prototype declaration.
+                let ctx = self.file_context(uri);
+                let class_loader = self.class_loader(&ctx);
+                let current_class =
+                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
+                if let Some(cls) = current_class
+                    && let Some(kind) = self.infer_member_declaration_kind(cls, name, *is_static)
+                    && let Some(loc) = self.resolve_member_declaration_prototype(
+                        uri,
+                        content,
+                        cls,
+                        name,
+                        kind,
+                        &class_loader,
+                    )
                 {
-                    return Some(usages);
+                    return Some(vec![loc]);
                 }
 
-                // No usages found: fall back to the declaration's own
-                // location so clients that rely on the self-location
-                // signal (VS Code) still trigger their reference fallback.
-                let parsed_uri = Url::parse(uri).ok()?;
-                let start = crate::util::offset_to_position(content, cursor_offset as usize);
-                let end =
-                    crate::util::offset_to_position(content, cursor_offset as usize + name.len());
-                Some(vec![Location {
-                    uri: parsed_uri,
-                    range: Range { start, end },
-                }])
+                if let Some(cls) = current_class
+                    && let Some(locs) =
+                        self.resolve_reverse_implementation(uri, content, cls, name, &class_loader)
+                    && !locs.is_empty()
+                {
+                    return Some(locs);
+                }
+
+                self.declaration_or_usages(uri, content, cursor_offset, name)
+            }
+
+            SymbolKind::ClassDeclaration { name } => {
+                // If this class extends a parent, jump to the parent
+                // class declaration.
+                let ctx = self.file_context(uri);
+                let current_class =
+                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
+                if let Some(cls) = current_class
+                    && let Some(ref parent_name) = cls.parent_class
+                    && let Some(loc) = self.resolve_class_reference(
+                        uri,
+                        content,
+                        parent_name,
+                        parent_name.contains('\\'),
+                        cursor_offset,
+                    )
+                {
+                    return Some(vec![loc]);
+                }
+
+                self.declaration_or_usages(uri, content, cursor_offset, name)
+            }
+
+            SymbolKind::NamespaceDeclaration { name } => {
+                self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
             SymbolKind::FunctionCall { name, .. } => {
@@ -333,7 +370,7 @@ impl Backend {
 
             SymbolKind::LaravelMacroString { .. } => Some(vec![point_location(
                 Url::parse(uri).ok()?,
-                crate::util::offset_to_position(content, cursor_offset as usize),
+                crate::text_position::offset_to_position(content, cursor_offset as usize),
             )]),
 
             SymbolKind::CommandOwnParam { .. }
@@ -343,12 +380,237 @@ impl Backend {
         }
     }
 
+    fn infer_member_declaration_kind(
+        &self,
+        class: &ClassInfo,
+        member_name: &str,
+        is_static: bool,
+    ) -> Option<MemberKind> {
+        if is_static
+            && class
+                .constants
+                .iter()
+                .any(|c| c.name == member_name && c.visibility != crate::types::Visibility::Private)
+        {
+            return Some(MemberKind::Constant);
+        }
+
+        if class.methods.iter().any(|m| {
+            m.name == member_name
+                && m.is_static == is_static
+                && !m.is_virtual
+                && m.visibility != crate::types::Visibility::Private
+        }) {
+            return Some(MemberKind::Method);
+        }
+
+        if class.properties.iter().any(|p| {
+            p.name == member_name
+                && p.is_static == is_static
+                && !p.is_virtual
+                && p.visibility != crate::types::Visibility::Private
+        }) {
+            return Some(MemberKind::Property);
+        }
+
+        None
+    }
+
+    fn resolve_member_declaration_prototype(
+        &self,
+        uri: &str,
+        content: &str,
+        class: &ClassInfo,
+        member_name: &str,
+        kind: MemberKind,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<Location> {
+        let search = MemberPrototypeSearch {
+            member_name,
+            kind,
+            uri,
+            content,
+            class_loader,
+        };
+
+        if let Some(loc) = self.find_member_prototype_in_traits(&class.used_traits, &search, 0) {
+            return Some(loc);
+        }
+
+        let mut current = class.clone();
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let Some(parent_name) = current.parent_class else {
+                break;
+            };
+            let Some(parent) = class_loader(&parent_name).map(Arc::unwrap_or_clone) else {
+                break;
+            };
+
+            if self.class_declares_member(&parent, &search)
+                && let Some(loc) = self.member_location(&parent_name, &parent, &search)
+            {
+                return Some(loc);
+            }
+
+            if let Some(loc) = self.find_member_prototype_in_traits(&parent.used_traits, &search, 0)
+            {
+                return Some(loc);
+            }
+
+            current = parent;
+        }
+
+        if matches!(search.kind, MemberKind::Method | MemberKind::Constant) {
+            return self.find_member_prototype_in_interfaces(class, &search);
+        }
+
+        None
+    }
+
+    fn find_member_prototype_in_traits(
+        &self,
+        trait_names: &[crate::atom::Atom],
+        search: &MemberPrototypeSearch<'_>,
+        depth: usize,
+    ) -> Option<Location> {
+        if depth > MAX_INHERITANCE_DEPTH as usize {
+            return None;
+        }
+
+        for trait_name in trait_names {
+            let Some(trait_info) = (search.class_loader)(trait_name).map(Arc::unwrap_or_clone)
+            else {
+                continue;
+            };
+            if self.class_declares_member(&trait_info, search)
+                && let Some(loc) = self.member_location(trait_name, &trait_info, search)
+            {
+                return Some(loc);
+            }
+            if let Some(loc) =
+                self.find_member_prototype_in_traits(&trait_info.used_traits, search, depth + 1)
+            {
+                return Some(loc);
+            }
+        }
+
+        None
+    }
+
+    fn find_member_prototype_in_interfaces(
+        &self,
+        class: &ClassInfo,
+        search: &MemberPrototypeSearch<'_>,
+    ) -> Option<Location> {
+        let mut current = Some(class.clone());
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let cls = current?;
+            for iface_name in &cls.interfaces {
+                if let Some(loc) = self.find_member_prototype_in_interface(iface_name, search, 0) {
+                    return Some(loc);
+                }
+            }
+            current = cls
+                .parent_class
+                .as_deref()
+                .and_then(|parent| (search.class_loader)(parent).map(Arc::unwrap_or_clone));
+        }
+
+        None
+    }
+
+    fn find_member_prototype_in_interface(
+        &self,
+        iface_name: &str,
+        search: &MemberPrototypeSearch<'_>,
+        depth: usize,
+    ) -> Option<Location> {
+        if depth > MAX_INHERITANCE_DEPTH as usize {
+            return None;
+        }
+        let iface = (search.class_loader)(iface_name).map(Arc::unwrap_or_clone)?;
+        if self.class_declares_member(&iface, search)
+            && let Some(loc) = self.member_location(iface_name, &iface, search)
+        {
+            return Some(loc);
+        }
+
+        for parent in &iface.interfaces {
+            if let Some(loc) = self.find_member_prototype_in_interface(parent, search, depth + 1) {
+                return Some(loc);
+            }
+        }
+
+        if let Some(parent) = iface.parent_class
+            && let Some(loc) = self.find_member_prototype_in_interface(&parent, search, depth + 1)
+        {
+            return Some(loc);
+        }
+
+        None
+    }
+
+    fn class_declares_member(&self, class: &ClassInfo, search: &MemberPrototypeSearch<'_>) -> bool {
+        match search.kind {
+            MemberKind::Method => class.methods.iter().any(|m| {
+                m.name == search.member_name
+                    && !m.is_virtual
+                    && m.visibility != crate::types::Visibility::Private
+            }),
+            MemberKind::Property => class.properties.iter().any(|p| {
+                p.name == search.member_name
+                    && !p.is_virtual
+                    && p.visibility != crate::types::Visibility::Private
+            }),
+            MemberKind::Constant => class.constants.iter().any(|c| {
+                c.name == search.member_name && c.visibility != crate::types::Visibility::Private
+            }),
+        }
+    }
+
+    fn member_location(
+        &self,
+        class_name: &str,
+        class: &ClassInfo,
+        search: &MemberPrototypeSearch<'_>,
+    ) -> Option<Location> {
+        let offset = class.member_name_offset(search.member_name, search.kind.as_str())?;
+        let (target_uri, target_content) =
+            self.find_class_file_content(class_name, search.uri, search.content)?;
+        let parsed_uri = Url::parse(&target_uri).ok()?;
+        Some(point_location(
+            parsed_uri,
+            crate::text_position::offset_to_position(&target_content, offset as usize),
+        ))
+    }
+
     /// Resolve a `ClassReference` symbol to its definition.
     ///
     /// Tries same-file lookup (uri_classes_index), then cross-file via PSR-4.
     /// When `is_fqn` is `true`, the name is already fully-qualified
     /// (the original PHP source used a leading `\`) and should be used
     /// as-is without namespace resolution.
+    fn declaration_or_usages(
+        &self,
+        uri: &str,
+        content: &str,
+        cursor_offset: u32,
+        name: &str,
+    ) -> Option<Vec<Location>> {
+        // Return the declaration's own location.  Editors detect
+        // "definition == current position" and offer Find References
+        // as a fallback (e.g. VS Code's
+        // editor.gotoLocation.alternativeDefinitionCommand).
+        let parsed_uri = Url::parse(uri).ok()?;
+        let start = crate::text_position::offset_to_position(content, cursor_offset as usize);
+        let end =
+            crate::text_position::offset_to_position(content, cursor_offset as usize + name.len());
+        Some(vec![Location {
+            uri: parsed_uri,
+            range: Range { start, end },
+        }])
+    }
+
     pub(super) fn resolve_class_reference(
         &self,
         uri: &str,
@@ -387,7 +649,7 @@ impl Backend {
         // previously navigated-to vendor files) live in
         // fqn_uri_index (FQN → URI) and uri_classes_index (URI → [ClassInfo]).
         for fqn in &candidates {
-            let target_uri = self.fqn_uri_index.read().get(fqn.as_str()).cloned();
+            let target_uri = self.symbols.fqn_uri_index.read().get(fqn.as_str()).cloned();
             if let Some(ref target_uri) = target_uri
                 && let Some(location) =
                     self.find_definition_in_uri_classes_index_cross_file(fqn, target_uri)
@@ -399,10 +661,10 @@ impl Backend {
         // Cross-file via PSR-4: parse on demand and cache.
         // PSR-4 mappings only cover user code (from composer.json).
         // Vendor classes are resolved by the class index above.
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(workspace_root) = workspace_root {
-            let mappings = self.psr4_mappings.read();
+            let mappings = self.workspace.psr4_mappings.read();
             for fqn in &candidates {
                 if let Some(file_path) =
                     composer::resolve_class_path(&mappings, &workspace_root, fqn)
@@ -419,8 +681,9 @@ impl Backend {
         // enclosing class or method docblock.
         if let Some(tpl_def) = self.lookup_template_def(uri, name, cursor_offset) {
             let target_uri = Url::parse(uri).ok()?;
-            let start_pos = crate::util::offset_to_position(content, tpl_def.name_offset as usize);
-            let end_pos = crate::util::offset_to_position(
+            let start_pos =
+                crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
+            let end_pos = crate::text_position::offset_to_position(
                 content,
                 (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
             );
@@ -463,7 +726,7 @@ impl Backend {
     fn resolve_constant_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Phase 1: Look up the constant in global_defines. ──
         let found = {
-            let dmap = self.global_defines.read();
+            let dmap = self.symbols.global_defines.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some(info) = dmap.get(candidate.as_str()) {
@@ -484,7 +747,7 @@ impl Backend {
         let found = if found.is_some() {
             found
         } else {
-            let idx = self.autoload_constant_index.read();
+            let idx = self.symbols.autoload_constant_index.read();
             let mut lazy_result = None;
             for candidate in candidates {
                 if let Some(path) = idx.get(candidate.as_str()) {
@@ -495,7 +758,7 @@ impl Backend {
                         let uri = crate::util::path_to_uri(&path);
                         self.update_ast(&uri, &content);
 
-                        let dmap = self.global_defines.read();
+                        let dmap = self.symbols.global_defines.read();
                         for retry in candidates {
                             if let Some(info) = dmap.get(retry.as_str()) {
                                 lazy_result = Some((info.file_uri.clone(), info.name_offset));
@@ -518,7 +781,7 @@ impl Backend {
         let found = if found.is_some() {
             found
         } else {
-            let paths = self.autoload_file_paths.read().clone();
+            let paths = self.symbols.autoload_file_paths.read().clone();
             let mut lazy_result = None;
             for path in &paths {
                 let uri = crate::util::path_to_uri(path);
@@ -529,7 +792,7 @@ impl Backend {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     self.update_ast(&uri, &content);
 
-                    let dmap = self.global_defines.read();
+                    let dmap = self.symbols.global_defines.read();
                     for candidate in candidates {
                         if let Some(info) = dmap.get(candidate.as_str()) {
                             lazy_result = Some((info.file_uri.clone(), info.name_offset));
@@ -556,7 +819,8 @@ impl Backend {
         if name_offset == 0 {
             return None;
         }
-        let position = crate::util::offset_to_position(&file_content, name_offset as usize);
+        let position =
+            crate::text_position::offset_to_position(&file_content, name_offset as usize);
         let parsed_uri = Url::parse(&file_uri).ok()?;
 
         Some(point_location(parsed_uri, position))
@@ -579,7 +843,7 @@ impl Backend {
     fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Step 1: Check global_functions (user code + cached stubs) ──
         let found = {
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some((uri, info)) = fmap.get(candidate.as_str()) {
@@ -600,7 +864,7 @@ impl Backend {
 
             // After find_or_load_function, the function is cached in
             // global_functions.  Look it up to get the URI.
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some((uri, info)) = fmap.get(candidate.as_str()) {
@@ -631,7 +895,7 @@ impl Backend {
             return None;
         }
         let position =
-            crate::util::offset_to_position(&file_content, func_info.name_offset as usize);
+            crate::text_position::offset_to_position(&file_content, func_info.name_offset as usize);
         let parsed_uri = Url::parse(&file_uri).ok()?;
 
         Some(point_location(parsed_uri, position))
@@ -695,9 +959,15 @@ impl Backend {
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).
-        let classes = if let Some(cached) = self.uri_classes_index.read().get(target_uri).cloned() {
+        let classes = if let Some(cached) = self
+            .symbols
+            .uri_classes_index
+            .read()
+            .get(target_uri)
+            .cloned()
+        {
             cached
-        } else if let Some(cls) = self.fqn_class_index.read().get(fqn) {
+        } else if let Some(cls) = self.symbols.fqn_class_index.read().get(fqn) {
             vec![Arc::clone(cls)]
         } else {
             let file_path = Url::parse(target_uri)
@@ -722,7 +992,7 @@ impl Backend {
             return None;
         }
         let position =
-            crate::util::offset_to_position(&content, class_info.keyword_offset as usize);
+            crate::text_position::offset_to_position(&content, class_info.keyword_offset as usize);
 
         Some(point_location(parsed_uri, position))
     }
@@ -737,7 +1007,7 @@ impl Backend {
     ) -> Option<Location> {
         let short_name = short_name(fqn);
 
-        let classes = self.uri_classes_index.read().get(uri).cloned()?;
+        let classes = self.symbols.uri_classes_index.read().get(uri).cloned()?;
 
         let class_info = classes.iter().find(|c| {
             if c.name != short_name {
@@ -756,7 +1026,8 @@ impl Backend {
         if class_info.keyword_offset == 0 {
             return None;
         }
-        let position = crate::util::offset_to_position(content, class_info.keyword_offset as usize);
+        let position =
+            crate::text_position::offset_to_position(content, class_info.keyword_offset as usize);
 
         // Build a file URI from the current URI string.
         let parsed_uri = Url::parse(uri).ok()?;
@@ -792,6 +1063,7 @@ impl Backend {
         let cursor_offset = position_to_offset(content, position);
 
         let classes: Vec<std::sync::Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -824,8 +1096,10 @@ impl Backend {
             if current_class.keyword_offset == 0 {
                 return None;
             }
-            let target_position =
-                crate::util::offset_to_position(content, current_class.keyword_offset as usize);
+            let target_position = crate::text_position::offset_to_position(
+                content,
+                current_class.keyword_offset as usize,
+            );
             let parsed_uri = Url::parse(uri).ok()?;
             return Some(point_location(parsed_uri, target_position));
         }
@@ -837,9 +1111,9 @@ impl Backend {
         // Use keyword_offset when available (the parent class is in the
         // same file's uri_classes_index entry).
         let parent_in_file = classes.iter().find(|c| c.name == *parent_name);
-        let parent_pos = parent_in_file
-            .filter(|pc| pc.keyword_offset > 0)
-            .map(|pc| crate::util::offset_to_position(content, pc.keyword_offset as usize));
+        let parent_pos = parent_in_file.filter(|pc| pc.keyword_offset > 0).map(|pc| {
+            crate::text_position::offset_to_position(content, pc.keyword_offset as usize)
+        });
         if let Some(pos) = parent_pos {
             let parsed_uri = Url::parse(uri).ok()?;
             return Some(point_location(parsed_uri, pos));
@@ -858,8 +1132,10 @@ impl Backend {
                 && cc.keyword_offset > 0
                 && let Ok(parsed_uri) = Url::parse(&class_uri)
             {
-                let pos =
-                    crate::util::offset_to_position(&class_content, cc.keyword_offset as usize);
+                let pos = crate::text_position::offset_to_position(
+                    &class_content,
+                    cc.keyword_offset as usize,
+                );
                 return Some(point_location(parsed_uri, pos));
             }
         }
@@ -868,7 +1144,7 @@ impl Backend {
         {
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
-                if let Some(file_uri) = self.fqn_uri_index.read().get(candidate).cloned()
+                if let Some(file_uri) = self.symbols.fqn_uri_index.read().get(candidate).cloned()
                     && let Some(file_path) = Url::parse(&file_uri)
                         .ok()
                         .and_then(|u| u.to_file_path().ok())
@@ -882,10 +1158,10 @@ impl Backend {
         // Try PSR-4 resolution as a last resort.
         // PSR-4 mappings only cover user code (from composer.json).
         // Vendor classes are resolved by the class index above.
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(workspace_root) = workspace_root {
-            let mappings = self.psr4_mappings.read();
+            let mappings = self.workspace.psr4_mappings.read();
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
                 if let Some(file_path) =

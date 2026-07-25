@@ -184,7 +184,7 @@ impl Backend {
 
         // ── 1. User-defined functions (from parsed files) ───────────
         {
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             for (key, (_uri, info)) in fmap.iter() {
                 // Match against both the FQN (key) and the short name so
                 // that typing either finds the function.
@@ -285,7 +285,7 @@ impl Backend {
         // parsed.  Only the name is available; full signatures appear
         // after the first use triggers a lazy `update_ast` call.
         {
-            let idx = self.autoload_function_index.read();
+            let idx = self.symbols.autoload_function_index.read();
             for (fqn, _path) in idx.iter() {
                 if !fqn.to_lowercase().contains(&prefix_lower) {
                     continue;
@@ -320,6 +320,7 @@ impl Backend {
                     };
 
                     let origin = self
+                        .symbols
                         .autoload_function_origin_index
                         .read()
                         .get(fqn)

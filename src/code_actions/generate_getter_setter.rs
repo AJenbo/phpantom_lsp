@@ -16,8 +16,6 @@
 //! the same as regular properties. If a `getX()` or `setX()` method
 //! already exists, the corresponding action is not offered.
 
-use std::collections::HashMap;
-
 #[cfg(test)]
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
@@ -35,7 +33,7 @@ use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
-use crate::util::offset_to_position;
+use crate::text_position::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -86,7 +84,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the cursor context and gather the (owned) accessor data.
         // The borrowed AST does not escape the closure.
@@ -189,18 +187,14 @@ impl Backend {
                 new_text: methods_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate getter".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -225,18 +219,14 @@ impl Backend {
                 new_text: methods_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri.clone(), vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate setter".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    vec![edit],
+                )),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
@@ -264,18 +254,11 @@ impl Backend {
                 new_text: methods_text,
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![edit]);
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: "Generate getter and setter".to_string(),
                 kind: Some(CodeActionKind::REFACTOR),
                 diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    document_changes: None,
-                    change_annotations: None,
-                }),
+                edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,

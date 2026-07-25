@@ -82,6 +82,7 @@ mod builder;
 mod builder_injection;
 mod casts;
 mod commands;
+mod completion_cache;
 mod config_keys;
 pub(crate) mod config_values;
 pub(crate) mod database_schema;
@@ -89,6 +90,7 @@ mod env_vars;
 mod factory;
 mod helpers;
 mod macros;
+mod model_extraction;
 pub(crate) mod patches;
 mod pivots;
 mod provider_resources;
@@ -100,7 +102,7 @@ mod trans_keys;
 mod view_names;
 pub(crate) mod where_property;
 
-pub(crate) use aliases::LaravelAliases;
+pub(crate) use aliases::{FacadeAccessor, LaravelAliases, parse_facade_accessor_for_class};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{LaravelCommandIndex, command_signature_at_offset, scan_command_file};
 pub(crate) use config_keys::find_config_references;
@@ -115,6 +117,9 @@ pub(crate) use macros::{
     extract_mixin_registrations, inject_macros, macro_closure_this_target,
     parse_installed_providers, parse_provider_class_list, parse_provider_referenced_classes,
     synthesize_mixin_macros,
+};
+pub(crate) use model_extraction::{
+    extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
 };
 pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
 pub(crate) use route_names::enumerate_all_route_names;
@@ -157,7 +162,9 @@ use std::sync::Arc;
 use builder::build_builder_forwarded_methods;
 use casts::cast_type_to_php_type;
 pub use factory::LaravelFactoryProvider;
-pub(crate) use factory::{factory_to_model_fqn, model_to_factory_fqn};
+pub(crate) use factory::{
+    factory_to_model_fqn, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
+};
 
 use crate::php_type::PhpType;
 use crate::types::{

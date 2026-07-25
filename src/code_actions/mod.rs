@@ -102,6 +102,8 @@ mod replace_fqcn;
 mod simplify_null;
 mod update_docblock;
 
+use std::collections::HashMap;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::sequence::Sequence;
@@ -109,6 +111,68 @@ use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+
+mod docblock_edit;
+pub(crate) use docblock_edit::{DocblockAbove, find_docblock_above_line};
+
+// ─── Shared edit builders ─────────────────────────────────────────────────────
+
+/// Build a [`WorkspaceEdit`] that applies a set of text edits to a single file.
+///
+/// Nearly every code action produces edits for exactly one document.  This
+/// wraps the `changes` map construction so handlers don't each open-code the
+/// `document_changes: None` / `change_annotations: None` boilerplate.
+pub(crate) fn single_file_edit(uri: Url, edits: Vec<TextEdit>) -> WorkspaceEdit {
+    let mut changes = HashMap::new();
+    changes.insert(uri, edits);
+    WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    }
+}
+
+/// Build a [`WorkspaceEdit`] that applies a single text edit to one file.
+///
+/// Convenience wrapper over [`single_file_edit`] for the common case of one
+/// range → one replacement string.
+pub(crate) fn single_edit(uri: Url, range: Range, new_text: String) -> WorkspaceEdit {
+    single_file_edit(uri, vec![TextEdit { range, new_text }])
+}
+
+// ─── Indentation helpers ──────────────────────────────────────────────────────
+
+/// Return the leading whitespace of the line containing `offset`.
+///
+/// This is the raw indentation of that line, without adding an extra level.
+pub(crate) fn indent_of_line_at(content: &str, offset: usize) -> String {
+    let before = &content[..offset.min(content.len())];
+    let line_start = before.rfind('\n').map_or(0, |p| p + 1);
+    content[line_start..offset.min(content.len())]
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect()
+}
+
+/// Detect the file's indentation unit (a tab, two spaces, or four spaces).
+///
+/// Scans lines for the first indented line and infers the convention,
+/// defaulting to four spaces when nothing indented is found.
+pub(crate) fn indent_unit(content: &str) -> &'static str {
+    for line in content.lines() {
+        if line.starts_with('\t') {
+            return "\t";
+        }
+        let spaces: usize = line.chars().take_while(|c| *c == ' ').count();
+        if spaces >= 2 {
+            if spaces.is_multiple_of(4) {
+                return "    ";
+            }
+            return "  ";
+        }
+    }
+    "    "
+}
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -402,7 +466,7 @@ impl Backend {
             // This handles both PHPStan (cached) and native (recomputed)
             // diagnostics uniformly.
             {
-                let mut suppressed = self.diag_suppressed.lock();
+                let mut suppressed = self.diag.suppressed.lock();
                 suppressed.extend(diags.iter().cloned());
             }
 
@@ -412,111 +476,6 @@ impl Backend {
         };
 
         (action, republish_uri)
-    }
-
-    /// Expand `action.diagnostics` with sibling `missingType.checkedException`
-    /// diagnostics for the same exception class within the same function body.
-    ///
-    /// When the user applies "Add @throws RuntimeException", PHPStan will
-    /// have reported a separate diagnostic for every `throw new RuntimeException`
-    /// in that method.  Adding the `@throws` tag fixes all of them, so we
-    /// find those siblings in the cached diagnostics and add them to the
-    /// action's diagnostic list.  The normal clearing logic then removes
-    /// them all in one go.
-    fn expand_sibling_checked_exception_diags(
-        &self,
-        data: &CodeActionData,
-        content: &str,
-        action: &mut CodeAction,
-    ) {
-        use crate::code_actions::phpstan::add_throws::{
-            extract_exception_fqn, find_enclosing_function_line_range,
-        };
-
-        let diag_message = match data
-            .extra
-            .get("diagnostic_message")
-            .and_then(|v| v.as_str())
-        {
-            Some(m) => m,
-            None => return,
-        };
-        let exception_fqn = match extract_exception_fqn(diag_message) {
-            Some(fqn) => fqn,
-            None => return,
-        };
-        let diag_line = match data.extra.get("diagnostic_line").and_then(|v| v.as_u64()) {
-            Some(l) => l as usize,
-            None => return,
-        };
-
-        // Find the function body that contains the triggering diagnostic.
-        let (func_start, func_end) = match find_enclosing_function_line_range(content, diag_line) {
-            Some(range) => range,
-            None => return,
-        };
-
-        let existing_diags = action.diagnostics.get_or_insert_with(Vec::new);
-
-        let cache = self.phpstan_tool.last_diags.lock();
-        let cached = match cache.get(&data.uri) {
-            Some(c) => c,
-            None => return,
-        };
-
-        for cached_d in cached {
-            // Must be the same identifier.
-            let ident = match &cached_d.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
-                _ => continue,
-            };
-            if ident != "missingType.checkedException" {
-                continue;
-            }
-
-            // Must be for the same exception class.
-            let cached_fqn: String = match extract_exception_fqn(&cached_d.message) {
-                Some(fqn) => fqn,
-                None => continue,
-            };
-            if !cached_fqn.eq_ignore_ascii_case(&exception_fqn) {
-                continue;
-            }
-
-            let line = cached_d.range.start.line as usize;
-
-            // Must be within the same function body.
-            if line < func_start || line > func_end {
-                continue;
-            }
-
-            // Skip if already in the list.
-            let already_present = existing_diags.iter().any(|d| {
-                d.range == cached_d.range
-                    && d.message == cached_d.message
-                    && d.code == cached_d.code
-            });
-            if already_present {
-                continue;
-            }
-
-            existing_diags.push(cached_d.clone());
-        }
-    }
-
-    /// Remove specific diagnostics from the PHPStan cache after a
-    /// quickfix has been applied via `codeAction/resolve`.
-    fn clear_phpstan_diagnostics_after_resolve(&self, uri: &str, resolved_diags: &[Diagnostic]) {
-        let mut cache = self.phpstan_tool.last_diags.lock();
-        if let Some(cached) = cache.get_mut(uri) {
-            cached.retain(|cached_d| {
-                !resolved_diags.iter().any(|resolved_d| {
-                    cached_d.range == resolved_d.range
-                        && cached_d.message == resolved_d.message
-                        && cached_d.code == resolved_d.code
-                })
-            });
-        }
     }
 }
 
@@ -534,4 +493,46 @@ pub(crate) fn make_code_action_data(
         extra,
     })
     .unwrap_or_default()
+}
+
+/// Find all occurrences of `needle` in `content` within the byte range
+/// `[scope_start, scope_end)` that are textually identical to the selected
+/// expression, excluding the original selection `[sel_start, sel_end)`.
+///
+/// Returns `(start, end)` byte offset pairs. Word boundaries are checked
+/// so that substrings of longer identifiers are not matched.
+pub(crate) fn find_identical_occurrences(
+    content: &str,
+    needle: &str,
+    sel_start: usize,
+    sel_end: usize,
+    scope_start: usize,
+    scope_end: usize,
+) -> Vec<(usize, usize)> {
+    if needle.is_empty() || scope_start >= scope_end || scope_end > content.len() {
+        return Vec::new();
+    }
+    let haystack = &content[scope_start..scope_end];
+    let mut results = Vec::new();
+    let mut search_from = 0;
+    while let Some(pos) = haystack[search_from..].find(needle) {
+        let abs_start = scope_start + search_from + pos;
+        let abs_end = abs_start + needle.len();
+        // Skip the original selection.
+        if abs_start != sel_start || abs_end != sel_end {
+            // Check word boundaries to avoid matching substrings.
+            let before_ok = abs_start == 0
+                || !content.as_bytes()[abs_start - 1].is_ascii_alphanumeric()
+                    && content.as_bytes()[abs_start - 1] != b'_'
+                    && content.as_bytes()[abs_start - 1] != b'$';
+            let after_ok = abs_end >= content.len()
+                || !content.as_bytes()[abs_end].is_ascii_alphanumeric()
+                    && content.as_bytes()[abs_end] != b'_';
+            if before_ok && after_ok {
+                results.push((abs_start, abs_end));
+            }
+        }
+        search_from = search_from + pos + 1;
+    }
+    results
 }

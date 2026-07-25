@@ -1955,20 +1955,20 @@ function foo($x) {
 #[test]
 fn detect_indent_unit_spaces() {
     let content = "<?php\n    function foo() {\n        $x = 1;\n    }\n";
-    assert_eq!(detect_indent_unit(content), "    ");
+    assert_eq!(indent_unit(content), "    ");
 }
 
 #[test]
 fn detect_indent_unit_tabs() {
     let content = "<?php\n\tfunction foo() {\n\t\t$x = 1;\n\t}\n";
-    assert_eq!(detect_indent_unit(content), "\t");
+    assert_eq!(indent_unit(content), "\t");
 }
 
 #[test]
 fn indent_at_line() {
     let content = "<?php\n    $x = 1;\n";
     let offset = content.find("$x").unwrap();
-    assert_eq!(indent_at(content, offset), "    ");
+    assert_eq!(indent_of_line_at(content, offset), "    ");
 }
 
 #[test]
@@ -1976,7 +1976,7 @@ fn detect_line_indent_method() {
     let content = "<?php\nclass Foo {\n    public function bar() {\n        $x = 1;\n    }\n}\n";
     // body_start is the `{` after `bar()`
     let offset = content.find("{\n        $x").unwrap();
-    assert_eq!(detect_line_indent(content, offset), "    ");
+    assert_eq!(indent_of_line_at(content, offset), "    ");
 }
 
 // ── Extraction context ──────────────────────────────────────────

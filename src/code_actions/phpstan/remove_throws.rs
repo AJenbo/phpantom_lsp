@@ -22,8 +22,10 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
+use crate::code_actions::{DocblockAbove, find_docblock_above_line};
 use crate::php_type::PhpType;
-use crate::util::{offset_to_position, ranges_overlap, short_name};
+use crate::text_position::{offset_to_position, ranges_overlap};
+use crate::util::short_name;
 
 /// PHPStan identifiers we match on.
 const UNUSED_TYPE_ID: &str = "throws.unusedType";
@@ -145,14 +147,10 @@ impl Backend {
         )?;
 
         let doc_uri: Url = data.uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, vec![throws_edit]);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(
+            doc_uri,
+            vec![throws_edit],
+        ))
     }
 }
 
@@ -190,91 +188,6 @@ fn extract_throws_type(message: &str, identifier: &str) -> Option<PhpType> {
     }
 
     Some(PhpType::parse(raw))
-}
-
-/// Information about a docblock found above a given line.
-struct DocblockAbove {
-    /// Byte offset of the `/**`.
-    start: usize,
-    /// Byte offset just past the `*/`.
-    end: usize,
-    /// The raw docblock text.
-    text: String,
-}
-
-/// Find the docblock immediately above the given line.
-///
-/// The diagnostic line is the method/function signature.  The docblock
-/// (if any) sits directly above it, possibly separated by blank lines
-/// or attribute lines.
-fn find_docblock_above_line(content: &str, line: usize) -> Option<DocblockAbove> {
-    let lines: Vec<&str> = content.lines().collect();
-    if line == 0 || line > lines.len() {
-        return None;
-    }
-
-    // Walk backward from the line before the diagnostic to find `*/`.
-    let mut doc_end_line = None;
-    for i in (0..line).rev() {
-        let trimmed = lines[i].trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.ends_with("*/") {
-            doc_end_line = Some(i);
-            break;
-        }
-        // Attributes (#[...]) can appear between docblock and function.
-        if trimmed.starts_with("#[") {
-            continue;
-        }
-        // Anything else means no docblock.
-        break;
-    }
-
-    let end_line = doc_end_line?;
-
-    // Walk backward from end_line to find `/**`.
-    let mut doc_start_line = None;
-    for i in (0..=end_line).rev() {
-        let trimmed = lines[i].trim();
-        if trimmed.contains("/**") {
-            doc_start_line = Some(i);
-            break;
-        }
-        // Should be a `*`-prefixed line.
-        if !trimmed.starts_with('*') && !trimmed.ends_with("*/") {
-            break;
-        }
-    }
-
-    let start_line = doc_start_line?;
-
-    // Convert line numbers to byte offsets.
-    let mut byte_offset = 0;
-    let mut start_byte = 0;
-    let mut end_byte = 0;
-    for (i, line_text) in lines.iter().enumerate() {
-        if i == start_line {
-            start_byte = byte_offset;
-        }
-        byte_offset += line_text.len() + 1; // +1 for newline
-        if i == end_line {
-            end_byte = byte_offset; // include trailing newline
-        }
-    }
-
-    // Trim to just the docblock including its indentation.
-    let text = content
-        .get(start_byte..end_byte.min(content.len()))
-        .unwrap_or("")
-        .to_string();
-
-    Some(DocblockAbove {
-        start: start_byte,
-        end: end_byte.min(content.len()),
-        text,
-    })
 }
 
 /// Build a `TextEdit` that removes the `@throws` line matching the

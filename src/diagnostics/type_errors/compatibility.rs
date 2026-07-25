@@ -1,0 +1,841 @@
+//! Type-compatibility policy layer used by the argument, return, and
+//! property type-mismatch diagnostics.
+//!
+//! [`is_type_compatible`] sits on top of the core type system
+//! (`crate::class_lookup::is_subtype_of_typed`). It adds diagnostic
+//! policy — conservative "MAYBE" escape hatches that suppress a
+//! diagnostic whenever the types *might* be compatible at runtime but
+//! cannot be proven so statically — on top of strict subtype checks.
+//! See the "Architecture note" on [`is_type_compatible`] for the
+//! distinction between the two.
+
+use std::sync::Arc;
+
+use crate::class_lookup::is_subtype_of_typed;
+use crate::php_type::{LiteralValue, PhpType, int_literal_is_within_range, is_array_like_name};
+use crate::types::ClassInfo;
+
+/// Returns `true` when the type is a bare unparameterised `array`.
+fn is_bare_array(ty: &PhpType) -> bool {
+    matches!(ty, PhpType::Named(n) if n.eq_ignore_ascii_case("array"))
+        || matches!(ty, PhpType::Array(inner) if inner.is_mixed())
+}
+
+/// Check if an argument type is compatible with a parameter type.
+///
+/// Returns `true` if the argument type can be passed to the parameter
+/// without a type error.  Conservative: returns `true` (compatible)
+/// when in doubt.
+pub(crate) fn is_type_compatible(
+    arg_type: &PhpType,
+    param_type: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> bool {
+    // ── Architecture note ───────────────────────────────────────
+    //
+    // This function is a diagnostic-policy layer on top of the core
+    // type system.  It contains two kinds of checks:
+    //
+    // 1. **MAYBE escape hatches** — cases where the types *might*
+    //    be compatible at runtime but we can't prove it statically.
+    //    These return `true` (suppress the diagnostic) to avoid
+    //    false positives.  They encode diagnostic policy, not type
+    //    theory, and are unique to this function.
+    //
+    // 2. **Hierarchy checks with permissive fallbacks** — nominal
+    //    subtype checks that fall back to `true` when a class can't
+    //    be loaded, rather than producing a false positive.
+    //
+    // Strict subtype relationships (Cat <: Animal, never <: T,
+    // Closure(int): void <: callable, array<int, string> <: array)
+    // are handled by the `is_subtype_of_typed` fallback at the end
+    // of this function and should NOT be duplicated here.
+    //
+    // A future pass may tighten specific MAYBE relationships (reporting
+    // them as mismatches rather than letting them pass) once we are
+    // confident the narrowing does not introduce false positives.
+
+    // Skip if either type is unresolved/unknown.
+    if arg_type.is_untyped() || param_type.is_untyped() {
+        return true;
+    }
+    if arg_type.is_mixed() || param_type.is_mixed() {
+        return true;
+    }
+    // When the argument is a union that contains `mixed`, bail out
+    // conservatively.  `mixed` means "we don't know" — the actual
+    // runtime value could satisfy the parameter type, so reporting
+    // an error would be a false positive.
+    if let PhpType::Union(members) = arg_type
+        && members.iter().any(|m| m.is_mixed())
+    {
+        return true;
+    }
+    // `void` should never appear as an argument but skip it conservatively.
+    if arg_type.is_void() || param_type.is_void() {
+        return true;
+    }
+    // Skip Raw types (unparseable / unresolved type strings).
+    if matches!(arg_type, PhpType::Raw(_)) || matches!(param_type, PhpType::Raw(_)) {
+        return true;
+    }
+
+    // Skip when the param type is a Named type that can't be loaded as a
+    // class and has no namespace separator — it's likely a @phpstan-type /
+    // @psalm-type alias that we couldn't expand.  We can't verify
+    // compatibility without the underlying type, so suppress to avoid
+    // false positives.  Namespaced types (containing `\`) are real class
+    // references that should still be checked.
+    if let PhpType::Named(name) = param_type
+        && !name.contains('\\')
+        && !crate::php_type::is_builtin_non_class_type(name)
+        && class_loader(name).is_none()
+    {
+        return true;
+    }
+
+    // Same escape hatch for the argument type — an unexpanded
+    // @phpstan-type / @psalm-type alias on the arg side would also
+    // cause false positives (e.g. `Payload` passed to `?array`).
+    if let PhpType::Named(name) = arg_type
+        && !name.contains('\\')
+        && !crate::php_type::is_builtin_non_class_type(name)
+        && class_loader(name).is_none()
+    {
+        return true;
+    }
+
+    // Skip anonymous class arguments.  Anonymous classes are stored
+    // with synthetic names (`__anonymous@<offset>`) that are not
+    // indexed globally, so the class loader cannot resolve their
+    // hierarchy.  They almost always extend/implement the expected
+    // type — the developer wrote `new class extends Foo { … }` for
+    // exactly that purpose.  MAYBE → stay silent.
+    if let Some(base) = arg_type.base_name()
+        && base.contains("__anonymous@")
+    {
+        return true;
+    }
+    // Skip when param type is `object` and arg type is any class-like.
+    // Any class instance IS an object — this is always YES.
+    if param_type.is_object() && arg_type.base_name().is_some() {
+        return true;
+    }
+    // Skip when arg type is `object` and param expects a specific class.
+    // The developer's code may have narrowed the object (instanceof,
+    // assert, etc.) before this call site.  We flag `$obj->method()`
+    // as unknown-member instead — that's where the developer learns
+    // they need better types.  MAYBE → stay silent.
+    if arg_type.is_object() && param_type.base_name().is_some() {
+        return true;
+    }
+    // Skip when param type is `iterable` and arg type is array-like or Traversable.
+    if param_type.is_iterable()
+        && (arg_type.is_array_like()
+            || arg_type
+                .base_name()
+                .and_then(class_loader)
+                .is_some_and(|cls| {
+                    crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
+                }))
+    {
+        return true;
+    }
+    // Skip when param type is `callable` and arg type is Closure, callable, string, array,
+    // or any object-like type (which might implement `__invoke`).
+    if param_type.is_callable()
+        && (arg_type.is_callable()
+            || arg_type.is_closure()
+            || arg_type.is_array_like()
+            || arg_type.is_string_subtype()
+            || arg_type.is_object_like())
+    {
+        return true;
+    }
+    // Skip when param or arg type contains `self`, `static`, `$this`, or
+    // `parent` anywhere in the type tree (including inside unions like
+    // `int|self|string`).  These keywords need class context to resolve
+    // and would cause false positives without it.
+    if contains_self_or_parent(param_type) || contains_self_or_parent(arg_type) {
+        return true;
+    }
+
+    // ── Refined scalar subtypes: stay silent when uncertain ──────
+    // `string` passed to `non-empty-string`, `int` to `positive-int`,
+    // etc.  The base type *might* satisfy the refinement at runtime
+    // and we can't prove otherwise from the type alone.  Only the
+    // reverse (e.g. `non-empty-string` passed to `string`) is safe
+    // to accept unconditionally — and `is_subtype_of` already does.
+    if is_refined_scalar_pair(arg_type, param_type) {
+        return true;
+    }
+
+    // ── int → int<min..max>: MAYBE ──────────────────────────────
+    // A bare `int` *might* satisfy any int range constraint at
+    // runtime.  We cannot prove otherwise from the type alone.
+    if matches!(param_type, PhpType::IntRange(..))
+        && let PhpType::Named(sub) = arg_type
+        && matches!(sub.to_ascii_lowercase().as_str(), "int" | "integer")
+    {
+        return true;
+    }
+
+    // ── Conservative union argument handling ─────────────────────
+    // When the argument is a union, require that *every* member is
+    // definitely incompatible before flagging.  If at least one
+    // member could be valid, the developer may have narrowed the
+    // type in a way we can't see (assert, instanceof, etc.).
+    // This avoids false positives like `null|Pen` vs `object|string`
+    // where `Pen` is clearly fine and the null path may be guarded.
+    if let PhpType::Union(members) = arg_type
+        && members
+            .iter()
+            .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
+    {
+        return true;
+    }
+
+    // ── Intersection argument handling ───────────────────────────
+    // A value of intersection type `A&B` satisfies *every* member, so
+    // it is compatible with the param when *any* member is.  This is
+    // the standard subtyping rule for intersections and covers common
+    // cases like PHPUnit's `MockObject&Foo` (a mock that is also a Foo)
+    // being returned where `Foo` (or a union containing `Foo`) is
+    // expected.
+    if let PhpType::Intersection(members) = arg_type
+        && members
+            .iter()
+            .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
+    {
+        return true;
+    }
+
+    // ── Conservative union parameter handling ────────────────────
+    // When the param is a union, accept if the arg is compatible
+    // with *any* member.  This extends the structural check to use
+    // our full compatibility logic (including MAYBE rules) for each
+    // union branch.
+    if let PhpType::Union(members) = param_type
+        && members
+            .iter()
+            .any(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
+    {
+        return true;
+    }
+
+    // ── Conservative intersection parameter handling ─────────────
+    // When the param is an intersection `A&B`, the value must satisfy
+    // *every* member.  Stay silent unless the arg is definitely
+    // incompatible with at least one member — i.e. accept when the arg
+    // is compatible with all members we can check.  Combined with the
+    // conservative rules above, this avoids false positives on mock
+    // types like `MethodNode&MockObject`.
+    if let PhpType::Intersection(members) = param_type
+        && members
+            .iter()
+            .all(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
+    {
+        return true;
+    }
+
+    // ── Bare Closure/callable ↔ callable specification: MAYBE ───
+    // When the param is a callable specification like
+    // `Closure(Builder<X>): mixed` and the arg is a bare `Closure`
+    // or `callable`, we can't verify the signature — stay silent.
+    // (The reverse direction — callable spec <: bare Closure — is a
+    // strict YES handled by the `is_subtype_of_typed` fallback.)
+    if matches!(param_type, PhpType::Callable { .. })
+        && (arg_type.is_closure() || arg_type.is_callable())
+    {
+        return true;
+    }
+
+    // ── Bare array ↔ typed array: MAYBE ─────────────────────────
+    // A bare `array` is untyped — it *might* satisfy `array<K,V>`,
+    // `list<X>`, `T[]`, or an array shape.  We can't prove it wrong.
+    // (The reverse — typed array <: bare array — is a strict YES
+    // handled by the `is_subtype_of_typed` fallback.)
+    if is_bare_array(arg_type) && is_any_array_type(param_type) {
+        return true;
+    }
+
+    // ── Nullable arg → non-nullable param: MAYBE ────────────────
+    // The developer may have guarded against null before this call
+    // (instanceof, assert, if-check).  We can't prove the null
+    // path actually reaches here, so stay silent.
+    if let PhpType::Nullable(inner) = arg_type
+        && is_type_compatible(inner, param_type, class_loader, strict_types)
+    {
+        return true;
+    }
+
+    // ── Non-nullable arg → nullable param: YES ──────────────────
+    // Passing `X` where `?X` is expected is always valid.
+    if let PhpType::Nullable(inner) = param_type
+        && is_type_compatible(arg_type, inner, class_loader, strict_types)
+    {
+        return true;
+    }
+
+    // ── Stringable objects accepted as string ────────────────────
+    // PHP calls __toString() on Stringable objects when a string is
+    // expected.  We only accept objects whose class implements
+    // \Stringable or declares __toString().  For bare `object` types
+    // (no class name) we stay permissive since we can't check.
+    if param_type.is_string_type() && arg_type.is_object_like() {
+        if let Some(class_name) = arg_type.base_name() {
+            if let Some(cls) = class_loader(class_name) {
+                let merged = crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
+                let implements_stringable =
+                    crate::class_lookup::is_subtype_of(&cls, "Stringable", class_loader);
+                let has_to_string = merged.get_method_ci("__toString").is_some();
+                if implements_stringable || has_to_string {
+                    return true;
+                }
+                // Class loaded but doesn't implement Stringable — fall through
+            }
+            // Class can't be loaded — fall through to other checks
+        } else {
+            // Bare `object` type — stay permissive
+            return true;
+        }
+    }
+
+    // ── PHP type juggling: int/float → string ───────────────────
+    // PHP coerces ints and floats to strings in many contexts
+    // (concatenation,
+    // function calls with declare(strict_types=0)).  Under
+    // strict_types=1 this is a TypeError, so we flag it.  Also
+    // covers numeric literals (e.g. `42` or `1.0` passed to `string`).
+    if !strict_types
+        && let PhpType::Named(sup) = param_type
+        && sup.eq_ignore_ascii_case("string")
+    {
+        let is_numeric_like = match arg_type {
+            PhpType::Named(sub) => {
+                matches!(
+                    sub.to_ascii_lowercase().as_str(),
+                    "int" | "integer" | "float" | "double"
+                )
+            }
+            PhpType::Literal(LiteralValue::Int(_) | LiteralValue::Float(_)) => true,
+            _ => false,
+        };
+        if is_numeric_like {
+            return true;
+        }
+    }
+
+    // ── PHP type juggling: numeric-string → float/int[/range] ───
+    // PHP coerces numeric strings to numbers in arithmetic and
+    // function calls.  Under strict_types=1 string-to-int/float
+    // coercion is forbidden.
+    if !strict_types {
+        let arg_is_numeric_string = match arg_type {
+            PhpType::Named(sub) => sub.eq_ignore_ascii_case("numeric-string"),
+            PhpType::Literal(LiteralValue::String(s)) => {
+                LiteralValue::string_raw(s.clone()).is_numeric_string()
+            }
+            _ => false,
+        };
+        if arg_is_numeric_string {
+            match param_type {
+                PhpType::Named(sup)
+                    if matches!(
+                        sup.to_ascii_lowercase().as_str(),
+                        "float" | "double" | "int" | "integer" | "numeric"
+                    ) =>
+                {
+                    return true;
+                }
+                PhpType::IntRange(min, max)
+                    if let PhpType::Literal(LiteralValue::String(s)) = arg_type
+                        && LiteralValue::string_raw(s.clone())
+                            .string_content()
+                            .and_then(|content| content.parse::<i64>().ok())
+                            .is_some_and(|value| int_literal_is_within_range(value, min, max)) =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // ── PHP type juggling: numeric → float/int ──────────────────
+    // `numeric` is `int|float|numeric-string`; it can always be
+    // coerced to float or int.  Under strict_types=1 the
+    // numeric-string component would fail, but int→float is still
+    // valid, so we stay silent regardless.
+    if let PhpType::Named(sub) = arg_type
+        && sub.eq_ignore_ascii_case("numeric")
+        && let PhpType::Named(sup) = param_type
+        && matches!(
+            sup.to_ascii_lowercase().as_str(),
+            "float" | "double" | "int" | "integer"
+        )
+    {
+        return true;
+    }
+
+    // ── model-property<Model>: string literal validation ────────
+    // Larastan's `model-property<Model>` is a string subtype
+    // representing the property names of an Eloquent model.  When
+    // the param is `model-property<Model>`, non-literal string
+    // types are accepted (MAYBE — the string might be a valid
+    // property name at runtime).  For string literals, we check
+    // against the model's known properties when the class can be
+    // loaded.
+    if let PhpType::Generic(name, args) = param_type
+        && name.eq_ignore_ascii_case("model-property")
+        && args.len() == 1
+    {
+        if let PhpType::Literal(lit) = arg_type
+            && let Some(prop_name) = lit.string_content()
+        {
+            if let Some(model_name) = args[0].base_name()
+                && let Some(cls) = class_loader(model_name)
+            {
+                let resolved =
+                    crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
+                let found = resolved.properties.iter().any(|p| &*p.name == prop_name)
+                    || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
+                        .iter()
+                        .any(|col| col == prop_name);
+                return found;
+            }
+            return true;
+        }
+        if arg_type.is_string_type() || arg_type.is_string_subtype() {
+            return true;
+        }
+    }
+
+    // ── Array-like / traversable-like → generic iterable/Traversable ─
+    // When the param is a generic `iterable<K,V>`, `Traversable<K,V>`,
+    // or any interface that extends Traversable (e.g. `Arrayable<K,V>`),
+    // we can't verify the generic type arguments covariantly at this
+    // phase.  Stay silent (MAYBE) when the base types are compatible.
+    if let PhpType::Generic(name, _) = param_type
+        && (name.eq_ignore_ascii_case("iterable")
+            || class_loader(name).is_some_and(|cls| {
+                crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
+            }))
+    {
+        // Array-like args always satisfy iterable/Traversable generics.
+        if arg_type.is_array_like()
+            || matches!(arg_type, PhpType::Generic(n, _) if is_array_like_name(n))
+            || matches!(arg_type, PhpType::Array(_) | PhpType::ArrayShape(_))
+        {
+            return true;
+        }
+        // Object-like args: check hierarchy for Traversable.
+        // Can't load → stay permissive; bare `object` → stay permissive.
+        if let Some(class_name) = arg_type.base_name() {
+            if let Some(cls) = class_loader(class_name) {
+                if crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader) {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        } else if arg_type.is_object_like() {
+            return true;
+        }
+    }
+
+    // ── Same-base generic covariance ────────────────────────────
+    // When both arg and param are generics with the same base name
+    // (e.g. `array<string, HtmlString|string>` vs `array<string, string>`),
+    // check each type argument covariantly using `is_type_compatible`
+    // (which has all our MAYBE rules) rather than falling through to
+    // `is_subtype_of_typed` (which uses strict structural subtyping
+    // and misses Stringable, type juggling, etc.).
+    if let (PhpType::Generic(name_arg, args_arg), PhpType::Generic(name_param, args_param)) =
+        (arg_type, param_type)
+    {
+        let base_arg = name_arg.to_ascii_lowercase();
+        let base_param = name_param.to_ascii_lowercase();
+        let bases_match = base_arg == base_param
+            || (is_array_like_name(name_arg) && is_array_like_name(name_param));
+        if bases_match && args_arg.len() == args_param.len() && !args_arg.is_empty() {
+            let all_args_compatible = args_arg
+                .iter()
+                .zip(args_param.iter())
+                .all(|(a, p)| is_type_compatible(a, p, class_loader, strict_types));
+            if all_args_compatible {
+                return true;
+            }
+        }
+    }
+
+    // ── list<X> ↔ array<int, X>: MAYBE ─────────────────────────
+    // A list is an array with sequential int keys starting at 0.
+    // In practice, PHP codebases use these interchangeably and we
+    // can't verify the structural guarantee statically.
+    if let (PhpType::Generic(name_arg, args_arg), PhpType::Generic(name_param, args_param)) =
+        (arg_type, param_type)
+    {
+        let arg_is_list = name_arg.eq_ignore_ascii_case("list");
+        let param_is_list = name_param.eq_ignore_ascii_case("list");
+        let arg_is_array = is_array_like_name(name_arg) && !arg_is_list;
+        let param_is_array = is_array_like_name(name_param) && !param_is_list;
+
+        // list<X> → array<int, X>
+        if arg_is_list
+            && param_is_array
+            && args_arg.len() == 1
+            && args_param.len() == 2
+            && is_type_compatible(&args_arg[0], &args_param[1], class_loader, strict_types)
+        {
+            return true;
+        }
+        // array<int, X> → list<X>
+        if arg_is_array
+            && param_is_list
+            && args_arg.len() == 2
+            && args_param.len() == 1
+            && is_type_compatible(&args_arg[1], &args_param[0], class_loader, strict_types)
+        {
+            return true;
+        }
+
+        // ── array<K, V> → array<V> (2-param to 1-param): YES ───
+        // `array<V>` means `array<mixed, V>`.  A 2-param array is
+        // more specific — its value type always fits in the 1-param
+        // form as long as the value types are compatible.
+        if arg_is_array
+            && param_is_array
+            && args_arg.len() == 2
+            && args_param.len() == 1
+            && is_type_compatible(&args_arg[1], &args_param[0], class_loader, strict_types)
+        {
+            return true;
+        }
+
+        // ── array<V> → array<K, V> (1-param to 2-param): MAYBE ─
+        // `array<V>` is `array<mixed, V>` — we don't know the key
+        // type, so it *might* satisfy `array<K, V>` at runtime.
+        if arg_is_array
+            && param_is_array
+            && args_arg.len() == 1
+            && args_param.len() == 2
+            && is_type_compatible(&args_arg[0], &args_param[1], class_loader, strict_types)
+        {
+            return true;
+        }
+    }
+
+    // ── X[] (Array slice) semantics ─────────────────────────────
+    // `X[]` in PHPDoc means `array<mixed, X>` — an array with
+    // unknown key type and value type X.  It is NOT `list<X>`,
+    // which additionally guarantees sequential int keys from 0.
+    //
+    // Therefore:
+    //   array<K, V> → V[]  is YES  (more specific → less specific)
+    //   V[] → array<K, V>  is MAYBE (we don't know the key type)
+    //   list<X> → X[]      is YES  (list is more specific than array)
+    //   X[] → list<X>      is MAYBE (X[] might have gaps / non-int keys)
+
+    // ── Generic array → X[] : YES ───────────────────────────────
+    // `array<int, string>` → `string[]` — the value type of the
+    // generic form is more specific than (or equal to) the slice.
+    if let PhpType::Generic(name, args) = arg_type
+        && is_array_like_name(name)
+        && let PhpType::Array(inner) = param_type
+    {
+        let mixed = PhpType::mixed();
+        let val = args.last().unwrap_or(&mixed);
+        if is_type_compatible(val, inner, class_loader, strict_types) {
+            return true;
+        }
+    }
+
+    // ── X[] → Generic array : MAYBE ─────────────────────────────
+    // `string[]` → `array<int, string>` — the key type is unknown,
+    // it *might* be int at runtime.
+    if let PhpType::Array(inner) = arg_type
+        && let PhpType::Generic(name, args) = param_type
+        && is_array_like_name(name)
+    {
+        let mixed = PhpType::mixed();
+        let val = args.last().unwrap_or(&mixed);
+        if is_type_compatible(inner, val, class_loader, strict_types) {
+            return true;
+        }
+    }
+
+    // ── list<X> → X[] : YES ────────────────────────────────────
+    // A list is a stricter form of array (sequential int keys).
+    // It always satisfies the weaker `X[]` constraint.
+    if let PhpType::Generic(name, args) = arg_type
+        && name.eq_ignore_ascii_case("list")
+        && args.len() == 1
+        && let PhpType::Array(inner) = param_type
+        && is_type_compatible(&args[0], inner, class_loader, strict_types)
+    {
+        return true;
+    }
+
+    // ── X[] → list<X> : MAYBE ──────────────────────────────────
+    // `X[]` is `array<mixed, X>` — it might have non-sequential
+    // keys, so it might not be a valid list.  Stay silent.
+    if let PhpType::Array(inner) = arg_type
+        && let PhpType::Generic(name, args) = param_type
+        && name.eq_ignore_ascii_case("list")
+        && args.len() == 1
+        && is_type_compatible(inner, &args[0], class_loader, strict_types)
+    {
+        return true;
+    }
+
+    // ── Class hierarchy: reverse direction MAYBE ────────────────
+    //
+    // Direction 1 (arg <: param, e.g. `Cat` passed to `Animal`)
+    // is a strict YES handled by the `is_subtype_of_typed` fallback
+    // at the end of this function.  No need to duplicate it here.
+    //
+    // Direction 2 (param <: arg, e.g. `Carbon\Carbon` passed where a
+    // `Illuminate\Support\Carbon` subclass is expected) is a MAYBE:
+    // the argument is a *broader* type but the value *might* be the
+    // narrower concrete at runtime (the developer may have checked
+    // with instanceof, or the API always returns the concrete type
+    // despite being typed as the parent).  This also covers cases the
+    // resolver still under-narrows, such as an Eloquent relation typed
+    // as the base `Collection` where a custom collection subclass is
+    // declared — dropping this rule turns those into false positives
+    // that PHPStan does not report.
+    //
+    // However, if the arg's class is **final**, the value cannot be
+    // any subtype — it is exactly that class.  So `final class Jack`
+    // passed to `JackSparrow` (where Jack does not extend
+    // JackSparrow) is a definite NO.
+    //
+    // We intentionally do NOT treat `object` or `stdClass` as
+    // universal supertypes here.  `base_name()` returns `None` for
+    // `object` (it is in the scalar-name list), so it never enters
+    // this block.  `stdClass` has a base_name but is not a parent
+    // of arbitrary classes in PHP — the hierarchy walk will simply
+    // not find a relationship, which is correct.
+
+    if let (Some(arg_base), Some(param_base)) = (arg_type.base_name(), param_type.base_name()) {
+        let arg_cls = class_loader(arg_base);
+
+        let arg_is_final = arg_cls.as_ref().is_some_and(|cls| cls.is_final);
+        if !arg_is_final {
+            if is_subtype_of_typed(param_type, arg_type, class_loader) {
+                return true;
+            }
+            // Also try loading param and walking up to arg.
+            if let Some(param_cls) = class_loader(param_base)
+                && crate::class_lookup::is_subtype_of(&param_cls, arg_base, class_loader)
+            {
+                return true;
+            }
+        }
+    }
+
+    // ── Arrayable/ArrayAccess arg → bare array: MAYBE ───────────
+    // Many collection-like types implement ArrayAccess or Arrayable
+    // and are used interchangeably with arrays.  When the arg type
+    // implements one of these interfaces and the param is bare
+    // `array`, stay silent.  Note: Traversable alone does NOT
+    // qualify — a Traversable is not substitutable for `array`
+    // (e.g. you cannot pass a Collection to array_map()).
+    if is_bare_array(param_type) {
+        if let Some(class_name) = arg_type.base_name()
+            && let Some(cls) = class_loader(class_name)
+        {
+            let is_array_like =
+                crate::class_lookup::is_subtype_of(&cls, "ArrayAccess", class_loader)
+                    || crate::class_lookup::is_subtype_of(&cls, "Arrayable", class_loader);
+            if is_array_like {
+                return true;
+            }
+        }
+        // Union arg: accept if every member is array-like or
+        // implements ArrayAccess/Arrayable.  When a
+        // member's class can't be loaded (unresolved short name
+        // from a docblock), treat it as potentially array-like
+        // to avoid false positives on large collection union
+        // types (DataCollection|PaginatedDataCollection|...).
+        if let PhpType::Union(members) = arg_type {
+            let all_array_like = members.iter().all(|m| {
+                if m.is_array_like() || matches!(m, PhpType::Array(_) | PhpType::ArrayShape(_)) {
+                    return true;
+                }
+                if let Some(name) = m.base_name() {
+                    if let Some(cls) = class_loader(name) {
+                        return crate::class_lookup::is_subtype_of(
+                            &cls,
+                            "ArrayAccess",
+                            class_loader,
+                        ) || crate::class_lookup::is_subtype_of(
+                            &cls,
+                            "Arrayable",
+                            class_loader,
+                        );
+                    }
+                    // Can't load class — stay permissive (the short
+                    // name likely comes from a docblock whose imports
+                    // we can't resolve in this context).
+                    return true;
+                }
+                false
+            });
+            if all_array_like {
+                return true;
+            }
+        }
+    }
+
+    // ── Array shape superset → subset: MAYBE ────────────────────
+    // When an array shape has extra keys beyond what the parameter
+    // shape requires, the extra keys are harmless.  PHP array shapes
+    // are open by convention in most codebases.
+    // Optional keys in the param shape (marked with `?`) do not need
+    // to be present in the arg shape — they are, by definition,
+    // not required.
+    if let (PhpType::ArrayShape(arg_entries), PhpType::ArrayShape(param_entries)) =
+        (arg_type, param_type)
+    {
+        let all_param_keys_satisfied = param_entries.iter().all(|pe| {
+            // Optional param keys don't need to appear in the arg.
+            if pe.optional {
+                // If present, check value compatibility; if absent, fine.
+                return arg_entries
+                    .iter()
+                    .find(|ae| ae.key == pe.key)
+                    .is_none_or(|ae| {
+                        is_type_compatible(
+                            &ae.value_type,
+                            &pe.value_type,
+                            class_loader,
+                            strict_types,
+                        )
+                    });
+            }
+            arg_entries.iter().any(|ae| {
+                ae.key == pe.key
+                    && is_type_compatible(
+                        &ae.value_type,
+                        &pe.value_type,
+                        class_loader,
+                        strict_types,
+                    )
+            })
+        });
+        if all_param_keys_satisfied {
+            return true;
+        }
+    }
+
+    // ── ArrayShape → typed array: MAYBE ─────────────────────────
+    // `array{id: string, index: string, body: array}` should be
+    // accepted where `array<string, mixed>` or similar is expected.
+    // The shape is a more specific form of the typed array.
+    if matches!(arg_type, PhpType::ArrayShape(_))
+        && matches!(param_type, PhpType::Generic(name, _) if is_array_like_name(name))
+    {
+        return true;
+    }
+    if matches!(arg_type, PhpType::ArrayShape(_)) && matches!(param_type, PhpType::Array(_)) {
+        return true;
+    }
+
+    // ── Typed array → ArrayShape: MAYBE ─────────────────────────
+    // `array<string, mixed>` or `array{index: string}` (fewer keys)
+    // passed where a specific shape is expected.  The actual array
+    // might have the right keys at runtime.  We can't prove
+    // otherwise from the type alone.
+    if matches!(param_type, PhpType::ArrayShape(_)) && is_any_array_type(arg_type) {
+        return true;
+    }
+
+    // Use the full subtype check including class hierarchy.
+    is_subtype_of_typed(arg_type, param_type, class_loader)
+}
+
+/// Returns `true` when the argument is a base scalar and the parameter
+/// is a refinement of that scalar.  In these cases we cannot prove the
+/// value violates the refinement, so we stay silent.
+///
+/// Also handles the case where the parameter is a union type: if any
+/// member of the union forms a refined scalar pair with the argument,
+/// we stay silent (the value might satisfy that branch at runtime).
+fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
+    // When the param is a union, check each member individually.
+    if let PhpType::Union(members) = param {
+        return members.iter().any(|m| is_refined_scalar_pair(arg, m));
+    }
+
+    let (arg_name, param_name) = match (arg, param) {
+        (PhpType::Named(a), PhpType::Named(p)) => (a.to_ascii_lowercase(), p.to_ascii_lowercase()),
+        _ => return false,
+    };
+
+    matches!(
+        (arg_name.as_str(), param_name.as_str()),
+        (
+            "string",
+            "non-empty-string"
+                | "numeric-string"
+                | "class-string"
+                | "literal-string"
+                | "callable-string"
+                | "truthy-string"
+                | "non-falsy-string"
+                | "lowercase-string"
+                | "non-empty-lowercase-string"
+        ) | (
+            "int" | "integer",
+            "positive-int"
+                | "negative-int"
+                | "non-negative-int"
+                | "non-positive-int"
+                | "non-zero-int"
+        ) | (
+            // bool *might* be true or false at runtime — we can't
+            // prove otherwise from the type alone.  This arises when
+            // template inference narrows a parameter to `true` or
+            // `false` (e.g. Conditionable::when(true, …)).
+            "bool" | "boolean",
+            "true" | "false"
+        )
+    )
+}
+
+/// Returns `true` when the type is any form of array (bare, generic,
+/// slice, or shape).  Used by the bare-array MAYBE rules to check
+/// inside unions as well as at the top level.
+fn is_any_array_type(ty: &PhpType) -> bool {
+    matches!(ty, PhpType::Array(_) | PhpType::ArrayShape(_))
+        || matches!(ty, PhpType::Generic(name, _) if is_array_like_name(name))
+        || is_bare_array(ty)
+}
+
+/// Deep check: returns `true` when the type contains `self`, `static`,
+/// `$this`, or `parent` anywhere in its structure — including inside
+/// union/intersection members, nullable wrappers, and generic arguments.
+fn contains_self_or_parent(ty: &PhpType) -> bool {
+    match ty {
+        PhpType::Named(s) => {
+            let low = s.to_ascii_lowercase();
+            matches!(low.as_str(), "self" | "static" | "$this" | "parent")
+        }
+        PhpType::Nullable(inner) => contains_self_or_parent(inner),
+        PhpType::Union(members) | PhpType::Intersection(members) => {
+            members.iter().any(contains_self_or_parent)
+        }
+        PhpType::Generic(name, args) => {
+            let low = name.to_ascii_lowercase();
+            matches!(low.as_str(), "self" | "static" | "$this" | "parent")
+                || args.iter().any(contains_self_or_parent)
+        }
+        PhpType::ClassString(inner) | PhpType::InterfaceString(inner) => inner
+            .as_ref()
+            .is_some_and(|inner| contains_self_or_parent(inner)),
+        _ => false,
+    }
+}

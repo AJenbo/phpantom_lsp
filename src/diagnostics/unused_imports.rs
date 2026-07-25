@@ -36,9 +36,8 @@ impl Backend {
         }
 
         // ── Gather the symbol map ───────────────────────────────────────
-        let symbol_map = match self.symbol_maps.read().get(uri) {
-            Some(sm) => sm.clone(),
-            None => return,
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return;
         };
 
         // ── Compute byte ranges of `use` statement lines ────────────────

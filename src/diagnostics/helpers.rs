@@ -8,10 +8,42 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
-use crate::types::ClassInfo;
+use crate::Backend;
+use crate::symbol_map::SymbolMap;
+use crate::types::{ClassInfo, FileContext};
 
 /// A byte range `[start, end)` representing a line in the source.
 pub(crate) type ByteRange = (usize, usize);
+
+/// Per-file snapshot shared by the "symbol-span" diagnostic collectors
+/// (unknown class/function/member, deprecated, implementation errors,
+/// invalid class kind, unused imports).
+///
+/// Bundles the file's precomputed [`SymbolMap`] with the same
+/// classes/use-map/namespace/resolved-names snapshot as [`FileContext`],
+/// so each collector reads its per-file locks once via [`Self::gather`]
+/// instead of re-acquiring `symbol_maps`, `uri_classes_index`,
+/// `file_imports`, `file_namespaces`, and `resolved_names` independently.
+pub(crate) struct FileDiagnosticContext {
+    /// The file's precomputed symbol spans.
+    pub(crate) symbol_map: Arc<SymbolMap>,
+    /// Classes, use-map, namespace, and resolved-names for the file.
+    pub(crate) file: FileContext,
+}
+
+impl FileDiagnosticContext {
+    /// Gather the shared per-file snapshot for `uri`.
+    ///
+    /// Returns `None` when the file has no symbol map — the early-out
+    /// every collector already applies (nothing to walk).
+    pub(crate) fn gather(backend: &Backend, uri: &str) -> Option<Self> {
+        let symbol_map = backend.symbol_map_for(uri)?;
+        Some(Self {
+            symbol_map,
+            file: backend.file_context(uri),
+        })
+    }
+}
 
 /// Compute the byte ranges of all namespace-level `use` import lines.
 ///

@@ -295,13 +295,13 @@ class Handler extends Base {
     let lens = &lenses[0];
     // The method `process` in Handler is on line 6 (0-based)
     assert_eq!(lens.range.start.line, 6);
-    assert_eq!(lens.range.start.character, 0);
+    assert_eq!(lens.range.start.character, 4);
 }
 
 // ─── Code Lens Command ─────────────────────────────────────────────────────
 
 #[test]
-fn lens_command_uses_show_references_by_default() {
+fn lens_command_uses_navigate_to_prototype() {
     let backend = create_test_backend();
     let content = r#"<?php
 class Parent_ {
@@ -317,11 +317,10 @@ class Child extends Parent_ {
 
     assert_eq!(lenses.len(), 1);
     let cmd = lenses[0].command.as_ref().unwrap();
-    assert_eq!(cmd.command, "editor.action.showReferences");
+    assert_eq!(cmd.command, "phpantom.navigateToPrototype");
     assert!(cmd.arguments.is_some());
     let args = cmd.arguments.as_ref().unwrap();
-    // Should have 3 arguments: uri, position, locations[]
-    assert_eq!(args.len(), 3);
+    assert_eq!(args.len(), 2);
 }
 
 // ─── Multiple Interfaces ────────────────────────────────────────────────────

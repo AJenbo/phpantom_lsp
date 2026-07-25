@@ -25,7 +25,6 @@ use tower_lsp::lsp_types::*;
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::util::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -68,7 +67,7 @@ impl Backend {
             Err(_) => return,
         };
 
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         let candidate = crate::parser::with_parsed_program(
             content,
@@ -88,28 +87,31 @@ impl Backend {
 
         // 1. Delete the property declaration.
         edits.push(TextEdit {
-            range: Range {
-                start: offset_to_position(content, candidate.property_delete_start),
-                end: offset_to_position(content, candidate.property_delete_end),
-            },
+            range: crate::text_position::byte_range_to_lsp_range(
+                content,
+                candidate.property_delete_start,
+                candidate.property_delete_end,
+            ),
             new_text: String::new(),
         });
 
         // 2. Delete the assignment statement.
         edits.push(TextEdit {
-            range: Range {
-                start: offset_to_position(content, candidate.assignment_delete_start),
-                end: offset_to_position(content, candidate.assignment_delete_end),
-            },
+            range: crate::text_position::byte_range_to_lsp_range(
+                content,
+                candidate.assignment_delete_start,
+                candidate.assignment_delete_end,
+            ),
             new_text: String::new(),
         });
 
         // 3. Insert the visibility prefix before the parameter.
         edits.push(TextEdit {
-            range: Range {
-                start: offset_to_position(content, candidate.param_insert_offset),
-                end: offset_to_position(content, candidate.param_insert_offset),
-            },
+            range: crate::text_position::byte_range_to_lsp_range(
+                content,
+                candidate.param_insert_offset,
+                candidate.param_insert_offset,
+            ),
             new_text: candidate.prefix,
         });
 
@@ -118,26 +120,16 @@ impl Backend {
             (candidate.carry_default, candidate.default_insert_offset)
         {
             edits.push(TextEdit {
-                range: Range {
-                    start: offset_to_position(content, offset),
-                    end: offset_to_position(content, offset),
-                },
+                range: crate::text_position::byte_range_to_lsp_range(content, offset, offset),
                 new_text: default_text,
             });
         }
-
-        let mut changes = std::collections::HashMap::new();
-        changes.insert(doc_uri, edits);
 
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title: "Promote to constructor property".to_string(),
             kind: Some(CodeActionKind::new("refactor.rewrite")),
             diagnostics: None,
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            }),
+            edit: Some(crate::code_actions::single_file_edit(doc_uri, edits)),
             command: None,
             is_preferred: None,
             disabled: None,

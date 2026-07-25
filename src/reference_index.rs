@@ -13,8 +13,9 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 use crate::Backend;
+use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
-use crate::util::{build_fqn, find_class_at_offset, short_name, strip_fqn_prefix};
+use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ReferenceIndexKey {
@@ -146,7 +147,7 @@ impl Backend {
             }
         }
 
-        if let Some(classes) = self.uri_classes_index.read().get(uri).cloned() {
+        if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in classes {
                 for prop in &class.properties {
                     let Some((start, end)) = member_range(prop.name_offset, &prop.name, true)
@@ -256,6 +257,7 @@ impl Backend {
             return false;
         }
         !self
+            .workspace
             .vendor_uri_prefixes
             .lock()
             .iter()
@@ -544,6 +546,7 @@ mod tests {
                 "name", None,
             )]);
         backend
+            .symbols
             .uri_classes_index
             .write()
             .insert(uri.clone(), vec![Arc::new(class)]);

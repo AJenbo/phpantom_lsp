@@ -789,7 +789,7 @@ fn collect_mixin_members(
             if !template_values.is_empty()
                 && let Some(cond) = method.conditional_return.as_ref()
                 && let Some(resolved) =
-                    crate::completion::conditional_resolution::resolve_conditional_from_values(
+                    crate::type_engine::conditional_resolution::resolve_conditional_from_values(
                         cond,
                         &template_values,
                     )

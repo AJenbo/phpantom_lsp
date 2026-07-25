@@ -20,14 +20,13 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
-use crate::names::OwnedResolvedNames;
 use crate::symbol_map::SymbolKind;
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::resolve_to_fqn;
+use super::helpers::{FileDiagnosticContext, resolve_to_fqn};
 
 impl Backend {
     /// Collect `@deprecated` usage diagnostics for a single file.
@@ -40,6 +39,23 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
+            return;
+        };
+        self.collect_deprecated_diagnostics_with_context(&ctx, uri, content, out);
+    }
+
+    /// Same as [`Self::collect_deprecated_diagnostics`] but reuses an
+    /// already-gathered [`FileDiagnosticContext`] instead of re-reading
+    /// the per-file locks. Used by `collect_slow_diagnostics` so all
+    /// slow collectors in the same pass share one consistent snapshot.
+    pub(crate) fn collect_deprecated_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
         // Cache of resolved variable types.  Keyed by
         // `(variable_name, enclosing_class_name)` so that all member
         // accesses on the same variable within the same class share a
@@ -48,31 +64,15 @@ impl Backend {
         // number of member accesses.
         let mut var_type_cache: HashMap<(String, String), Option<ClassInfo>> = HashMap::new();
 
-        // ── Gather context under locks ──────────────────────────────────
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
-        };
+        let symbol_map = &ctx.symbol_map;
+        let file_resolved_names = &ctx.file.resolved_names;
+        let file_use_map = &ctx.file.use_map;
+        let file_namespace = &ctx.file.namespace;
+        let local_classes = &ctx.file.classes;
 
-        let file_resolved_names: Option<Arc<OwnedResolvedNames>> =
-            self.resolved_names.read().get(uri).cloned();
-
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
-        let local_classes: Vec<Arc<ClassInfo>> = self
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-
-        let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
+        let class_loader = self.class_loader_with(local_classes, file_use_map, file_namespace);
+        let function_loader =
+            self.function_loader_with(file_resolved_names.as_deref(), file_use_map, file_namespace);
         let cache = &self.resolved_class_cache;
 
         // ── Walk every symbol span ──────────────────────────────────────
@@ -85,12 +85,12 @@ impl Backend {
                     // back to the legacy resolve_to_fqn helper otherwise.
                     let resolved_name = if *is_fqn {
                         name.to_string()
-                    } else if let Some(ref rn) = file_resolved_names {
+                    } else if let Some(rn) = file_resolved_names {
                         rn.get(span.start)
                             .map(|s| s.to_string())
-                            .unwrap_or_else(|| resolve_to_fqn(name, &file_use_map, &file_namespace))
+                            .unwrap_or_else(|| resolve_to_fqn(name, file_use_map, file_namespace))
                     } else {
-                        resolve_to_fqn(name, &file_use_map, &file_namespace)
+                        resolve_to_fqn(name, file_use_map, file_namespace)
                     };
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
@@ -125,9 +125,9 @@ impl Backend {
                     let base_class = resolve_subject_to_class_name(
                         subject_text,
                         *is_static,
-                        &file_use_map,
-                        &file_namespace,
-                        &local_classes,
+                        file_use_map,
+                        file_namespace,
+                        local_classes,
                         span.start,
                     )
                     .and_then(|name| self.find_or_load_class(&name))
@@ -163,7 +163,7 @@ impl Backend {
 
                                 let rctx = ResolutionCtx {
                                     current_class: enclosing_class.as_ref(),
-                                    all_classes: &local_classes,
+                                    all_classes: local_classes,
                                     content,
                                     cursor_offset: span.start,
                                     class_loader: &class_loader,
@@ -283,7 +283,7 @@ impl Backend {
                         continue;
                     }
                     if let Some(func_info) =
-                        self.resolve_function_name(name, &file_use_map, &file_namespace)
+                        self.resolve_function_name(name, file_use_map, file_namespace)
                         && let Some(msg) = &func_info.deprecation_message
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
@@ -384,8 +384,8 @@ fn resolve_subject_to_class_name(
     // class names.  We pass a dummy function loader (not needed for
     // non-variable subjects) and a dummy class loader.
     let dummy_class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
-    let dummy_function_loader = |_: &str| -> Option<crate::types::FunctionInfo> { None };
-    let ctx = crate::subject_resolution::SubjectResolutionCtx {
+    let dummy_function_loader = |_: &str, _: u32| -> Option<crate::types::FunctionInfo> { None };
+    let ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes,
         use_map: file_use_map,
         namespace: file_namespace,
@@ -394,8 +394,13 @@ fn resolve_subject_to_class_name(
         function_loader: &dummy_function_loader,
     };
 
-    crate::subject_resolution::resolve_subject_type(subject_text, is_static, access_offset, &ctx)
-        .and_then(|t| t.top_level_class_names().into_iter().next())
+    crate::type_engine::subject_resolution::resolve_subject_type(
+        subject_text,
+        is_static,
+        access_offset,
+        &ctx,
+    )
+    .and_then(|t| t.top_level_class_names().into_iter().next())
 }
 
 /// Resolve a subject expression to a `ClassInfo` using the full resolver

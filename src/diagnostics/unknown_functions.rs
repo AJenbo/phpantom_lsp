@@ -16,15 +16,14 @@
 //!   (`isset`, `unset`, `empty`, `eval`, `exit`, `die`, `list`,
 //!   `print`, `echo`, `include`, `require`, etc.) are skipped.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
 use super::helpers::{
-    compute_existence_guards, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic,
+    FileDiagnosticContext, compute_existence_guards, compute_use_line_ranges, is_offset_in_ranges,
+    make_diagnostic,
 };
 
 /// Diagnostic code used for unknown-function diagnostics.
@@ -68,18 +67,27 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // ── Gather context under locks ──────────────────────────────────
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
+        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
+            return;
         };
+        self.collect_unknown_function_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+    /// Same as [`Self::collect_unknown_function_diagnostics`] but reuses
+    /// an already-gathered [`FileDiagnosticContext`] instead of
+    /// re-reading the per-file locks. Used by `collect_slow_diagnostics`
+    /// so all slow collectors in the same pass share one consistent
+    /// snapshot.
+    pub(crate) fn collect_unknown_function_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let file_use_map = &ctx.file.use_map;
+        let file_namespace = &ctx.file.namespace;
 
         // ── Compute byte ranges of `use` statement lines ────────────────
         let use_line_ranges = compute_use_line_ranges(content);
@@ -100,7 +108,7 @@ impl Backend {
                     is_definition: true,
                 } => {
                     let mut names = vec![name.clone()];
-                    if let Some(ref ns) = file_namespace {
+                    if let Some(ns) = file_namespace {
                         names.push(format!("{}\\{}", ns, name));
                     }
                     Some(names)
@@ -140,7 +148,7 @@ impl Backend {
 
             // ── Attempt resolution through all phases ───────────────────
             if self
-                .resolve_function_name(name, &file_use_map, &file_namespace)
+                .resolve_function_name(name, file_use_map, file_namespace)
                 .is_some()
             {
                 continue;

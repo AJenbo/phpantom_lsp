@@ -24,7 +24,6 @@
 //! This is a single-file edit — it does not update call sites or
 //! subclass overrides in other files.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -38,8 +37,8 @@ use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, Visibility};
-use crate::util::offset_to_position;
 
 /// The action kind used for the deferred resolve dispatch.
 const ACTION_KIND: &str = "refactor.changeVisibility";
@@ -99,7 +98,7 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let cursor_offset = crate::util::position_to_offset(content, params.range.start);
+        let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
         // Resolve the cursor context once and extract the owned data the
         // rest of this function needs (the AST does not escape the closure).
@@ -227,23 +226,14 @@ impl Backend {
         let end_pos = offset_to_position(content, vis_end);
 
         let doc_uri: Url = uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(
+        Some(crate::code_actions::single_edit(
             doc_uri,
-            vec![TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: target_vis.to_string(),
-            }],
-        );
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+            Range {
+                start: start_pos,
+                end: end_pos,
+            },
+            target_vis.to_string(),
+        ))
     }
 
     // ── Private helpers ─────────────────────────────────────────────────
@@ -263,13 +253,14 @@ impl Backend {
     ) -> Option<u8> {
         // Find the enclosing ClassInfo from the uri_classes_index.
         let local_classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
             .cloned()
             .unwrap_or_default();
 
-        let enclosing = crate::util::find_class_at_offset(&local_classes, cursor_offset)?;
+        let enclosing = crate::class_lookup::find_class_at_offset(&local_classes, cursor_offset)?;
 
         // Collect all ancestors: parent class chain + interfaces + traits.
         let mut best_level: Option<u8> = None;

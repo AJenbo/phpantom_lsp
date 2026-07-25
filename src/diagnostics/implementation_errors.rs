@@ -15,6 +15,8 @@ use crate::code_actions::implement_methods::collect_missing_methods;
 use crate::symbol_map::SymbolKind;
 use crate::types::ClassLikeKind;
 
+use super::helpers::FileDiagnosticContext;
+
 impl Backend {
     /// Collect implementation-error diagnostics for a single file.
     ///
@@ -31,16 +33,26 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
+        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
+            return;
         };
+        self.collect_implementation_error_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&ctx);
+    /// Same as [`Self::collect_implementation_error_diagnostics`] but
+    /// reuses an already-gathered [`FileDiagnosticContext`] instead of
+    /// re-reading the per-file locks. Used by `collect_slow_diagnostics`
+    /// so all slow collectors in the same pass share one consistent
+    /// snapshot.
+    pub(crate) fn collect_implementation_error_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let class_loader = self.class_loader(&ctx.file);
 
         // Iterate all ClassDeclaration spans in the symbol map.
         for span in &symbol_map.spans {
@@ -50,14 +62,13 @@ impl Backend {
             };
 
             // Find the matching ClassInfo in the uri_classes_index.
-            let class_info = match ctx
-                .classes
-                .iter()
-                .find(|c| c.name == *class_name || self.class_fqn_matches(c, class_name, &ctx))
-            {
-                Some(c) => Arc::clone(c),
-                None => continue,
-            };
+            let class_info =
+                match ctx.file.classes.iter().find(|c| {
+                    c.name == *class_name || self.class_fqn_matches(c, class_name, &ctx.file)
+                }) {
+                    Some(c) => Arc::clone(c),
+                    None => continue,
+                };
 
             // Only concrete classes and enums can have implementation errors.
             // Abstract classes, interfaces, and traits are skipped.

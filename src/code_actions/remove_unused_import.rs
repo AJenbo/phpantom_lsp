@@ -20,13 +20,13 @@
 //! is applied.
 
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use tower_lsp::lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
-use crate::util::{line_start_byte_offset, offset_to_position, ranges_overlap};
+use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 
 impl Backend {
     /// Collect "Remove unused import" code actions.
@@ -155,14 +155,7 @@ impl Backend {
             // valid as we apply deletions from bottom to top.
             edits.sort_by_key(|e| Reverse(e.range.start));
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, edits);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(doc_uri, edits))
         } else {
             // Single-import removal: use the diagnostic range from the
             // action to build the deletion edit.
@@ -171,14 +164,10 @@ impl Backend {
             let removal_edit =
                 build_line_deletion_edit(content, &diag.range, &removed_import_lines);
 
-            let mut changes = HashMap::new();
-            changes.insert(doc_uri, vec![removal_edit]);
-
-            Some(WorkspaceEdit {
-                changes: Some(changes),
-                document_changes: None,
-                change_annotations: None,
-            })
+            Some(crate::code_actions::single_file_edit(
+                doc_uri,
+                vec![removal_edit],
+            ))
         }
     }
 }
@@ -420,8 +409,8 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
     // Locate the member text from the diagnostic range. The range columns
     // are UTF-16 code units; convert them to byte offsets before slicing
     // `line` (and convert back to UTF-16 columns for the resulting edit).
-    let start_byte = crate::util::utf16_col_to_byte_offset(line, range.start.character);
-    let end_byte = crate::util::utf16_col_to_byte_offset(line, range.end.character);
+    let start_byte = crate::text_position::utf16_col_to_byte_offset(line, range.start.character);
+    let end_byte = crate::text_position::utf16_col_to_byte_offset(line, range.end.character);
     if end_byte > line.len() || start_byte >= end_byte {
         return None;
     }
@@ -475,11 +464,11 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
 
     let start_pos = Position::new(
         range.start.line,
-        crate::util::byte_offset_to_utf16_col(line, removal_start),
+        crate::text_position::byte_offset_to_utf16_col(line, removal_start),
     );
     let end_pos = Position::new(
         range.start.line,
-        crate::util::byte_offset_to_utf16_col(line, removal_end),
+        crate::text_position::byte_offset_to_utf16_col(line, removal_end),
     );
 
     Some(TextEdit {
@@ -496,7 +485,7 @@ pub(crate) fn extend_range_for_group_member(content: &str, range: &Range) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::position_to_byte_offset;
+    use crate::text_position::position_to_byte_offset;
 
     fn lsp_position_to_byte_offset(content: &str, pos: Position) -> usize {
         position_to_byte_offset(content, pos)

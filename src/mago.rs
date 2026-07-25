@@ -53,6 +53,7 @@ use std::time::Duration;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::config::MagoConfig;
+use crate::process::paths_match;
 
 // ── Tool resolution ─────────────────────────────────────────────────
 
@@ -91,57 +92,11 @@ pub(crate) fn resolve_mago(
         Some(cmd) => Some(ResolvedMago {
             path: PathBuf::from(cmd),
         }),
-        // Auto-detect.
-        None => auto_detect(workspace_root, bin_dir),
+        // Auto-detect: `<bin_dir>/mago` under the workspace root,
+        // then `$PATH`.
+        None => crate::process::auto_detect_binary(workspace_root, bin_dir, "mago")
+            .map(|path| ResolvedMago { path }),
     }
-}
-
-/// Auto-detect Mago by checking `<bin_dir>/mago` then `$PATH`.
-fn auto_detect(workspace_root: Option<&Path>, bin_dir: Option<&str>) -> Option<ResolvedMago> {
-    // Check the Composer bin directory first (vendor/bin/mago).
-    if let Some(root) = workspace_root {
-        let bin = bin_dir.unwrap_or("vendor/bin");
-        let candidate = root.join(bin).join("mago");
-        if candidate.is_file() {
-            return Some(ResolvedMago { path: candidate });
-        }
-    }
-
-    // Fall back to $PATH.
-    if let Ok(path) = which("mago") {
-        return Some(ResolvedMago { path });
-    }
-
-    None
-}
-
-/// Simple `which`-like lookup: search `$PATH` for an executable with
-/// the given name.
-fn which(binary_name: &str) -> Result<PathBuf, String> {
-    let path_var = std::env::var("PATH").map_err(|_| "PATH not set".to_string())?;
-
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(binary_name);
-        if candidate.is_file() && is_executable(&candidate) {
-            return Ok(candidate);
-        }
-    }
-
-    Err(format!("{} not found on PATH", binary_name))
-}
-
-/// Check whether a file is executable.
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|m| m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(_path: &Path) -> bool {
-    true
 }
 
 // ── Mago execution ─────────────────────────────────────────────────
@@ -179,7 +134,7 @@ pub(crate) fn run_mago_lint(
         .current_dir(workspace_root);
 
     let file_path_str = file_path.to_string_lossy();
-    let result = crate::util::run_command_with_timeout(
+    let result = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,
@@ -244,7 +199,7 @@ pub(crate) fn run_mago_analyze(
         .current_dir(workspace_root);
 
     let file_path_str = file_path.to_string_lossy();
-    let result = crate::util::run_command_with_timeout(
+    let result = crate::process::run_command_with_timeout(
         &mut cmd,
         timeout,
         cancelled,
@@ -336,7 +291,7 @@ fn run_mago_workspace(
 
     let tool_name = format!("Mago {} (workspace)", subcommand);
     let result =
-        crate::util::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
+        crate::process::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
 
     match result.code {
         0 => {
@@ -657,26 +612,6 @@ pub(crate) fn byte_offset_to_position(content: &str, offset: usize) -> Position 
     }
 }
 
-/// Check whether two file paths refer to the same file.
-///
-/// Mago reports paths as absolute.  We compare by checking suffix
-/// matches (one path ends with the other) to handle cases where one
-/// path is relative and the other is absolute.
-fn paths_match(a: &str, b: &str) -> bool {
-    if a == b {
-        return true;
-    }
-    // Normalize separators for comparison.
-    let a_norm = a.replace('\\', "/");
-    let b_norm = b.replace('\\', "/");
-    if a_norm == b_norm {
-        return true;
-    }
-    // Check suffix match (one is a suffix of the other), requiring a
-    // path separator boundary so that e.g. "AFoo.php" does not match "Foo.php".
-    a_norm.ends_with(&format!("/{}", b_norm)) || b_norm.ends_with(&format!("/{}", a_norm))
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -722,34 +657,6 @@ mod tests {
             Some("mago-lint"),
             "workspace results carry the same source as per-file runs"
         );
-    }
-
-    // ── paths_match ─────────────────────────────────────────────────
-
-    #[test]
-    fn paths_match_identical() {
-        assert!(paths_match(
-            "/home/user/project/src/Foo.php",
-            "/home/user/project/src/Foo.php"
-        ));
-    }
-
-    #[test]
-    fn paths_match_suffix() {
-        assert!(paths_match("/home/user/project/src/Foo.php", "src/Foo.php"));
-    }
-
-    #[test]
-    fn paths_match_different_files() {
-        assert!(!paths_match(
-            "/home/user/project/src/Foo.php",
-            "src/Bar.php"
-        ));
-    }
-
-    #[test]
-    fn paths_match_rejects_partial_filename() {
-        assert!(!paths_match("/project/src/AFoo.php", "Foo.php"));
     }
 
     // ── byte_offset_to_position ─────────────────────────────────────

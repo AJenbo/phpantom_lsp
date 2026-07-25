@@ -131,7 +131,7 @@ impl Backend {
         // Collect the project's own PSR-4 prefixes (without trailing
         // `\`) so we can gate which cache entries are eligible.
         let psr4_prefixes: Vec<String> = {
-            let mappings = self.psr4_mappings.read();
+            let mappings = self.workspace.psr4_mappings.read();
             mappings
                 .iter()
                 .map(|m| m.prefix.trim_end_matches('\\').to_string())
@@ -144,8 +144,8 @@ impl Backend {
         // PSR-4.  They are always included (even if no other source
         // mentions them) and boosted to the top of the suggestion list.
         let inferred: Vec<InferredNamespace> = {
-            let ws = self.workspace_root.read();
-            let mappings = self.psr4_mappings.read();
+            let ws = self.workspace.workspace_root.read();
+            let mappings = self.workspace.psr4_mappings.read();
             if let Some(ref root) = *ws {
                 if let Ok(url) = Url::parse(uri) {
                     if let Ok(file_path) = url.to_file_path() {
@@ -216,7 +216,7 @@ impl Backend {
 
         // ── 3. uri_classes_index namespace portions ───────────────────────────
         {
-            let amap = self.uri_classes_index.read();
+            let amap = self.symbols.uri_classes_index.read();
             for classes in amap.values() {
                 for cls in classes {
                     if let Some(ns) = &cls.file_namespace {
@@ -231,7 +231,7 @@ impl Backend {
 
         // ── 4. fqn_uri_index namespace portions ───────────────────────
         {
-            let idx = self.fqn_uri_index.read();
+            let idx = self.symbols.fqn_uri_index.read();
             for fqn in idx.keys() {
                 if let Some(ns_end) = fqn.rfind('\\') {
                     insert_if_under_psr4(&fqn[..ns_end], &mut namespaces, &psr4_prefixes);

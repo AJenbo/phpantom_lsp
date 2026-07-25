@@ -23,7 +23,10 @@ class DemoServiceProvider extends ServiceProvider
         // PHPantom recovers those from CollectionMixin's source.
         Collection::mixin(new CollectionMixin());
 
-        // Carbon supports the same `macro()` pattern as Laravel's Macroable:
+        // Carbon supports the same `macro()` pattern as Laravel's Macroable.
+        // The closure is bound with the target as scope, so `self::`/`static::`
+        // refer to CarbonImmutable and protected helpers like `self::this()`
+        // (the instance the macro is called on) resolve:
         CarbonImmutable::macro('diffFromYear', function (int $year, bool $absolute = false): string {
             return self::this()->diffForHumans(
                 CarbonImmutable::create($year, 1, 1),

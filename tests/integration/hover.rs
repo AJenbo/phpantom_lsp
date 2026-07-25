@@ -7075,6 +7075,146 @@ class Repo {
 }
 
 #[test]
+fn hover_variable_assigned_from_facade_concrete_method_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+
+namespace Illuminate\Support\Facades {
+    abstract class Facade
+    {
+        public static function __callStatic(string $method, array $args): array|string|float|int|bool
+        {
+            return false;
+        }
+    }
+}
+
+namespace {
+    use Illuminate\Support\Facades\Facade;
+
+    final class Foo
+    {
+        public function bar(): void {}
+    }
+
+    final class DriverDetails
+    {
+        public function foo(): Foo
+        {
+            return new Foo();
+        }
+    }
+
+    final class DriverProvider
+    {
+        public function details(string $driver): DriverDetails
+        {
+            return new DriverDetails();
+        }
+    }
+
+    final class Driver extends Facade
+    {
+        protected static function getFacadeAccessor(): string
+        {
+            return DriverProvider::class;
+        }
+    }
+
+    $name = "reverb";
+    $driver = Driver::details($name);
+    $driver;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 46, 6).expect("hover on $driver should resolve");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("DriverDetails"),
+        "facade static call should resolve through getFacadeAccessor() concrete return, got: {text}"
+    );
+    assert!(
+        !text.contains("array|string|float|int|bool"),
+        "facade __callStatic fallback should not win over concrete method return, got: {text}"
+    );
+}
+
+#[test]
+fn hover_facade_concrete_target_scoped_to_own_class() {
+    // Two facades declared in the same file: resolving a call on `Second`
+    // must read `Second::getFacadeAccessor()`, not the first accessor found
+    // in the file (which belongs to `First`).
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+
+namespace Illuminate\Support\Facades {
+    abstract class Facade
+    {
+        public static function __callStatic(string $method, array $args): mixed
+        {
+            return null;
+        }
+    }
+}
+
+namespace {
+    use Illuminate\Support\Facades\Facade;
+
+    final class WrongType {}
+    final class RightType {}
+
+    final class FirstTarget
+    {
+        public function handle(): WrongType
+        {
+            return new WrongType();
+        }
+    }
+
+    final class SecondTarget
+    {
+        public function handle(): RightType
+        {
+            return new RightType();
+        }
+    }
+
+    final class First extends Facade
+    {
+        protected static function getFacadeAccessor(): string
+        {
+            return FirstTarget::class;
+        }
+    }
+
+    final class Second extends Facade
+    {
+        protected static function getFacadeAccessor(): string
+        {
+            return SecondTarget::class;
+        }
+    }
+
+    $result = Second::handle();
+    $result;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 51, 6).expect("hover on $result should resolve");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("RightType"),
+        "facade call should resolve through its own accessor, got: {text}"
+    );
+    assert!(
+        !text.contains("WrongType"),
+        "facade call must not cross-resolve to another facade's accessor, got: {text}"
+    );
+}
+
+#[test]
 fn hover_foreach_over_variable_assigned_via_elvis_with_static_call() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

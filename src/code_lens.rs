@@ -1,15 +1,24 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows clickable annotations above methods that override a parent
-//! method or implement an interface method, linking to the prototype
-//! declaration.
+//! Shows override/implement annotations linking to the prototype declaration.
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::definition::member::MemberKind;
+use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH};
-use crate::util::offset_to_position;
+
+fn line_indent(content: &str, byte_offset: usize) -> u32 {
+    let line_start = content[..byte_offset]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    content[line_start..]
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .count() as u32
+}
 
 /// Information about a prototype (ancestor) method that a local method
 /// overrides or implements.
@@ -31,7 +40,7 @@ impl Backend {
     /// a parent class method or implements an interface method.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
-            let map = self.uri_classes_index.read();
+            let map = self.symbols.uri_classes_index.read();
             map.get(uri)?.clone()
         };
 
@@ -41,32 +50,28 @@ impl Backend {
             let class_fqn = class.fqn();
 
             for method in &class.methods {
-                // Skip synthetic/stub methods with no real source position.
-                if method.name_offset == 0 {
-                    continue;
-                }
-
-                // Skip virtual methods (injected via @method tags, not
-                // actually declared in source).
-                if method.is_virtual {
-                    continue;
-                }
-
-                if let Some(proto) =
-                    self.find_prototype(class, &class_fqn, &method.name, uri, content)
+                if method.name_offset == 0
+                    || method.is_virtual
+                    || method.visibility == crate::types::Visibility::Private
                 {
-                    let pos = offset_to_position(content, method.name_offset as usize);
-                    let range = Range {
-                        start: Position {
-                            line: pos.line,
-                            character: 0,
-                        },
-                        end: Position {
-                            line: pos.line,
-                            character: 0,
-                        },
-                    };
+                    continue;
+                }
 
+                let pos = offset_to_position(content, method.name_offset as usize);
+                let indent = line_indent(content, method.name_offset as usize);
+                let range = Range {
+                    start: Position {
+                        line: pos.line,
+                        character: indent,
+                    },
+                    end: Position {
+                        line: pos.line,
+                        character: indent,
+                    },
+                };
+
+                let proto = self.find_prototype(class, &class_fqn, &method.name, uri, content);
+                if let Some(proto) = proto {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
                     let title = format!("{} {}::{}", icon, proto.ancestor_name, method.name);
 
@@ -307,39 +312,14 @@ impl Backend {
     /// Build the LSP `Command` for a code lens that navigates to a target
     /// location.
     ///
-    /// Uses `editor.action.showReferences` (widely supported) by default,
-    /// and `vscode.open` when connected to a VS Code client.
+    /// Returns a custom command handled by `workspace/executeCommand`,
+    /// which uses `window/showDocument` to navigate.  This works across
+    /// all LSP clients without editor-specific command sniffing.
     fn build_code_lens_command(&self, title: String, uri: Url, position: Position) -> Command {
-        let client = self.client_name.lock();
-        if client.contains("Visual Studio Code") {
-            // VS Code: use vscode.open with a fragment for direct navigation.
-            let fragment = format!("L{},{}", position.line + 1, position.character + 1);
-            let mut target_uri = uri;
-            target_uri.set_fragment(Some(&fragment));
-            Command {
-                title,
-                command: "vscode.open".to_string(),
-                arguments: Some(vec![serde_json::json!(target_uri)]),
-            }
-        } else {
-            // All other editors: use editor.action.showReferences which is
-            // handled by most LSP clients (Zed, Neovim, Emacs, etc.).
-            let location = Location {
-                uri: uri.clone(),
-                range: Range {
-                    start: position,
-                    end: position,
-                },
-            };
-            Command {
-                title,
-                command: "editor.action.showReferences".to_string(),
-                arguments: Some(vec![
-                    serde_json::json!(uri),
-                    serde_json::json!(position),
-                    serde_json::json!([location]),
-                ]),
-            }
+        Command {
+            title,
+            command: "phpantom.navigateToPrototype".to_string(),
+            arguments: Some(vec![serde_json::json!(uri), serde_json::json!(position)]),
         }
     }
 

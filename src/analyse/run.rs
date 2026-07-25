@@ -63,7 +63,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // calls are no-ops.
     let backend = Backend::new_headless();
     *backend.workspace_root().write() = Some(root.to_path_buf());
-    *backend.config.lock() = cfg.clone();
+    *backend.workspace.config.lock() = cfg.clone();
 
     let composer_package = composer::read_composer_package(root);
 
@@ -199,7 +199,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // read lock, then drop the lock before resolving.  Resolution may
     // call find_or_load_class which takes write locks on uri_classes_index.
     let sorted_fqns = {
-        let uri_classes_index = backend.uri_classes_index.read();
+        let uri_classes_index = backend.symbols.uri_classes_index.read();
         crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
     };
     // Run on a dedicated large-stack thread: `resolve_class_fully_inner`
@@ -283,9 +283,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         let _cache_guard =
                             with_active_resolved_class_cache(&backend.resolved_class_cache);
                         let _chain_guard =
-                            crate::completion::resolver::with_chain_resolution_cache();
+                            crate::type_engine::resolver::with_chain_resolution_cache();
                         let _callable_guard =
-                            crate::completion::call_resolution::with_callable_target_cache();
+                            crate::type_engine::call_resolution::with_callable_target_cache();
                         let _body_infer_guard = backend.activate_body_return_inferrer();
                         let _auth_user_guard = backend.activate_auth_user_resolver();
 
@@ -297,7 +297,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // collectors hit the cache (O(log N) lookup)
                         // instead of doing a full backward scan.
                         let _scope_guard =
-                            crate::completion::variable::forward_walk::with_diagnostic_scope_cache(
+                            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache(
                             );
                         let scope_t0 = Instant::now();
                         {
@@ -305,11 +305,11 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             let class_loader = backend.class_loader(&file_ctx);
                             let function_loader_cl = backend.function_loader(&file_ctx);
                             let constant_loader_cl = backend.constant_loader();
-                            let loaders = crate::completion::resolver::Loaders {
+                            let loaders = crate::type_engine::resolver::Loaders {
                                 function_loader: Some(&function_loader_cl),
                                 constant_loader: Some(&constant_loader_cl),
                             };
-                            crate::completion::variable::forward_walk::build_diagnostic_scopes(
+                            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,
                                 &file_ctx.classes,
                                 &class_loader,
@@ -460,7 +460,10 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // Use original_content (not virtual PHP) because
                         // diagnostic line numbers have already been translated
                         // back to original file coordinates.
-                        crate::diagnostics::filter_ignored_by_comment(&mut raw, original_content);
+                        crate::diagnostics::suppression::filter_ignored_by_comment(
+                            &mut raw,
+                            original_content,
+                        );
 
                         // ── Apply [[diagnostics.ignore]] config rules ──────
                         if !ignore_rules.is_empty() {
@@ -658,7 +661,7 @@ pub(crate) fn discover_user_files(
     source_dirs.sort();
     source_dirs.dedup();
 
-    let vendor_dirs: Vec<PathBuf> = backend.vendor_dir_paths.lock().clone();
+    let vendor_dirs: Vec<PathBuf> = backend.workspace.vendor_dir_paths.lock().clone();
 
     // When an explicit path filter points outside all PSR-4 source
     // directories (e.g. into vendor/), walk the filter path directly

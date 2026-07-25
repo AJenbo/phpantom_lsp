@@ -1,0 +1,234 @@
+//! Pull-model diagnostics (`textDocument/diagnostic` and
+//! `workspace/diagnostic`).
+//!
+//! Relocated from `server.rs`: the resultId-cache logic that decides
+//! whether to return `Unchanged`, trigger fresh native computation, or
+//! report the background workspace pass's cached results. The LSP trait
+//! handlers in `server.rs` are thin delegations to these methods.
+
+use std::collections::{HashMap, HashSet};
+
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+
+use crate::Backend;
+
+impl Backend {
+    /// Body of `textDocument/diagnostic`. See [`server`](crate::server)'s
+    /// module docs for how pull and push delivery are selected.
+    pub(crate) fn document_pull_diagnostic(
+        &self,
+        params: DocumentDiagnosticParams,
+    ) -> Result<DocumentDiagnosticReportResult> {
+        let uri_str = params.text_document.uri.to_string();
+
+        // Check resultId — if the client sends back the same resultId we
+        // last returned AND the full cache is still present (not
+        // invalidated by schedule_diagnostics), the diagnostics have not
+        // changed and we can return Unchanged immediately.
+        let cache_present = self.diag.last_full.lock().contains_key(&uri_str);
+        if cache_present && let Some(prev_id) = &params.previous_result_id {
+            let ids = self.diag.result_ids.lock();
+            if let Some(&current_id) = ids.get(&uri_str)
+                && prev_id == &current_id.to_string()
+            {
+                return Ok(DocumentDiagnosticReportResult::Report(
+                    DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
+                        related_documents: None,
+                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                            result_id: current_id.to_string(),
+                        },
+                    }),
+                ));
+            }
+        }
+
+        // In pull mode the pull request *triggers* native diagnostic
+        // computation (no debounce — the IDE decided "now is the time").
+        // If the full cache is missing for this URI, run the native
+        // pipeline immediately and block until it finishes.  External
+        // tool results (PHPStan, PHPCS, Mago) are delivered
+        // incrementally via publishDiagnostics as each finishes; we do
+        // not block on them here to keep the pull response fast.
+        let needs_compute = {
+            let cache = self.diag.last_full.lock();
+            !cache.contains_key(&uri_str)
+        };
+
+        if needs_compute {
+            self.trigger_diagnostics_for_pull(&uri_str);
+        }
+
+        let (diagnostics, result_id) = {
+            let cache = self.diag.last_full.lock();
+            let ids = self.diag.result_ids.lock();
+            let diags = cache.get(&uri_str).cloned().unwrap_or_default();
+            let rid = ids.get(&uri_str).copied().unwrap_or(0).to_string();
+            (diags, rid)
+        };
+
+        Ok(DocumentDiagnosticReportResult::Report(
+            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                related_documents: None,
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    result_id: Some(result_id),
+                    items: diagnostics,
+                },
+            }),
+        ))
+    }
+
+    /// Body of `workspace/diagnostic`. Reports open files from the live
+    /// per-file pipeline and unopened files from the background workspace
+    /// pass.
+    pub(crate) fn workspace_pull_diagnostic(
+        &self,
+        params: WorkspaceDiagnosticParams,
+    ) -> Result<WorkspaceDiagnosticReportResult> {
+        // Build a set of previous result IDs sent by the client so we
+        // can return Unchanged for files that haven't changed.
+        let previous: HashMap<&str, &str> = params
+            .previous_result_ids
+            .iter()
+            .map(|p| (p.uri.as_str(), p.value.as_str()))
+            .collect();
+
+        let open_uris: Vec<String> = {
+            let files = self.open_files.read();
+            files.keys().cloned().collect()
+        };
+
+        let mut items = Vec::new();
+
+        for uri_str in &open_uris {
+            // Read the current resultId for this file.
+            let current_id = {
+                let ids = self.diag.result_ids.lock();
+                ids.get(uri_str.as_str()).copied().unwrap_or(0)
+            };
+
+            // Check if the client already has up-to-date diagnostics.
+            // The resultId must match AND the full cache must be present.
+            // When `schedule_diagnostics` invalidates the cache (removing
+            // diag_last_full), the resultId is intentionally kept so it
+            // doesn't reset to 0.  But we must not return "unchanged"
+            // when the cache is missing — that means fresh computation
+            // is needed.
+            let cache_present = self.diag.last_full.lock().contains_key(uri_str.as_str());
+            if cache_present
+                && let Some(prev_id) = previous.get(uri_str.as_str())
+                && *prev_id == current_id.to_string()
+            {
+                let uri = match uri_str.parse::<Url>() {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                };
+                items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
+                    WorkspaceUnchangedDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                            result_id: current_id.to_string(),
+                        },
+                    },
+                ));
+                continue;
+            }
+
+            // If the cache is missing, trigger computation (same as
+            // textDocument/diagnostic).
+            let needs_compute = {
+                let cache = self.diag.last_full.lock();
+                !cache.contains_key(uri_str.as_str())
+            };
+            if needs_compute {
+                self.trigger_diagnostics_for_pull(uri_str);
+            }
+
+            let diagnostics = {
+                let cache = self.diag.last_full.lock();
+                cache.get(uri_str.as_str()).cloned().unwrap_or_default()
+            };
+
+            // Re-read the resultId after potential computation.
+            let current_id = {
+                let ids = self.diag.result_ids.lock();
+                ids.get(uri_str.as_str()).copied().unwrap_or(0)
+            };
+
+            let uri = match uri_str.parse::<Url>() {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+
+            items.push(WorkspaceDocumentDiagnosticReport::Full(
+                WorkspaceFullDocumentDiagnosticReport {
+                    uri,
+                    version: None,
+                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                        result_id: Some(current_id.to_string()),
+                        items: diagnostics,
+                    },
+                },
+            ));
+        }
+
+        // ── Background workspace diagnostics (unopened files) ────────
+        // Files the user has not opened are diagnosed by the background
+        // workspace pass; report its cached results here.  Open files
+        // are skipped — the live per-file pipeline above owns them.
+        let open_uris: HashSet<&str> = open_uris.iter().map(|u| u.as_str()).collect();
+        let workspace_items: Vec<(String, String, Option<Vec<Diagnostic>>)> = {
+            let ws = self.diag.workspace_diags.lock();
+            ws.tracked_uris()
+                .into_iter()
+                .filter(|uri| !open_uris.contains(uri.as_str()))
+                .filter_map(|uri| {
+                    let result_id = ws.result_id(&uri)?;
+                    // Only clone the merged set when the client's
+                    // previous result id is stale; unchanged files
+                    // are answered without touching the diagnostics.
+                    let diags = if previous.get(uri.as_str()) == Some(&result_id.as_str()) {
+                        None
+                    } else {
+                        Some(ws.merged(&uri))
+                    };
+                    Some((uri, result_id, diags))
+                })
+                .collect()
+        };
+
+        for (uri_str, result_id, diagnostics) in workspace_items {
+            let Ok(uri) = uri_str.parse::<Url>() else {
+                continue;
+            };
+
+            match diagnostics {
+                // The client already has this exact result set.
+                None => items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
+                    WorkspaceUnchangedDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                            result_id,
+                        },
+                    },
+                )),
+                Some(diags) => items.push(WorkspaceDocumentDiagnosticReport::Full(
+                    WorkspaceFullDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                            result_id: Some(result_id),
+                            items: diags,
+                        },
+                    },
+                )),
+            }
+        }
+
+        Ok(WorkspaceDiagnosticReportResult::Report(
+            WorkspaceDiagnosticReport { items },
+        ))
+    }
+}

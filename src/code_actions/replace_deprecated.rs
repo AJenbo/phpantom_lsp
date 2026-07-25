@@ -45,8 +45,9 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let request_start = crate::util::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::util::position_to_byte_offset(content, params.range.end);
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
         let symbol_map = {
             let maps = self.symbol_maps.read();
@@ -59,6 +60,7 @@ impl Backend {
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
         let file_namespace: Option<String> = self.first_file_namespace(uri);
         let local_classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -230,23 +232,15 @@ fn emit_action(
         Err(_) => return,
     };
 
-    let edit = TextEdit {
-        range,
-        new_text: replacement.to_string(),
-    };
-
-    let mut changes = HashMap::new();
-    changes.insert(doc_uri, vec![edit]);
-
     out.push(CodeActionOrCommand::CodeAction(CodeAction {
         title,
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: None,
-        edit: Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }),
+        edit: Some(crate::code_actions::single_edit(
+            doc_uri,
+            range,
+            replacement.to_string(),
+        )),
         command: None,
         is_preferred: Some(false),
         disabled: None,
@@ -501,8 +495,8 @@ fn resolve_subject_to_class(
     backend: &Backend,
 ) -> Option<ClassInfo> {
     let class_loader = backend.class_loader_with(ctx.local_classes, ctx.use_map, ctx.namespace);
-    let function_loader = backend.function_loader_with(ctx.use_map, ctx.namespace);
-    let res_ctx = crate::subject_resolution::SubjectResolutionCtx {
+    let function_loader = backend.function_loader_with(None, ctx.use_map, ctx.namespace);
+    let res_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes: ctx.local_classes,
         use_map: ctx.use_map,
         namespace: ctx.namespace,
@@ -511,7 +505,7 @@ fn resolve_subject_to_class(
         function_loader: &function_loader,
     };
 
-    let php_type = crate::subject_resolution::resolve_subject_type(
+    let php_type = crate::type_engine::subject_resolution::resolve_subject_type(
         subject_text,
         is_static,
         access_offset,

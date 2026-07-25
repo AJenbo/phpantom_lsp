@@ -154,7 +154,7 @@ impl WorkspaceDiagnostics {
                 out.extend(diags.iter().cloned());
             }
         }
-        super::suppress_imprecise_overlaps(&mut out);
+        super::suppression::suppress_imprecise_overlaps(&mut out);
         out
     }
 
@@ -181,10 +181,11 @@ impl Backend {
         if !self.config().diagnostics.workspace_enabled() {
             return;
         }
-        if self.workspace_root.read().is_none() {
+        if self.workspace.workspace_root.read().is_none() {
             return;
         }
         if self
+            .diag
             .workspace_diag_pass_started
             .swap(true, Ordering::AcqRel)
         {
@@ -247,7 +248,7 @@ impl Backend {
             let backend = self.clone_for_blocking();
             crate::server::run_blocking_cancel_safe(move || {
                 let sorted_fqns = {
-                    let uri_classes_index = backend.uri_classes_index.read();
+                    let uri_classes_index = backend.symbols.uri_classes_index.read();
                     crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
                 };
                 // Dedicated large-stack thread: class resolution can
@@ -310,7 +311,7 @@ impl Backend {
             // live pipeline owns them now).
             {
                 let open = self.open_files.read();
-                let mut ws = self.workspace_diags.lock();
+                let mut ws = self.diag.workspace_diags.lock();
                 for (uri, diags) in results {
                     if open.contains_key(&uri) {
                         continue;
@@ -330,7 +331,6 @@ impl Backend {
                 last_delivery = Instant::now();
             }
         }
-
         done
     }
 
@@ -338,7 +338,7 @@ impl Backend {
     /// file that is not a stub, not under a vendor directory, and not
     /// currently open in the editor.
     fn workspace_diagnostic_target_uris(&self) -> Vec<String> {
-        let vendor_prefixes = self.vendor_uri_prefixes.lock().clone();
+        let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         let open_uris: HashSet<String> = self.open_files.read().keys().cloned().collect();
         let maps = self.symbol_maps.read();
         maps.keys()
@@ -445,8 +445,8 @@ impl Backend {
             self.collect_fast_diagnostics(uri, effective, &mut out);
             self.collect_slow_diagnostics(uri, effective, &mut out);
 
-            super::suppress_imprecise_overlaps(&mut out);
-            super::filter_ignored_by_comment(&mut out, effective);
+            super::suppression::suppress_imprecise_overlaps(&mut out);
+            super::suppression::filter_ignored_by_comment(&mut out, effective);
             if !ignore_rules.is_empty()
                 && let Some(relative) = self.workspace_relative_path(uri)
             {
@@ -464,7 +464,7 @@ impl Backend {
             .ok()?
             .to_file_path()
             .ok()?;
-        let root = self.workspace_root.read().clone()?;
+        let root = self.workspace.workspace_root.read().clone()?;
         Some(
             path.strip_prefix(&root)
                 .unwrap_or(&path)
@@ -502,7 +502,7 @@ impl Backend {
             let Ok(uri) = uri_str.parse::<tower_lsp::lsp_types::Url>() else {
                 continue;
             };
-            let diags = self.workspace_diags.lock().merged(&uri_str);
+            let diags = self.diag.workspace_diags.lock().merged(&uri_str);
             client.publish_diagnostics(uri, diags, None).await;
         }
     }
@@ -513,11 +513,15 @@ impl Backend {
     /// on-disk state instead of the startup snapshot.  A file that can
     /// no longer be read (deleted) has its entry cleared.
     pub(crate) async fn recompute_workspace_diags_for_closed_file(&self, uri: &str) {
-        if !self.workspace_diag_pass_started.load(Ordering::Acquire) {
+        if !self
+            .diag
+            .workspace_diag_pass_started
+            .load(Ordering::Acquire)
+        {
             return;
         }
         // Only user files participate in workspace diagnostics.
-        let vendor_prefixes = self.vendor_uri_prefixes.lock().clone();
+        let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         if uri.starts_with("phpantom-stub")
             || vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
         {
@@ -540,7 +544,7 @@ impl Backend {
             return;
         }
 
-        let changed = self.workspace_diags.lock().set_native(uri, diags);
+        let changed = self.diag.workspace_diags.lock().set_native(uri, diags);
         if changed {
             self.flush_workspace_diag_updates(vec![uri.to_string()])
                 .await;
@@ -552,7 +556,7 @@ impl Backend {
     /// Run each enabled external tool once over the whole project and
     /// store the results, delivering after each tool completes.
     async fn run_workspace_external_tools(&self, progress: &ScanProgress) {
-        let Some(root) = self.workspace_root.read().clone() else {
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
             return;
         };
         let config = self.config();
@@ -671,7 +675,7 @@ impl Backend {
         results: HashMap<PathBuf, Vec<Diagnostic>>,
     ) {
         let rules = ignore_rules::compile_ignore_rules(&self.config().diagnostics.ignore);
-        let root = self.workspace_root.read().clone();
+        let root = self.workspace.workspace_root.read().clone();
 
         let mut workspace_results: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         let mut open_results: Vec<(String, Vec<Diagnostic>)> = Vec::new();
@@ -701,6 +705,7 @@ impl Backend {
         }
 
         let updated = self
+            .diag
             .workspace_diags
             .lock()
             .set_external(source, workspace_results);
@@ -851,7 +856,7 @@ mod tests {
         let clean_uri = crate::util::path_to_uri(&src.join("Clean.php"));
 
         let (broken_diags, clean_tracked, open_tracked) = {
-            let ws = backend.workspace_diags.lock();
+            let ws = backend.diag.workspace_diags.lock();
             (
                 ws.merged(&broken_uri),
                 ws.result_id(&clean_uri).is_some(),
@@ -944,6 +949,7 @@ mod tests {
     async fn did_close_migrates_external_results() {
         let backend = Backend::new_test();
         backend
+            .diag
             .workspace_diag_pass_started
             .store(true, std::sync::atomic::Ordering::Release);
 
@@ -956,7 +962,7 @@ mod tests {
 
         backend.clear_diagnostics_for_file(uri).await;
 
-        let merged = backend.workspace_diags.lock().merged(uri);
+        let merged = backend.diag.workspace_diags.lock().merged(uri);
         assert_eq!(
             merged.len(),
             1,

@@ -109,7 +109,7 @@ impl Backend {
 
         // ── 1. User-defined constants (from parsed files) ───────────
         {
-            let dmap = self.global_defines.read();
+            let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
                 if !name.to_lowercase().contains(&prefix_lower) {
                     continue;
@@ -141,8 +141,8 @@ impl Backend {
         // user sees cross-file constants even before they're lazily
         // parsed via `update_ast`.
         {
-            let idx = self.autoload_constant_index.read();
-            let dmap = self.global_defines.read();
+            let idx = self.symbols.autoload_constant_index.read();
+            let dmap = self.symbols.global_defines.read();
             for name in idx.keys() {
                 if !name.to_lowercase().contains(&prefix_lower) {
                     continue;
@@ -155,6 +155,7 @@ impl Backend {
                 // handler will fill it in when the user selects the item.
                 let value = dmap.get(name.as_str()).and_then(|info| info.value.clone());
                 let origin = self
+                    .symbols
                     .autoload_constant_origin_index
                     .read()
                     .get(name)

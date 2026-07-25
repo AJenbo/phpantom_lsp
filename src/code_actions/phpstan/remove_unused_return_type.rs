@@ -18,8 +18,6 @@
 //! payload but no `edit`.  Phase 2 (`resolve_remove_unused_return_type`)
 //! recomputes the workspace edit on demand when the user picks the action.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -28,7 +26,7 @@ use crate::code_actions::phpstan::add_iterable_type::{
 };
 use crate::code_actions::{CodeActionData, make_code_action_data};
 use crate::php_type::PhpType;
-use crate::util::ranges_overlap;
+use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -527,13 +525,7 @@ impl Backend {
             return None;
         }
 
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

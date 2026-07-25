@@ -3,7 +3,7 @@ use super::*;
 fn ctx_at(content: &str, needle: &str) -> Option<DetectedContext> {
     // Place the cursor right after `needle` (which should end inside a quote).
     let idx = content.find(needle).expect("needle not found") + needle.len();
-    let position = crate::util::offset_to_position(content, idx);
+    let position = crate::text_position::offset_to_position(content, idx);
     detect_context(content, position)
 }
 
@@ -83,7 +83,7 @@ class SyncCommand extends Command
 }
 ";
     let idx = content.find("argument('").unwrap() + "argument('".len();
-    let position = crate::util::offset_to_position(content, idx);
+    let position = crate::text_position::offset_to_position(content, idx);
     let response = backend.try_command_param_completion(content, position);
     let labels = collect_labels(response);
     assert!(labels.contains(&"user".to_string()), "got {labels:?}");
@@ -108,7 +108,7 @@ class SyncCommand extends Command
 }
 ";
     let idx = content.find("option('").unwrap() + "option('".len();
-    let position = crate::util::offset_to_position(content, idx);
+    let position = crate::text_position::offset_to_position(content, idx);
     let response = backend.try_command_param_completion(content, position);
     let labels = collect_labels(response);
     assert!(labels.contains(&"queue".to_string()), "got {labels:?}");

@@ -16,7 +16,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::util::position_to_offset;
+use crate::text_position::position_to_offset;
 
 /// What kind of command-parameter completion the cursor sits in.
 enum ParamContext {
@@ -87,7 +87,7 @@ impl Backend {
             return None;
         }
 
-        let start_pos = crate::util::offset_to_position(content, detected.content_start_offset);
+        let start_pos = crate::text_position::offset_to_position(content, detected.content_start_offset);
         let edit_range = Range {
             start: start_pos,
             end: position,

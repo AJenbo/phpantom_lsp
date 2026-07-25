@@ -14,9 +14,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
-use crate::util::{
-    build_fqn, line_start_byte_offset, offset_to_position, ranges_overlap, strip_fqn_prefix,
-};
+use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
+use crate::util::{build_fqn, strip_fqn_prefix};
 
 impl Backend {
     /// Resolve the fully-qualified class name for a class rename.
@@ -63,7 +62,7 @@ impl Backend {
         let old_short = crate::util::short_name(old_fqn);
 
         // Find the definition file URI from the fqn_uri_index.
-        let def_uri_str = self.fqn_uri_index.read().get(old_fqn).cloned()?;
+        let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
 
         let def_url = Url::parse(&def_uri_str).ok()?;
         let def_path = def_url.to_file_path().ok()?;
@@ -250,8 +249,9 @@ impl Backend {
 
             for loc in file_locations {
                 let start_off =
-                    crate::util::position_to_byte_offset(&file_content, loc.range.start);
-                let end_off = crate::util::position_to_byte_offset(&file_content, loc.range.end);
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.start);
+                let end_off =
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.end);
                 let source_text = file_content
                     .get(start_off..end_off)
                     .unwrap_or("")
@@ -377,7 +377,12 @@ impl Backend {
 
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
-        let def_uri_str = self.fqn_uri_index.read().get(old_fqn_normalized).cloned();
+        let def_uri_str = self
+            .symbols
+            .fqn_uri_index
+            .read()
+            .get(old_fqn_normalized)
+            .cloned();
 
         for (file_uri_str, file_locations) in &locations_by_file {
             let file_content = match self.get_file_content(file_uri_str) {
@@ -463,8 +468,9 @@ impl Backend {
 
             for loc in file_locations {
                 let start_off =
-                    crate::util::position_to_byte_offset(&file_content, loc.range.start);
-                let end_off = crate::util::position_to_byte_offset(&file_content, loc.range.end);
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.start);
+                let end_off =
+                    crate::text_position::position_to_byte_offset(&file_content, loc.range.end);
                 let source_text = file_content
                     .get(start_off..end_off)
                     .unwrap_or("")
@@ -558,7 +564,7 @@ impl Backend {
             return None;
         }
 
-        let def_uri_str = self.fqn_uri_index.read().get(old_fqn).cloned()?;
+        let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
         let old_url = Url::parse(&def_uri_str).ok()?;
 
         let workspace_root = self.workspace_root().read().clone()?;

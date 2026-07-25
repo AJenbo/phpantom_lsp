@@ -2,13 +2,15 @@
 
 <p align="center">
   <img src="docs/assets/spookaphant.svg" alt="Spookaphant" width="316" height="230" />
+  <br>
+  <a href="https://github.com/PHPantom-dev/phpantom_lsp/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/PHPantom-dev/phpantom_lsp/ci.yml?logo=github&label=CI" alt="CI"></a>
+  <a href="https://codecov.io/gh/PHPantom-dev/phpantom_lsp"><img src="https://codecov.io/gh/PHPantom-dev/phpantom_lsp/graph/badge.svg?token=UH5RFA3AR9" alt="codecov"></a>
+  <a href="https://crates.io/crates/phpantom_lsp"><img src="https://img.shields.io/crates/v/phpantom_lsp?logo=rust" alt="crates"></a>
 </p>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/PHPantom-dev/phpantom_lsp/ci.yml?logo=github&label=CI)](https://github.com/PHPantom-dev/phpantom_lsp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/PHPantom-dev/phpantom_lsp/graph/badge.svg?token=UH5RFA3AR9)](https://codecov.io/gh/PHPantom-dev/phpantom_lsp)
-[![crates](https://img.shields.io/crates/v/phpantom_lsp?logo=rust)](https://crates.io/crates/phpantom_lsp)
-
 A fast, lightweight PHP language server written in Rust. Ready in seconds, uses a fraction of the RAM other language servers need, and stays responsive throughout. No indexing phase, no waiting.
+
+Check out the **[documentation](https://phpantom-dev.github.io/phpantom_lsp/)** to get started.
 
 > [!NOTE]
 > PHPantom is in active development. The core editing features are solid and used daily on production codebases.
@@ -88,17 +90,6 @@ PHPantom understands Composer projects out of the box, but works without setup o
 - **`require_once` discovery.** Functions from required files are available for completion.
 - **Go-to-implementation.** Jump from an interface or abstract class to all concrete implementations. Scans open files, classmap, PSR-4 directories, and embedded stubs.
 - **Workspace-wide diagnostics.** After startup, diagnostics run in the background across every file in the project, not just the ones you have open, so problems are already visible when you navigate to a file. Configured external tools (PHPStan, PHPCS, Mago) run project-wide too, once the background pass finishes. Both are deferred until after startup so they never slow down time to ready.
-
-## Documentation
-
-- **[Installation](docs/SETUP.md).** Editor-specific setup for Zed, Neovim, PHPStorm, and others.
-- **[CLI Reference](docs/CLI.md).** Batch diagnostics (`analyze`), automated fixes (`fix`), and CI integration.
-- **[Building from Source](docs/BUILDING.md).** Build, test, and debug instructions.
-- **[Architecture](docs/ARCHITECTURE.md).** Symbol resolution, stub loading, and inheritance merging.
-- **[Contributing](docs/CONTRIBUTING.md)**
-- **[Changelog](docs/CHANGELOG.md)**
-- **Benchmarks.** [Latency](https://phpantom-dev.github.io/phpantom_lsp/dev/bench/) and [memory usage](https://phpantom-dev.github.io/phpantom_lsp/dev/memory/) tracked on every commit.
-- **[Roadmap](docs/todo.md).** Planned features and domain-specific plans.
 
 ## Acknowledgements
 

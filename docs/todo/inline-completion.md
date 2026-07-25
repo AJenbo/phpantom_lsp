@@ -121,7 +121,7 @@ completion resolver. No model, no data files, no latency.
 
 The template engine reuses existing infrastructure:
 
-- **Variable types:** `completion/variable/resolution.rs` already
+- **Variable types:** `type_engine/variable/resolution.rs` already
   resolves every variable in scope to a type. The template engine
   calls the same pipeline.
 - **Containing function:** The AST map already stores `MethodInfo`

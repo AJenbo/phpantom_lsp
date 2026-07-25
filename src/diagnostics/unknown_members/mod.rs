@@ -81,16 +81,16 @@ use crate::parser::with_parse_cache;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::{
+use crate::symbol_map::SymbolKind;
+use crate::type_engine::resolver::{
     ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
-use crate::symbol_map::SymbolKind;
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::{
-    compute_existence_guards, compute_isset_empty_argument_ranges, find_innermost_enclosing_class,
-    is_offset_in_ranges, make_diagnostic,
+    FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
+    find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
 
 /// Diagnostic code used for unknown-member diagnostics so that code
@@ -238,28 +238,33 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // ── Gather context under locks ──────────────────────────────────
-        let symbol_map = {
-            let maps = self.symbol_maps.read();
-            match maps.get(uri) {
-                Some(sm) => sm.clone(),
-                None => return,
-            }
+        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
+            return;
         };
+        self.collect_unknown_member_diagnostics_with_context(&ctx, uri, content, out);
+    }
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
+    /// Same as [`Self::collect_unknown_member_diagnostics`] but reuses
+    /// an already-gathered [`FileDiagnosticContext`] instead of
+    /// re-reading the per-file locks. Used by `collect_slow_diagnostics`
+    /// so all slow collectors in the same pass share one consistent
+    /// snapshot.
+    pub(crate) fn collect_unknown_member_diagnostics_with_context(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let symbol_map = &ctx.symbol_map;
+        let file_use_map = &ctx.file.use_map;
+        let file_namespace = &ctx.file.namespace;
+        let file_resolved_names = &ctx.file.resolved_names;
+        let local_classes = &ctx.file.classes;
 
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
-        let local_classes: Vec<Arc<ClassInfo>> = self
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-
-        let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-        let function_loader = self.function_loader_with(&file_use_map, &file_namespace);
+        let class_loader = self.class_loader_with(local_classes, file_use_map, file_namespace);
+        let function_loader =
+            self.function_loader_with(file_resolved_names.as_deref(), file_use_map, file_namespace);
         let resolved_cache = &self.resolved_class_cache;
 
         // ── Compute existence guards ────────────────────────────────────
@@ -364,7 +369,7 @@ impl Backend {
                 AccessKind::Arrow
             };
 
-            let current_class = find_innermost_enclosing_class(&local_classes, span.start);
+            let current_class = find_innermost_enclosing_class(local_classes, span.start);
 
             // ── Suppress inside traits for self-referencing subjects ────
             // Traits are incomplete: they expect host classes to provide
@@ -462,7 +467,7 @@ impl Backend {
                 .or_insert_with(|| {
                     let rctx = ResolutionCtx {
                         current_class,
-                        all_classes: &local_classes,
+                        all_classes: local_classes,
                         content,
                         cursor_offset: span.start,
                         class_loader: &class_loader,
@@ -618,7 +623,7 @@ impl Backend {
                         if result != MemberCheckResult::Ok && is_narrowable_variable {
                             let rctx = ResolutionCtx {
                                 current_class,
-                                all_classes: &local_classes,
+                                all_classes: local_classes,
                                 content,
                                 cursor_offset: span.start,
                                 class_loader: &class_loader,

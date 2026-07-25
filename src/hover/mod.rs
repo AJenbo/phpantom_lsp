@@ -27,11 +27,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::ResolutionCtx;
+use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
+use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::*;
-use crate::util::find_class_at_offset;
 
 use formatting::*;
 use member::HoverMemberHit;
@@ -47,7 +47,7 @@ impl Backend {
     /// Return a Markdown provenance line for a class FQN, or `None` for
     /// project-local classes.
     pub(crate) fn provenance_line_for_class(&self, fqn: &str) -> Option<String> {
-        let class_uri = self.fqn_uri_index.read().get(fqn).cloned()?;
+        let class_uri = self.symbols.fqn_uri_index.read().get(fqn).cloned()?;
         let (origin, pkg_name) = self.package_info_for_uri(&class_uri);
         format_provenance_line(origin, pkg_name.as_deref())
     }
@@ -61,6 +61,7 @@ impl Backend {
     /// scan but not yet parsed.
     pub(crate) fn provenance_line_for_function(&self, func_name: &str) -> Option<String> {
         let uri = self
+            .symbols
             .global_functions
             .read()
             .get(func_name)
@@ -70,6 +71,7 @@ impl Backend {
             return format_provenance_line(origin, pkg_name.as_deref());
         }
         let path = self
+            .symbols
             .autoload_function_index
             .read()
             .get(func_name)
@@ -86,7 +88,7 @@ impl Backend {
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
         let _body_infer_guard = self.activate_body_return_inferrer();
         let _auth_user_guard = self.activate_auth_user_resolver();
-        let offset = crate::util::position_to_offset(content, position);
+        let offset = crate::text_position::position_to_offset(content, position);
 
         // Try the exact cursor offset first.
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
@@ -189,7 +191,7 @@ impl Backend {
                 };
 
                 let candidates = ResolvedType::into_arced_classes(
-                    crate::completion::resolver::resolve_target_classes(
+                    crate::type_engine::resolver::resolve_target_classes(
                         subject_text,
                         access_kind,
                         &rctx,
@@ -399,7 +401,7 @@ impl Backend {
             }
 
             SymbolKind::FunctionCall { name, .. } => {
-                self.hover_function_call(name, uri, content, &ctx, &function_loader)
+                self.hover_function_call(name, uri, content, &ctx, &function_loader, symbol.start)
             }
 
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -539,6 +541,7 @@ impl Backend {
                     // custom view directories (from `config/view.php`)
                     // display cleanly rather than as absolute paths.
                     let short_path = self
+                        .workspace
                         .workspace_root
                         .read()
                         .as_deref()
@@ -610,9 +613,10 @@ impl Backend {
         uri: &str,
         content: &str,
         _ctx: &FileContext,
-        function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
+        function_loader: &dyn Fn(&str, u32) -> Option<FunctionInfo>,
+        offset: u32,
     ) -> Option<Hover> {
-        if let Some(mut func) = function_loader(name) {
+        if let Some(mut func) = function_loader(name, offset) {
             let is_configured_date_helper = matches!(
                 name.trim_start_matches('\\').rsplit('\\').next(),
                 Some("now" | "today")

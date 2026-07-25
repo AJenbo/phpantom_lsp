@@ -256,6 +256,7 @@ mod tests {
             backed_type: None,
             attribute_targets: 0,
             laravel: None,
+            fqn: None,
         }
     }
 

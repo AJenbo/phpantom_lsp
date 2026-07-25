@@ -10,9 +10,11 @@ use super::*;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::references::push_unique_location;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind};
+use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
-use crate::util::{build_fqn, offset_to_position, push_unique_location};
+use crate::util::build_fqn;
 
 impl Backend {
     /// Find all references to a class/interface/trait/enum across all files.
@@ -356,7 +358,7 @@ impl Backend {
 
         // Walk down from each owner, including inheriting descendants and
         // pruning at overrides.
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         let mut queue: std::collections::VecDeque<String> = owners.iter().cloned().collect();
         let mut seen: HashSet<String> = owners.iter().cloned().collect();
         while let Some(fqn) = queue.pop_front() {
@@ -389,13 +391,14 @@ impl Backend {
         offset: u32,
     ) -> Option<String> {
         let classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
             .cloned()
             .unwrap_or_default();
 
-        let current_class = crate::util::find_class_at_offset(&classes, offset)?;
+        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset)?;
 
         match ssp_kind {
             SelfStaticParentKind::Parent => current_class.parent_class.map(|a| a.to_string()),

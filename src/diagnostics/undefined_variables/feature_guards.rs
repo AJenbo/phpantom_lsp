@@ -1,0 +1,233 @@
+//! Whole-scope feature detection for the undefined/unused-variable
+//! diagnostics.
+//!
+//! These helpers scan a function/method body for constructs that make
+//! per-variable static analysis unsound (variable variables, `extract()`)
+//! or that reference variables by string name rather than direct use
+//! (`compact()`, `get_defined_vars()`). The caller uses the results to
+//! bail out of the scope entirely or to treat the named variables as
+//! always defined/used.
+//!
+//! Each detector is a small [`Walker`] visitor: the generated traversal
+//! recurses through every node kind, so the visitor only overrides the
+//! hooks it cares about. Nested closures, arrow functions, named function
+//! declarations, and anonymous-class bodies are their own variable scopes,
+//! so the visitors stop at those boundaries (an anonymous class still has
+//! its constructor arguments walked, since those live in the enclosing
+//! scope).
+
+use std::collections::HashSet;
+
+use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
+
+/// Emit [`Walker`] overrides that stop traversal at nested variable
+/// scopes (closures, arrow functions, named function declarations) while
+/// still walking an anonymous class's constructor arguments, which belong
+/// to the enclosing scope.
+macro_rules! stop_at_inner_scopes {
+    ($ctx:ty) => {
+        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
+        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
+        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
+        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
+            if let Some(argument_list) = &node.argument_list {
+                self.walk_partial_argument_list(argument_list, context);
+            }
+        }
+    };
+}
+
+// ─── Dynamic variable / extract detection ───────────────────────────────────
+
+/// Returns `true` if the statements contain variable variables (`$$x` or
+/// `${expr}`) anywhere in the function body (excluding nested scopes).
+pub(super) fn has_dynamic_variables(statements: &[Statement<'_>]) -> bool {
+    let walker = DynamicVariableWalker;
+    let mut found = false;
+    for stmt in statements {
+        walker.walk_statement(stmt, &mut found);
+    }
+    found
+}
+
+struct DynamicVariableWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for DynamicVariableWalker {
+    fn walk_in_indirect_variable(&self, _node: &'ast IndirectVariable<'arena>, context: &mut bool) {
+        *context = true;
+    }
+
+    fn walk_in_nested_variable(&self, _node: &'ast NestedVariable<'arena>, context: &mut bool) {
+        *context = true;
+    }
+
+    // A nested/indirect variable in a member, method, or constant name
+    // position (`self::$$prop`, `$obj->$$prop`, `$obj->{$name}()`) names a
+    // dynamic member, not a dynamic local, so it does not make local
+    // variable analysis unsound. Walk only the base expression, skipping
+    // the selector.
+    fn walk_static_property_access(
+        &self,
+        node: &'ast StaticPropertyAccess<'arena>,
+        context: &mut bool,
+    ) {
+        self.walk_expression(node.class, context);
+    }
+
+    fn walk_class_constant_access(
+        &self,
+        node: &'ast ClassConstantAccess<'arena>,
+        context: &mut bool,
+    ) {
+        self.walk_expression(node.class, context);
+    }
+
+    fn walk_class_like_member_selector(
+        &self,
+        _node: &'ast ClassLikeMemberSelector<'arena>,
+        _context: &mut bool,
+    ) {
+    }
+
+    stop_at_inner_scopes!(bool);
+}
+
+/// Returns `true` if the statements contain a call to `extract()`.
+pub(super) fn has_extract_call(statements: &[Statement<'_>]) -> bool {
+    let walker = ExtractCallWalker;
+    let mut found = false;
+    for stmt in statements {
+        walker.walk_statement(stmt, &mut found);
+    }
+    found
+}
+
+struct ExtractCallWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for ExtractCallWalker {
+    fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut bool) {
+        if is_named_call(node, b"extract") {
+            *context = true;
+        }
+    }
+
+    stop_at_inner_scopes!(bool);
+}
+
+// ─── compact() variable collection ──────────────────────────────────────────
+
+/// Collect variable names referenced by `compact('var1', 'var2', …)`
+/// calls.  These variables are used by string name and should be
+/// considered defined.
+pub(crate) fn collect_compact_vars(statements: &[Statement<'_>]) -> HashSet<String> {
+    let walker = CompactWalker;
+    let mut vars = HashSet::new();
+    for stmt in statements {
+        walker.walk_statement(stmt, &mut vars);
+    }
+    vars
+}
+
+struct CompactWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, HashSet<String>> for CompactWalker {
+    fn walk_in_function_call(
+        &self,
+        node: &'ast FunctionCall<'arena>,
+        context: &mut HashSet<String>,
+    ) {
+        if is_named_call(node, b"compact") {
+            // Each argument is a variable name (string literal) or an
+            // array of names (possibly nested), matching the forms
+            // compact() accepts.
+            for arg in node.argument_list.arguments.iter() {
+                collect_compact_name_from_arg(arg.value(), context);
+            }
+        }
+    }
+
+    stop_at_inner_scopes!(HashSet<String>);
+}
+
+/// Collect variable names from a single `compact()` argument. A string
+/// literal names a variable directly; an array literal is descended
+/// into recursively so `compact(['a', ['b']])` collects both names.
+fn collect_compact_name_from_arg(expr: &Expression<'_>, vars: &mut HashSet<String>) {
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the interpreted string content (without
+            // quotes); fall back to `raw` and strip quotes manually
+            // if `value` is `None`.
+            let name: &str = if let Some(v) = s.value {
+                crate::atom::bytes_to_str(v)
+            } else {
+                let raw = crate::atom::bytes_to_str(s.raw);
+                raw.strip_prefix('\'')
+                    .or_else(|| raw.strip_prefix('"'))
+                    .and_then(|inner| inner.strip_suffix('\'').or_else(|| inner.strip_suffix('"')))
+                    .unwrap_or(raw)
+            };
+            if !name.is_empty() {
+                vars.insert(format!("${}", name));
+            }
+        }
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                collect_compact_name_from_elem(elem, vars);
+            }
+        }
+        Expression::LegacyArray(arr) => {
+            for elem in arr.elements.iter() {
+                collect_compact_name_from_elem(elem, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Collect variable names from one element of an array passed to
+/// `compact()`. Keys are ignored; values are names or nested arrays.
+fn collect_compact_name_from_elem(elem: &ArrayElement<'_>, vars: &mut HashSet<String>) {
+    match elem {
+        ArrayElement::KeyValue(kv) => collect_compact_name_from_arg(kv.value, vars),
+        ArrayElement::Value(v) => collect_compact_name_from_arg(v.value, vars),
+        ArrayElement::Variadic(s) => collect_compact_name_from_arg(s.value, vars),
+        ArrayElement::Missing(_) => {}
+    }
+}
+
+// ─── get_defined_vars() detection ───────────────────────────────────────────
+
+/// Returns true if the statements contain a call to `get_defined_vars()`.
+/// When present in a scope, all variables defined in that scope are
+/// considered used (e.g. for debug dumps), so unused-variable diagnostics
+/// should be suppressed for them.
+pub(crate) fn has_get_defined_vars(statements: &[Statement<'_>]) -> bool {
+    let walker = GetDefinedVarsWalker;
+    let mut found = false;
+    for stmt in statements {
+        walker.walk_statement(stmt, &mut found);
+    }
+    found
+}
+
+struct GetDefinedVarsWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for GetDefinedVarsWalker {
+    fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut bool) {
+        if is_named_call(node, b"get_defined_vars") {
+            *context = true;
+        }
+    }
+
+    stop_at_inner_scopes!(bool);
+}
+
+// ─── Shared helpers ─────────────────────────────────────────────────────────
+
+/// Returns `true` if `call` is an unqualified call to a global function
+/// whose name matches `name` (case-insensitively).
+fn is_named_call(call: &FunctionCall<'_>, name: &[u8]) -> bool {
+    matches!(call.function, Expression::Identifier(ident) if ident.value().eq_ignore_ascii_case(name))
+}

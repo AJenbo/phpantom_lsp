@@ -44,7 +44,7 @@ fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Lo
     let entry = index.get(name)?;
     let uri = Url::parse(&entry.uri).ok()?;
     let content = backend.get_file_content(&entry.uri)?;
-    let position = crate::util::offset_to_position(&content, entry.name_offset as usize);
+    let position = crate::text_position::offset_to_position(&content, entry.name_offset as usize);
     Some(crate::definition::point_location(uri, position))
 }
 
@@ -72,7 +72,7 @@ pub(crate) fn find_laravel_string_key_references(
 
     if include_declaration && kind != &LaravelStringKind::Config {
         for decl in resolve_laravel_string_key(backend, kind, key) {
-            crate::util::push_unique_location(
+            crate::references::push_unique_location(
                 &mut locations,
                 &decl.uri,
                 decl.range.start,
@@ -92,8 +92,9 @@ fn find_string_key_usages(
     backend: &crate::Backend,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
 ) -> Vec<Location> {
+    use crate::references::push_unique_location;
     use crate::symbol_map::SymbolKind;
-    use crate::util::{offset_to_position, push_unique_location};
+    use crate::text_position::offset_to_position;
     use tower_lsp::lsp_types::Url;
 
     let mut locations = Vec::new();

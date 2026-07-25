@@ -849,6 +849,46 @@ fn class_with_ns(name: &str, ns: &str) -> ClassInfo {
     }
 }
 
+// ── fqn() caching ───────────────────────────────────────────────
+
+#[test]
+fn fqn_without_cache_computes_from_name_and_namespace() {
+    assert_eq!(class("Foo").fqn().as_str(), "Foo");
+    assert_eq!(
+        class_with_ns("User", "App\\Models").fqn().as_str(),
+        "App\\Models\\User"
+    );
+}
+
+#[test]
+fn fqn_empty_namespace_returns_bare_name() {
+    let cls = ClassInfo {
+        name: crate::atom::atom("Foo"),
+        file_namespace: Some(crate::atom::atom("")),
+        ..Default::default()
+    };
+    assert_eq!(cls.fqn().as_str(), "Foo");
+}
+
+#[test]
+fn cache_fqn_matches_computed_value() {
+    for (name, ns) in [("User", "App\\Models"), ("Bare", ""), ("Global", "\0none")] {
+        let mut cls = ClassInfo {
+            name: crate::atom::atom(name),
+            file_namespace: (ns != "\0none").then(|| crate::atom::atom(ns)),
+            ..Default::default()
+        };
+        let uncached = cls.fqn();
+        cls.cache_fqn();
+        assert!(cls.fqn.is_some(), "cache_fqn should populate the cache");
+        assert_eq!(
+            cls.fqn(),
+            uncached,
+            "cached fqn must equal the computed fqn"
+        );
+    }
+}
+
 // ── from_classes_with_hint: intersection ────────────────────────
 
 #[test]

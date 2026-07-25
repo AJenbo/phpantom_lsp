@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::LaravelStringKind;
-use crate::util::position_to_offset;
+use crate::text_position::position_to_offset;
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -264,7 +264,7 @@ impl Backend {
     /// directories are returned. Read from disk, so unsaved edits to
     /// `config/view.php` are not reflected until saved.
     pub(crate) fn laravel_view_roots(&self) -> Vec<std::path::PathBuf> {
-        match self.workspace_root.read().clone() {
+        match self.workspace.workspace_root.read().clone() {
             Some(root) => crate::blade::discover_view_paths(&root),
             None => Vec::new(),
         }
@@ -440,7 +440,7 @@ fn extract_lang_file_stem(uri: &str) -> Option<String> {
 /// We scan the filesystem because JSON files are not PHP and therefore do
 /// not appear in `user_file_symbol_maps()`.
 fn collect_json_trans_keys(backend: &crate::Backend, out: &mut Vec<String>) {
-    let root = match backend.workspace_root.read().clone() {
+    let root = match backend.workspace.workspace_root.read().clone() {
         Some(r) => r,
         None => return,
     };
@@ -604,7 +604,7 @@ impl Backend {
         // (right after the opening quote) to the current cursor position.
         // This replaces the entire typed prefix with the selected name,
         // so dots in the name don't break the editor's word-based filter.
-        let start_pos = crate::util::offset_to_position(content, ctx.content_start_offset);
+        let start_pos = crate::text_position::offset_to_position(content, ctx.content_start_offset);
         let edit_range = Range {
             start: start_pos,
             end: position,

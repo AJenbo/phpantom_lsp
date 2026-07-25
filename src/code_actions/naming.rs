@@ -107,6 +107,32 @@ pub(crate) fn string_to_screaming_snake(s: &str) -> String {
     result
 }
 
+/// Make `base` unique by appending a numeric suffix until `exists` returns
+/// `false`.
+///
+/// `exists` reports whether a candidate name already collides in the target
+/// scope (in-scope variable names, sibling constants, sibling methods, …).
+/// `separator` sits between the base and the counter: `""` yields
+/// `name`, `name1`, `name2`; `"_"` yields `name`, `name_1`, `name_2`.
+/// If `base` itself is free it is returned unchanged.
+pub(crate) fn deduplicate_name(
+    base: &str,
+    separator: &str,
+    exists: impl Fn(&str) -> bool,
+) -> String {
+    if !exists(base) {
+        return base.to_string();
+    }
+    for i in 1u32.. {
+        let candidate = format!("{base}{separator}{i}");
+        if !exists(&candidate) {
+            return candidate;
+        }
+    }
+    // The 1..=u32::MAX range guarantees a return above for any realistic scope.
+    base.to_string()
+}
+
 /// Capitalise the first character of a string (ASCII-aware, Unicode-safe).
 pub(crate) fn capitalise(s: &str) -> String {
     let mut chars = s.chars();

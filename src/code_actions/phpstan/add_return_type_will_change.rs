@@ -18,14 +18,13 @@
 //! `edit`.  Phase 2 (`resolve_add_return_type_will_change`) computes
 //! the workspace edit on demand when the user picks the action.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use super::{InsertionPoint, find_method_insertion_point};
 use crate::Backend;
+use crate::code_actions::phpstan::contains_php_attribute;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{contains_php_attribute, offset_to_position, ranges_overlap};
+use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
 const TENTATIVE_RETURN_TYPE_ID: &str = "method.tentativeReturnType";
@@ -141,14 +140,7 @@ impl Backend {
         }];
 
         let doc_uri: Url = uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

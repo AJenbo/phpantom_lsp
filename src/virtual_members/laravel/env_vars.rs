@@ -19,10 +19,10 @@ pub(crate) fn resolve_env_definition(
     if !content.contains("env(") {
         return None;
     }
-    let cursor_offset = crate::util::position_to_offset(content, position) as usize;
+    let cursor_offset = crate::text_position::position_to_offset(content, position) as usize;
     let key = find_env_usage_at_cursor(content, cursor_offset)?;
 
-    let root = backend.workspace_root.read().clone()?;
+    let root = backend.workspace.workspace_root.read().clone()?;
     let env_path = root.join(".env");
     if !env_path.exists() {
         return None;

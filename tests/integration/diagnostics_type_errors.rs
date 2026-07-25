@@ -1872,6 +1872,52 @@ function test(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_sibling_class_strings_passed_to_static_bound() {
+    let php = r#"<?php
+/**
+ * @phpstan-type Input array{
+ *     type: 'S1'|'S2'|'S3',
+ *     data: array<string, mixed>
+ * }
+ */
+abstract class AClass
+{
+    /**
+     * @param Input $data
+     * @return array<string, mixed>
+     */
+    public static function foo(array $data): array
+    {
+        return match ($data["type"]) {
+            "S1" => static::bar(SClass1::class, $data["data"]),
+            "S2" => static::bar(SClass2::class, $data["data"]),
+            "S3" => static::bar(SClass3::class, $data["data"]),
+        };
+    }
+
+    /**
+     * @param class-string<static> $class
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function bar(string $class, array $data): array
+    {
+        return $data;
+    }
+}
+
+final class SClass1 extends AClass {}
+final class SClass2 extends AClass {}
+final class SClass3 extends AClass {}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag sibling class-string constants passed to class-string<static>, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: iterable<...> accepts arrays
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6269,5 +6315,61 @@ function test(): void {
     assert!(
         has_type_error(&diags),
         "A string literal value in a list that is NOT a property should be flagged"
+    );
+}
+
+// ─── Built-in names shadowed by vendor polyfills ─────────────────────────────
+
+/// A vendor polyfill (e.g. symfony/polyfill-php84) may declare a legacy
+/// `final class RoundingMode` whose "cases" are plain int constants,
+/// registered in the classmap alongside the real built-in enum.  The
+/// embedded stub must win: `RoundingMode::HalfAwayFromZero` passed to a
+/// `RoundingMode` parameter is an enum case, not an int.
+#[test]
+fn builtin_enum_case_prefers_stub_over_polyfill_classmap_entry() {
+    let backend = create_test_backend_with_full_stubs();
+
+    // Simulate the polyfill's legacy-class variant on disk, registered
+    // in the classmap under the built-in's global name.
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let polyfill = dir.path().join("RoundingMode.php");
+    std::fs::write(
+        &polyfill,
+        concat!(
+            "<?php\n",
+            "if (\\PHP_VERSION_ID < 80100) {\n",
+            "    final class RoundingMode\n",
+            "    {\n",
+            "        const HalfAwayFromZero = 0;\n",
+            "        const HalfTowardsZero = 1;\n",
+            "        const HalfEven = 2;\n",
+            "    }\n",
+            "}\n",
+        ),
+    )
+    .expect("failed to write polyfill file");
+    {
+        let mut idx = backend.fqn_uri_index().write();
+        idx.insert(
+            "RoundingMode".to_string(),
+            Url::from_file_path(&polyfill).unwrap().to_string(),
+        );
+    }
+
+    let php = r#"<?php
+function takes_mode(RoundingMode $mode): void {}
+
+function test(): void {
+    takes_mode(RoundingMode::HalfAwayFromZero);
+}
+"#;
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
+    assert!(
+        !has_type_error(&out),
+        "Enum case of a built-in must resolve to the enum, not the polyfill's int constant: {:?}",
+        type_error_messages(&out)
     );
 }

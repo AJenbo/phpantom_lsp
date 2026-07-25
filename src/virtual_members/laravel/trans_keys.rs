@@ -45,7 +45,7 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
                 let prefix = format!("{namespace}::{file_stem}");
                 let declarations = collect_trans_declarations(&content, &prefix);
                 if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                    let pos = crate::util::offset_to_position(&content, decl.start);
+                    let pos = crate::text_position::offset_to_position(&content, decl.start);
                     results.push(crate::definition::point_location(uri, pos));
                     continue;
                 }
@@ -75,7 +75,7 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
 
             let declarations = collect_trans_declarations(&content, file_stem);
             if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::util::offset_to_position(&content, decl.start);
+                let pos = crate::text_position::offset_to_position(&content, decl.start);
                 results.push(crate::definition::point_location(uri, pos));
                 continue;
             }
@@ -84,7 +84,7 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
         }
     }
 
-    if let Some(root) = backend.workspace_root.read().clone() {
+    if let Some(root) = backend.workspace.workspace_root.read().clone() {
         for sub in &["lang", "resources/lang"] {
             let dir = root.join(sub);
             let Ok(entries) = std::fs::read_dir(&dir) else {

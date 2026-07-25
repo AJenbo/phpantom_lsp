@@ -22,13 +22,11 @@
 //! `edit`.  Phase 2 (`resolve_new_static`) computes the workspace edit
 //! on demand when the user picks an action.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::util::{offset_to_position, ranges_overlap};
+use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
 const NEW_STATIC_ID: &str = "new.static";
@@ -188,14 +186,7 @@ impl Backend {
         let edits = edits?;
 
         let doc_uri: Url = uri.parse().ok()?;
-        let mut changes = HashMap::new();
-        changes.insert(doc_uri, edits);
-
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }
 

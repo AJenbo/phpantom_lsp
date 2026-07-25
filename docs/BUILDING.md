@@ -63,4 +63,4 @@ RUST_LOG=debug cargo run 2>phpantom.log
 
 Logs are written to stderr, so redirect as needed.
 
-For editor setup instructions, see [SETUP.md](SETUP.md).
+For editor setup instructions, see [Editor Setup](editor-setup.md).

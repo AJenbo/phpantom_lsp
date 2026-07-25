@@ -32,11 +32,12 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::Loaders;
+use crate::class_lookup::find_class_at_offset;
 use crate::docblock;
 use crate::php_type::PhpType;
+use crate::text_position::position_to_offset;
+use crate::type_engine::resolver::Loaders;
 use crate::types::{ClassInfo, FileContext, ResolvedType};
-use crate::util::{find_class_at_offset, position_to_offset};
 
 /// Well-known keys for the `$_SERVER` superglobal.
 ///
@@ -333,7 +334,7 @@ impl Backend {
         // the original parse failed due to syntax errors.
         let class_loader =
             self.class_loader_with(effective_classes, &file_ctx.use_map, &file_ctx.namespace);
-        let parsed = super::type_resolution::resolve_type_alias_typed(
+        let parsed = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &effective_type,
             "",
             effective_classes,
@@ -533,7 +534,7 @@ impl Backend {
             }
         };
         let function_loader = self.function_loader(file_ctx);
-        let resolved = crate::completion::variable::resolution::resolve_variable_types(
+        let resolved = crate::type_engine::variable::resolution::resolve_variable_types(
             var_name,
             effective_class,
             &file_ctx.classes,

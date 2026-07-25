@@ -16,11 +16,11 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::{Loaders, ResolutionCtx};
+use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 use crate::types::*;
-use crate::util::find_class_at_offset;
 
 impl Backend {
     /// Handle a "go to type definition" request.
@@ -93,7 +93,7 @@ impl Backend {
                     laravel_macro_this_resolver: None,
                     resolved_class_cache: Some(&self.resolved_class_cache),
                     function_loader: Some(
-                        &function_loader as &dyn Fn(&str) -> Option<FunctionInfo>,
+                        &function_loader as &dyn Fn(&str, u32) -> Option<FunctionInfo>,
                     ),
                     scope_var_resolver: None,
                     is_in_static_method: false,
@@ -101,7 +101,7 @@ impl Backend {
                 };
 
                 let candidates = ResolvedType::into_arced_classes(
-                    crate::completion::resolver::resolve_target_classes(
+                    crate::type_engine::resolver::resolve_target_classes(
                         subject_text,
                         access_kind,
                         &rctx,
@@ -234,14 +234,14 @@ impl Backend {
         &self,
         name: &str,
         ctx: &FileContext,
-        function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
+        function_loader: &dyn Fn(&str, u32) -> Option<FunctionInfo>,
         offset: u32,
     ) -> Option<PhpType> {
         let fqn = ctx.resolve_name_at(name, offset);
         let candidates = [fqn, name.to_string()];
 
         for candidate in &candidates {
-            if let Some(func) = function_loader(candidate) {
+            if let Some(func) = function_loader(candidate, offset) {
                 let default_type = PhpType::untyped();
                 let ret_type = func.return_type.as_ref().unwrap_or(&default_type);
 
@@ -300,7 +300,7 @@ fn resolve_variable_type_names(
     current_class: Option<&ClassInfo>,
     ctx: &FileContext,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &dyn Fn(&str) -> Option<FunctionInfo>,
+    function_loader: &dyn Fn(&str, u32) -> Option<FunctionInfo>,
 ) -> Option<PhpType> {
     // $this resolves to the enclosing class.
     if name == "this" {
@@ -308,7 +308,7 @@ fn resolve_variable_type_names(
     }
 
     // Delegate to the unified pipeline.
-    let resolved = crate::completion::variable::resolution::resolve_variable_php_type(
+    let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(
         name,
         content,
         cursor_offset,
