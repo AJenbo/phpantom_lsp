@@ -300,9 +300,13 @@ impl Backend {
                 !is_method && !is_constant
             }
             SymbolKind::Variable { name } => {
-                // Variable spans can represent property declarations.
+                // Variable spans can represent property declarations,
+                // including constructor-promoted properties (tagged
+                // VarDefKind::Parameter since the token is also a real
+                // parameter, but still declares a class property).
                 self.lookup_var_def_kind_at(uri, name, span.start)
                     .is_some_and(|k| k == crate::symbol_map::VarDefKind::Property)
+                    || self.is_promoted_property_param(uri, span.start)
             }
             SymbolKind::CompactVariable { .. } => false,
             _ => false,

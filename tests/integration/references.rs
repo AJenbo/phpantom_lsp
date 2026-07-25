@@ -389,6 +389,50 @@ class Foo {
     );
 }
 
+#[test]
+fn promoted_property_references_cascade() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_promoted_prop.php";
+    let content = r#"<?php
+
+class SomeService {
+    public function __construct(
+        private int $someField,
+    ) {}
+
+    public function handle(): int {
+        return $this->someField;
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `someField` in the promoted constructor parameter (line 4).
+    let results = backend
+        .find_references(uri, content, Position::new(4, 22), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "promoted_property_references");
+
+    // Expect: 1 declaration (the parameter) + 1 access ($this->someField).
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 references (1 declaration + 1 access), got {}: {:#?}",
+        results.len(),
+        results
+    );
+
+    // The access reference must land on the `$this->someField` usage, not
+    // just the constructor's own local parameter uses.
+    let access = results
+        .iter()
+        .find(|loc| loc.range.start.line == 8)
+        .expect("should include the $this->someField access site");
+    assert_eq!(access.range.start.character, 22);
+}
+
 // ─── Variable references ────────────────────────────────────────────────────
 
 #[test]

@@ -616,6 +616,57 @@ async fn rename_property_from_access() {
     }
 }
 
+#[tokio::test]
+async fn rename_promoted_property_from_parameter() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class SomeService {\n",
+        "    public function __construct(\n",
+        "        private int $someField,\n",
+        "    ) {}\n",
+        "\n",
+        "    public function handle(): int {\n",
+        "        return $this->someField;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    // Rename from the constructor-promoted parameter declaration itself.
+    let (line, character) = line_char_of(text, "$someField,");
+    let edit = rename(&backend, &uri, line, character, "otherField").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit for promoted property rename"
+    );
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    // Should have edits for: the promoted parameter and $this->someField.
+    assert!(
+        file_edits.len() >= 2,
+        "Expected at least 2 edits for someField, got {}",
+        file_edits.len()
+    );
+
+    // The declaration site includes `$`, the `$this->` access site doesn't.
+    for te in &file_edits {
+        assert!(
+            te.new_text == "otherField" || te.new_text == "$otherField",
+            "Unexpected edit text: {}",
+            te.new_text
+        );
+    }
+
+    let updated = apply_edits(text, &file_edits);
+    assert!(
+        updated.contains("$this->otherField"),
+        "Expected $this->someField usage to cascade to otherField:\n{updated}"
+    );
+}
+
 // ─── Function Rename ────────────────────────────────────────────────────────
 
 #[tokio::test]

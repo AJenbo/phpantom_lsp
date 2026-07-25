@@ -45,7 +45,14 @@ impl Backend {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Check if this is actually a property declaration — if
                 // so, highlight member accesses instead of local vars.
-                if let Some(VarDefKind::Property) = symbol_map.var_def_kind_at(name, span.start) {
+                // Constructor-promoted properties are tagged
+                // VarDefKind::Parameter (the token is also a real
+                // parameter) but still declare a class property.
+                let is_property = matches!(
+                    symbol_map.var_def_kind_at(name, span.start),
+                    Some(VarDefKind::Property)
+                ) || self.is_promoted_property_param(uri, span.start);
+                if is_property {
                     self.highlight_member_name(symbol_map, content, name)
                 } else {
                     self.highlight_variable(symbol_map, content, name, span.start)

@@ -57,8 +57,15 @@ impl Backend {
         match &span.kind {
             SymbolKind::Variable { name } => {
                 // Property declarations should not trigger linked editing —
-                // renaming a property requires cross-file awareness.
-                if let Some(VarDefKind::Property) = symbol_map.var_def_kind_at(name, span.start) {
+                // renaming a property requires cross-file awareness. This
+                // includes constructor-promoted properties, which are
+                // tagged VarDefKind::Parameter (the token is also a real
+                // parameter) but still declare a class property.
+                let is_property = matches!(
+                    symbol_map.var_def_kind_at(name, span.start),
+                    Some(VarDefKind::Property)
+                ) || self.is_promoted_property_param(uri, span.start);
+                if is_property {
                     return None;
                 }
 

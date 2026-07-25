@@ -138,6 +138,25 @@ impl Backend {
         map.var_def_kind_at(var_name, cursor_offset).cloned()
     }
 
+    /// Whether `offset` is the declaration site of a constructor-promoted
+    /// property parameter (`public function __construct(private int $x) {}`).
+    ///
+    /// Promoted parameters share the same byte offset as their
+    /// `VarDefKind::Parameter` symbol-map entry, but they declare a real
+    /// class property, not a local variable — callers that special-case
+    /// `VarDefKind::Property` (cross-file references, rename, linked
+    /// editing, document highlight) must treat these the same way.
+    /// `ClassInfo::properties` already carries promoted parameters (built
+    /// in `parser/classes.rs`), so this checks membership there instead of
+    /// teaching the symbol map a new `VarDefKind`.
+    pub(crate) fn is_promoted_property_param(&self, uri: &str, offset: u32) -> bool {
+        self.get_classes_for_uri(uri)
+            .iter()
+            .flat_map(|classes| classes.iter())
+            .flat_map(|c| c.properties.iter())
+            .any(|p| p.name_offset != 0 && p.name_offset == offset)
+    }
+
     /// If the cursor is on a variable at its assignment definition site,
     /// return the `effective_from` offset (end of the assignment statement).
     ///

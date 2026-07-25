@@ -137,9 +137,14 @@ impl Backend {
                 // Property declarations use Variable spans (so GTD can
                 // jump to the type hint), but Find References should
                 // search for member accesses, not local variable uses.
-                if let Some(crate::symbol_map::VarDefKind::Property) =
-                    self.lookup_var_def_kind_at(uri, name, span_start)
-                {
+                // Constructor-promoted properties are also Variable spans
+                // (tagged VarDefKind::Parameter, since the token is also a
+                // real parameter) but declare a property just the same.
+                let is_property = matches!(
+                    self.lookup_var_def_kind_at(uri, name, span_start),
+                    Some(crate::symbol_map::VarDefKind::Property)
+                ) || self.is_promoted_property_param(uri, span_start);
+                if is_property {
                     // Properties are never static in the Variable span
                     // context ($this->prop).  Static properties use
                     // MemberAccess spans at their usage sites with
