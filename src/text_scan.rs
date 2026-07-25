@@ -432,7 +432,14 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
     let mut saw_closer = false;
     for (idx, ch) in trimmed.char_indices() {
         match ch {
-            ')' | '}' | ']' => {
+            // Only `)`/`}` are recognized here because the backward balance
+            // scan below (and in `collapse_continuation_lines`) only tracks
+            // paren/brace depth, not bracket depth. Treating `]` as a
+            // trigger would let this collapse a multi-line array subscript
+            // (`$config[\n    'key',\n]->foo`) while never accounting for
+            // the `[`, so the walk stops one line too early and silently
+            // drops the base expression instead of producing no match.
+            ')' | '}' => {
                 saw_closer = true;
                 end = idx + ch.len_utf8();
             }

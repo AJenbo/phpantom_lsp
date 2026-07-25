@@ -559,3 +559,38 @@ async fn test_multiline_chain_same_line_after_closure_arg_close() {
         "Should offer Collection::all() after same-line closure close, got: {names:?}"
     );
 }
+
+#[tokio::test]
+async fn test_multiline_chain_same_line_after_bracket_close_does_not_misresolve() {
+    // Bracket depth (`[`/`]`) is not tracked by the backward balance scan
+    // used to reconstruct the base expression, so a chain operator that
+    // follows a closing `]` on its own line must not be treated as a
+    // same-line continuation: doing so would drop everything before the
+    // bracket close (e.g. the `$this->items[` base) and hand the resolver
+    // a malformed expression instead of the real receiver. Falling back to
+    // "no completions" is correct here; resolving to the wrong receiver's
+    // members would not be.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///multiline_bracket_same_line.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Box {\n",
+        "    public function open(): string { return ''; }\n",
+        "}\n",
+        "class Container {\n",
+        "    /** @var array<string, Box> */\n",
+        "    public array $items = [];\n",
+        "    public function run(): void {\n",
+        "        $this->items[\n",
+        "            'key'\n",
+        "        ]->o\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let names = complete_at(&backend, &uri, text, 10, 12).await;
+    assert!(
+        !names.iter().any(|n| n.starts_with("open(")),
+        "Should not resolve Box::open() from a malformed collapsed expression, got: {names:?}"
+    );
+}
