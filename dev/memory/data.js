@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784957316177,
+  "lastUpdate": 1784957674511,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21089,6 +21089,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "8ed83dcc30f21ec3a8f74aa75841cb82276bdc31",
+          "message": "fix: wire config resolver into array shape key completion\n\nThe array shape completion path constructed its Loaders without the\nconfig_resolver closure, so variables assigned from config() calls\ndid not offer array key completions even though hover showed the\ncorrect array shape type. Pass the config resolver through so\n$mysql['...'] offers the expected keys.",
+          "timestamp": "2026-07-25T00:17:26-05:00",
+          "tree_id": "150b92ffccd0c816c300932a4205aaffc2800d28",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8ed83dcc30f21ec3a8f74aa75841cb82276bdc31"
+        },
+        "date": 1784957671501,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 92.4,
             "unit": "MiB"
           }
         ]
