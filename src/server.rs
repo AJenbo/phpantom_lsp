@@ -1754,11 +1754,21 @@ impl Backend {
                 let _ = client.workspace_diagnostic_refresh().await;
             }
 
-            // With the whole workspace parsed, run the background
-            // workspace diagnostics pass (native collectors over every
-            // unopened user file, then project-wide external tools).
-            // Deliberately chained after the index so it never competes
-            // with startup for CPU.
+            // With the whole workspace parsed, eagerly resolve every
+            // class so interactive requests hit a warm cache.  This
+            // runs even when workspace diagnostics are disabled — it
+            // serves completion, hover, and go-to-definition too.
+            // Populating before `initialized` finishes would be wasted
+            // work: it clears the resolution caches after the startup
+            // scan.
+            if progress_backend.wait_for_init_complete().await {
+                progress_backend.eager_populate_resolved_classes().await;
+            }
+
+            // Then run the background workspace diagnostics pass
+            // (native collectors over every unopened user file, then
+            // project-wide external tools).  Deliberately chained after
+            // the index so it never competes with startup for CPU.
             progress_backend.run_workspace_diagnostics().await;
         });
     }

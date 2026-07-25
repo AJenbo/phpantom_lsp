@@ -254,74 +254,30 @@ inside the type resolution pipeline, not by resolution logic.
 
 ---
 
-#### Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)
+#### Phase 4e: Eliminate recursion guards in class resolution ✓
 
-**Impact: Medium-High. Effort: Medium.**
-
-Once Phase 4d (or earlier) makes the resolved codebase metadata
-immutable after population, the re-entrant resolution that currently
-requires thread-local recursion guards cannot occur. This phase
-removes those guards and the depth caps they protect:
-
-1. **`RESOLVING` set and `MAX_RESOLVE_DEPTH` (30) in
-   `virtual_members/mod.rs`.** Thread-local set of class FQNs
-   currently being resolved. When a class is already in the set,
-   re-entrant calls return a partial result (base inheritance only,
-   no virtual members). This produces non-deterministic results:
-   whichever class in a mutual dependency (e.g. Model/Builder) is
-   resolved first gets full virtual members, the other gets degraded.
-   After eager population, all classes are resolved before any
-   consumer queries them, so re-entry cannot happen.
-
-2. **`RESOLVE_DEPTH` and `MAX_RESOLVE_TARGET_DEPTH` (60) in
-   `type_engine/resolver/`.** Thread-local depth counter for
-   `resolve_target_classes_expr_inner`. Guards against mutual
-   recursion between subject resolution, call-return resolution,
-   and variable resolution. The limit of 60 (vs typical chain
-   depth of 5-10) indicates the recursion is caused by accidental
-   re-entry into class resolution, not by the problem size. Once
-   class resolution is a cache lookup, this re-entry path vanishes.
-
-3. **LSP server eager population.** The `analyse.rs` CLI already
-   runs `populate_from_sorted` before diagnostics. The LSP server's
-   Tokio threads do not. Extend eager population to run on file
-   change in the LSP server (incrementally, not full re-population)
-   so that interactive requests also benefit from pre-resolved
-   metadata.
-
-**How the reference projects avoid this problem:**
-
-- **Mago:** topologically sorts classes (`codex/src/populator/
-  sorter.rs`) using a DFS with `visited` + `visiting` sets. Cycles
-  are broken silently when `visiting.contains(&class_like)`. Each
-  class is then populated exactly once by
-  `populate_class_like_metadata_iterative` (non-recursive, assumes
-  dependencies are done). No re-entrant resolution is possible.
-
-- **PHPStan:** member lookup on `ClassReflection` delegates to
-  `PhpClassReflectionExtension`, which calls PHP's native
-  `ReflectionClass` (already resolved by the runtime). Each class
-  has a single canonical instance via `MemoizingReflectionProvider`
-  (keyed by lowercase name), so re-entrant lookups hit the same
-  cached object. Explicit cycle guards exist only for specific
-  features: `$resolvingTypeAliasImports` for `@type-import` cycles,
-  `$inferClassConstructorPropertyTypesInProcess` for constructor
-  property inference.
-
-- **Phpactor:** three independent cycle-protection layers.
-  (1) `ClassHierarchyResolver::doResolve()` passes a `$resolved`
-  map by value; if a class name is already a key, recursion stops.
-  (2) Every reflection object carries a `$visited` array through its
-  constructor; `reflectClassLike()` throws `CycleDetected` on
-  re-entry. (3) Direct self-reference guards in `parent()` and
-  `ancestors()`.
-
-**Success criteria:**
-- `RESOLVING`, `RESOLVE_DEPTH`, `MAX_RESOLVE_DEPTH`, and
-  `MAX_RESOLVE_TARGET_DEPTH` are removed from the codebase.
-- `mark_resolving` / `unmark_resolving` functions are removed.
-- No test regressions.
-- LSP server runs eager population incrementally on file change.
+Removed the thread-local `RESOLVING` set, both depth counters, and
+both depth caps (`MAX_RESOLVE_DEPTH` 30, `MAX_RESOLVE_TARGET_DEPTH`
+60). Genuine dependency cycles still exist (e.g. two Eloquent models
+whose relationship providers resolve each other, and classes loaded
+on demand mid-resolution), so the cycle-break itself cannot be
+deleted: it moved into `ResolvedCacheInner` as an in-flight set keyed
+by `(thread, FQN)` with an RAII release. Re-entry on the same class
+returns a base-inheritance partial exactly as before, but resolution
+is no longer cut off at an arbitrary nesting depth, other threads'
+concurrent resolutions are unaffected, and the state is per-`Backend`
+instead of a process-wide thread-local. Cache-less
+`resolve_class_fully` callers get a throwaway cache scoped to their
+call tree, so cycle-breaking applies uniformly (and nested provider
+work within the tree is deduplicated). The depth cap in
+`resolve_target_classes_expr_inner` was removed outright: its
+recursion follows the finite subject expression plus variable
+resolution's own keyed guards, and class resolution can no longer
+feed unbounded re-entry into it. The LSP server now runs eager
+population at the tail of the full background index even when
+workspace diagnostics are disabled; incremental re-population of
+evicted classes on file change was already in place in
+`parser/ast_update.rs`.
 
 #### Phase 4f: Remove inflated stack sizes (absorbs P25)
 

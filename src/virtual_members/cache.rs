@@ -70,6 +70,17 @@ pub struct ResolvedCacheInner {
     /// per-edit cache contents.
     is_laravel: bool,
     schema_index: SchemaIndex,
+    /// Classes currently being resolved by `resolve_class_fully_inner`,
+    /// keyed per thread so one thread's in-progress resolution never
+    /// degrades another thread's independent resolution of the same
+    /// class.  When resolution of a class re-enters itself on the same
+    /// thread (a genuine dependency cycle, e.g. two Eloquent models
+    /// whose relationship providers resolve each other), the re-entrant
+    /// call detects its own marker here and returns a base-inheritance
+    /// partial result instead of recursing forever.  Entries live only
+    /// for the duration of one synchronous resolution call tree; they
+    /// are removed by an RAII guard, so a panic cannot leak them.
+    in_flight: HashSet<(std::thread::ThreadId, Atom)>,
 }
 
 impl Default for ResolvedCacheInner {
@@ -80,6 +91,7 @@ impl Default for ResolvedCacheInner {
             reverse_deps: HashMap::new(),
             is_laravel: true,
             schema_index: SchemaIndex::default(),
+            in_flight: HashSet::new(),
         }
     }
 }
@@ -108,6 +120,19 @@ impl ResolvedCacheInner {
     /// does not lose the project classification.
     pub fn set_laravel(&mut self, is_laravel: bool) {
         self.is_laravel = is_laravel;
+    }
+
+    /// Mark `fqn` as being resolved on the current thread.  Returns
+    /// `true` when freshly marked (caller should proceed with full
+    /// resolution) and `false` on re-entry (caller should break the
+    /// cycle with a partial result).
+    pub fn mark_in_flight(&mut self, fqn: Atom) -> bool {
+        self.in_flight.insert((std::thread::current().id(), fqn))
+    }
+
+    /// Remove the current thread's in-flight marker for `fqn`.
+    pub fn unmark_in_flight(&mut self, fqn: Atom) {
+        self.in_flight.remove(&(std::thread::current().id(), fqn));
     }
 
     pub fn schema_index(&self) -> &SchemaIndex {
@@ -153,6 +178,10 @@ impl ResolvedCacheInner {
     }
 
     /// Remove all entries and indices.
+    ///
+    /// `in_flight` is left untouched: its entries belong to resolution
+    /// call trees currently running on other threads, not to the cached
+    /// contents being invalidated.
     pub fn clear(&mut self) {
         self.map.clear();
         self.fqn_keys.clear();

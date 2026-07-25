@@ -4,11 +4,13 @@
 //! implementation: base inheritance merging (via
 //! [`resolve_class_with_inheritance`]), virtual member providers,
 //! transitive interface merging with `@implements` generic
-//! substitution, Laravel patches, and the per-thread recursion guard
-//! that breaks mutual class resolution.  Results are stored in the
-//! [`ResolvedClassCache`] defined in [`super::cache`].
+//! substitution, and Laravel patches.  Results are stored in the
+//! [`ResolvedClassCache`] defined in [`super::cache`], which also
+//! tracks in-flight resolutions so genuine dependency cycles (e.g.
+//! two Eloquent models whose relationship providers resolve each
+//! other) break with a base-inheritance partial result instead of
+//! recursing forever.
 
-use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -25,37 +27,32 @@ use crate::virtual_members::laravel::patches::apply_laravel_patches;
 use super::laravel;
 use super::{ResolvedClassCache, ResolvedClassCacheKey, apply_virtual_members, default_providers};
 
-// ─── Recursion guard ────────────────────────────────────────────────────────
+// ─── Cycle breaking ─────────────────────────────────────────────────────────
 //
-// Thread-local depth counter and set of class FQNs currently being
-// resolved by `resolve_class_fully_inner` on this thread.  When a class
-// is already in the set, re-entrant calls return a partial result (base
-// inheritance only, no virtual members or interface merging) instead of
-// recursing.  The depth counter provides an additional safety net: when
-// nesting exceeds `MAX_RESOLVE_DEPTH`, resolution bails out regardless
-// of the per-class guard.
+// `resolve_class_fully_inner` can re-enter itself when a virtual member
+// provider or interface merge resolves a class that (transitively)
+// depends on the class being resolved — a genuine dependency cycle,
+// e.g. two Eloquent models whose relationship providers resolve each
+// other.  Eager population in toposorted order makes such re-entry rare
+// (dependencies are usually already cached), but cycles broken by the
+// toposort and classes loaded on demand mid-resolution can still hit
+// it.  The [`ResolvedCacheInner::mark_in_flight`] set — keyed by
+// `(thread, FQN)` so concurrent resolutions of the same class on other
+// threads proceed independently — detects the re-entry, and the
+// re-entrant call returns a base-inheritance partial result instead of
+// recursing forever.
 
-/// Maximum nesting depth for `resolve_class_fully_inner` before
-/// returning a partial (base-only) result.  This is a safety net in
-/// addition to the per-class `RESOLVING` guard.
-const MAX_RESOLVE_DEPTH: u32 = 30;
-
-thread_local! {
-    static RESOLVING: std::cell::RefCell<HashSet<String>> =
-        std::cell::RefCell::new(HashSet::new());
-    static RESOLVE_DEPTH: Cell<u32> = const { Cell::new(0) };
+/// RAII guard that removes a class's in-flight marker when its
+/// resolution call tree unwinds (normally or by panic).
+struct InFlightGuard<'a> {
+    cache: &'a ResolvedClassCache,
+    fqn: crate::atom::Atom,
 }
 
-/// Mark a class as being resolved.  Returns `true` if it was freshly
-/// inserted (caller should proceed), `false` if it was already present
-/// (caller should bail to avoid infinite recursion).
-fn mark_resolving(fqn: &str) -> bool {
-    RESOLVING.with(|set| set.borrow_mut().insert(fqn.to_string()))
-}
-
-/// Remove a class from the resolving set when resolution is complete.
-fn unmark_resolving(fqn: &str) {
-    RESOLVING.with(|set| set.borrow_mut().remove(fqn));
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.cache.write().unmark_in_flight(self.fqn);
+    }
 }
 
 // ─── Eager class population ─────────────────────────────────────────────────
@@ -308,6 +305,19 @@ fn resolve_class_fully_inner(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
+    // Cycle breaking needs somewhere to record in-flight resolutions,
+    // so cache-less callers get a throwaway cache scoped to this call
+    // tree.  Nested provider resolutions also reuse it, so shared
+    // dependencies within the tree resolve once instead of repeatedly.
+    let temp_cache;
+    let cache: &ResolvedClassCache = match cache {
+        Some(c) => c,
+        None => {
+            temp_cache = super::cache::new_resolved_class_cache();
+            &temp_cache
+        }
+    };
+
     let fqn = class.fqn();
     let cache_key: ResolvedClassCacheKey = (fqn, Vec::new());
 
@@ -340,36 +350,34 @@ fn resolve_class_fully_inner(
     };
 
     // ── Cache lookup ────────────────────────────────────────────────
-    if let Some(cache) = cache {
+    {
         let map = cache.read();
         if let Some(cached) = map.get(&cache_key) {
             return Arc::clone(cached);
         }
     }
 
-    // ── Recursion guard ─────────────────────────────────────────────
-    // If this class is already being resolved on this thread (re-entrant
-    // call from a virtual member provider or interface merge), or we have
-    // exceeded the maximum nesting depth, return a partial result with
-    // base inheritance only.  This breaks the mutual recursion that
-    // causes stack overflow.
-    let depth = RESOLVE_DEPTH.with(|d| d.get());
-    if depth >= MAX_RESOLVE_DEPTH || !mark_resolving(&fqn) {
-        // Already resolving or too deep — return base-only resolution.
+    // ── Cycle break ─────────────────────────────────────────────────
+    // If this class is already being resolved by this thread (re-entrant
+    // call from a virtual member provider or interface merge on a
+    // dependency cycle), return a partial result with base inheritance
+    // only.  This breaks the mutual recursion that would otherwise
+    // overflow the stack.
+    if !cache.write().mark_in_flight(fqn) {
         return Arc::new(resolve_class_with_inheritance(
             effective_class,
             class_loader,
         ));
     }
-    RESOLVE_DEPTH.with(|d| d.set(depth + 1));
+    let _in_flight = InFlightGuard { cache, fqn };
 
     // ── Uncached resolution ─────────────────────────────────────────
     let mut merged = resolve_class_with_inheritance(effective_class, class_loader);
 
-    // Whether Laravel-specific resolution should run.  Read from the
-    // project-scoped cache when one is active; otherwise default to `true`
-    // so behaviour is unchanged for cache-less code paths and tests.
-    let is_laravel = cache.map(|c| c.read().is_laravel()).unwrap_or(true);
+    // Whether Laravel-specific resolution should run.  A throwaway
+    // cache defaults to `true`, so behaviour is unchanged for
+    // cache-less code paths and tests.
+    let is_laravel = cache.read().is_laravel();
 
     // ── Pre-provider patches ────────────────────────────────────────
     // Inject missing `@mixin` annotations before virtual member
@@ -404,7 +412,7 @@ fn resolve_class_fully_inner(
 
     let providers = default_providers(is_laravel);
     if !providers.is_empty() {
-        apply_virtual_members(&mut merged, class_loader, &providers, cache);
+        apply_virtual_members(&mut merged, class_loader, &providers, Some(cache));
     }
 
     // 3. Merge members from implemented interfaces.
@@ -598,20 +606,18 @@ fn resolve_class_fully_inner(
             // for interfaces without generic substitutions.
             if iface_subs.is_empty() {
                 let iface_key: ResolvedClassCacheKey = (iface.fqn(), Vec::new());
-                if let Some(c) = cache {
-                    let map = c.read();
-                    if let Some(cached) = map.get(&iface_key) {
-                        let resolved_iface = ClassInfo::clone(cached);
-                        drop(map);
-                        merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
-                        continue;
-                    }
+                let map = cache.read();
+                if let Some(cached) = map.get(&iface_key) {
+                    let resolved_iface = ClassInfo::clone(cached);
+                    drop(map);
+                    merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
+                    continue;
                 }
             }
 
             let mut resolved_iface = resolve_class_with_inheritance(&iface, class_loader);
             if !providers.is_empty() {
-                apply_virtual_members(&mut resolved_iface, class_loader, &providers, cache);
+                apply_virtual_members(&mut resolved_iface, class_loader, &providers, Some(cache));
             }
 
             merge_interface_members_into(&mut merged, resolved_iface, &iface_subs);
@@ -646,15 +652,9 @@ fn resolve_class_fully_inner(
     }
 
     // ── Cache store ─────────────────────────────────────────────────
-    // ── Remove from recursion guard ─────────────────────────────────
-    unmark_resolving(&fqn);
-    RESOLVE_DEPTH.with(|d| d.set(depth));
-
     merged.rebuild_method_index();
     let result = Arc::new(merged);
-    if let Some(cache) = cache {
-        cache.write().insert(cache_key, Arc::clone(&result));
-    }
+    cache.write().insert(cache_key, Arc::clone(&result));
 
     result
 }

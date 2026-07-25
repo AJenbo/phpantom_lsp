@@ -162,34 +162,12 @@ pub(crate) fn resolve_target_classes_expr(
 
 /// Inner implementation of [`resolve_target_classes_expr`] without
 /// chain caching.  The outer function handles cache lookup/store.
+///
+/// Recursion here follows the finite structure of the subject
+/// expression plus variable resolution, which carries its own keyed
+/// re-entry guards; class resolution cannot re-enter it (cycles are
+/// broken inside `resolve_class_fully`), so no depth cap is needed.
 fn resolve_target_classes_expr_inner(
-    expr: &SubjectExpr,
-    access_kind: AccessKind,
-    ctx: &ResolutionCtx<'_>,
-) -> Vec<ResolvedType> {
-    thread_local! {
-        static RESOLVE_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    }
-    let depth = RESOLVE_DEPTH.with(|d| {
-        let v = d.get() + 1;
-        d.set(v);
-        v
-    });
-    // Maximum nesting depth for `resolve_target_classes_expr_inner`.
-    // Breaks infinite recursion between subject resolution, call-return
-    // resolution, and variable resolution that can occur on files with
-    // deeply intertwined class hierarchies and virtual members.
-    const MAX_RESOLVE_TARGET_DEPTH: u32 = 60;
-    if depth > MAX_RESOLVE_TARGET_DEPTH {
-        RESOLVE_DEPTH.with(|d| d.set(depth - 1));
-        return vec![];
-    }
-    let result = resolve_target_classes_expr_inner_impl(expr, access_kind, ctx);
-    RESOLVE_DEPTH.with(|d| d.set(depth - 1));
-    result
-}
-
-fn resolve_target_classes_expr_inner_impl(
     expr: &SubjectExpr,
     access_kind: AccessKind,
     ctx: &ResolutionCtx<'_>,

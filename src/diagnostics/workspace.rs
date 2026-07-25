@@ -195,11 +195,8 @@ impl Backend {
         // Wait for `initialized` to finish (it clears resolution caches
         // after the startup scan; starting before that would waste the
         // eager class population below).
-        while !self.init_complete.load(Ordering::Acquire) {
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+        if !self.wait_for_init_complete().await {
+            return;
         }
 
         let progress_token = self.progress_create("phpantom/workspace-diagnostics").await;
@@ -241,37 +238,12 @@ impl Backend {
         // ── Eager class population ──────────────────────────────────
         // Resolve every known class in dependency-first order so the
         // per-file collectors below hit a warm cache instead of
-        // recursing into class resolution.  Same approach as the CLI
-        // analyse pipeline.
+        // recursing into class resolution.  The full-index task already
+        // ran this; classes it populated are skipped, so this only
+        // resolves classes loaded since (or everything, if the pass was
+        // triggered another way).
         progress.set_percentage(1, "Resolving classes");
-        {
-            let backend = self.clone_for_blocking();
-            crate::server::run_blocking_cancel_safe(move || {
-                let sorted_fqns = {
-                    let uri_classes_index = backend.symbols.uri_classes_index.read();
-                    crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
-                };
-                // Dedicated large-stack thread: class resolution can
-                // nest deeply when the toposort misses dependencies.
-                std::thread::scope(|s| {
-                    let backend = &backend;
-                    let sorted_fqns = &sorted_fqns;
-                    std::thread::Builder::new()
-                        .name("ws-diag-populate".into())
-                        .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                        .spawn_scoped(s, move || {
-                            let class_loader = |name: &str| backend.find_or_load_class(name);
-                            crate::virtual_members::populate_from_sorted(
-                                sorted_fqns,
-                                &backend.resolved_class_cache,
-                                &class_loader,
-                            );
-                        })
-                        .expect("failed to spawn ws-diag-populate thread");
-                });
-            })
-            .await;
-        }
+        self.eager_populate_resolved_classes().await;
 
         // ── Per-file diagnostics, batched ───────────────────────────
         let mut uris = self.workspace_diagnostic_target_uris();
