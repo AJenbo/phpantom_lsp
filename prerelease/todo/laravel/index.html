@@ -1416,17 +1416,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l33-artisan-command-and-signature-strings" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L33. Artisan command and signature strings
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l36-container-binding-registrations-from-service-providers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2135,17 +2124,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L32. Config-backed named-resource strings
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l33-artisan-command-and-signature-strings" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L33. Artisan command and signature strings
       </span>
     </span>
   </a>
@@ -3022,24 +3000,6 @@ pass:</p>
 <p>Each family gets the full string-kind treatment for free once wired
 as a <code>LaravelStringKey</code>: completion, go-to-definition (jump to the
 config entry), hover (L16), diagnostics (L14), and references.</p>
-<h4 id="l33-artisan-command-and-signature-strings">L33. Artisan command and signature strings<a class="headerlink" href="#l33-artisan-command-and-signature-strings" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
-<p>Two related string surfaces, both statically recoverable:</p>
-<ul>
-<li><strong>Command names.</strong> <code>Artisan::call('app:sync')</code>, <code>Artisan::queue()</code>,
-  <code>$this-&gt;call()</code>/<code>callSilently()</code> in commands, and <code>Schedule::command()</code>
-  name a command declared by a <code>Command</code> subclass's <code>$signature</code> (or
-  <code>$name</code>) property, or an <code>#[AsCommand]</code> attribute. Scan project and
-  vendor command classes for literal signatures; complete, navigate to
-  the class, and flag unknown names.</li>
-<li><strong>Own arguments and options.</strong> Inside a command class,
-  <code>$this-&gt;argument('user')</code> / <code>$this-&gt;option('queue')</code> name segments of
-  that same class's <code>$signature</code>. Parse the signature grammar
-  (<code>{user}</code>, <code>{user?}</code>, <code>{--queue=}</code>, arrays, defaults, descriptions)
-  once and complete/validate against it; hover shows the segment's
-  description. The parsed parameter list also enables array-key
-  completion for <code>Artisan::call('app:sync', [...])</code> second arguments.</li>
-</ul>
 <h4 id="l36-container-binding-registrations-from-service-providers">L36. Container binding registrations from service providers<a class="headerlink" href="#l36-container-binding-registrations-from-service-providers" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>app('cache')</code> resolves through the framework's core alias table
