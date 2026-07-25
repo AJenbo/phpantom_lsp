@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784945415272,
+  "lastUpdate": 1784945810930,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20545,6 +20545,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 92.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "19288497833e17c312aa45664858c99a9e3bc8c1",
+          "message": "feat: add reference count inlay hints\n\nShow reference counts for classes, enums, interfaces, traits, methods,\nproperties, and constants as inlay hints instead of non-actionable code\nlenses. Interface and abstract class declarations also show implementation\ncounts. Code lenses remain reserved for actionable prototype navigation.\n\nThe hints omit private members, magic methods, and overridden members to\navoid noisy or misleading counts, while still showing zero-reference hints\nso users can distinguish unused symbols from missing data.\n\nGo-to-definition on overridden declarations now follows methods,\nproperties, and constants to the nearest parent, trait, or interface\nprototype where applicable.\n\nUse a single all-targets Clippy invocation in CI and let agent docs prefer\nclippy --fix so automated changes apply safe lint suggestions before\nformatting.\n\nCloses #140",
+          "timestamp": "2026-07-24T21:00:33-05:00",
+          "tree_id": "9efe14eaaf7e3ce16040f91a13756e266e3935c2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/19288497833e17c312aa45664858c99a9e3bc8c1"
+        },
+        "date": 1784945807718,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 96.4,
             "unit": "MiB"
           }
         ]
