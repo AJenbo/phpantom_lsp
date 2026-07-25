@@ -575,6 +575,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#semantic_tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[semantic_tokens]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#formatting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1582,6 +1593,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#semantic_tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[semantic_tokens]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#formatting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1849,6 +1871,49 @@ present on a rule; omitted constraints match anything.</p>
 <td>string</td>
 <td><code>"full"</code></td>
 <td>Class discovery strategy: <code>"full"</code>, <code>"composer"</code>, <code>"self"</code>, or <code>"none"</code>. See <a href="#indexing-strategy">Indexing Strategy</a> below.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="semantic_tokens"><code>[semantic_tokens]</code><a class="headerlink" href="#semantic_tokens" title="Permanent link">&para;</a></h3>
+<p>PHPantom defaults to <code>contextual</code> semantic tokens so editor syntax
+highlighting remains in charge of ordinary PHP syntax.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td>string</td>
+<td><code>"contextual"</code></td>
+<td>Semantic token mode: <code>"contextual"</code>, <code>"full"</code>, or <code>"off"</code>.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"contextual"</code></td>
+<td>Emit only context-sensitive tokens that complement Tree-sitter/TextMate highlighting, such as parameters, PHPDoc template parameters, deprecated references, and static member accesses.</td>
+</tr>
+<tr>
+<td><code>"full"</code></td>
+<td>Emit the complete semantic token stream, including ordinary classes, variables, functions, methods, properties, comments, keywords, attributes, and Blade tokens.</td>
+</tr>
+<tr>
+<td><code>"off"</code></td>
+<td>Return no semantic tokens.</td>
 </tr>
 </tbody>
 </table>
