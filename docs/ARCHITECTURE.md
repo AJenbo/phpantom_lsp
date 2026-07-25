@@ -37,111 +37,106 @@ Each layer builds on the one below it. A bug in the FQN index doesn't break sing
 
 ## Module Layout
 
+This tree lists directories and load-bearing files, not every source
+file; run `ls src/` for the current listing. Modules ending in `_tests`
+or a sibling `tests.rs`/`*_tests.rs` hold unit tests for the module they
+sit next to.
+
 ```
 src/
-├── lib.rs                  # Backend struct, state, constructors
-├── main.rs                 # Entry point (stdin/stdout LSP transport)
-├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …)
-├── types.rs                # Data structures (ClassInfo, MethodInfo, SubjectExpr, ResolvedCallableTarget, …)
+├── lib.rs                  # Backend struct, state, module declarations, shared constants (PARSE_WORKER_STACK_SIZE, …)
+├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
+├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …) + workspace init/indexing
+├── backend.rs, backend/    # Backend construction and file access
+├── config.rs               # .phpantom.toml / workspace configuration
+│
+│   # Data model
+├── types/                  # Core structures (ClassInfo, MethodInfo, ResolvedType, SubjectExpr, …)
+├── php_type/               # PHP type representation: parse, display, normalize, subtype, transform
+├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
+│                           # Extracting and resolving the subject before ->, ?->, ::
+│
+│   # Parsing & indexing
+├── parser/                 # mago-syntax AST → ClassInfo/FunctionInfo (classes, functions, use statements, attributes, incremental update_ast)
+├── docblock/               # PHPDoc parsing (tags, templates, shapes, conditional types, type_strings)
+├── symbol_map/             # Precomputed per-file symbol spans, definition sites, call sites
+├── scope_collector/        # Variable scope-map construction
+├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
 ├── composer.rs             # composer.json / PSR-4 autoload parsing
-├── stubs.rs                # Embedded phpstorm-stubs (build-time generated index)
-├── resolution.rs           # Multi-phase class/function lookup and name resolution
-├── inheritance.rs          # Base class inheritance merging (traits, parent chain)
-├── symbol_map/
-│   ├── mod.rs              # Data structures (SymbolSpan, SymbolKind, VarDefSite, CallSite, SymbolMap) and impl
-│   ├── docblock.rs         # Docblock symbol extraction (type span emission, @template/@method tag scanning, navigability filter)
-│   └── extraction.rs       # AST walk that builds a SymbolMap (extract_symbol_map and all extract_from_* helpers)
-├── virtual_members/
-│   ├── mod.rs              # VirtualMemberProvider trait, VirtualMembers struct, merge logic
-│   ├── laravel.rs          # LaravelModelProvider (relationships, scopes, casts, accessors)
-│   └── phpdoc.rs           # PHPDocProvider (@method, @property, @property-read, @property-write, @mixin)
-├── subject_extraction.rs   # Shared helpers for extracting subjects before ->, ?->, ::
-├── util.rs                 # Position conversion, class lookup, logging, directory walkers (collect_php_files, collect_php_files_gitignore)
-├── parser/
-│   ├── mod.rs              # Top-level parse entry points (parse_php, parse_functions, …)
-│   ├── classes.rs          # Class, interface, trait, enum, and anonymous class extraction
-│   ├── functions.rs        # Standalone function and define() constant extraction
-│   ├── use_statements.rs   # use statement and namespace extraction
-│   └── ast_update.rs       # update_ast orchestrator and name resolution helpers
-├── docblock/
-│   ├── mod.rs              # Re-exports from submodules
-│   ├── tags.rs             # PHPDoc tag extraction (@return, @var, @mixin, @deprecated, …)
-│   ├── templates.rs        # Template/generics/type-alias tags (@template, @extends, …)
-│   ├── virtual_members.rs  # Virtual member tags (@property, @method)
-│   ├── conditional.rs      # PHPStan conditional return type parsing
-│   └── types.rs            # Type cleaning utilities (clean_type, strip_nullable, …)
+├── names.rs                # Name resolution (FQN, use-map, namespace)
+├── reference_index.rs      # Workspace-wide reference index for find-references / rename
+│
+│   # Class & type resolution
+├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
+├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
+├── inheritance/            # Parent/trait/mixin member merging, generics substitution
+├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
+├── stubs.rs, stub_patches.rs  # Embedded phpstorm-stubs index + hand patches
+├── phar.rs                 # Class discovery inside PHAR archives
+│
+│   # The shared type engine (lives under completion/, see note below)
 ├── completion/
-│   ├── mod.rs              # Submodule declarations + backward-compatible re-exports
-│   ├── handler.rs          # Top-level completion request orchestration
-│   ├── target.rs           # Extract what the user is completing (subject + access kind)
-│   ├── resolver.rs         # Resolve subject → ClassInfo (type resolution engine), shared resolve_callable_target
-│   ├── call_resolution.rs  # Call expression and callable target resolution
+│   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache, property narrowing
+│   ├── variable/           # Variable type resolution via assignment scanning
+│   │   ├── forward_walk/   #   the forward walker (shared by diagnostics, hover, go-to-def, sig help)
+│   │   ├── rhs_resolution/ #   right-hand-side expression resolution
+│   │   └── …               #   closure/foreach/class-string/raw-type resolution
+│   ├── call_resolution/    # Call expression + callable target resolution, return types, arg types
+│   ├── types/              # Type-hint → ClassInfo, narrowing/, conditional return types
+│   │                       # ---- completion-specific below ----
+│   ├── handler/            # Completion request orchestration (member access, class constants, named args, phpdoc)
+│   ├── context/            # Context-specific completion (catch, class, keyword, namespace, override, type-hint, …)
+│   ├── phpdoc/             # PHPDoc tag completion + docblock generation/
+│   ├── source/             # Source-text scanning (comment position, throws analysis)
 │   ├── builder.rs          # Build LSP CompletionItems from resolved ClassInfo
-│   ├── array_shape.rs      # Array shape key completion and raw variable type resolution
-│   ├── named_args.rs       # Named argument completion inside function/method call parens
-│   ├── use_edit.rs         # Use-statement insertion helpers
-│   ├── variable/           # Variable resolution
-│   │   ├── resolution.rs       # Variable type resolution via assignment scanning
-│   │   ├── completion.rs       # Variable name completions and scope collection
-│   │   ├── rhs_resolution.rs   # Right-hand-side expression resolution
-│   │   ├── class_string_resolution.rs  # Class-string variable resolution ($cls = User::class)
-│   │   ├── raw_type_inference.rs   # Raw type inference (array shapes, array functions, generators)
-│   │   ├── foreach_resolution.rs   # Foreach value/key and array destructuring type resolution
-│   │   └── closure_resolution.rs   # Closure and arrow-function parameter resolution
-│   ├── types/              # Type resolution
-│   │   ├── resolution.rs       # Type-hint string → ClassInfo mapping (unions, generics, aliases)
-│   │   ├── narrowing.rs        # instanceof / assert / custom type guard narrowing
-│   │   └── conditional.rs      # PHPStan conditional return type resolution at call sites
-│   ├── context/            # Context-specific completion
-│   │   ├── catch_completion.rs # Smart exception type completion inside catch() clauses
-│   │   ├── class_completion.rs # Class name completions (class, interface, trait, enum)
-│   │   ├── constant_completion.rs  # Global constant name completions
-│   │   ├── function_completion.rs  # Standalone function name completions
-│   │   ├── namespace_completion.rs # Namespace declaration completions
-│   │   └── type_hint_completion.rs # Type completion in parameter lists, return types, properties
-│   ├── phpdoc/             # PHPDoc completion
-│   │   ├── mod.rs              # PHPDoc tag completion inside /** … */ blocks
-│   │   └── context.rs          # PHPDoc context detection and symbol info extraction
-│   └── source/             # Source analysis
-│       ├── comment_position.rs # Comment and docblock position detection
-│       ├── helpers.rs          # Source-text scanning helpers (closure/callable return types, new-expression parsing)
-│       └── throws_analysis.rs  # Shared throw-statement scanning and @throws tag lookup
-├── signature_help.rs       # Signature help: parameter hints inside function/method call parens
-├── hover/
-│   └── mod.rs              # Hover handler: symbol-map dispatch, type/signature/docblock formatting
-├── definition/
-│   ├── mod.rs              # Submodule declarations
-│   ├── resolve.rs          # Core go-to-definition: symbol-map dispatch + text-based fallback
-│   ├── member.rs           # Member-access resolution (->method, ::$prop, ::CONST) with stored offsets
-│   ├── variable/
-│   │   ├── mod.rs          # VarDefSearchResult enum, Backend methods, tests
-│   │   ├── var_definition.rs # AST walk finding variable definition sites
-│   │   └── type_hint.rs    # AST walk extracting type hints at definition sites
-│   └── implementation.rs   # Go-to-implementation (interface/abstract → concrete classes)
-├── references/
-│   ├── mod.rs              # Find References handler: same-file and cross-file symbol scanning
-│   └── tests.rs            # Unit tests for find-references
-├── highlight/
-│   └── mod.rs              # Document highlighting: same-file symbol occurrence highlighting
+│   └── …                   # target.rs, array_shape.rs, named_args.rs, use_edit.rs, eloquent_string.rs, laravel_route_controller.rs, …
+│
+│   # LSP features (one module each)
+├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
+├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+├── references/, rename/, highlight/
+├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
+├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting.rs
+├── linked_editing.rs, selection_range.rs, type_hierarchy.rs
+│
+│   # Diagnostics
 ├── diagnostics/
-│   ├── mod.rs              # Diagnostic collection and publishing (skips vendor files)
-│   ├── deprecated.rs       # @deprecated usage diagnostics (strikethrough)
-│   └── unused_imports.rs   # Unused use-statement dimming
-build.rs                    # Parses PhpStormStubsMap.php, generates stub index
+│   ├── mod.rs              # Native collection/publishing orchestration + scheduling
+│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
+│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
+│   └── <collector>.rs      # One module per diagnostic (unknown_classes, unknown_functions,
+│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
+│
+│   # External tools & CLI subcommands
+├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
+├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+├── self_update.rs          # Binary self-update
+│
+│   # Blade & shared utilities
+├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
+
+build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
 stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
 tests/
-├── common/mod.rs           # Shared test helpers and minimal PHP stubs
-├── completion_*.rs         # Completion integration tests (by feature area)
-├── definition_*.rs         # Go-to-definition integration tests
-├── hover.rs                # Hover integration tests
-├── signature_help.rs       # Signature help integration tests
-├── implementation.rs       # Go-to-implementation integration tests
-├── document_highlight.rs   # Document highlighting integration tests
-├── docblock_*.rs           # Docblock parsing and type tests
-├── parser.rs               # PHP parser / AST extraction tests
-├── composer.rs             # Composer integration tests
-└── …
+├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
+├── unit/                   # Unit tests (composer, docblock, named args, …)
+├── fixtures/               # Fixtures driven by fixture_runner.rs
+├── psalm_assertions/, phpstan_nsrt/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+└── assert_type_runner.rs, fixture_runner.rs
 ```
+
+**The shared type engine lives under `completion/`, despite the name.**
+`completion/resolver/`, `completion/variable/` (including the
+`forward_walk/` forward walker), `completion/call_resolution/`, and
+`completion/types/` are the project's single type-resolution engine —
+they answer "what is the type of this expression here?" and are consumed
+by diagnostics, hover, go-to-definition, and signature help, not just
+completion (see [Forward Walker](#forward-walker) and
+[Name Resolution](#name-resolution) below). This naming is a known wart;
+extracting the engine into its own top-level module is tracked in
+[`docs/todo/refactor.md`](todo/refactor.md).
 
 ## External Crates
 
@@ -177,15 +172,12 @@ all Mago crates in a single commit and run the test suite.
 
 ### Docblock string helpers kept by design
 
-The following functions in `type_strings.rs` operate on raw docblock
-text (tokenizing tag descriptions, separating type tokens from
-parameter names) rather than on structured type fields, and have no
-`PhpType` equivalent:
+The following items in `type_strings.rs` operate on raw docblock text
+(tokenizing tag descriptions, separating type tokens from parameter
+names) rather than on structured type fields, and have no `PhpType`
+equivalent:
 
 - `split_type_token` — extracts a type token from a tag description
-- `clean_type` — strips `?`, leading `\`, trailing punctuation
-- `split_union_depth0` — splits raw union text at depth 0
-- `split_generic_args` — splits raw generic arguments at depth 0
 - `PHPDOC_TYPE_KEYWORDS` — completion candidate list for PHPDoc types
 
 ## Go-to-Definition Architecture
