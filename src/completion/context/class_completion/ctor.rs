@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::InsertTextFormat;
 
 use crate::Backend;
 use crate::completion::builder::build_callable_snippet;
-use crate::types::ParameterInfo;
+use crate::types::{ParameterInfo, SharedVec};
 
 impl Backend {
     /// Build the insert text (and optional format) for a `new` context
@@ -30,7 +30,7 @@ impl Backend {
     /// Tries `load_stub_class` (which checks `uri_classes_index` first, then
     /// in-memory stubs) to avoid disk I/O.  Returns `None` when the
     /// class cannot be found or has no constructor.
-    pub(super) fn ctor_params_for(&self, class_name: &str) -> Option<Vec<ParameterInfo>> {
+    pub(super) fn ctor_params_for(&self, class_name: &str) -> Option<SharedVec<ParameterInfo>> {
         let cls = self.load_stub_class(class_name)?;
         let ctor = cls.get_method_ci("__construct")?;
         Some(ctor.parameters.clone())

@@ -20,7 +20,7 @@ fn virtual_members_is_empty() {
 #[test]
 fn virtual_members_not_empty_with_method() {
     let vm = VirtualMembers {
-        methods: vec![make_method("foo", Some("string"))],
+        methods: vec![Arc::new(make_method("foo", Some("string")))],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -70,7 +70,7 @@ fn merge_adds_new_methods() {
         .push(Arc::new(make_method("existing", Some("string"))));
 
     let virtual_members = VirtualMembers {
-        methods: vec![make_method("new_method", Some("int"))],
+        methods: vec![Arc::new(make_method("new_method", Some("int")))],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -110,7 +110,7 @@ fn merge_does_not_overwrite_existing_method() {
         .push(Arc::new(make_method("doStuff", Some("string"))));
 
     let virtual_members = VirtualMembers {
-        methods: vec![make_method("doStuff", Some("int"))],
+        methods: vec![Arc::new(make_method("doStuff", Some("int")))],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -138,7 +138,10 @@ fn merge_allows_same_name_methods_with_different_staticness() {
     static_method.is_static = true;
 
     let virtual_members = VirtualMembers {
-        methods: vec![make_method("active", Some("int")), static_method],
+        methods: vec![
+            Arc::new(make_method("active", Some("int"))),
+            Arc::new(static_method),
+        ],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -180,7 +183,7 @@ fn merge_replaces_scope_attribute_method_with_virtual() {
     virtual_scope.visibility = Visibility::Public;
 
     let virtual_members = VirtualMembers {
-        methods: vec![virtual_scope],
+        methods: vec![Arc::new(virtual_scope)],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -208,7 +211,7 @@ fn merge_does_not_replace_non_scope_attribute_method() {
     class.methods.push(Arc::new(original));
 
     let virtual_members = VirtualMembers {
-        methods: vec![make_method("active", Some("int"))],
+        methods: vec![Arc::new(make_method("active", Some("int")))],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -239,7 +242,7 @@ fn merge_replaces_scope_attribute_and_adds_static_variant() {
     virtual_static.visibility = Visibility::Public;
 
     let virtual_members = VirtualMembers {
-        methods: vec![virtual_instance, virtual_static],
+        methods: vec![Arc::new(virtual_instance), Arc::new(virtual_static)],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -285,7 +288,7 @@ fn merge_blocks_same_name_same_staticness() {
     virtual_static.is_static = true;
 
     let virtual_members = VirtualMembers {
-        methods: vec![virtual_static],
+        methods: vec![Arc::new(virtual_static)],
         properties: Vec::new(),
         constants: Vec::new(),
     };
@@ -663,7 +666,7 @@ fn merge_handles_empty_virtual_members() {
 
 /// A test provider that always applies and contributes fixed members.
 struct TestProvider {
-    methods: Vec<MethodInfo>,
+    methods: Vec<Arc<MethodInfo>>,
     properties: Vec<PropertyInfo>,
 }
 
@@ -718,7 +721,7 @@ fn apply_providers_in_priority_order() {
 
     // Higher priority provider contributes "doStuff" returning "string"
     let high_priority = Box::new(TestProvider {
-        methods: vec![make_method("doStuff", Some("string"))],
+        methods: vec![Arc::new(make_method("doStuff", Some("string")))],
         properties: Vec::new(),
     }) as Box<dyn VirtualMemberProvider>;
 
@@ -726,8 +729,8 @@ fn apply_providers_in_priority_order() {
     // (should be shadowed) and "other" returning "bool" (should be added)
     let low_priority = Box::new(TestProvider {
         methods: vec![
-            make_method("doStuff", Some("int")),
-            make_method("other", Some("bool")),
+            Arc::new(make_method("doStuff", Some("int"))),
+            Arc::new(make_method("other", Some("bool"))),
         ],
         properties: Vec::new(),
     }) as Box<dyn VirtualMemberProvider>;
@@ -771,7 +774,7 @@ fn apply_providers_real_members_beat_virtual() {
         .push(Arc::new(make_method("realMethod", Some("string"))));
 
     let provider = Box::new(TestProvider {
-        methods: vec![make_method("realMethod", Some("int"))],
+        methods: vec![Arc::new(make_method("realMethod", Some("int")))],
         properties: Vec::new(),
     }) as Box<dyn VirtualMemberProvider>;
 
@@ -1018,6 +1021,111 @@ fn resolve_class_fully_returns_same_as_base_when_no_providers() {
             "full resolution should contain all base methods"
         );
     }
+}
+
+// ── transformed-method interning tests ──────────────────────────────
+
+#[test]
+fn intern_transformed_method_shares_same_origin_and_transform() {
+    let cache = new_resolved_class_cache();
+    let _guard = with_active_resolved_class_cache(&cache);
+
+    let origin = Arc::new(make_method("where", Some("Builder<TModel>")));
+    let mut subs = std::collections::HashMap::new();
+    subs.insert("TModel".to_string(), PhpType::parse("App\\Models\\User"));
+    let fp = cache::TransformFingerprint::new(Some(&subs), None, 0);
+
+    let first = cache::intern_transformed_method(&origin, fp, || {
+        let mut m = (*origin).clone();
+        m.return_type = Some(PhpType::parse("Builder<App\\Models\\User>"));
+        m
+    });
+    let second = cache::intern_transformed_method(&origin, fp, || {
+        panic!("second lookup must hit the interned value, not rebuild");
+    });
+
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "same (origin, transform) must share one allocation"
+    );
+    assert_eq!(
+        first.return_type_str().as_deref(),
+        Some("Builder<App\\Models\\User>")
+    );
+}
+
+#[test]
+fn intern_transformed_method_distinguishes_transforms() {
+    let cache = new_resolved_class_cache();
+    let _guard = with_active_resolved_class_cache(&cache);
+
+    let origin = Arc::new(make_method("where", Some("Builder<TModel>")));
+    let mut subs_user = std::collections::HashMap::new();
+    subs_user.insert("TModel".to_string(), PhpType::parse("User"));
+    let mut subs_order = std::collections::HashMap::new();
+    subs_order.insert("TModel".to_string(), PhpType::parse("Order"));
+
+    let fp_user = cache::TransformFingerprint::new(Some(&subs_user), None, 0);
+    let fp_order = cache::TransformFingerprint::new(Some(&subs_order), None, 0);
+    assert_ne!(fp_user, fp_order, "different subs must fingerprint apart");
+
+    // Same subs but different flags must also fingerprint apart.
+    let fp_flagged = cache::TransformFingerprint::new(Some(&subs_user), None, 1);
+    assert_ne!(
+        fp_user, fp_flagged,
+        "flags must participate in the fingerprint"
+    );
+
+    let user = cache::intern_transformed_method(&origin, fp_user, || {
+        let mut m = (*origin).clone();
+        m.return_type = Some(PhpType::parse("Builder<User>"));
+        m
+    });
+    let order = cache::intern_transformed_method(&origin, fp_order, || {
+        let mut m = (*origin).clone();
+        m.return_type = Some(PhpType::parse("Builder<Order>"));
+        m
+    });
+    assert!(!Arc::ptr_eq(&user, &order));
+    assert_eq!(user.return_type_str().as_deref(), Some("Builder<User>"));
+    assert_eq!(order.return_type_str().as_deref(), Some("Builder<Order>"));
+}
+
+#[test]
+fn intern_transformed_method_ignores_dead_origin_entries() {
+    let cache = new_resolved_class_cache();
+    let _guard = with_active_resolved_class_cache(&cache);
+
+    let origin_a = Arc::new(make_method("first", Some("TValue")));
+    let origin_b = Arc::new(make_method("first", Some("TValue")));
+    let fp = cache::TransformFingerprint::new(None, Some("Target"), 0);
+
+    let a = cache::intern_transformed_method(&origin_a, fp, || (*origin_a).clone());
+    // A different origin with the same fingerprint must not be served
+    // origin A's entry, even though the fingerprints collide by design.
+    let b = cache::intern_transformed_method(&origin_b, fp, || {
+        let mut m = (*origin_b).clone();
+        m.is_static = true;
+        m
+    });
+    assert!(
+        !Arc::ptr_eq(&a, &b),
+        "distinct origins must not share entries"
+    );
+    assert!(b.is_static);
+}
+
+#[test]
+fn intern_transformed_method_without_active_cache_builds_directly() {
+    // No guard: builds must run every time but still produce the value.
+    let origin = Arc::new(make_method("where", Some("Builder<TModel>")));
+    let fp = cache::TransformFingerprint::new(None, None, 0);
+    let one = cache::intern_transformed_method(&origin, fp, || (*origin).clone());
+    let two = cache::intern_transformed_method(&origin, fp, || (*origin).clone());
+    assert!(
+        !Arc::ptr_eq(&one, &two),
+        "no cache active: nothing is interned"
+    );
 }
 
 // ── evict_fqn / depends_on_any tests ────────────────────────────────

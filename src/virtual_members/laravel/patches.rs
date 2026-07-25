@@ -404,7 +404,7 @@ fn patch_cache_facade_generics(class: &mut ClassInfo) {
         let method = Arc::make_mut(method);
         // Re-type the callback as `Closure(): TCacheValue` so the template
         // binder classifies it as a callable-return binding.
-        for param in method.parameters.iter_mut() {
+        for param in method.parameters.make_mut().iter_mut() {
             if param.name == callback_name {
                 param.type_hint = Some(callback_hint.clone());
                 param.native_type_hint = Some(callback_hint.clone());
@@ -558,7 +558,7 @@ fn patch_testcase_mock_return_types(class: &mut ClassInfo) {
         };
 
         let method = Arc::make_mut(method);
-        for param in method.parameters.iter_mut() {
+        for param in method.parameters.make_mut().iter_mut() {
             if param.name == abstract_name {
                 param.type_hint = Some(abstract_hint.clone());
                 param.native_type_hint = None;

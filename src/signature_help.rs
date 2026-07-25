@@ -310,7 +310,7 @@ struct ResolvedCallable {
 impl From<crate::types::ResolvedCallableTarget> for ResolvedCallable {
     fn from(t: crate::types::ResolvedCallableTarget) -> Self {
         Self {
-            parameters: t.parameters,
+            parameters: t.parameters.into_vec(),
             return_type: t.return_type,
         }
     }

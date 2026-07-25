@@ -57,6 +57,7 @@ pub use cache::{
     ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, evict_fqn,
     new_resolved_class_cache, with_active_resolved_class_cache,
 };
+pub(crate) use cache::{TransformFingerprint, intern_transformed_method};
 pub use resolve::{
     populate_from_sorted, resolve_class_fully, resolve_class_fully_cached,
     resolve_class_fully_maybe_cached, resolve_class_fully_with_generics,
@@ -76,7 +77,12 @@ use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo};
 /// [`provide`](VirtualMemberProvider::provide) method.
 pub struct VirtualMembers {
     /// Virtual methods to add to the class.
-    pub methods: Vec<MethodInfo>,
+    ///
+    /// `Arc`-wrapped so a provider can share one allocation across every
+    /// class it contributes the same method to (e.g. mixin members and
+    /// Builder-forwarded methods interned per transform), instead of the
+    /// merge cloning a fresh copy per class.
+    pub methods: Vec<Arc<MethodInfo>>,
     /// Virtual properties to add to the class.
     pub properties: Vec<PropertyInfo>,
     /// Virtual constants to add to the class.
@@ -189,12 +195,12 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
                 // Replace the original with the synthesized virtual method.
                 // For scope attributes, the original is an implementation detail.
                 // For query methods, we want to return the custom builder.
-                class.methods.make_mut()[idx] = Arc::new(method);
+                class.methods.make_mut()[idx] = method;
             }
             // Otherwise: real declared member — keep the original.
         } else {
             let new_idx = class.methods.len();
-            class.methods.push(Arc::new(method));
+            class.methods.push(method);
             method_index.insert(key, new_idx);
         }
     }

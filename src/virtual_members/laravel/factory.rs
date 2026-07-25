@@ -281,7 +281,8 @@ fn build_factory_relationship_methods(
                 parameters: vec![
                     relationship_param("$count", "int|array|callable"),
                     relationship_param("$state", "array|callable"),
-                ],
+                ]
+                .into(),
                 description: Some(format!(
                     "Create the `{}` relationship for the factory-created model(s).",
                     method.name
@@ -294,7 +295,7 @@ fn build_factory_relationship_methods(
         let for_name = format!("for{pascal}");
         if seen.insert(for_name.to_ascii_lowercase()) {
             methods.push(MethodInfo {
-                parameters: vec![relationship_param("$state", "array|callable")],
+                parameters: vec![relationship_param("$state", "array|callable")].into(),
                 description: Some(format!(
                     "Attach the factory-created model(s) to a `{}` parent.",
                     method.name
@@ -359,7 +360,7 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
             cache,
         ));
         VirtualMembers {
-            methods,
+            methods: methods.into_iter().map(Arc::new).collect(),
             properties: Vec::new(),
             constants: Vec::new(),
         }

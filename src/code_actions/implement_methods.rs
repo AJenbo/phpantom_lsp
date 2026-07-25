@@ -709,7 +709,8 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                 },
-            ],
+            ]
+            .into(),
             ..MethodInfo::virtual_method("test", None)
         };
 
@@ -731,7 +732,8 @@ mod tests {
                 is_variadic: false,
                 is_reference: false,
                 closure_this_type: None,
-            }],
+            }]
+            .into(),
             ..MethodInfo::virtual_method("getAttribute", None)
         };
         let result = format_params(&method, &HashMap::new(), &None);
@@ -765,7 +767,8 @@ mod tests {
                     is_reference: true,
                     closure_this_type: None,
                 },
-            ],
+            ]
+            .into(),
             ..MethodInfo::virtual_method("test", None)
         };
 
@@ -1188,7 +1191,8 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                 },
-            ],
+            ]
+            .into(),
             native_return_type: Some(PhpType::parse("void")),
             visibility: Visibility::Public,
             ..MethodInfo::virtual_method("process", Some("void"))

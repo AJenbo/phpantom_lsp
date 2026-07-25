@@ -159,7 +159,7 @@ impl Backend {
         content: &str,
         position: Position,
         file_ctx: &FileContext,
-    ) -> Vec<crate::types::ParameterInfo> {
+    ) -> crate::types::SharedVec<crate::types::ParameterInfo> {
         self.resolve_callable_target(&ctx.call_expression, content, position, file_ctx)
             .map(|r| r.parameters)
             .unwrap_or_default()

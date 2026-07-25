@@ -157,7 +157,7 @@ fn link_callback_to_array_element(
     let callback_hint = PhpType::parse(&format!("callable({}): {}", TVALUE, callback_return));
     let array_hint = PhpType::parse(&format!("array<{}>", TVALUE));
 
-    for param in &mut func.parameters {
+    for param in func.parameters.make_mut() {
         if param.name == callback_name {
             param.type_hint = Some(callback_hint.clone());
         } else if param.name == array_name {
@@ -316,7 +316,12 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         }
         // Update the parameter type hint from Traversable to TIterator
         // so that classify_template_binding recognises a Direct binding.
-        if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$iterator") {
+        if let Some(param) = ctor
+            .parameters
+            .make_mut()
+            .iter_mut()
+            .find(|p| p.name == "$iterator")
+        {
             param.type_hint = Some(PhpType::Named(atom("TIterator")));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
@@ -425,7 +430,12 @@ fn patch_array_iterator(class: &mut ClassInfo) {
 
         // Set the parameter type hint to array<TKey, TValue> so that
         // classify_template_binding can determine the GenericWrapper mode.
-        if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$array") {
+        if let Some(param) = ctor
+            .parameters
+            .make_mut()
+            .iter_mut()
+            .find(|p| p.name == "$array")
+        {
             param.type_hint = Some(PhpType::Generic(
                 "array".to_string(),
                 vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
@@ -484,7 +494,12 @@ fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
         if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
             ctor.template_bindings.push(binding);
         }
-        if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$iterator") {
+        if let Some(param) = ctor
+            .parameters
+            .make_mut()
+            .iter_mut()
+            .find(|p| p.name == "$iterator")
+        {
             param.type_hint = Some(PhpType::Named(atom("TIterator")));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
@@ -570,7 +585,7 @@ mod tests {
         FunctionInfo {
             name: atom(name),
             name_offset: 0,
-            parameters: Vec::new(),
+            parameters: Vec::new().into(),
             return_type: None,
             native_return_type: None,
             description: None,
@@ -659,7 +674,7 @@ mod tests {
     #[test]
     fn array_map_links_callback_to_array_element() {
         let mut func = empty_function("array_map");
-        func.parameters = vec![param("$callback", "callable"), param("$array", "array")];
+        func.parameters = vec![param("$callback", "callable"), param("$array", "array")].into();
         func.return_type = Some(PhpType::parse("array"));
 
         apply_function_stub_patches(&mut func);
@@ -688,7 +703,7 @@ mod tests {
     #[test]
     fn array_filter_links_callback_to_array_element() {
         let mut func = empty_function("array_filter");
-        func.parameters = vec![param("$array", "array"), param("$callback", "callable")];
+        func.parameters = vec![param("$array", "array"), param("$callback", "callable")].into();
 
         apply_function_stub_patches(&mut func);
 
@@ -712,7 +727,7 @@ mod tests {
         // A hand-written `@method array_map(...)` or a differently-shaped
         // stub must not be rewritten.
         let mut func = empty_function("array_map");
-        func.parameters = vec![param("$other", "array")];
+        func.parameters = vec![param("$other", "array")].into();
 
         apply_function_stub_patches(&mut func);
 

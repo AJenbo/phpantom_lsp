@@ -168,7 +168,7 @@ pub fn build_where_property_methods_for_class(
         }
 
         let method = MethodInfo {
-            parameters: vec![value_param.clone()],
+            parameters: vec![value_param.clone()].into(),
             description: Some(format!("Find models where `{col}` equals the given value.",)),
             return_type: Some(return_type.clone()),
             ..MethodInfo::virtual_method(&method_name, None)

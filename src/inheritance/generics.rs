@@ -6,7 +6,6 @@
 //! and rewrites method/property signatures accordingly.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::atom::Atom;
 use crate::php_type::PhpType;
@@ -25,9 +24,20 @@ pub(crate) fn apply_substitution_to_method(
     if let Some(ref mut cond) = method.conditional_return {
         apply_substitution_to_conditional(cond, subs);
     }
-    for param in &mut method.parameters {
-        if let Some(ref mut hint) = param.type_hint {
-            *hint = hint.substitute(subs);
+    // Only copy-on-write the shared parameter list when a parameter
+    // actually references a substituted name — substitution usually
+    // rewrites just the return type.
+    let keys: Vec<String> = subs.keys().cloned().collect();
+    let any_param_referenced = method.parameters.iter().any(|p| {
+        p.type_hint
+            .as_ref()
+            .is_some_and(|h| h.references_any_template_param(&keys))
+    });
+    if any_param_referenced {
+        for param in method.parameters.make_mut() {
+            if let Some(ref mut hint) = param.type_hint {
+                *hint = hint.substitute(subs);
+            }
         }
     }
 }
@@ -353,11 +363,41 @@ pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[PhpType]) -> Cl
     }
 
     let mut result = class.clone();
-    for method in result.methods.make_mut() {
-        apply_substitution_to_method(Arc::make_mut(method), &subs);
+    let sub_keys: Vec<String> = subs.keys().cloned().collect();
+
+    // Only copy-on-write the member vectors (and the individual members)
+    // that actually reference a substituted template parameter.  A
+    // generic variant like `Builder<User>` shares every method that does
+    // not mention `TModel` with the base resolution instead of
+    // deep-cloning the entire member set per instantiation.
+    if result
+        .methods
+        .iter()
+        .any(|m| method_references_params(m, &sub_keys))
+    {
+        let fp = crate::virtual_members::TransformFingerprint::new(Some(&subs), None, 0);
+        for method in result.methods.make_mut() {
+            if method_references_params(method, &sub_keys) {
+                let transformed =
+                    crate::virtual_members::intern_transformed_method(method, fp, || {
+                        let mut m = (**method).clone();
+                        apply_substitution_to_method(&mut m, &subs);
+                        m
+                    });
+                *method = transformed;
+            }
+        }
     }
-    for property in result.properties.make_mut() {
-        apply_substitution_to_property(property, &subs);
+    if result
+        .properties
+        .iter()
+        .any(|p| property_references_params(p, &sub_keys))
+    {
+        for property in result.properties.make_mut() {
+            if property_references_params(property, &sub_keys) {
+                apply_substitution_to_property(property, &subs);
+            }
+        }
     }
 
     // Substitute template params in generic annotations so that

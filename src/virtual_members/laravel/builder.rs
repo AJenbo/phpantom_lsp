@@ -92,7 +92,7 @@ pub(super) fn build_builder_forwarded_methods(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
-) -> Vec<MethodInfo> {
+) -> Vec<Arc<MethodInfo>> {
     // Walk the parent chain to find a custom builder definition.
     // Laravel's #[UseEloquentBuilder] and HasBuilder are effectively inherited.
     let mut requested_builder_fqn = ELOQUENT_BUILDER_FQN.to_string();
@@ -158,6 +158,23 @@ pub(super) fn build_builder_forwarded_methods(
 
     let mut methods = Vec::new();
 
+    // The transform below is identical for every materialization of the
+    // same model's forwarded set (the substitution map already encodes
+    // the concrete model), so the copies are interned: repeated
+    // resolutions and generic variants of the model share one
+    // allocation per forwarded method.  The custom-collection rewrite
+    // is part of the transform, so it participates in the fingerprint
+    // through the extra string slot.
+    let custom_collection = class
+        .laravel()
+        .and_then(|l| l.custom_collection.as_ref())
+        .and_then(|c| c.base_name());
+    let fp = crate::virtual_members::TransformFingerprint::new(
+        Some(&subs),
+        custom_collection,
+        crate::virtual_members::cache::transform_flags::FORWARD_AS_STATIC,
+    );
+
     for method in &effective_methods {
         if method.visibility != Visibility::Public {
             continue;
@@ -178,32 +195,34 @@ pub(super) fn build_builder_forwarded_methods(
             continue;
         }
 
-        let mut forwarded = (**method).clone();
-        forwarded.is_static = true;
+        let forwarded = crate::virtual_members::intern_transformed_method(method, fp, || {
+            let mut forwarded = (**method).clone();
+            forwarded.is_static = true;
 
-        // Apply template and self-type substitutions.
-        if !subs.is_empty() {
-            if let Some(ref mut ret) = forwarded.return_type {
-                *ret = ret.substitute(&subs);
-            }
-            if let Some(ref mut cond) = forwarded.conditional_return {
-                apply_substitution_to_conditional(cond, &subs);
-            }
-            for param in &mut forwarded.parameters {
-                if let Some(ref mut hint) = param.type_hint {
-                    *hint = hint.substitute(&subs);
+            // Apply template and self-type substitutions.
+            if !subs.is_empty() {
+                if let Some(ref mut ret) = forwarded.return_type {
+                    *ret = ret.substitute(&subs);
+                }
+                if let Some(ref mut cond) = forwarded.conditional_return {
+                    apply_substitution_to_conditional(cond, &subs);
+                }
+                for param in forwarded.parameters.make_mut() {
+                    if let Some(ref mut hint) = param.type_hint {
+                        *hint = hint.substitute(&subs);
+                    }
                 }
             }
-        }
 
-        // Replace Eloquent Collection with custom collection class.
-        if let Some(coll) = class.laravel().and_then(|l| l.custom_collection.as_ref())
-            && let Some(coll_name) = coll.base_name()
-            && let Some(ref mut ret) = forwarded.return_type
-        {
-            *ret = replace_eloquent_collection_typed(ret, coll_name);
-        }
+            // Replace Eloquent Collection with custom collection class.
+            if let Some(coll_name) = custom_collection
+                && let Some(ref mut ret) = forwarded.return_type
+            {
+                *ret = replace_eloquent_collection_typed(ret, coll_name);
+            }
 
+            forwarded
+        });
         methods.push(forwarded);
     }
 
@@ -211,10 +230,10 @@ pub(super) fn build_builder_forwarded_methods(
     // When a model has a custom builder, User::query() should return
     // UserBuilder<User> instead of the default Builder<User>.
     for name in ["query", "newQuery", "newModelQuery"] {
-        methods.push(MethodInfo {
+        methods.push(Arc::new(MethodInfo {
             is_static: true,
             ..MethodInfo::virtual_method_typed(name, Some(&builder_self_type))
-        });
+        }));
     }
 
     methods

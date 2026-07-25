@@ -241,7 +241,7 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
         results.push(MethodInfo {
             name: method_atom,
             name_offset: 0,
-            parameters,
+            parameters: parameters.into(),
             return_type,
             native_return_type: None,
             description: None,

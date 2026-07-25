@@ -366,7 +366,7 @@ fn build_mixin_macro(
     let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
 
     let mut synthesized = MethodInfo::virtual_method_typed(name, return_type.as_ref());
-    synthesized.parameters = parameters;
+    synthesized.parameters = parameters.into();
     synthesized.native_return_type = return_type;
     synthesized.is_macro = true;
 
@@ -415,7 +415,7 @@ fn build_direct_mixin_macro(
         .map(|rth| crate::parser::extract_hint_type(&rth.hint));
 
     let mut synthesized = MethodInfo::virtual_method_typed(name, return_type.as_ref());
-    synthesized.parameters = parameters;
+    synthesized.parameters = parameters.into();
     synthesized.native_return_type = return_type;
     synthesized.is_macro = true;
 
@@ -983,7 +983,7 @@ fn build_instance_registration(
     let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
 
     let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
-    method.parameters = parameters;
+    method.parameters = parameters.into();
     method.native_return_type = return_type;
     method.is_macro = true;
 
@@ -1019,7 +1019,7 @@ fn build_registration(
     let return_type = return_type_hint.map(|rth| crate::parser::extract_hint_type(&rth.hint));
 
     let mut method = MethodInfo::virtual_method_typed(&name, return_type.as_ref());
-    method.parameters = parameters;
+    method.parameters = parameters.into();
     method.native_return_type = return_type;
     method.is_macro = true;
 

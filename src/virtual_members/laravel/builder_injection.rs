@@ -235,7 +235,7 @@ fn inject_scopes_and_model_methods(
             .iter()
             .any(|m| m.name == method.name && m.is_static == method.is_static);
         if !already_exists {
-            result.methods.push(Arc::new(method));
+            result.methods.push(method);
         }
     }
 
@@ -307,6 +307,15 @@ fn inject_model_virtual_methods(
     let model_type = PhpType::Named(atom(model_name));
     let subs = self_ref_subs(model_type);
 
+    // The transform depends only on the model (via `subs`), so the
+    // forwarded copies are interned and shared by every Builder and
+    // relation variant of the same model.
+    let fp = crate::virtual_members::TransformFingerprint::new(
+        Some(&subs),
+        None,
+        crate::virtual_members::cache::transform_flags::FORWARD_AS_INSTANCE,
+    );
+
     for method in &resolved_model.methods {
         // Only inject virtual methods (from @method tags).  Real
         // methods on the model are not forwarded through Builder.
@@ -324,16 +333,19 @@ fn inject_model_virtual_methods(
             continue;
         }
 
-        // Clone the inner MethodInfo and convert to an instance method on the builder.
-        let mut forwarded = (**method).clone();
-        forwarded.is_static = false;
+        // Convert to an instance method on the builder.
+        let forwarded = crate::virtual_members::intern_transformed_method(method, fp, || {
+            let mut forwarded = (**method).clone();
+            forwarded.is_static = false;
 
-        // Substitute self-referencing return types.
-        if let Some(ref mut ret) = forwarded.return_type {
-            *ret = ret.substitute(&subs);
-        }
+            // Substitute self-referencing return types.
+            if let Some(ref mut ret) = forwarded.return_type {
+                *ret = ret.substitute(&subs);
+            }
 
-        builder.methods.push(Arc::new(forwarded));
+            forwarded
+        });
+        builder.methods.push(forwarded);
     }
 }
 

@@ -309,7 +309,8 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
-        }],
+        }]
+        .into(),
         return_type: Some(PhpType::parse("TValue")),
         native_return_type: None,
         description: None,
@@ -372,7 +373,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
         methods: vec![Arc::new(MethodInfo {
             name: crate::atom::atom("first"),
             name_offset: 0,
-            parameters: vec![],
+            parameters: vec![].into(),
             return_type: Some(PhpType::parse("TValue")),
             native_return_type: None,
             description: None,

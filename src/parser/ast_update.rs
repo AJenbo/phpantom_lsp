@@ -497,7 +497,7 @@ impl Backend {
                             func.conditional_return = Some(resolved);
                         }
                     }
-                    for param in &mut func.parameters {
+                    for param in func.parameters.make_mut() {
                         if let Some(ref hint) = param.type_hint {
                             let resolved = hint.resolve_names(&resolver);
                             if resolved != *hint {
@@ -1330,7 +1330,7 @@ impl Backend {
                         method.conditional_return = Some(resolved);
                     }
                 }
-                for param in &mut method.parameters {
+                for param in method.parameters.make_mut() {
                     if let Some(ref hint) = param.type_hint {
                         let resolved = hint.resolve_names(method_resolver);
                         if resolved != *hint {

@@ -1240,7 +1240,7 @@ impl Backend {
                     methods.push(MethodInfo {
                         name,
                         name_offset,
-                        parameters,
+                        parameters: parameters.into(),
                         native_return_type: native_return_type.clone(),
                         return_type,
                         description: method_description,

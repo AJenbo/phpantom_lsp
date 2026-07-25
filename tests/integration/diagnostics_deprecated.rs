@@ -2198,7 +2198,7 @@ fn replace_deprecated_function_call_action_offered() {
                 FunctionInfo {
                     name: atom("read_exif_data"),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: Some(PhpType::parse("array")),
                     native_return_type: None,
                     description: None,

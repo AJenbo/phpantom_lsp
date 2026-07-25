@@ -88,7 +88,7 @@ pub fn make_method_with_params(
     params: Vec<ParameterInfo>,
 ) -> MethodInfo {
     MethodInfo {
-        parameters: params,
+        parameters: params.into(),
         ..MethodInfo::virtual_method(name, return_type)
     }
 }

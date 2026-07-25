@@ -796,7 +796,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         .map(|(method_name, throws)| MethodInfo {
             name: crate::atom::atom(method_name),
             name_offset: 0,
-            parameters: Vec::new(),
+            parameters: Vec::new().into(),
             return_type: None,
             native_return_type: None,
             description: None,
@@ -1143,7 +1143,7 @@ fn test_find_cross_file_propagated_throws_function_call() {
     let func_info = FunctionInfo {
         name: crate::atom::atom("riskyFunction"),
         name_offset: 0,
-        parameters: Vec::new(),
+        parameters: Vec::new().into(),
         return_type: None,
         native_return_type: None,
         description: None,
@@ -1277,7 +1277,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
     let func_info = FunctionInfo {
         name: crate::atom::atom("helperFunction"),
         name_offset: 0,
-        parameters: Vec::new(),
+        parameters: Vec::new().into(),
         return_type: None,
         native_return_type: None,
         description: None,

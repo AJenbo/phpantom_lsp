@@ -14,9 +14,11 @@ use crate::util::short_name;
 use crate::virtual_members::laravel::{
     extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
 };
+use crate::virtual_members::{TransformFingerprint, intern_transformed_method};
 
 use super::generics::{
-    apply_substitution_to_method, apply_substitution_to_property, right_align_offset,
+    apply_substitution_to_method, apply_substitution_to_property, method_references_params,
+    right_align_offset,
 };
 use super::{MergeDedup, TraitContext};
 
@@ -190,6 +192,17 @@ pub(crate) fn merge_traits_into(
             current = parent;
         }
 
+        // Template parameter names substituted for this trait, used to
+        // decide per member whether substitution would change anything.
+        // Empty when the trait is non-generic, in which case members
+        // below keep their shared `Arc` / skip the substitution walk.
+        let sub_keys: Vec<String> = if trait_subs.is_empty() {
+            Vec::new()
+        } else {
+            trait_subs.keys().cloned().collect()
+        };
+        let fp_sub = TransformFingerprint::new(Some(&trait_subs), None, 0);
+
         // Merge trait methods — skip if already present.
         // Apply generic substitution if a `@use` mapping exists.
         // Also skip methods excluded by `insteadof` declarations.
@@ -214,35 +227,65 @@ pub(crate) fn merge_traits_into(
             {
                 continue;
             }
-            let mut method = (**method).clone();
 
-            // Apply visibility-only `as` changes (no alias name).
-            // For example, `TraitA::method as protected` changes the
-            // visibility of `method` without creating an alias.
-            for alias in ctx.aliases {
-                if alias.method_name.eq_ignore_ascii_case(&method.name)
-                    && alias.alias.is_none()
-                    && let Some(vis) = alias.visibility
-                {
-                    // Check trait name matches (if specified)
-                    let name_matches = alias.trait_name.as_ref().is_none_or(|t| t == trait_name);
-                    if name_matches {
-                        method.visibility = vis;
-                    }
-                }
-            }
+            // Visibility-only `as` change (no alias name) that applies
+            // to this method.  For example, `TraitA::method as protected`
+            // changes the visibility of `method` without creating an
+            // alias.  The last matching declaration wins, matching the
+            // in-order application this replaced.
+            let vis_change = ctx
+                .aliases
+                .iter()
+                .filter(|alias| {
+                    alias.method_name.eq_ignore_ascii_case(&method.name)
+                        && alias.alias.is_none()
+                        && alias.trait_name.as_ref().is_none_or(|t| t == trait_name)
+                })
+                .filter_map(|alias| alias.visibility)
+                .next_back();
 
-            if !trait_subs.is_empty() {
-                apply_substitution_to_method(&mut method, &trait_subs);
-            }
+            let needs_sub = method_references_params(method, &sub_keys);
             // Replace bare `self` with the using class name so that
             // `self` resolves to the class that imports the trait.
-            if let Some(ref mut rt) = method.return_type
-                && rt.contains_bare_self()
-            {
-                *rt = rt.replace_bare_self(self_class_name);
+            let needs_bare_self = method
+                .return_type
+                .as_ref()
+                .is_some_and(|r| r.contains_bare_self());
+            if vis_change.is_none() && !needs_sub && !needs_bare_self {
+                // Nothing to rewrite: keep the shared `Arc` instead of
+                // deep-cloning the trait method into the using class.
+                merged.methods.push(Arc::clone(method));
+                continue;
             }
-            merged.methods.push(Arc::new(method));
+
+            let build = || {
+                let mut method = (**method).clone();
+                if let Some(vis) = vis_change {
+                    method.visibility = vis;
+                }
+                if needs_sub {
+                    apply_substitution_to_method(&mut method, &trait_subs);
+                }
+                if let Some(ref mut rt) = method.return_type
+                    && rt.contains_bare_self()
+                {
+                    *rt = rt.replace_bare_self(self_class_name);
+                }
+                method
+            };
+            // Substitution-only transforms are identical for every class
+            // using the trait with the same generics, so they are shared
+            // through the interning store.  Bare-`self` replacement
+            // targets the *using* class and visibility aliases are
+            // per-class declarations — those copies are genuinely
+            // distinct, so they are built directly.
+            if vis_change.is_none() && !needs_bare_self {
+                merged
+                    .methods
+                    .push(intern_transformed_method(method, fp_sub, build));
+            } else {
+                merged.methods.push(Arc::new(build()));
+            }
         }
 
         // Merge trait properties — apply substitution.

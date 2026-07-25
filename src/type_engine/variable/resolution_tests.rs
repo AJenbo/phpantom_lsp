@@ -1404,7 +1404,8 @@ function test() {
                 crate::test_fixtures::make_param("$array", Some("array"), true),
                 crate::test_fixtures::make_param("$callback", Some("callable"), true),
                 crate::test_fixtures::make_param("$initial", Some("TCarry"), false),
-            ];
+            ]
+            .into();
             fi.template_params = vec![crate::atom::atom("TCarry"), crate::atom::atom("TValue")];
             fi.template_bindings =
                 vec![(crate::atom::atom("TCarry"), crate::atom::atom("$initial"))];
@@ -1443,7 +1444,7 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
     crate::types::FunctionInfo {
         name: crate::atom::atom(name),
         name_offset: 0,
-        parameters: Vec::new(),
+        parameters: Vec::new().into(),
         return_type,
         native_return_type: None,
         description: None,

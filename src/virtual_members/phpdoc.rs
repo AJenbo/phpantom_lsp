@@ -99,7 +99,7 @@ fn ensure_mixin_cache_fresh() {
 /// vectors and dedup sets into a single value to keep the argument
 /// count of [`collect_mixin_members`] within clippy's limit.
 struct MixinCollector {
-    methods: Vec<MethodInfo>,
+    methods: Vec<Arc<MethodInfo>>,
     properties: Vec<PropertyInfo>,
     constants: Vec<ConstantInfo>,
     dedup: MixinDedup,
@@ -263,7 +263,7 @@ impl VirtualMemberProvider for PHPDocProvider {
         {
             for m in docblock::extract_method_tags(doc_text) {
                 seen_methods.insert(m.name.to_string());
-                methods.push(m);
+                methods.push(Arc::new(m));
             }
 
             for (name, type_hint) in docblock::extract_property_tags(doc_text) {
@@ -304,7 +304,7 @@ impl VirtualMemberProvider for PHPDocProvider {
             {
                 for m in docblock::extract_method_tags(doc_text) {
                     if seen_methods.insert(m.name.to_string()) {
-                        methods.push(m);
+                        methods.push(Arc::new(m));
                     }
                 }
 
@@ -375,7 +375,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                             if !level_subs.is_empty() {
                                 inheritance::apply_substitution_to_method(&mut m, &level_subs);
                             }
-                            methods.push(m);
+                            methods.push(Arc::new(m));
                         }
                     }
 
@@ -451,7 +451,7 @@ impl VirtualMemberProvider for PHPDocProvider {
                             if !subs.is_empty() {
                                 inheritance::apply_substitution_to_method(&mut m, &subs);
                             }
-                            methods.push(m);
+                            methods.push(Arc::new(m));
                         }
                     }
 
@@ -765,6 +765,22 @@ fn collect_mixin_members(
                 .or_insert_with(|| default.clone());
         }
 
+        // Interning fingerprint for the transform applied below.  The
+        // conditional-collapse inputs (`template_values`) are the subs
+        // plus the mixin class's template defaults, and the
+        // decorated-forward rewrite targets the mixin class — both are
+        // fully determined by the origin method's class, so hashing the
+        // subs and the decorated flag identifies the transform.
+        let fp = super::cache::TransformFingerprint::new(
+            Some(&subs),
+            None,
+            if decorated_forward {
+                super::cache::transform_flags::MIXIN_VIRTUAL_DECORATED
+            } else {
+                super::cache::transform_flags::MIXIN_VIRTUAL
+            },
+        );
+
         // Only merge public members — mixins proxy via magic methods
         // which only expose public API.
         for method in &resolved_mixin.methods {
@@ -776,44 +792,47 @@ fn collect_mixin_members(
             if !collector.dedup.methods.insert(method.name.to_string()) {
                 continue;
             }
-            let mut method = (**method).clone();
-            if !subs.is_empty() {
-                inheritance::apply_substitution_to_method(&mut method, &subs);
-            }
-            // Collapse a conditional return type keyed on one of the mixin
-            // class's template params now that their values are known (from
-            // generic args or defaults).  Without this, the conditional's
-            // subject template is unresolvable at the call site — the mixin
-            // origin is lost once the method is merged into the consumer —
-            // and resolution falls back to the else branch.
-            if !template_values.is_empty()
-                && let Some(cond) = method.conditional_return.as_ref()
-                && let Some(resolved) =
-                    crate::type_engine::conditional_resolution::resolve_conditional_from_values(
-                        cond,
-                        &template_values,
-                    )
-            {
-                method.return_type = Some(resolved);
-                method.conditional_return = None;
-            }
-            // Decorated forward (ForwardsCalls / forwardDecoratedCallTo):
-            // when the target returns itself, the forwarder returns
-            // `$this`.  Self-like returns are left as `$this`/`self`/
-            // `static` so call-site resolution binds them to the
-            // consumer (and preserves generics like `Builder<TModel>`).
-            // Returns that name the mixin class FQN are rewritten to
-            // `$this` for the same reason.  Non-self returns (int, bool,
-            // Collection, …) pass through unchanged.
-            //
-            // Builder-as-static forwarding still needs the raw keyword
-            // so its substitution map can rewrite `$this` →
-            // `Builder<ConcreteModel>`.
-            if decorated_forward {
-                apply_decorated_forward_return(&mut method, &resolved_mixin_name, &mixin_class);
-            }
-            method.is_virtual = true;
-            collector.methods.push(method);
+            let transformed = super::cache::intern_transformed_method(method, fp, || {
+                let mut method = (**method).clone();
+                if !subs.is_empty() {
+                    inheritance::apply_substitution_to_method(&mut method, &subs);
+                }
+                // Collapse a conditional return type keyed on one of the mixin
+                // class's template params now that their values are known (from
+                // generic args or defaults).  Without this, the conditional's
+                // subject template is unresolvable at the call site — the mixin
+                // origin is lost once the method is merged into the consumer —
+                // and resolution falls back to the else branch.
+                if !template_values.is_empty()
+                    && let Some(cond) = method.conditional_return.as_ref()
+                    && let Some(resolved) =
+                        crate::type_engine::conditional_resolution::resolve_conditional_from_values(
+                            cond,
+                            &template_values,
+                        )
+                {
+                    method.return_type = Some(resolved);
+                    method.conditional_return = None;
+                }
+                // Decorated forward (ForwardsCalls / forwardDecoratedCallTo):
+                // when the target returns itself, the forwarder returns
+                // `$this`.  Self-like returns are left as `$this`/`self`/
+                // `static` so call-site resolution binds them to the
+                // consumer (and preserves generics like `Builder<TModel>`).
+                // Returns that name the mixin class FQN are rewritten to
+                // `$this` for the same reason.  Non-self returns (int, bool,
+                // Collection, …) pass through unchanged.
+                //
+                // Builder-as-static forwarding still needs the raw keyword
+                // so its substitution map can rewrite `$this` →
+                // `Builder<ConcreteModel>`.
+                if decorated_forward {
+                    apply_decorated_forward_return(&mut method, &resolved_mixin_name, &mixin_class);
+                }
+                method.is_virtual = true;
+                method
+            });
+            collector.methods.push(transformed);
         }
 
         for property in &resolved_mixin.properties {
@@ -860,7 +879,7 @@ fn collect_mixin_members(
                     apply_decorated_forward_return(&mut m, &resolved_mixin_name, &mixin_class);
                 }
                 m.is_virtual = true;
-                collector.methods.push(m);
+                collector.methods.push(Arc::new(m));
             }
 
             for (name, type_hint) in docblock::extract_property_tags(doc_text) {

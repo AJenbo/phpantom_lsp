@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::atom::atom;
 use crate::inheritance::{
     ClassRef, apply_substitution_to_method, apply_substitution_to_property,
-    enrich_method_from_ancestor, enrich_property_from_ancestor, resolve_class_with_inheritance,
+    enrich_method_arc_from_ancestor, enrich_property_from_ancestor, resolve_class_with_inheritance,
 };
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
@@ -306,17 +306,32 @@ fn resolve_class_fully_inner(
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
     // Cycle breaking needs somewhere to record in-flight resolutions,
-    // so cache-less callers get a throwaway cache scoped to this call
-    // tree.  Nested provider resolutions also reuse it, so shared
-    // dependencies within the tree resolve once instead of repeatedly.
+    // so cache-less callers fall back to the thread's active cache
+    // when one is live, and otherwise get a throwaway cache scoped to
+    // this call tree.  Nested provider resolutions also reuse it, so
+    // shared dependencies within the tree resolve once instead of
+    // repeatedly.
     let temp_cache;
     let cache: &ResolvedClassCache = match cache {
         Some(c) => c,
-        None => {
-            temp_cache = super::cache::new_resolved_class_cache();
-            &temp_cache
-        }
+        None => match super::cache::active_resolved_class_cache() {
+            Some(active) => active,
+            None => {
+                temp_cache = super::cache::new_resolved_class_cache();
+                &temp_cache
+            }
+        },
     };
+
+    // Make the effective cache visible to the merge layers below
+    // (`resolve_class_with_inheritance`, trait/mixin merging), which
+    // receive only a `class_loader`.  They use it to intern transformed
+    // member copies so value-identical substitutions share one
+    // allocation across all classes that embed them.  The guard nests
+    // and restores the previous cache on drop, and this call tree is
+    // fully synchronous, so the thread-local cannot leak across an
+    // `.await`.
+    let _active_guard = super::cache::with_active_resolved_class_cache(cache);
 
     let fqn = class.fqn();
     let cache_key: ResolvedClassCacheKey = (fqn, Vec::new());
@@ -678,13 +693,38 @@ fn merge_interface_members_into(
     iface_subs: &HashMap<String, PhpType>,
 ) {
     // Apply @implements generic substitutions to the resolved
-    // interface members before merging.
+    // interface members before merging.  Only the members that actually
+    // reference a substituted template parameter are copied; the rest
+    // keep sharing their allocation with the cached interface.
     if !iface_subs.is_empty() {
-        for method in resolved_iface.methods.make_mut().iter_mut() {
-            apply_substitution_to_method(Arc::make_mut(method), iface_subs);
+        let sub_keys: Vec<String> = iface_subs.keys().cloned().collect();
+        if resolved_iface
+            .methods
+            .iter()
+            .any(|m| crate::inheritance::method_references_params(m, &sub_keys))
+        {
+            let fp = super::cache::TransformFingerprint::new(Some(iface_subs), None, 0);
+            for method in resolved_iface.methods.make_mut().iter_mut() {
+                if crate::inheritance::method_references_params(method, &sub_keys) {
+                    let transformed = super::cache::intern_transformed_method(method, fp, || {
+                        let mut m = (**method).clone();
+                        apply_substitution_to_method(&mut m, iface_subs);
+                        m
+                    });
+                    *method = transformed;
+                }
+            }
         }
-        for property in resolved_iface.properties.make_mut().iter_mut() {
-            apply_substitution_to_property(property, iface_subs);
+        if resolved_iface
+            .properties
+            .iter()
+            .any(|p| crate::inheritance::property_references_params(p, &sub_keys))
+        {
+            for property in resolved_iface.properties.make_mut().iter_mut() {
+                if crate::inheritance::property_references_params(property, &sub_keys) {
+                    apply_substitution_to_property(property, iface_subs);
+                }
+            }
         }
     }
 
@@ -724,7 +764,7 @@ fn merge_interface_members_into(
             // Delegate to the shared enrichment helper which handles
             // return types, parameters, descriptions, template params,
             // conditional returns, and type assertions uniformly.
-            enrich_method_from_ancestor(Arc::make_mut(existing), &iface_method);
+            enrich_method_arc_from_ancestor(existing, &iface_method);
         } else {
             merged.methods.push(iface_method);
         }

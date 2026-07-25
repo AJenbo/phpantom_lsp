@@ -706,7 +706,8 @@ fn make_cache_remember() -> MethodInfo {
             crate::test_fixtures::make_param("$key", Some("string"), true),
             crate::test_fixtures::make_param("$ttl", Some("\\Closure|int|null"), true),
             crate::test_fixtures::make_param("$callback", Some("\\Closure"), true),
-        ],
+        ]
+        .into(),
         ..MethodInfo::virtual_method("remember", None)
     }
 }
@@ -917,7 +918,8 @@ fn cache_facade_non_callback_method_untouched() {
             "$key",
             Some("string"),
             true,
-        )],
+        )]
+        .into(),
         ..MethodInfo::virtual_method("get", None)
     })]
     .into();
@@ -947,7 +949,8 @@ fn make_testing_mock(name: &str) -> MethodInfo {
         parameters: vec![
             crate::test_fixtures::make_param("$abstract", Some("string"), true),
             crate::test_fixtures::make_param("$mock", Some("\\Closure|null"), false),
-        ],
+        ]
+        .into(),
         is_virtual: false,
         ..MethodInfo::virtual_method(name, None)
     }
@@ -1015,7 +1018,8 @@ fn testing_mock_helper_with_concrete_return_is_untouched() {
             "$abstract",
             Some("string"),
             true,
-        )],
+        )]
+        .into(),
         ..MethodInfo::virtual_method("mock", None)
     })]
     .into();

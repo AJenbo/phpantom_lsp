@@ -151,18 +151,18 @@ fn method_signature_eq_different_deprecation() {
 #[test]
 fn method_signature_eq_different_params() {
     let mut a = method("foo");
-    a.parameters = vec![param("$x", "int")];
+    a.parameters = vec![param("$x", "int")].into();
     let mut b = method("foo");
-    b.parameters = vec![param("$x", "string")];
+    b.parameters = vec![param("$x", "string")].into();
     assert!(!a.signature_eq(&b));
 }
 
 #[test]
 fn method_signature_eq_different_param_count() {
     let mut a = method("foo");
-    a.parameters = vec![param("$x", "int")];
+    a.parameters = vec![param("$x", "int")].into();
     let mut b = method("foo");
-    b.parameters = vec![param("$x", "int"), param("$y", "string")];
+    b.parameters = vec![param("$x", "int"), param("$y", "string")].into();
     assert!(!a.signature_eq(&b));
 }
 
@@ -1055,7 +1055,7 @@ fn func(name: &str) -> FunctionInfo {
     FunctionInfo {
         name: atom(name),
         name_offset: 0,
-        parameters: Vec::new(),
+        parameters: Vec::new().into(),
         return_type: None,
         native_return_type: None,
         description: None,
@@ -1110,18 +1110,18 @@ fn func_signature_eq_different_native_return_type() {
 #[test]
 fn func_signature_eq_different_param_type() {
     let mut a = func("bar");
-    a.parameters = vec![param("$x", "null")];
+    a.parameters = vec![param("$x", "null")].into();
     let mut b = func("bar");
-    b.parameters = vec![param("$x", "string")];
+    b.parameters = vec![param("$x", "string")].into();
     assert!(!a.signature_eq(&b));
 }
 
 #[test]
 fn func_signature_eq_different_param_count() {
     let mut a = func("bar");
-    a.parameters = vec![param("$x", "int")];
+    a.parameters = vec![param("$x", "int")].into();
     let mut b = func("bar");
-    b.parameters = vec![param("$x", "int"), param("$y", "string")];
+    b.parameters = vec![param("$x", "int"), param("$y", "string")].into();
     assert!(!a.signature_eq(&b));
 }
 

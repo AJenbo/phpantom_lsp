@@ -112,14 +112,14 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
     };
 
     let instance_method = MethodInfo {
-        parameters: parameters.clone(),
+        parameters: parameters.clone().into(),
         deprecation_message: method.deprecation_message.clone(),
         return_type: Some(return_type.clone()),
         ..MethodInfo::virtual_method(&name, None)
     };
 
     let static_method = MethodInfo {
-        parameters,
+        parameters: parameters.into(),
         is_static: true,
         deprecation_message: method.deprecation_message.clone(),
         return_type: Some(return_type),
@@ -144,7 +144,7 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
 pub fn build_scope_methods_for_builder(
     model_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Vec<MethodInfo> {
+) -> Vec<Arc<MethodInfo>> {
     let model_class = match class_loader(model_name) {
         Some(c) => c,
         None => {
@@ -174,39 +174,51 @@ pub fn build_scope_methods_for_builder(
 
     let mut methods = Vec::new();
 
+    // The rewrite below depends only on the model, so the produced
+    // copies are interned and shared by every Builder and relation
+    // variant of the same model.
+    let fp = crate::virtual_members::TransformFingerprint::new(
+        Some(&subs),
+        Some(model_name),
+        crate::virtual_members::cache::transform_flags::SCOPE_INSTANCE,
+    );
+
     for method in &resolved_model.methods {
         if !is_scope_method(method) {
             continue;
         }
 
-        // Build an instance method (scopes are called as instance
-        // methods on Builder, not static).  For `#[Scope]`-attributed
-        // methods the name is used as-is; for `scopeX` methods the
-        // prefix is stripped.
-        let [instance_method, _static_method] = build_scope_methods(method);
+        let transformed = crate::virtual_members::intern_transformed_method(method, fp, || {
+            // Build an instance method (scopes are called as instance
+            // methods on Builder, not static).  For `#[Scope]`-attributed
+            // methods the name is used as-is; for `scopeX` methods the
+            // prefix is stripped.
+            let [instance_method, _static_method] = build_scope_methods(method);
 
-        let mut m = instance_method;
+            let mut m = instance_method;
 
-        // Apply substitutions to the return type.
-        if let Some(ref mut ret) = m.return_type {
-            *ret = ret.substitute(&subs);
+            // Apply substitutions to the return type.
+            if let Some(ref mut ret) = m.return_type {
+                *ret = ret.substitute(&subs);
 
-            // When a scope method declares a bare `Builder` return type
-            // (without generic args), the chain loses track of the
-            // concrete model.  Subsequent calls on the returned Builder
-            // would not find model-specific scope methods because
-            // `type_hint_to_classes_typed` only injects scopes when
-            // generic args are present.  Wrap bare Builder return types
-            // as `Builder<ModelName>` to preserve the chain.
-            if is_bare_builder_type(ret) {
-                *ret = PhpType::Generic(
-                    ELOQUENT_BUILDER_FQN.to_string(),
-                    vec![PhpType::Named(atom(model_name))],
-                );
+                // When a scope method declares a bare `Builder` return type
+                // (without generic args), the chain loses track of the
+                // concrete model.  Subsequent calls on the returned Builder
+                // would not find model-specific scope methods because
+                // `type_hint_to_classes_typed` only injects scopes when
+                // generic args are present.  Wrap bare Builder return types
+                // as `Builder<ModelName>` to preserve the chain.
+                if is_bare_builder_type(ret) {
+                    *ret = PhpType::Generic(
+                        ELOQUENT_BUILDER_FQN.to_string(),
+                        vec![PhpType::Named(atom(model_name))],
+                    );
+                }
             }
-        }
 
-        methods.push(m);
+            m
+        });
+        methods.push(transformed);
     }
 
     methods

@@ -511,7 +511,7 @@ mod tests {
         Arc::new(MethodInfo {
             name: Atom::from(name),
             name_offset: 0,
-            parameters: vec![],
+            parameters: vec![].into(),
             return_type: None,
             native_return_type: None,
             description: None,

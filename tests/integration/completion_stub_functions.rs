@@ -376,7 +376,7 @@ async fn test_user_function_takes_precedence_over_stub() {
     let custom_func = phpantom_lsp::FunctionInfo {
         name: atom("str_contains"),
         name_offset: 0,
-        parameters: vec![],
+        parameters: vec![].into(),
         return_type: Some(PhpType::parse("CustomReturn")),
         native_return_type: None,
         description: None,

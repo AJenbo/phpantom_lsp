@@ -429,7 +429,7 @@ impl Backend {
                         functions.push(FunctionInfo {
                             name,
                             name_offset,
-                            parameters,
+                            parameters: parameters.into(),
                             native_return_type,
                             return_type,
                             description,

@@ -1995,7 +1995,7 @@ fn try_resolve_method_params(
     object: &Expression<'_>,
     method: &ClassLikeMemberSelector<'_>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(Vec<ParameterInfo>,)> {
+) -> Option<(crate::types::SharedVec<ParameterInfo>,)> {
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => return None,
@@ -2015,7 +2015,7 @@ fn try_resolve_method_params(
 fn try_resolve_static_method_params<'a>(
     static_call: &'a StaticMethodCall<'a>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(Vec<ParameterInfo>, &'a ArgumentList<'a>)> {
+) -> Option<(crate::types::SharedVec<ParameterInfo>, &'a ArgumentList<'a>)> {
     let method_name = match &static_call.method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
         _ => return None,
@@ -2037,7 +2037,7 @@ fn try_resolve_static_method_params<'a>(
 fn try_resolve_constructor_params<'a>(
     inst: &'a Instantiation<'a>,
     ctx: &VarResolutionCtx<'_>,
-) -> Option<(Vec<ParameterInfo>, &'a ArgumentList<'a>)> {
+) -> Option<(crate::types::SharedVec<ParameterInfo>, &'a ArgumentList<'a>)> {
     let class_name = match inst.class {
         Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
         Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),

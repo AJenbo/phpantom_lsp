@@ -27,9 +27,10 @@ use std::sync::Arc;
 use crate::atom::{Atom, AtomSet, atom};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, Visibility};
+use crate::virtual_members::{TransformFingerprint, intern_transformed_method};
 
 // Re-export functions that are used internally
-pub(crate) use enrichment::enrich_method_from_ancestor;
+pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_from_ancestor;
 
 #[cfg(test)]
@@ -325,6 +326,16 @@ pub(crate) fn resolve_class_with_inheritance(
             level_subs.keys().cloned().collect()
         };
 
+        // Interning fingerprints for the three transform shapes a parent
+        // method can need (substitution, bare-`self` replacement, or
+        // both), computed once per level.  The bare-`self` target is the
+        // declaring parent, so the transformed copies are identical for
+        // every subclass and can be shared through the interning store.
+        let parent_fqn = parent.fqn();
+        let fp_sub = TransformFingerprint::new(Some(&level_subs), None, 0);
+        let fp_self = TransformFingerprint::new(None, Some(parent_fqn.as_str()), 0);
+        let fp_both = TransformFingerprint::new(Some(&level_subs), Some(parent_fqn.as_str()), 0);
+
         // Merge parent methods — skip private.
         // When the child already has a method with the same name,
         // enrich it with the parent's richer docblock types instead
@@ -349,11 +360,14 @@ pub(crate) fn resolve_class_with_inheritance(
                     .find(|m| m.name.eq_ignore_ascii_case(&method.name))
                 {
                     if needs_sub {
-                        let mut ancestor_method = (**method).clone();
-                        apply_substitution_to_method(&mut ancestor_method, &level_subs);
-                        enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
+                        let ancestor_method = intern_transformed_method(method, fp_sub, || {
+                            let mut m = (**method).clone();
+                            apply_substitution_to_method(&mut m, &level_subs);
+                            m
+                        });
+                        enrich_method_arc_from_ancestor(existing, &ancestor_method);
                     } else {
-                        enrich_method_from_ancestor(Arc::make_mut(existing), method);
+                        enrich_method_arc_from_ancestor(existing, method);
                     }
                 }
                 continue;
@@ -371,16 +385,24 @@ pub(crate) fn resolve_class_with_inheritance(
                 merged.methods.push(Arc::clone(method));
                 continue;
             }
-            let mut ancestor_method = (**method).clone();
-            if needs_sub {
-                apply_substitution_to_method(&mut ancestor_method, &level_subs);
-            }
-            if let Some(ref mut rt) = ancestor_method.return_type
-                && rt.contains_bare_self()
-            {
-                *rt = rt.replace_bare_self(&parent.fqn());
-            }
-            merged.methods.push(Arc::new(ancestor_method));
+            let fp = match (needs_sub, needs_bare_self) {
+                (true, false) => fp_sub,
+                (false, true) => fp_self,
+                _ => fp_both,
+            };
+            let transformed = intern_transformed_method(method, fp, || {
+                let mut ancestor_method = (**method).clone();
+                if needs_sub {
+                    apply_substitution_to_method(&mut ancestor_method, &level_subs);
+                }
+                if let Some(ref mut rt) = ancestor_method.return_type
+                    && rt.contains_bare_self()
+                {
+                    *rt = rt.replace_bare_self(&parent_fqn);
+                }
+                ancestor_method
+            });
+            merged.methods.push(transformed);
         }
 
         // Merge parent properties — same enrichment logic.
@@ -439,6 +461,7 @@ pub(crate) fn resolve_class_with_inheritance(
         let iface_subs =
             build_substitution_map(&ClassRef::Borrowed(class), &iface, &HashMap::new());
         let iface_sub_keys: Vec<String> = iface_subs.keys().cloned().collect();
+        let fp_iface = TransformFingerprint::new(Some(&iface_subs), None, 0);
 
         for method in &iface.methods {
             // Only enrich methods that the class already has (i.e. overrides).
@@ -449,11 +472,14 @@ pub(crate) fn resolve_class_with_inheritance(
                 .find(|m| m.name.eq_ignore_ascii_case(&method.name))
             {
                 if method_references_params(method, &iface_sub_keys) {
-                    let mut ancestor_method = (**method).clone();
-                    apply_substitution_to_method(&mut ancestor_method, &iface_subs);
-                    enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
+                    let ancestor_method = intern_transformed_method(method, fp_iface, || {
+                        let mut m = (**method).clone();
+                        apply_substitution_to_method(&mut m, &iface_subs);
+                        m
+                    });
+                    enrich_method_arc_from_ancestor(existing, &ancestor_method);
                 } else {
-                    enrich_method_from_ancestor(Arc::make_mut(existing), method);
+                    enrich_method_arc_from_ancestor(existing, method);
                 }
             }
         }

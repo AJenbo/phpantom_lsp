@@ -4,6 +4,8 @@
 //! parameter types, descriptions), this module propagates richer type information
 //! from ancestors through inheritance chains.
 
+use std::sync::Arc;
+
 use crate::php_type::PhpType;
 use crate::types::{MethodInfo, ParameterInfo, PropertyInfo};
 
@@ -43,6 +45,116 @@ fn ancestor_has_richer_type(effective: &Option<PhpType>, native: &Option<PhpType
         // No effective type — nothing richer to offer.
         _ => false,
     }
+}
+
+/// Copy-on-write wrapper around [`enrich_method_from_ancestor`].
+///
+/// Most class/ancestor method overlaps have nothing to propagate (the
+/// child already carries its own docblock types, or the ancestor has
+/// nothing richer to offer).  Checking first means the shared
+/// `Arc<MethodInfo>` is only deep-cloned when the enrichment actually
+/// changes a field, instead of once per overlap per class.
+pub(crate) fn enrich_method_arc_from_ancestor(
+    existing: &mut Arc<MethodInfo>,
+    ancestor: &MethodInfo,
+) {
+    if method_enrichment_would_change(existing, ancestor) {
+        enrich_method_from_ancestor(Arc::make_mut(existing), ancestor);
+    }
+}
+
+/// Whether [`enrich_method_from_ancestor`] would change any field of
+/// `existing`.
+///
+/// Mirrors the apply function's conditions exactly (keep the two in
+/// sync), with one refinement: a copy that would overwrite a field with
+/// an equal value counts as "no change".  A `false` here guarantees the
+/// enrichment is semantically a no-op, so the caller can skip the
+/// copy-on-write clone.
+fn method_enrichment_would_change(existing: &MethodInfo, ancestor: &MethodInfo) -> bool {
+    // Return type.
+    if (existing.return_type.is_none() && ancestor.return_type.is_some()
+        || lacks_docblock_override(&existing.return_type, &existing.native_return_type)
+            && ancestor_has_richer_type(&ancestor.return_type, &ancestor.native_return_type))
+        && existing.return_type != ancestor.return_type
+    {
+        return true;
+    }
+
+    // Template parameters (copies bounds and bindings alongside).
+    if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
+        return true;
+    }
+
+    // Conditional return type.
+    if existing.conditional_return.is_none() && ancestor.conditional_return.is_some() {
+        return true;
+    }
+
+    // Type assertions.
+    if existing.type_assertions.is_empty() && !ancestor.type_assertions.is_empty() {
+        return true;
+    }
+
+    // Parameters (constructors match by name, everything else by position).
+    let params_would_change = if existing.name == "__construct" {
+        constructor_parameters_would_change(&existing.parameters, &ancestor.parameters)
+    } else {
+        positional_parameters_would_change(&existing.parameters, &ancestor.parameters)
+    };
+    if params_would_change {
+        return true;
+    }
+
+    // Descriptions.
+    (existing.description.is_none() && ancestor.description.is_some())
+        || (existing.return_description.is_none() && ancestor.return_description.is_some())
+}
+
+/// Whether [`enrich_constructor_parameters_by_name`] would change any
+/// parameter.
+fn constructor_parameters_would_change(
+    existing_params: &[ParameterInfo],
+    ancestor_params: &[ParameterInfo],
+) -> bool {
+    existing_params.iter().any(|ep| {
+        ancestor_params
+            .iter()
+            .find(|ap| ap.name == ep.name)
+            .is_some_and(|ap| parameter_enrichment_would_change(ep, ap))
+    })
+}
+
+/// Whether [`enrich_parameters_from_ancestor`] would change any
+/// parameter.
+fn positional_parameters_would_change(
+    existing_params: &[ParameterInfo],
+    ancestor_params: &[ParameterInfo],
+) -> bool {
+    existing_params
+        .iter()
+        .zip(ancestor_params)
+        .any(|(ep, ap)| parameter_enrichment_would_change(ep, ap))
+}
+
+/// Whether [`enrich_single_parameter`] would change `existing_param`.
+///
+/// Mirrors the apply function's conditions (keep the two in sync).
+fn parameter_enrichment_would_change(
+    existing_param: &ParameterInfo,
+    ancestor_param: &ParameterInfo,
+) -> bool {
+    let child_has_specific_native = existing_param.native_type_hint.as_ref().is_some_and(|nt| {
+        !nt.is_object() && !nt.is_mixed() && !nt.is_array_like() && !nt.is_iterable()
+    });
+    if !child_has_specific_native
+        && lacks_docblock_override(&existing_param.type_hint, &existing_param.native_type_hint)
+        && ancestor_has_richer_type(&ancestor_param.type_hint, &ancestor_param.native_type_hint)
+        && existing_param.type_hint != ancestor_param.type_hint
+    {
+        return true;
+    }
+    existing_param.description.is_none() && ancestor_param.description.is_some()
 }
 
 /// Enrich a child method with docblock information from an ancestor method.
@@ -110,10 +222,17 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
     // This follows PHPStan's `PhpDocInheritanceResolver`: for
     // `__construct` the positional parameter name list falls back to
     // the child's own names, so only same-named parameters inherit.
+    // The would-change pre-check keeps the shared parameter list intact
+    // (no copy-on-write) when there is nothing to propagate.
     if existing.name == "__construct" {
-        enrich_constructor_parameters_by_name(&mut existing.parameters, &ancestor.parameters);
-    } else {
-        enrich_parameters_from_ancestor(&mut existing.parameters, &ancestor.parameters);
+        if constructor_parameters_would_change(&existing.parameters, &ancestor.parameters) {
+            enrich_constructor_parameters_by_name(
+                existing.parameters.make_mut(),
+                &ancestor.parameters,
+            );
+        }
+    } else if positional_parameters_would_change(&existing.parameters, &ancestor.parameters) {
+        enrich_parameters_from_ancestor(existing.parameters.make_mut(), &ancestor.parameters);
     }
 
     // ── Descriptions ────────────────────────────────────────────

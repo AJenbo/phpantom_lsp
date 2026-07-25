@@ -162,7 +162,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
                 phpantom_lsp::FunctionInfo {
                     name: atom("getAnimal"),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: Some(PhpType::parse("Dog|Cat")),
                     native_return_type: None,
                     description: None,

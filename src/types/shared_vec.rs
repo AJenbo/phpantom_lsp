@@ -88,6 +88,16 @@ impl<T: Clone> SharedVec<T> {
         SharedVec(Arc::new(v))
     }
 
+    /// Borrow the contents as a slice.
+    ///
+    /// Equivalent to the `Deref` coercion, but named explicitly so call
+    /// sites do not accidentally resolve to an inherent slice method on
+    /// the deref target (e.g. the unstable `str::as_str`).
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
+
     /// Append a single element (copy-on-write).
     #[inline]
     pub fn push(&mut self, val: T) {

@@ -567,7 +567,7 @@ mod tests {
         let method = MethodInfo {
             name: crate::atom::atom("foo"),
             name_offset: 0,
-            parameters: vec![],
+            parameters: vec![].into(),
             return_type: Some(PhpType::parse("void")),
             native_return_type: None,
             description: None,
@@ -623,7 +623,8 @@ mod tests {
                     is_reference: false,
                     closure_this_type: None,
                 },
-            ],
+            ]
+            .into(),
             return_type: Some(PhpType::parse("int")),
             native_return_type: None,
             description: None,
@@ -753,7 +754,7 @@ mod tests {
         let func = FunctionInfo {
             name: crate::atom::atom("noop"),
             name_offset: 0,
-            parameters: vec![],
+            parameters: vec![].into(),
             return_type: None,
             native_return_type: None,
             description: None,

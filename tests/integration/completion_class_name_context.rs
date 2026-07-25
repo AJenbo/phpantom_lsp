@@ -2512,7 +2512,7 @@ async fn test_use_import_excludes_constants_and_functions() {
                 phpantom_lsp::types::FunctionInfo {
                     name: atom("some_widget_func"),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: None,
                     native_return_type: None,
                     description: None,
@@ -2646,7 +2646,7 @@ async fn test_use_function_shows_only_functions() {
                 phpantom_lsp::types::FunctionInfo {
                     name: atom("array_merge"),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: Some(PhpType::parse("array")),
                     native_return_type: None,
                     description: None,

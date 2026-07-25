@@ -384,7 +384,7 @@ impl Backend {
                     })
                     .collect();
                 return ResolvedCallableTarget {
-                    parameters,
+                    parameters: parameters.into(),
                     return_type: func.return_type.clone(),
                     ..Default::default()
                 };
@@ -427,7 +427,7 @@ impl Backend {
             // signature help still shows the empty `()` signature.
             None => {
                 return Some(ResolvedCallableTarget {
-                    parameters: vec![],
+                    parameters: crate::types::SharedVec::new(),
                     return_type: None,
                     accepts_any_args: true,
                     ..Default::default()
@@ -691,7 +691,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 })
                 .collect();
             Some(ResolvedCallableTarget {
-                parameters,
+                parameters: parameters.into(),
                 return_type: return_type.as_deref().cloned(),
                 accepts_any_args: false,
                 ..Default::default()
@@ -701,7 +701,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
             if name.eq_ignore_ascii_case("callable") || name.eq_ignore_ascii_case("Closure") =>
         {
             Some(ResolvedCallableTarget {
-                parameters: vec![],
+                parameters: crate::types::SharedVec::new(),
                 return_type: None,
                 accepts_any_args: true,
                 ..Default::default()

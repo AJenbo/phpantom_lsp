@@ -9,12 +9,12 @@
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use parking_lot::RwLock;
 
 use crate::atom::Atom;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, MethodInfo};
 use crate::virtual_members::laravel::database_schema::SchemaIndex;
 
 /// Cache key for [`ResolvedClassCache`]: fully-qualified class name
@@ -81,7 +81,41 @@ pub struct ResolvedCacheInner {
     /// for the duration of one synchronous resolution call tree; they
     /// are removed by an RAII guard, so a panic cannot leak them.
     in_flight: HashSet<(std::thread::ThreadId, Atom)>,
+    /// Interned transformed methods, keyed by the identity of the
+    /// original `Arc<MethodInfo>` plus a fingerprint of the transform
+    /// (template substitution map, bare-`self` replacement target,
+    /// flag rewrites — see [`TransformFingerprint`]).
+    ///
+    /// The inheritance and virtual-member merges produce large numbers
+    /// of *value-identical* transformed copies: every relation variant
+    /// of the same model substitutes the same Builder methods with the
+    /// same concrete type, every subclass of a generic parent without
+    /// explicit `@extends` generics substitutes the same template
+    /// bounds, and so on.  Interning collapses each distinct
+    /// `(origin, transform)` pair to a single allocation shared by all
+    /// classes that embed it.
+    ///
+    /// Entries carry a [`Weak`] witness of the origin.  When the origin
+    /// dies (its file was re-parsed), a later lookup whose pointer
+    /// happens to collide with the freed address fails the
+    /// `Weak::upgrade` + `ptr_eq` validation and the entry is simply
+    /// replaced, so stale entries can never leak a wrong method.
+    substituted_methods: HashMap<(usize, u128), SubstitutedEntry>,
 }
+
+/// One interned transformed method: the origin witness plus the shared
+/// transformed value.  See
+/// [`ResolvedCacheInner::substituted_methods`].
+struct SubstitutedEntry {
+    witness: Weak<MethodInfo>,
+    value: Arc<MethodInfo>,
+}
+
+/// Ceiling on the interned-method map.  Reaching it clears the map (the
+/// merge simply stops sharing until it refills); it exists only as a
+/// backstop against unbounded growth across many edit/evict cycles,
+/// far above what a full workspace resolution produces.
+const SUBSTITUTED_METHODS_CAP: usize = 1 << 20;
 
 impl Default for ResolvedCacheInner {
     fn default() -> Self {
@@ -92,6 +126,7 @@ impl Default for ResolvedCacheInner {
             is_laravel: true,
             schema_index: SchemaIndex::default(),
             in_flight: HashSet::new(),
+            substituted_methods: HashMap::new(),
         }
     }
 }
@@ -186,6 +221,48 @@ impl ResolvedCacheInner {
         self.map.clear();
         self.fqn_keys.clear();
         self.reverse_deps.clear();
+        self.substituted_methods.clear();
+    }
+
+    /// Look up an interned transformed method for `origin` under the
+    /// transform identified by `fp`.
+    ///
+    /// Returns `None` when no entry exists or when the stored entry's
+    /// witness no longer matches `origin` (the origin died and its
+    /// address was reused) — the caller then builds and
+    /// [inserts](Self::insert_substituted) a fresh value.
+    pub(crate) fn get_substituted(
+        &self,
+        origin: &Arc<MethodInfo>,
+        fp: u128,
+    ) -> Option<Arc<MethodInfo>> {
+        let key = (Arc::as_ptr(origin) as usize, fp);
+        let entry = self.substituted_methods.get(&key)?;
+        let alive = entry.witness.upgrade()?;
+        if Arc::ptr_eq(&alive, origin) {
+            Some(Arc::clone(&entry.value))
+        } else {
+            None
+        }
+    }
+
+    /// Intern a transformed method built from `origin` under `fp`.
+    pub(crate) fn insert_substituted(
+        &mut self,
+        origin: &Arc<MethodInfo>,
+        fp: u128,
+        value: Arc<MethodInfo>,
+    ) {
+        if self.substituted_methods.len() >= SUBSTITUTED_METHODS_CAP {
+            self.substituted_methods.clear();
+        }
+        self.substituted_methods.insert(
+            (Arc::as_ptr(origin) as usize, fp),
+            SubstitutedEntry {
+                witness: Arc::downgrade(origin),
+                value,
+            },
+        );
     }
 
     /// Remove `key` from the reverse-dependency edge under `dep`, pruning
@@ -306,6 +383,116 @@ pub fn active_resolved_class_cache() -> Option<&'static ResolvedClassCache> {
         // (it clears the pointer on drop).
         Some(unsafe { &*ptr })
     }
+}
+
+// ─── Transformed-method interning ───────────────────────────────────────────
+
+/// Identity of a method transform, used as the interning key alongside
+/// the origin `Arc<MethodInfo>`'s address.
+///
+/// Two merge sites that build a transformed copy of the same origin end
+/// up with the same fingerprint exactly when the transform they apply is
+/// identical: the same template substitution map, the same bare-`self`
+/// replacement target (or none), and the same flag rewrites.  The
+/// fingerprint is a 128-bit hash, making accidental collisions (which
+/// would silently share a wrong method) astronomically unlikely.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct TransformFingerprint(pub(crate) u128);
+
+impl TransformFingerprint {
+    /// Fingerprint a template substitution map plus transform modifiers.
+    ///
+    /// * `subs` — the substitution map applied via
+    ///   `apply_substitution_to_method`, or `None` when the transform
+    ///   does not substitute.
+    /// * `bare_self_target` — the class name substituted for a bare
+    ///   `self` return type, when that rewrite applies.
+    /// * `flags` — call-site-specific flag rewrites (e.g. "mark
+    ///   virtual", "drop static"), so different transforms of the same
+    ///   origin under the same substitution never collide.
+    pub(crate) fn new(
+        subs: Option<&HashMap<String, crate::php_type::PhpType>>,
+        bare_self_target: Option<&str>,
+        flags: u8,
+    ) -> Self {
+        use std::hash::{Hash, Hasher};
+
+        // Hash the sorted substitution entries so map iteration order
+        // cannot affect the fingerprint.  Two independent unseeded
+        // hashers (distinguished by an initial marker byte) yield a
+        // 128-bit result.
+        let mut entries: Vec<(&str, String)> = subs
+            .map(|s| s.iter().map(|(k, v)| (k.as_str(), v.to_string())).collect())
+            .unwrap_or_default();
+        entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+        let mut halves = [0u64; 2];
+        for (seed, half) in halves.iter_mut().enumerate() {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (seed as u8).hash(&mut h);
+            for (k, v) in &entries {
+                k.hash(&mut h);
+                v.hash(&mut h);
+            }
+            bare_self_target.hash(&mut h);
+            flags.hash(&mut h);
+            *half = h.finish();
+        }
+        TransformFingerprint(((halves[0] as u128) << 64) | halves[1] as u128)
+    }
+}
+
+/// Flag bytes distinguishing the transform shapes used with
+/// [`TransformFingerprint`], so different transforms of the same origin
+/// under the same substitution never collide.  Values must stay
+/// globally unique across all interning call sites.
+///
+/// The plain-substitution transforms (inheritance / trait / interface /
+/// generic-argument merges) use `0` — they are distinguished from each
+/// other purely by their substitution map, and from the flagged
+/// transforms below by these non-zero markers.
+pub(crate) mod transform_flags {
+    /// Builder instance method forwarded onto a model as `static`.
+    pub const FORWARD_AS_STATIC: u8 = 1;
+    /// Model `@method` virtual forwarded onto a Builder as an instance
+    /// method.
+    pub const FORWARD_AS_INSTANCE: u8 = 2;
+    /// Mixin member marked virtual on the consuming class.
+    pub const MIXIN_VIRTUAL: u8 = 4;
+    /// Mixin member marked virtual with the decorated-forward return
+    /// rewrite applied.
+    pub const MIXIN_VIRTUAL_DECORATED: u8 = 4 | 8;
+    /// Model scope method rewritten to its public Builder-instance form.
+    pub const SCOPE_INSTANCE: u8 = 16;
+}
+
+/// Return a transformed copy of `origin`, shared through the active
+/// resolved-class cache's interning store when possible.
+///
+/// When a cache is active on this thread and already holds a value for
+/// `(origin, fp)`, that shared `Arc` is returned and `build` is never
+/// called.  Otherwise `build` produces the transformed `MethodInfo`,
+/// which is interned (when a cache is active) so every later merge that
+/// applies the same transform to the same origin shares the allocation.
+///
+/// Callers must ensure `fp` fully identifies the transform `build`
+/// applies (see [`TransformFingerprint::new`]).
+pub(crate) fn intern_transformed_method(
+    origin: &Arc<MethodInfo>,
+    fp: TransformFingerprint,
+    build: impl FnOnce() -> MethodInfo,
+) -> Arc<MethodInfo> {
+    let Some(cache) = active_resolved_class_cache() else {
+        return Arc::new(build());
+    };
+    if let Some(hit) = cache.read().get_substituted(origin, fp.0) {
+        return hit;
+    }
+    let value = Arc::new(build());
+    cache
+        .write()
+        .insert_substituted(origin, fp.0, Arc::clone(&value));
+    value
 }
 
 /// Evict all cache entries whose FQN matches the given name, then

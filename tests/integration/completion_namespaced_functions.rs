@@ -75,7 +75,7 @@ fn register_namespaced_function(
                 FunctionInfo {
                     name: atom(name),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: Some(PhpType::parse("mixed")),
                     native_return_type: None,
                     description: None,
@@ -110,7 +110,7 @@ fn register_global_function(backend: &phpantom_lsp::Backend, name: &str, uri: &s
                 FunctionInfo {
                     name: atom(name),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: Some(PhpType::parse("string")),
                     native_return_type: None,
                     description: None,
@@ -860,7 +860,8 @@ async fn test_use_function_namespaced_detail_shows_signature() {
                         is_variadic: false,
                         is_reference: false,
                         closure_this_type: None,
-                    }],
+                    }]
+                    .into(),
                     return_type: Some(PhpType::parse("mixed")),
                     native_return_type: None,
                     description: None,
@@ -961,7 +962,7 @@ async fn test_deprecated_namespaced_function() {
                 FunctionInfo {
                     name: atom("old_helper"),
                     name_offset: 0,
-                    parameters: vec![],
+                    parameters: vec![].into(),
                     return_type: None,
                     native_return_type: None,
                     description: None,

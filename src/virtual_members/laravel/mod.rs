@@ -604,8 +604,8 @@ impl VirtualMemberProvider for LaravelModelProvider {
                 // the `scopeX` prefix — the attribute takes priority
                 // and the name is used as-is (no prefix stripping).
                 let [instance_method, static_method] = build_scope_methods(method);
-                methods.push(instance_method);
-                methods.push(static_method);
+                methods.push(Arc::new(instance_method));
+                methods.push(Arc::new(static_method));
                 continue;
             }
 
@@ -765,7 +765,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
         let where_static = build_where_property_methods_for_class(class, &existing);
         for mut m in where_static {
             m.is_static = true;
-            methods.push(m);
+            methods.push(Arc::new(m));
         }
 
         VirtualMembers {

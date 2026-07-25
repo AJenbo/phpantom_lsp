@@ -375,7 +375,14 @@ pub struct MethodInfo {
     /// synthetic members) — callers should fall back to text search.
     pub name_offset: u32,
     /// The parameters of the method.
-    pub parameters: Vec<ParameterInfo>,
+    ///
+    /// A [`SharedVec`] so that transformed copies of a method (template
+    /// substitution, Builder forwarding, mixin injection) share the
+    /// parameter list with their origin when no parameter type is
+    /// rewritten — which is the common case: substitution usually only
+    /// changes the return type.  Mutation goes through
+    /// [`SharedVec::make_mut`] (copy-on-write).
+    pub parameters: SharedVec<ParameterInfo>,
     /// Effective return type after docblock override (e.g. `Collection<User>`).
     ///
     /// When a `@return` tag is present in the docblock and is more specific
@@ -590,7 +597,7 @@ impl MethodInfo {
         Self {
             name: crate::atom::atom(name),
             name_offset: 0,
-            parameters: Vec::new(),
+            parameters: SharedVec::new(),
             return_type: return_type.map(PhpType::parse),
             native_return_type: None,
             description: None,
@@ -623,7 +630,7 @@ impl MethodInfo {
         Self {
             name: crate::atom::atom(name),
             name_offset: 0,
-            parameters: Vec::new(),
+            parameters: SharedVec::new(),
             return_type: return_type.cloned(),
             native_return_type: None,
             description: None,
@@ -1007,7 +1014,11 @@ pub struct CompletionTarget {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResolvedCallableTarget {
     /// The parameters of the callable.
-    pub parameters: Vec<ParameterInfo>,
+    ///
+    /// A [`SharedVec`] so that projecting a method's parameters into a
+    /// target (and caching the target per call site) shares the list
+    /// instead of copying it.
+    pub parameters: SharedVec<ParameterInfo>,
     /// Optional return type.
     pub return_type: Option<PhpType>,
     /// Whether the callable accepts any number of arguments without error,
@@ -1038,7 +1049,12 @@ pub struct FunctionInfo {
     /// synthetic entries) — callers should fall back to text search.
     pub name_offset: u32,
     /// The parameters of the function.
-    pub parameters: Vec<ParameterInfo>,
+    ///
+    /// A [`SharedVec`] for the same reason as
+    /// [`MethodInfo::parameters`]: synthesized `FunctionInfo` values
+    /// built from methods (callable targets, first-class callables)
+    /// share the parameter list instead of copying it.
+    pub parameters: SharedVec<ParameterInfo>,
     /// Effective return type after docblock override (e.g. `Collection<User>`).
     ///
     /// When a `@return` tag is present in the docblock and is more specific
