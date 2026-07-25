@@ -1033,10 +1033,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" class="md-nav__link">
+  <a href="#phase-4e-eliminate-recursion-guards-in-class-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)
+        Phase 4e: Eliminate recursion guards in class resolution ✓
       </span>
     </span>
   </a>
@@ -1635,10 +1635,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" class="md-nav__link">
+  <a href="#phase-4e-eliminate-recursion-guards-in-class-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)
+        Phase 4e: Eliminate recursion guards in class resolution ✓
       </span>
     </span>
   </a>
@@ -2046,80 +2046,29 @@ the allocation churn that dominated it:</p>
 <p>The 8.3s was dominated by allocation churn (ClassInfo cloning)
 inside the type resolution pipeline, not by resolution logic.</p>
 <hr />
-<h4 id="phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22">Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)<a class="headerlink" href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High. Effort: Medium.</strong></p>
-<p>Once Phase 4d (or earlier) makes the resolved codebase metadata
-immutable after population, the re-entrant resolution that currently
-requires thread-local recursion guards cannot occur. This phase
-removes those guards and the depth caps they protect:</p>
-<ol>
-<li>
-<p><strong><code>RESOLVING</code> set and <code>MAX_RESOLVE_DEPTH</code> (30) in
-   <code>virtual_members/mod.rs</code>.</strong> Thread-local set of class FQNs
-   currently being resolved. When a class is already in the set,
-   re-entrant calls return a partial result (base inheritance only,
-   no virtual members). This produces non-deterministic results:
-   whichever class in a mutual dependency (e.g. Model/Builder) is
-   resolved first gets full virtual members, the other gets degraded.
-   After eager population, all classes are resolved before any
-   consumer queries them, so re-entry cannot happen.</p>
-</li>
-<li>
-<p><strong><code>RESOLVE_DEPTH</code> and <code>MAX_RESOLVE_TARGET_DEPTH</code> (60) in
-   <code>type_engine/resolver/</code>.</strong> Thread-local depth counter for
-   <code>resolve_target_classes_expr_inner</code>. Guards against mutual
-   recursion between subject resolution, call-return resolution,
-   and variable resolution. The limit of 60 (vs typical chain
-   depth of 5-10) indicates the recursion is caused by accidental
-   re-entry into class resolution, not by the problem size. Once
-   class resolution is a cache lookup, this re-entry path vanishes.</p>
-</li>
-<li>
-<p><strong>LSP server eager population.</strong> The <code>analyse.rs</code> CLI already
-   runs <code>populate_from_sorted</code> before diagnostics. The LSP server's
-   Tokio threads do not. Extend eager population to run on file
-   change in the LSP server (incrementally, not full re-population)
-   so that interactive requests also benefit from pre-resolved
-   metadata.</p>
-</li>
-</ol>
-<p><strong>How the reference projects avoid this problem:</strong></p>
-<ul>
-<li>
-<p><strong>Mago:</strong> topologically sorts classes (<code>codex/src/populator/
-  sorter.rs</code>) using a DFS with <code>visited</code> + <code>visiting</code> sets. Cycles
-  are broken silently when <code>visiting.contains(&amp;class_like)</code>. Each
-  class is then populated exactly once by
-  <code>populate_class_like_metadata_iterative</code> (non-recursive, assumes
-  dependencies are done). No re-entrant resolution is possible.</p>
-</li>
-<li>
-<p><strong>PHPStan:</strong> member lookup on <code>ClassReflection</code> delegates to
-  <code>PhpClassReflectionExtension</code>, which calls PHP's native
-  <code>ReflectionClass</code> (already resolved by the runtime). Each class
-  has a single canonical instance via <code>MemoizingReflectionProvider</code>
-  (keyed by lowercase name), so re-entrant lookups hit the same
-  cached object. Explicit cycle guards exist only for specific
-  features: <code>$resolvingTypeAliasImports</code> for <code>@type-import</code> cycles,
-  <code>$inferClassConstructorPropertyTypesInProcess</code> for constructor
-  property inference.</p>
-</li>
-<li>
-<p><strong>Phpactor:</strong> three independent cycle-protection layers.
-  (1) <code>ClassHierarchyResolver::doResolve()</code> passes a <code>$resolved</code>
-  map by value; if a class name is already a key, recursion stops.
-  (2) Every reflection object carries a <code>$visited</code> array through its
-  constructor; <code>reflectClassLike()</code> throws <code>CycleDetected</code> on
-  re-entry. (3) Direct self-reference guards in <code>parent()</code> and
-  <code>ancestors()</code>.</p>
-</li>
-</ul>
-<p><strong>Success criteria:</strong>
-- <code>RESOLVING</code>, <code>RESOLVE_DEPTH</code>, <code>MAX_RESOLVE_DEPTH</code>, and
-  <code>MAX_RESOLVE_TARGET_DEPTH</code> are removed from the codebase.
-- <code>mark_resolving</code> / <code>unmark_resolving</code> functions are removed.
-- No test regressions.
-- LSP server runs eager population incrementally on file change.</p>
+<h4 id="phase-4e-eliminate-recursion-guards-in-class-resolution">Phase 4e: Eliminate recursion guards in class resolution ✓<a class="headerlink" href="#phase-4e-eliminate-recursion-guards-in-class-resolution" title="Permanent link">&para;</a></h4>
+<p>Removed the thread-local <code>RESOLVING</code> set, both depth counters, and
+both depth caps (<code>MAX_RESOLVE_DEPTH</code> 30, <code>MAX_RESOLVE_TARGET_DEPTH</code>
+60). Genuine dependency cycles still exist (e.g. two Eloquent models
+whose relationship providers resolve each other, and classes loaded
+on demand mid-resolution), so the cycle-break itself cannot be
+deleted: it moved into <code>ResolvedCacheInner</code> as an in-flight set keyed
+by <code>(thread, FQN)</code> with an RAII release. Re-entry on the same class
+returns a base-inheritance partial exactly as before, but resolution
+is no longer cut off at an arbitrary nesting depth, other threads'
+concurrent resolutions are unaffected, and the state is per-<code>Backend</code>
+instead of a process-wide thread-local. Cache-less
+<code>resolve_class_fully</code> callers get a throwaway cache scoped to their
+call tree, so cycle-breaking applies uniformly (and nested provider
+work within the tree is deduplicated). The depth cap in
+<code>resolve_target_classes_expr_inner</code> was removed outright: its
+recursion follows the finite subject expression plus variable
+resolution's own keyed guards, and class resolution can no longer
+feed unbounded re-entry into it. The LSP server now runs eager
+population at the tail of the full background index even when
+workspace diagnostics are disabled; incremental re-population of
+evicted classes on file change was already in place in
+<code>parser/ast_update.rs</code>.</p>
 <h4 id="phase-4f-remove-inflated-stack-sizes-absorbs-p25">Phase 4f: Remove inflated stack sizes (absorbs P25)<a class="headerlink" href="#phase-4f-remove-inflated-stack-sizes-absorbs-p25" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium. Effort: Low.</strong></p>
 <p>After Phase 4e eliminates re-entrant class resolution and P20
