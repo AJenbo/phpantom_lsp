@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784949168806,
+  "lastUpdate": 1784949614463,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20647,6 +20647,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 97,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6da452bd1d142f51a64d0e50f4a56da9a8b74bac",
+          "message": "Fix inlay position calculation",
+          "timestamp": "2026-07-25T05:03:58+02:00",
+          "tree_id": "4c376dba0687f62b98936d12dfe51dfc632e4e6b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6da452bd1d142f51a64d0e50f4a56da9a8b74bac"
+        },
+        "date": 1784949612234,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 94.8,
             "unit": "MiB"
           }
         ]
