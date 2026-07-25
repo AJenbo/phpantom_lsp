@@ -7,7 +7,7 @@ use std::sync::Arc;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -37,7 +37,7 @@ pub(super) fn resolve_rhs_instantiation(
                 ctx.class_loader,
             ),
         };
-        let parsed_name = PhpType::Named(fqn);
+        let parsed_name = PhpType::Named(atom(&fqn));
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
             &ctx.current_class.name,
@@ -149,7 +149,7 @@ pub(super) fn resolve_rhs_instantiation(
                                             && !subs.contains_key(tpl_name.as_str())
                                             && let Some(concrete_arg) = concrete_args.get(i)
                                         {
-                                            subs.insert(tpl_name.clone(), concrete_arg.clone());
+                                            subs.insert(tpl_name.to_string(), concrete_arg.clone());
                                         }
                                     }
                                 }
@@ -433,7 +433,7 @@ pub(crate) fn remap_inherited_ctor_subs(
     let mut ancestor_to_child: HashMap<String, PhpType> = child
         .template_params
         .iter()
-        .map(|p| (p.to_string(), PhpType::Named(p.to_string())))
+        .map(|p| (p.to_string(), PhpType::Named(atom(p.as_ref()))))
         .collect();
 
     // Track the current node's extends info as owned data so we don't
@@ -490,17 +490,17 @@ pub(crate) fn remap_inherited_ctor_subs(
             // child_type is typically PhpType::Named("V") — extract the name.
             match child_type {
                 PhpType::Named(child_param) => {
-                    result.insert(child_param.clone(), inferred_type.clone());
+                    result.insert(child_param.to_string(), inferred_type.clone());
                 }
                 _ => {
                     // Complex mapping (e.g. mapped to a concrete type, not a
                     // param name) — keep the original key as fallback.
-                    result.insert(ancestor_param.clone(), inferred_type.clone());
+                    result.insert(ancestor_param.to_string(), inferred_type.clone());
                 }
             }
         } else {
             // No mapping found — keep the original key.
-            result.insert(ancestor_param.clone(), inferred_type.clone());
+            result.insert(ancestor_param.to_string(), inferred_type.clone());
         }
     }
     result
@@ -1001,7 +1001,7 @@ pub(super) fn resolve_array_literal_generic(
         match tpl_position {
             0 => {
                 // Implicit integer keys.
-                Some(PhpType::Named("int".to_string()))
+                Some(PhpType::Named(atom("int")))
             }
             1 => {
                 // Element type from first element.
@@ -1146,7 +1146,7 @@ mod tests {
 
     #[test]
     fn type_contains_name_simple() {
-        let ty = PhpType::Named("Foo".to_owned());
+        let ty = PhpType::Named(atom("Foo"));
         assert!(type_contains_name(&ty, "Foo"));
         assert!(!type_contains_name(&ty, "Bar"));
     }

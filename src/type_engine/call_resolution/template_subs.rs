@@ -637,19 +637,18 @@ impl Backend {
             // self::class / static::class / parent::class resolve relative
             // to the class at the call site.
             let class_named = if is_self_or_static(name) {
-                ctx.current_class
-                    .map(|c| PhpType::Named(c.fqn().to_string()))
+                ctx.current_class.map(|c| PhpType::Named(c.fqn()))
             } else if name.eq_ignore_ascii_case("parent") {
                 ctx.current_class
                     .and_then(|c| c.parent_class.as_ref())
-                    .map(|p| PhpType::Named(p.to_string()))
+                    .map(|p| PhpType::Named(atom(p.as_ref())))
             } else {
                 let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
                     cls.fqn().to_string()
                 } else {
                     name.to_string()
                 };
-                Some(PhpType::Named(resolved_name))
+                Some(PhpType::Named(atom(&resolved_name)))
             };
             return class_named.map(|n| PhpType::ClassString(Some(Box::new(n))));
         }
@@ -678,16 +677,16 @@ impl Backend {
             } else {
                 class_name
             };
-            return Some(PhpType::Named(resolved_name));
+            return Some(PhpType::Named(atom(&resolved_name)));
         }
 
         // $this / self / static → current class (or preserve the keyword when asked)
         if is_self_or_static(trimmed) {
             return ctx.current_class.map(|c| {
                 if ctx.preserve_static {
-                    PhpType::Named(trimmed.to_string())
+                    PhpType::Named(atom(trimmed))
                 } else {
-                    PhpType::Named(c.name.to_string())
+                    PhpType::Named(atom(c.name.as_ref()))
                 }
             });
         }

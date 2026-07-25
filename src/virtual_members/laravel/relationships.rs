@@ -7,6 +7,7 @@
 //! inferring relationship types from method body text when no `@return`
 //! annotation is present.
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -231,7 +232,7 @@ pub(crate) fn extract_pivot_type_typed(return_type: &PhpType) -> Option<&PhpType
 
 /// Pre-built `Illuminate\Database\Eloquent\Model` type for fallback related types.
 fn eloquent_model_type() -> PhpType {
-    PhpType::Named("Illuminate\\Database\\Eloquent\\Model".to_owned())
+    PhpType::Named(atom("Illuminate\\Database\\Eloquent\\Model"))
 }
 
 /// Build the property type string for a relationship.
@@ -329,7 +330,7 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         // `resolve_name` will strip the leading `\` back to canonical
         // form during the resolution pass.
         if method_name == "morphTo" {
-            return Some(PhpType::Named(format!("\\{fqn}")));
+            return Some(PhpType::Named(atom(&format!("\\{fqn}"))));
         }
 
         // Extract the first argument from the call.  We look for
@@ -340,14 +341,14 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         if let Some(class_arg) = extract_class_argument(after_paren) {
             return Some(PhpType::Generic(
                 format!("\\{fqn}"),
-                vec![PhpType::Named(class_arg)],
+                vec![PhpType::Named(atom(&class_arg))],
             ));
         }
 
         // No `::class` argument found — return the bare relationship
         // name without generics.  The provider will handle it the same
         // way it handles annotated relationships without generics.
-        return Some(PhpType::Named(format!("\\{fqn}")));
+        return Some(PhpType::Named(atom(&format!("\\{fqn}"))));
     }
 
     None

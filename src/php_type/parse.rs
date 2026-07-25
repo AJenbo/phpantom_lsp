@@ -342,7 +342,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                     }
                     PhpType::Generic(name, args)
                 }
-                None => PhpType::Named(name),
+                None => PhpType::Named(atom(&name)),
             }
         }
 
@@ -448,7 +448,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                         return_type,
                     }
                 }
-                None => PhpType::Named(kind),
+                None => PhpType::Named(atom(&kind)),
             }
         }
 
@@ -490,7 +490,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- Variable (e.g. $this in conditional types) -----------------------
-        cst::Type::Variable(v) => PhpType::Named(bytes_to_str(v.value).to_string()),
+        cst::Type::Variable(v) => PhpType::Named(atom(bytes_to_str(v.value))),
 
         // -- Literal types ----------------------------------------------------
         cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw).to_string()),
@@ -540,7 +540,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         | cst::Type::UnspecifiedLiteralString(k)
         | cst::Type::UnspecifiedLiteralFloat(k)
         | cst::Type::NonEmptyUnspecifiedLiteralString(k) => {
-            PhpType::Named(normalize_keyword_casing(bytes_to_str(k.value)))
+            PhpType::Named(atom(&normalize_keyword_casing(bytes_to_str(k.value))))
         }
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------
@@ -561,7 +561,7 @@ pub(crate) fn convert_keyword_with_optional_generics(
             let args: Vec<PhpType> = params.entries.iter().map(|e| convert(&e.inner)).collect();
             PhpType::Generic(canonical, args)
         }
-        None => PhpType::Named(canonical),
+        None => PhpType::Named(atom(&canonical)),
     }
 }
 
@@ -608,7 +608,7 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
                 .map(PhpType::literal_string_value)
                 .collect();
             match keys.len() {
-                0 => PhpType::Named("never".to_string()),
+                0 => PhpType::Named(atom("never")),
                 1 => keys.into_iter().next().unwrap(),
                 _ => PhpType::Union(keys),
             }
@@ -617,12 +617,12 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
             let n = name.to_ascii_lowercase();
             match n.as_str() {
                 "array" | "non-empty-array" if args.len() == 2 => args[0].clone(),
-                "array" | "non-empty-array" if args.len() == 1 => PhpType::Named("int".to_string()),
-                "list" | "non-empty-list" => PhpType::Named("int".to_string()),
+                "array" | "non-empty-array" if args.len() == 1 => PhpType::Named(atom("int")),
+                "list" | "non-empty-list" => PhpType::Named(atom("int")),
                 _ => PhpType::KeyOf(Box::new(resolved.clone())),
             }
         }
-        PhpType::Array(_) => PhpType::Named("int".to_string()),
+        PhpType::Array(_) => PhpType::Named(atom("int")),
         _ => PhpType::KeyOf(Box::new(resolved.clone())),
     }
 }
@@ -640,7 +640,7 @@ pub(crate) fn evaluate_value_of(resolved: &PhpType) -> PhpType {
             // so `array{a: int, b: string, c: int}` yields `int|string`.
             dedup_types(&mut values);
             match values.len() {
-                0 => PhpType::Named("never".to_string()),
+                0 => PhpType::Named(atom("never")),
                 1 => values.into_iter().next().unwrap(),
                 _ => PhpType::Union(values),
             }
@@ -714,7 +714,7 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
 pub(crate) fn literal_or_named_shape_key(ty: &PhpType) -> Option<String> {
     match ty {
         PhpType::Literal(lit) => lit.string_content().map(ToOwned::to_owned),
-        PhpType::Named(key) => Some(key.clone()),
+        PhpType::Named(key) => Some(key.to_string()),
         _ => None,
     }
 }

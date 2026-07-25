@@ -28,6 +28,7 @@
 //!   known.  We never widen to `mixed` and never invent a contract Laravel did
 //!   not itself guarantee.
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::Url;
@@ -271,7 +272,7 @@ pub(crate) fn resolve_auth_user_model(
         return None;
     }
 
-    let mut members = models.into_iter().map(PhpType::Named);
+    let mut members = models.into_iter().map(|n| PhpType::Named(atom(n.as_ref())));
     let first = members.next()?;
     match members.next() {
         None => Some(first),

@@ -208,7 +208,7 @@ fn custom_builder_forwarding_maps_parent_tmodel_to_concrete_class() {
     custom_builder.parent_class = Some(atom(ELOQUENT_BUILDER_FQN));
     let mut user = make_class("App\\Models\\User");
     user.laravel = Some(Box::new(crate::types::LaravelMetadata {
-        custom_builder: Some(PhpType::Named("App\\Models\\UserBuilder".to_string())),
+        custom_builder: Some(PhpType::Named(atom("App\\Models\\UserBuilder"))),
         ..Default::default()
     }));
 

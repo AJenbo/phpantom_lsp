@@ -20,6 +20,7 @@
 /// All functions in this module are free functions (not methods on
 /// `Backend`).  Cross-module dependencies that previously used `Self::`
 /// are called via their canonical module paths.
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -508,8 +509,8 @@ fn infer_type_from_simple_expr(expr: &str) -> Option<PhpType> {
             "int" | "integer" => return Some(PhpType::int()),
             "float" | "double" | "real" => return Some(PhpType::float()),
             "bool" | "boolean" => return Some(PhpType::bool()),
-            "array" => return Some(PhpType::Named("array".to_string())),
-            "object" => return Some(PhpType::Named("object".to_string())),
+            "array" => return Some(PhpType::Named(atom("array"))),
+            "object" => return Some(PhpType::Named(atom("object"))),
             _ => {} // might be a parenthesized expression, not a cast
         }
     }
@@ -722,13 +723,10 @@ pub(crate) fn resolve_first_class_callable_return_type(
                 if classes.is_empty() {
                     None
                 } else if classes.len() == 1 {
-                    Some(PhpType::Named(classes[0].fqn().to_string()))
+                    Some(PhpType::Named(classes[0].fqn()))
                 } else {
                     Some(PhpType::Union(
-                        classes
-                            .iter()
-                            .map(|c| PhpType::Named(c.fqn().to_string()))
-                            .collect(),
+                        classes.iter().map(|c| PhpType::Named(c.fqn())).collect(),
                     ))
                 }
             })

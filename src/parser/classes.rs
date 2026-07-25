@@ -529,7 +529,7 @@ impl Backend {
                     // merged into implementors), so synthesize them here.
                     properties.push(crate::types::PropertyInfo::virtual_property_typed(
                         "name",
-                        Some(&PhpType::Named("string".to_string())),
+                        Some(&PhpType::Named(atom("string"))),
                     ));
                     if let Some(hint) = enum_def.backing_type_hint.as_ref() {
                         let value_type = crate::parser::extract_hint_type(&hint.hint);
@@ -1090,7 +1090,7 @@ impl Backend {
                                     {
                                         let raw = bytes_to_str(ident.value()).to_string();
                                         let fqn = resolve_name_via_ctx(&raw, doc_ctx);
-                                        return Some(PhpType::Named(fqn));
+                                        return Some(PhpType::Named(atom(&fqn)));
                                     }
                                     None
                                 });
@@ -1569,7 +1569,7 @@ impl Backend {
                     }) {
                         let raw = bytes_to_str(class_ident.value()).to_string();
                         let fqn = resolve_name_via_ctx(&raw, doc_ctx);
-                        prop.type_hint = Some(PhpType::Named(fqn));
+                        prop.type_hint = Some(PhpType::Named(atom(&fqn)));
                     }
                 }
             }

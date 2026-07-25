@@ -7,7 +7,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::docblock;
 use crate::php_type::PhpType;
 use crate::types::ResolvedType;
@@ -320,7 +320,7 @@ pub(crate) fn class_string_inner_binding(
             Some(cls) => cls.fqn().to_string(),
             None => content.to_string(),
         };
-        return Some(PhpType::Named(fqn));
+        return Some(PhpType::Named(atom(&fqn)));
     }
 
     class_string_inner_from_type(&Backend::resolve_arg_text_to_type(arg_text, ctx)?)
@@ -336,7 +336,7 @@ pub(crate) fn class_string_inner_binding(
 pub(super) fn class_string_inner_from_type(ty: &PhpType) -> Option<PhpType> {
     match ty {
         PhpType::ClassString(Some(inner)) => Some(inner.as_ref().clone()),
-        PhpType::ClassString(None) => Some(PhpType::Named("object".to_string())),
+        PhpType::ClassString(None) => Some(PhpType::Named(atom("object"))),
         // A class name binds directly; a scalar keyword (`string`, `int`,
         // …) is not a class, so it must not bind `T` — otherwise a plain
         // `string` argument would produce `class-string<string>`.
@@ -344,7 +344,7 @@ pub(super) fn class_string_inner_from_type(ty: &PhpType) -> Option<PhpType> {
             if crate::php_type::is_builtin_non_class_type(name) {
                 None
             } else {
-                Some(PhpType::Named(name.clone()))
+                Some(PhpType::Named(*name))
             }
         }
         // A union of class-strings binds `T` to the union of the inner

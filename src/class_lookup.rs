@@ -7,6 +7,7 @@
 //! in [`crate::resolution`]; this module is the shared kernel that
 //! resolution and the completion/diagnostics pipelines both call into.
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
@@ -263,7 +264,7 @@ pub(crate) fn is_subtype_of(
 /// class names instead of pre-constructed [`crate::php_type::PhpType`] values.
 ///
 /// This avoids the boilerplate of wrapping each name in
-/// `PhpType::Named(name.to_string())` at call sites that already have
+/// `PhpType::Named(atom(name.as_ref()))` at call sites that already have
 /// `&str` class names.
 pub(crate) fn is_subtype_of_names(
     subtype_name: &str,
@@ -272,8 +273,8 @@ pub(crate) fn is_subtype_of_names(
 ) -> bool {
     use crate::php_type::PhpType;
     is_subtype_of_typed(
-        &PhpType::Named(subtype_name.to_string()),
-        &PhpType::Named(supertype_name.to_string()),
+        &PhpType::Named(atom(subtype_name)),
+        &PhpType::Named(atom(supertype_name)),
         class_loader,
     )
 }
@@ -287,11 +288,7 @@ pub(crate) fn is_subtype_of_named(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     use crate::php_type::PhpType;
-    is_subtype_of_typed(
-        subtype,
-        &PhpType::Named(supertype_name.to_string()),
-        class_loader,
-    )
+    is_subtype_of_typed(subtype, &PhpType::Named(atom(supertype_name)), class_loader)
 }
 
 /// Check whether `subtype` is a subtype of `supertype`, combining
@@ -437,7 +434,7 @@ pub(crate) fn is_subtype_of_typed(
     // name is a class-string of some object.
     if let (PhpType::ClassString(sub_inner), PhpType::ClassString(sup_inner)) = (subtype, supertype)
     {
-        let object_bound = PhpType::Named("object".to_string());
+        let object_bound = PhpType::Named(atom("object"));
         let sub = sub_inner.as_deref().unwrap_or(&object_bound);
         let sup = sup_inner.as_deref().unwrap_or(&object_bound);
         return is_subtype_of_typed(sub, sup, class_loader);

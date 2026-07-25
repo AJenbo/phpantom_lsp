@@ -631,7 +631,7 @@ impl Backend {
                 && let Some(date_class) = self
                     .find_or_load_class(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
             {
-                let date_type = crate::php_type::PhpType::Named(date_class.fqn().to_string());
+                let date_type = crate::php_type::PhpType::Named(date_class.fqn());
                 func.return_type = Some(date_type);
                 inferred_date_return = true;
             }

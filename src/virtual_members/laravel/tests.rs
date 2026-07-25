@@ -1739,10 +1739,8 @@ fn dates_take_priority_over_attribute_defaults() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().dates_definitions = vec!["deleted_at".to_string()];
-    user.laravel_mut().attributes_definitions = vec![(
-        "deleted_at".to_string(),
-        PhpType::Named("string".to_string()),
-    )];
+    user.laravel_mut().attributes_definitions =
+        vec![("deleted_at".to_string(), PhpType::Named(atom("string")))];
 
     let result = provider.provide(&user, &no_loader, None);
 
@@ -1843,9 +1841,9 @@ fn synthesizes_attribute_default_properties() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions = vec![
-        ("role".to_string(), PhpType::Named("string".to_string())),
-        ("is_active".to_string(), PhpType::Named("bool".to_string())),
-        ("login_count".to_string(), PhpType::Named("int".to_string())),
+        ("role".to_string(), PhpType::Named(atom("string"))),
+        ("is_active".to_string(), PhpType::Named(atom("bool"))),
+        ("login_count".to_string(), PhpType::Named(atom("int"))),
     ];
 
     let result = provider.provide(&user, &no_loader, None);
@@ -1870,7 +1868,7 @@ fn attribute_defaults_are_public_and_not_static() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named("string".to_string()))];
+        vec![("role".to_string(), PhpType::Named(atom("string")))];
 
     let result = provider.provide(&user, &no_loader, None);
     let prop = result.properties.iter().find(|p| p.name == "role").unwrap();
@@ -1888,7 +1886,7 @@ fn casts_take_priority_over_attribute_defaults() {
     // Both $casts and $attributes define is_active
     user.laravel_mut().casts_definitions = vec![("is_active".to_string(), "boolean".to_string())];
     user.laravel_mut().attributes_definitions =
-        vec![("is_active".to_string(), PhpType::Named("int".to_string()))];
+        vec![("is_active".to_string(), PhpType::Named(atom("int")))];
 
     let result = provider.provide(&user, &no_loader, None);
 
@@ -1918,7 +1916,7 @@ fn attribute_defaults_coexist_with_casts_for_different_columns() {
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().casts_definitions = vec![("is_admin".to_string(), "boolean".to_string())];
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named("string".to_string()))];
+        vec![("role".to_string(), PhpType::Named(atom("string")))];
 
     let result = provider.provide(&user, &no_loader, None);
 
@@ -1939,7 +1937,7 @@ fn attribute_defaults_coexist_with_relationships_and_scopes() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named("string".to_string()))];
+        vec![("role".to_string(), PhpType::Named(atom("string")))];
     user.methods
         .push(Arc::new(make_method("posts", Some("HasMany<Post, $this>"))));
     user.methods.push(Arc::new(make_method_with_params(
@@ -1989,7 +1987,7 @@ fn attribute_default_float_type() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions =
-        vec![("rating".to_string(), PhpType::Named("float".to_string()))];
+        vec![("rating".to_string(), PhpType::Named(atom("float")))];
 
     let result = provider.provide(&user, &no_loader, None);
     let prop = result
@@ -2007,7 +2005,7 @@ fn attribute_default_null_type() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions =
-        vec![("bio".to_string(), PhpType::Named("null".to_string()))];
+        vec![("bio".to_string(), PhpType::Named(atom("null")))];
 
     let result = provider.provide(&user, &no_loader, None);
     let prop = result.properties.iter().find(|p| p.name == "bio").unwrap();
@@ -2021,7 +2019,7 @@ fn attribute_default_array_type() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions =
-        vec![("settings".to_string(), PhpType::Named("array".to_string()))];
+        vec![("settings".to_string(), PhpType::Named(atom("array")))];
 
     let result = provider.provide(&user, &no_loader, None);
     let prop = result
@@ -2111,7 +2109,7 @@ fn attributes_take_priority_over_column_names() {
     user.name = crate::atom::atom("User");
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named("string".to_string()))];
+        vec![("role".to_string(), PhpType::Named(atom("string")))];
     user.laravel_mut().column_names = vec!["role".to_string(), "email".to_string()];
 
     let result = provider.provide(&user, &no_loader, None);
@@ -2141,7 +2139,7 @@ fn all_three_sources_coexist() {
     user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     user.laravel_mut().casts_definitions = vec![("is_admin".to_string(), "boolean".to_string())];
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named("string".to_string()))];
+        vec![("role".to_string(), PhpType::Named(atom("string")))];
     user.laravel_mut().column_names = vec![
         "is_admin".to_string(),
         "role".to_string(),

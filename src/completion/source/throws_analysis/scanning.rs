@@ -10,6 +10,7 @@
 //!   - Look up a method's `@throws` tags from its docblock
 //!   - Extract the function body following a docblock
 
+use crate::atom::atom;
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::php_type::PhpType;
 use crate::text_scan::{
@@ -80,7 +81,7 @@ pub(crate) fn find_throw_statements(body: &str) -> Vec<ThrowInfo> {
                     let type_name = &after_new[..type_end];
                     if !type_name.is_empty() {
                         results.push(ThrowInfo {
-                            type_name: PhpType::Named(type_name.to_string()),
+                            type_name: PhpType::Named(atom(type_name)),
                             offset: pos,
                         });
                     }
@@ -298,7 +299,7 @@ pub(crate) fn find_inline_throws_annotations(body: &str) -> Vec<ThrowInfo> {
                                 .trim_end_matches('/');
                             if !clean.is_empty() && !clean.starts_with('$') {
                                 results.push(ThrowInfo {
-                                    type_name: PhpType::Named(clean.to_string()),
+                                    type_name: PhpType::Named(atom(clean)),
                                     offset: doc_start,
                                 });
                             }
@@ -357,7 +358,7 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
                     let parsed = PhpType::parse(type_str);
                     let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
                     if let Some(name) = non_null.base_name() {
-                        return Some(PhpType::Named(name.to_string()));
+                        return Some(PhpType::Named(atom(name)));
                     }
                 }
             }
@@ -381,7 +382,7 @@ pub(crate) fn find_method_return_type(file_content: &str, method_name: &str) -> 
                             && !parsed.is_mixed()
                             && !parsed.is_self_like()
                         {
-                            return Some(PhpType::Named(name.to_string()));
+                            return Some(PhpType::Named(atom(name)));
                         }
                     }
                 }
@@ -434,7 +435,7 @@ pub(crate) fn find_method_throws_tags(file_content: &str, method_name: &str) -> 
                             .trim_end_matches('*')
                             .trim_start_matches('\\');
                         if !clean.is_empty() {
-                            throws.push(PhpType::Named(clean.to_string()));
+                            throws.push(PhpType::Named(atom(clean)));
                         }
                     }
                 }

@@ -87,6 +87,7 @@
 //!    verification chains such as
 //!    `$mock->shouldHaveReceived('store')->with(...)->once()`.
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -327,7 +328,7 @@ fn is_likely_template_param(ty: &PhpType) -> bool {
 /// `selectOne`).  Patching this here lets property access on query
 /// results resolve correctly across the codebase.
 fn patch_db_select_return_types(class: &mut ClassInfo) {
-    let std_class = PhpType::Named("stdClass".to_owned());
+    let std_class = PhpType::Named(atom("stdClass"));
     let array_of_std = PhpType::generic_array(PhpType::int(), std_class.clone());
     let std_or_null = PhpType::Nullable(Box::new(std_class));
 
@@ -379,7 +380,7 @@ fn patch_cache_facade_generics(class: &mut ClassInfo) {
     ];
 
     let callback_hint = PhpType::parse("Closure(): TCacheValue");
-    let template_return = PhpType::Named(TEMPLATE.to_owned());
+    let template_return = PhpType::Named(atom(TEMPLATE));
 
     for method in class.methods.make_mut().iter_mut() {
         if !CALLBACK_METHODS.contains(&method.name.as_str()) {
@@ -444,12 +445,12 @@ fn patch_eloquent_builder_paginate_element_type(class: &mut ClassInfo) {
         // hand-written override that already carries generics (a
         // `PhpType::Generic`) is left untouched.
         let paginator_name = match method.return_type.as_ref() {
-            Some(PhpType::Named(name)) if name.contains("Paginator") => name.clone(),
+            Some(PhpType::Named(name)) if name.contains("Paginator") => name.to_string(),
             _ => continue,
         };
         let element_type = PhpType::Generic(
             paginator_name,
-            vec![PhpType::int(), PhpType::Named("TModel".to_owned())],
+            vec![PhpType::int(), PhpType::Named(atom("TModel"))],
         );
         Arc::make_mut(method).return_type = Some(element_type);
     }
@@ -468,7 +469,7 @@ fn patch_eloquent_builder_paginate_element_type(class: &mut ClassInfo) {
 /// (the runtime type is always the adapter), not container-binding
 /// resolution.
 fn patch_storage_fake_return_types(class: &mut ClassInfo) {
-    let adapter = PhpType::Named(FILESYSTEM_ADAPTER_FQN.to_owned());
+    let adapter = PhpType::Named(atom(FILESYSTEM_ADAPTER_FQN));
     for method in class.methods.make_mut().iter_mut() {
         if method.name != "fake" && method.name != "persistentFake" {
             continue;
@@ -521,8 +522,8 @@ fn patch_testcase_mock_return_types(class: &mut ClassInfo) {
 
     let abstract_hint = PhpType::parse("class-string<TMock>|TMock");
     let mock_return = PhpType::Intersection(vec![
-        PhpType::Named(MOCK_INTERFACE_FQN.to_owned()),
-        PhpType::Named(TEMPLATE.to_owned()),
+        PhpType::Named(atom(MOCK_INTERFACE_FQN)),
+        PhpType::Named(atom(TEMPLATE)),
     ]);
 
     for method in class.methods.make_mut().iter_mut() {
@@ -595,8 +596,8 @@ fn patch_testcase_mock_return_types(class: &mut ClassInfo) {
 /// the already-resolved `Mockery\LegacyMockInterface` name (patching an
 /// implementing interface/class).
 fn patch_mockery_verification_return_types(class: &mut ClassInfo) {
-    let director = PhpType::Named(VERIFICATION_DIRECTOR_FQN.to_owned());
-    let higher_order_message = PhpType::Named(HIGHER_ORDER_MESSAGE_FQN.to_owned());
+    let director = PhpType::Named(atom(VERIFICATION_DIRECTOR_FQN));
+    let higher_order_message = PhpType::Named(atom(HIGHER_ORDER_MESSAGE_FQN));
 
     for method in class.methods.make_mut().iter_mut() {
         let new_return = match method.name.as_str() {

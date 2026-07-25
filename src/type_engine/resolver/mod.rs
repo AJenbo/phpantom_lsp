@@ -37,6 +37,7 @@ pub(crate) use context::{
 };
 pub(crate) use property_narrowing::apply_property_narrowing;
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::Backend;
@@ -1029,7 +1030,7 @@ fn check_unresolvable_class_name(
     let base = effective.base_name()?;
 
     if class_loader(base).is_none() {
-        Some(PhpType::Named(base.to_string()))
+        Some(PhpType::Named(atom(base)))
     } else {
         None
     }

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
@@ -292,11 +292,11 @@ pub(in crate::type_engine) fn try_extract_instanceof<'b>(
             // RHS is the class name
             match bin.rhs {
                 Expression::Identifier(ident) => {
-                    Some(PhpType::Named(bytes_to_str(ident.value()).to_string()))
+                    Some(PhpType::Named(atom(bytes_to_str(ident.value()))))
                 }
-                Expression::Self_(_) => Some(PhpType::Named("self".to_string())),
-                Expression::Static(_) => Some(PhpType::Named("static".to_string())),
-                Expression::Parent(_) => Some(PhpType::Named("parent".to_string())),
+                Expression::Self_(_) => Some(PhpType::Named(atom("self"))),
+                Expression::Static(_) => Some(PhpType::Named(atom("static"))),
+                Expression::Parent(_) => Some(PhpType::Named(atom("parent"))),
                 _ => None,
             }
         }
@@ -326,7 +326,7 @@ pub(in crate::type_engine) fn try_extract_instanceof<'b>(
 ///   `false` for `instanceof` / `is_a()` checks where a more-specific subtype
 ///   in the current results should be kept.
 pub(in crate::type_engine) struct InstanceofExtraction {
-    /// The narrowed type (e.g. `PhpType::Named("ClassName".into())`).
+    /// The narrowed type (e.g. `PhpType::Named(atom("ClassName"))`).
     pub class_type: PhpType,
     pub negated: bool,
     pub exact: bool,
@@ -417,7 +417,7 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<PhpT
             Argument::Positional(pos) => pos.value,
             Argument::Named(named) => named.value,
         };
-        extract_class_string_from_expr(second_expr).map(PhpType::Named)
+        extract_class_string_from_expr(second_expr).map(|n| PhpType::Named(atom(n.as_ref())))
     } else {
         None
     }
@@ -502,7 +502,7 @@ fn match_class_identity_pair<'b>(
     if !is_class_of_var {
         return None;
     }
-    extract_class_string_from_expr(rhs).map(PhpType::Named)
+    extract_class_string_from_expr(rhs).map(|n| PhpType::Named(atom(n.as_ref())))
 }
 
 /// Check if `expr` is `get_class($var)` where the variable matches.

@@ -14,6 +14,7 @@
 //! here rather than inline in the generic resolver avoids coupling the type
 //! engine to Laravel conventions.
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -303,7 +304,7 @@ fn inject_model_virtual_methods(
     // `Builder<static>`), so substituting `static` → model name
     // produces `Builder<Customer>`.  Using `Builder<Model>` here
     // would double-wrap to `Builder<Builder<Customer>>`.
-    let model_type = PhpType::Named(model_name.to_owned());
+    let model_type = PhpType::Named(atom(model_name));
     let subs = self_ref_subs(model_type);
 
     for method in &resolved_model.methods {

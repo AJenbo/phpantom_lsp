@@ -6,6 +6,7 @@
 //! virtual instance and static methods with the `scope` prefix stripped
 //! and the first `$query` parameter removed.
 
+use crate::atom::atom;
 use std::sync::Arc;
 
 use crate::php_type::PhpType;
@@ -168,7 +169,7 @@ pub fn build_scope_methods_for_builder(
     // The default scope return type is `\...\Builder<static>` where
     // `static` means the model, so substituting `static` → `User`
     // produces `\...\Builder<User>`, keeping the chain on the builder.
-    let model_type = PhpType::Named(model_name.to_owned());
+    let model_type = PhpType::Named(atom(model_name));
     let subs = super::self_ref_subs(model_type);
 
     let mut methods = Vec::new();
@@ -200,7 +201,7 @@ pub fn build_scope_methods_for_builder(
             if is_bare_builder_type(ret) {
                 *ret = PhpType::Generic(
                     ELOQUENT_BUILDER_FQN.to_string(),
-                    vec![PhpType::Named(model_name.to_string())],
+                    vec![PhpType::Named(atom(model_name))],
                 );
             }
         }

@@ -511,7 +511,7 @@ pub struct MethodInfo {
     /// Exception types declared via `@throws` tags in the method's docblock.
     ///
     /// For example, a method with `@throws \InvalidArgumentException` would have
-    /// `throws: vec![PhpType::Named("InvalidArgumentException".into())]`.  Used
+    /// `throws: vec![PhpType::Named(atom("InvalidArgumentException"))]`.  Used
     /// during code generation and analysis to propagate exception information.
     pub throws: Vec<PhpType>,
     /// Type constraint from `@psalm-if-this-is` or `@phpstan-if-this-is`.

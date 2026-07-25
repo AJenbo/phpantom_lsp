@@ -74,7 +74,7 @@ pub(crate) fn merge_traits_into(
             let factory_fqn = model_to_factory_fqn(&model_fqn);
             if class_loader(&factory_fqn).is_some() {
                 for param in &trait_info.template_params {
-                    trait_subs.insert(param.to_string(), PhpType::Named(factory_fqn.clone()));
+                    trait_subs.insert(param.to_string(), PhpType::Named(atom(&factory_fqn)));
                 }
             }
         }

@@ -1180,7 +1180,7 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
         .map(|c| c.fqn().to_string())
         .or_else(|| first.type_string.base_name().map(|s| s.to_string()))?;
 
-    Some(PhpType::Named(name))
+    Some(PhpType::Named(atom(&name)))
 }
 
 /// Bind a foreach value variable from the iterable's element type.

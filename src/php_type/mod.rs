@@ -22,7 +22,7 @@ use mago_database::file::FileId;
 use mago_span::{Position, Span};
 use mago_type_syntax::cst;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{Atom, atom, bytes_to_str};
 
 mod display;
 mod keywords;
@@ -46,7 +46,14 @@ pub enum PhpType {
     /// A named type: keywords (`int`, `string`, `mixed`, `void`, …),
     /// class references (`Foo\Bar`), or special names (`self`, `static`,
     /// `parent`). Also used for PHPDoc variable references (`$this`).
-    Named(String),
+    ///
+    /// Interned as an [`Atom`]: `Named` values are drawn from a bounded set
+    /// (class names, keywords, template parameters, `$this`), compared
+    /// frequently, and cloned throughout the substitution hot path, so
+    /// pointer-sized equality and free cloning pay off here. Literal scalar
+    /// values live in [`PhpType::Literal`], not here, so the interner is
+    /// never fed unbounded free text.
+    Named(Atom),
 
     /// Nullable type: `?T`.
     Nullable(Box<PhpType>),
@@ -227,22 +234,22 @@ pub struct CallableParam {
 impl PhpType {
     /// `int` type.
     pub fn int() -> PhpType {
-        PhpType::Named("int".to_owned())
+        PhpType::Named(atom("int"))
     }
 
     /// `string` type.
     pub fn string() -> PhpType {
-        PhpType::Named("string".to_owned())
+        PhpType::Named(atom("string"))
     }
 
     /// `float` type.
     pub fn float() -> PhpType {
-        PhpType::Named("float".to_owned())
+        PhpType::Named(atom("float"))
     }
 
     /// `bool` type.
     pub fn bool() -> PhpType {
-        PhpType::Named("bool".to_owned())
+        PhpType::Named(atom("bool"))
     }
 
     pub fn literal_int(raw: impl Into<String>) -> PhpType {
@@ -263,88 +270,88 @@ impl PhpType {
 
     /// `true` type.
     pub fn true_() -> PhpType {
-        PhpType::Named("true".to_owned())
+        PhpType::Named(atom("true"))
     }
 
     /// `false` type.
     pub fn false_() -> PhpType {
-        PhpType::Named("false".to_owned())
+        PhpType::Named(atom("false"))
     }
 
     /// `null` type.
     pub fn null() -> PhpType {
-        PhpType::Named("null".to_owned())
+        PhpType::Named(atom("null"))
     }
 
     /// `void` type.
     pub fn void() -> PhpType {
-        PhpType::Named("void".to_owned())
+        PhpType::Named(atom("void"))
     }
 
     /// `mixed` type.
     pub fn mixed() -> PhpType {
-        PhpType::Named("mixed".to_owned())
+        PhpType::Named(atom("mixed"))
     }
 
     /// `never` type.
     pub fn never() -> PhpType {
-        PhpType::Named("never".to_owned())
+        PhpType::Named(atom("never"))
     }
 
     /// `array` type (bare, unparameterised).
     pub fn array() -> PhpType {
-        PhpType::Named("array".to_owned())
+        PhpType::Named(atom("array"))
     }
 
     /// `object` type.
     pub fn object() -> PhpType {
-        PhpType::Named("object".to_owned())
+        PhpType::Named(atom("object"))
     }
 
     /// `callable` type.
     pub fn callable() -> PhpType {
-        PhpType::Named("callable".to_owned())
+        PhpType::Named(atom("callable"))
     }
 
     /// `\Closure` type (fully-qualified).
     pub fn closure() -> PhpType {
-        PhpType::Named("Closure".to_string())
+        PhpType::Named(atom("Closure"))
     }
 
     /// `iterable` type.
     pub fn iterable() -> PhpType {
-        PhpType::Named("iterable".to_owned())
+        PhpType::Named(atom("iterable"))
     }
 
     /// `self` type.
     pub fn self_() -> PhpType {
-        PhpType::Named("self".to_owned())
+        PhpType::Named(atom("self"))
     }
 
     /// `static` type.
     pub fn static_() -> PhpType {
-        PhpType::Named("static".to_owned())
+        PhpType::Named(atom("static"))
     }
 
     /// `$this` type.
     pub fn this() -> PhpType {
-        PhpType::Named("$this".to_owned())
+        PhpType::Named(atom("$this"))
     }
 
     /// `parent` type.
     pub fn parent_() -> PhpType {
-        PhpType::Named("parent".to_owned())
+        PhpType::Named(atom("parent"))
     }
 
     /// `numeric` pseudo-type.
     pub fn numeric() -> PhpType {
-        PhpType::Named("numeric".to_owned())
+        PhpType::Named(atom("numeric"))
     }
 
     /// Internal `__empty` sentinel used during type narrowing to represent
     /// a fully-filtered-out union member.
     pub fn empty_sentinel() -> PhpType {
-        PhpType::Named("__empty".to_owned())
+        PhpType::Named(atom("__empty"))
     }
 
     /// Convenience constructor for the "no type information" sentinel.
@@ -385,7 +392,8 @@ impl PhpType {
     /// This avoids the `.to_string().is_empty()` round-trip when callers
     /// only need to know whether a `PhpType` carries meaningful content.
     pub fn is_empty(&self) -> bool {
-        matches!(self, PhpType::Raw(s) | PhpType::Named(s) if s.is_empty())
+        matches!(self, PhpType::Raw(s) if s.is_empty())
+            || matches!(self, PhpType::Named(s) if s.is_empty())
     }
 
     /// Whether this type is the internal `__empty` sentinel used during
@@ -1043,13 +1051,13 @@ impl PhpType {
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
         match self {
-            PhpType::Named(s) => native_scalar_name(s).map(|n| PhpType::Named(n.to_string())),
+            PhpType::Named(s) => native_scalar_name(s).map(|n| PhpType::Named(atom(n))),
             PhpType::Generic(name, _) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
                 native_scalar_name(name)
-                    .map(|n| PhpType::Named(n.to_string()))
-                    .or_else(|| Some(PhpType::Named(name.clone())))
+                    .map(|n| PhpType::Named(atom(n)))
+                    .or_else(|| Some(PhpType::Named(atom(name))))
             }
             PhpType::Nullable(inner) => inner
                 .to_native_hint_typed()
@@ -1111,7 +1119,7 @@ impl PhpType {
             }
             PhpType::Literal(LiteralValue::Float(_)) => Some(PhpType::float()),
             PhpType::ObjectShape(_) => Some(PhpType::object()),
-            PhpType::Callable { kind, .. } => Some(PhpType::Named(kind.clone())),
+            PhpType::Callable { kind, .. } => Some(PhpType::Named(atom(kind))),
             PhpType::Conditional { .. }
             | PhpType::KeyOf(_)
             | PhpType::ValueOf(_)

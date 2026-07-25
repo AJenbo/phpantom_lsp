@@ -2,6 +2,7 @@
 //! from a classified declaration, plus the type-enrichment helpers
 //! that decide when a native type hint needs a PHPDoc tag at all.
 
+use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -209,7 +210,7 @@ pub(crate) fn enrichment_plain_typed(
         let args: Vec<PhpType> = cls
             .template_params
             .iter()
-            .map(|s| PhpType::Named(s.to_string()))
+            .map(|s| PhpType::Named(atom(s.as_ref())))
             .collect();
         return Some(PhpType::Generic(name.to_string(), args));
     }

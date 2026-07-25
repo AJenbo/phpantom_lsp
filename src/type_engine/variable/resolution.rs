@@ -97,7 +97,7 @@ pub(super) fn enrich_builder_type_in_scope(
     // Build the enriched type with the enclosing model as the generic arg.
     Some(PhpType::Generic(
         type_name.to_string(),
-        vec![PhpType::Named(current_class.name.to_string())],
+        vec![PhpType::Named(atom(current_class.name.as_ref()))],
     ))
 }
 
@@ -1290,7 +1290,7 @@ pub(super) fn substitute_class_string_template_bounds(
     // (i.e. a potential template parameter).
     let inner_name = match &ty {
         PhpType::ClassString(Some(inner)) => match inner.as_ref() {
-            PhpType::Named(name) => Some(name.clone()),
+            PhpType::Named(name) => Some(*name),
             _ => None,
         },
         _ => None,
@@ -1362,10 +1362,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.class_loader,
                 );
-                Some(PhpType::Named(fqn))
+                Some(PhpType::Named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
-            Expression::Static(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
+            Expression::Self_(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Static(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
             _ => None,
         },
         // Function / method calls → look up the return type.

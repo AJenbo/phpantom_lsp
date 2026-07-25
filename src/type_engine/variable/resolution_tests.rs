@@ -1399,7 +1399,7 @@ function test() {
     // (matching what the real backend parses from the upstream stubs).
     let func_loader = |name: &str, _offset: u32| -> Option<crate::types::FunctionInfo> {
         if name.eq_ignore_ascii_case("array_reduce") {
-            let mut fi = stub_function_info(name, Some(PhpType::Named("TCarry".to_string())));
+            let mut fi = stub_function_info(name, Some(PhpType::Named(atom("TCarry"))));
             fi.parameters = vec![
                 crate::test_fixtures::make_param("$array", Some("array"), true),
                 crate::test_fixtures::make_param("$callback", Some("callable"), true),

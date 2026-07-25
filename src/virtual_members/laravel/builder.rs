@@ -145,10 +145,8 @@ pub(super) fn build_builder_forwarded_methods(
 
     // Build a substitution map: TModel → concrete model class name,
     // and static/$this/self → Builder<ConcreteModel>.
-    let builder_self_type = PhpType::Generic(
-        builder_fqn.clone(),
-        vec![PhpType::Named(class.fqn().to_string())],
-    );
+    let builder_self_type =
+        PhpType::Generic(builder_fqn.clone(), vec![PhpType::Named(class.fqn())]);
     let mut subs = super::self_ref_subs(builder_self_type.clone());
     insert_builder_template_substitutions(
         &mut subs,
@@ -314,7 +312,7 @@ fn insert_builder_template_substitutions(
     builder_fqn: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
-    let model_type = PhpType::Named(model_class.fqn().to_string());
+    let model_type = PhpType::Named(model_class.fqn());
     for param in &builder_class.template_params {
         subs.insert(param.to_string(), model_type.clone());
     }

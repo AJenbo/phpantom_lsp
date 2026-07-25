@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
@@ -86,7 +86,7 @@ pub(super) fn resolve_rhs_property_access(
         };
         if let Some(class_name) = class_name {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
-            let resolved_typed = PhpType::Named(resolved_name.to_string());
+            let resolved_typed = PhpType::Named(atom(resolved_name));
             let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &resolved_typed,
                 current_class_name,
@@ -108,7 +108,7 @@ pub(super) fn resolve_rhs_property_access(
             // `class-string<object>` parameters) keep the concrete class.
             if const_name.as_deref() == Some("class") {
                 return vec![ResolvedType::from_type_string(PhpType::ClassString(Some(
-                    Box::new(PhpType::Named(resolved_name.to_string())),
+                    Box::new(PhpType::Named(atom(resolved_name))),
                 )))];
             }
 
@@ -206,7 +206,7 @@ pub(super) fn resolve_rhs_property_access(
             && let Some(prop_name) = prop_name
         {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
-            let resolved_typed = PhpType::Named(resolved_name.to_string());
+            let resolved_typed = PhpType::Named(atom(resolved_name));
             let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &resolved_typed,
                 current_class_name,

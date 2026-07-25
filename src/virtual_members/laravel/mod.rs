@@ -132,6 +132,7 @@ pub use helpers::extends_eloquent_model;
 pub(crate) use helpers::walk_all_php_expressions;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
 
+use crate::atom::atom;
 pub(crate) use accessors::is_accessor_or_mutator_method;
 use accessors::{
     extract_modern_accessor_type, is_legacy_accessor, is_legacy_mutator, is_modern_accessor,
@@ -295,7 +296,7 @@ pub struct LaravelModelProvider;
 
 /// Laravel date type used for date-related virtual properties.
 fn carbon_type() -> PhpType {
-    PhpType::Named(CONFIGURED_DATE_CLASS_FQN.to_owned())
+    PhpType::Named(atom(CONFIGURED_DATE_CLASS_FQN))
 }
 
 fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {

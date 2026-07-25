@@ -30,7 +30,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::{
@@ -737,7 +737,7 @@ fn try_relation_query_override(
     // Return `Builder<RelatedModel>` as the closure parameter type.
     let builder_type = PhpType::Generic(
         ELOQUENT_BUILDER_FQN.to_string(),
-        vec![PhpType::Named(related_fqn)],
+        vec![PhpType::Named(atom(&related_fqn))],
     );
 
     Some(vec![builder_type])
@@ -772,7 +772,7 @@ fn build_receiver_self_type(
     // Only attempt reconstruction when the class declares template
     // params — otherwise there are no generic args to recover.
     if receiver.template_params.is_empty() {
-        return PhpType::Named(fqn.to_string());
+        return PhpType::Named(atom(fqn.as_ref()));
     }
 
     // For Eloquent Builder, extract the model name from method return
@@ -811,7 +811,7 @@ fn build_receiver_self_type(
         }
     }
 
-    PhpType::Named(fqn.to_string())
+    PhpType::Named(atom(fqn.as_ref()))
 }
 
 /// Try to extract concrete generic args from a class's own methods.

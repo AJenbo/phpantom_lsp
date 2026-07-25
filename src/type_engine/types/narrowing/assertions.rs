@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::atom::{Atom, bytes_to_str};
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, TypeAssertion};
 
@@ -540,7 +540,7 @@ fn resolve_assertion_template_type(
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
         let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
-        return PhpType::Named(fqn);
+        return PhpType::Named(atom(&fqn));
     }
 
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
@@ -558,7 +558,7 @@ fn resolve_assertion_template_type(
             for resolved in scope_resolver(&var_name) {
                 if let Some(PhpType::Named(name)) = resolved.type_string.unwrap_class_string_inner()
                 {
-                    return PhpType::Named(name.clone());
+                    return PhpType::Named(*name);
                 }
             }
         }
@@ -581,7 +581,7 @@ fn resolve_assertion_template_type(
                 ctx.class_loader,
             );
         if let Some(first) = targets.into_iter().next() {
-            return PhpType::Named(first.name.to_string());
+            return PhpType::Named(atom(first.name.as_ref()));
         }
     }
 

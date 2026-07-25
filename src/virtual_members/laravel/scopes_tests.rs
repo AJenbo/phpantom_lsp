@@ -149,7 +149,7 @@ fn scope_return_type_custom() {
     let method = make_method("scopeActive", Some("\\App\\Builders\\UserBuilder"));
     assert_eq!(
         scope_return_type(&method),
-        PhpType::Named("\\App\\Builders\\UserBuilder".to_string())
+        PhpType::Named(atom("\\App\\Builders\\UserBuilder"))
     );
 }
 

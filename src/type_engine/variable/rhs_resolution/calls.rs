@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -1638,7 +1638,7 @@ pub(super) fn resolve_owner_method_call(
             owner
                 .parent_class
                 .as_ref()
-                .map(|p| PhpType::Named(p.to_string()))
+                .map(|p| PhpType::Named(atom(p.as_ref())))
                 .unwrap_or(substituted)
         } else {
             substituted
@@ -1866,7 +1866,7 @@ pub(super) fn resolve_rhs_static_call(
                             );
                             for r in results {
                                 union_classes.push(ResolvedType::from_both_arc(
-                                    PhpType::Named(r.name.to_string()),
+                                    PhpType::Named(atom(r.name.as_ref())),
                                     r,
                                 ));
                             }

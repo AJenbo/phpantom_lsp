@@ -12,6 +12,7 @@
 /// subject resolution pipelines, then looks up each resolved class name
 /// via [`resolve_class_reference`](super::resolve) to find its
 /// definition location.
+use crate::atom::atom;
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
@@ -116,28 +117,28 @@ impl Backend {
 
             SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
                 SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class
-                    .map(|cc| vec![PhpType::Named(cc.name.to_string())])
+                    .map(|cc| vec![PhpType::Named(atom(cc.name.as_ref()))])
                     .unwrap_or_default(),
                 SelfStaticParentKind::This => {
                     if let Some(override_cls) =
                         self.resolve_closure_this_override(uri, content, offset)
                     {
-                        vec![PhpType::Named(override_cls.fqn().to_string())]
+                        vec![PhpType::Named(override_cls.fqn())]
                     } else {
                         current_class
-                            .map(|cc| vec![PhpType::Named(cc.name.to_string())])
+                            .map(|cc| vec![PhpType::Named(atom(cc.name.as_ref()))])
                             .unwrap_or_default()
                     }
                 }
                 SelfStaticParentKind::Parent => current_class
                     .and_then(|cc| cc.parent_class.as_ref())
-                    .map(|p| vec![PhpType::Named(p.to_string())])
+                    .map(|p| vec![PhpType::Named(atom(p.as_ref()))])
                     .unwrap_or_default(),
             },
 
             SymbolKind::ClassReference { name, .. } => {
                 // The type *is* the class itself.
-                vec![PhpType::Named(name.clone())]
+                vec![PhpType::Named(atom(name))]
             }
 
             SymbolKind::FunctionCall { name, .. } => self
@@ -304,7 +305,7 @@ fn resolve_variable_type_names(
 ) -> Option<PhpType> {
     // $this resolves to the enclosing class.
     if name == "this" {
-        return current_class.map(|cc| PhpType::Named(cc.name.to_string()));
+        return current_class.map(|cc| PhpType::Named(atom(cc.name.as_ref())));
     }
 
     // Delegate to the unified pipeline.

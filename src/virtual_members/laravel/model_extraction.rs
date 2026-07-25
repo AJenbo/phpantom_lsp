@@ -15,7 +15,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{Atom, bytes_to_str, last_segment};
+use crate::atom::{Atom, atom, bytes_to_str, last_segment};
 use crate::parser::DocblockCtx;
 use crate::php_type::PhpType;
 use crate::types::{LaravelMetadata, MethodInfo, PivotRelation};
@@ -209,7 +209,7 @@ fn extract_custom_builder(
 ) -> Option<PhpType> {
     // 1. Try the #[UseEloquentBuilder] attribute first.
     if let Some(name) = extract_use_eloquent_builder_attribute(attribute_lists, content) {
-        return Some(PhpType::Named(name));
+        return Some(PhpType::Named(atom(&name)));
     }
 
     // 2. Fall back to @use HasBuilder<X>.
@@ -249,7 +249,7 @@ fn extract_custom_collection(
 ) -> Option<PhpType> {
     // 1. Try the #[CollectedBy] attribute first.
     if let Some(name) = extract_collected_by_attribute(attribute_lists, content) {
-        return Some(PhpType::Named(name));
+        return Some(PhpType::Named(atom(&name)));
     }
 
     // 2. Fall back to @use HasCollection<X>.

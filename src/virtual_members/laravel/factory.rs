@@ -154,7 +154,7 @@ fn build_factory_model_methods(
         return Vec::new();
     }
 
-    let model_type = PhpType::Named(model_fqn.to_string());
+    let model_type = PhpType::Named(atom(model_fqn.as_ref()));
 
     vec![
         MethodInfo::virtual_method_typed("create", Some(&model_type)),

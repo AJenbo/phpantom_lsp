@@ -502,7 +502,7 @@ fn tget_from_casts_attributes_short_name() {
     )];
     assert_eq!(
         extract_tget_from_implements_generics(&c),
-        Some(PhpType::Named("HtmlString".to_string()))
+        Some(PhpType::Named(atom("HtmlString")))
     );
 }
 
@@ -518,9 +518,7 @@ fn tget_from_casts_attributes_fqn() {
     )];
     assert_eq!(
         extract_tget_from_implements_generics(&c),
-        Some(PhpType::Named(
-            "\\Illuminate\\Support\\HtmlString".to_string()
-        ))
+        Some(PhpType::Named(atom("\\Illuminate\\Support\\HtmlString")))
     );
 }
 
@@ -535,7 +533,7 @@ fn tget_from_casts_attributes_fqn_canonical() {
     )];
     assert_eq!(
         extract_tget_from_implements_generics(&c),
-        Some(PhpType::Named("HtmlString".to_string()))
+        Some(PhpType::Named(atom("HtmlString")))
     );
 }
 

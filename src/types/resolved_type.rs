@@ -12,7 +12,7 @@ impl ResolvedType {
     /// but loses generic parameters.  Future sprints will populate the
     /// type string from the actual return type annotation.
     pub fn from_class(class: ClassInfo) -> Self {
-        let type_string = PhpType::Named(class.fqn().to_string());
+        let type_string = PhpType::Named(class.fqn());
         Self {
             type_string,
             class_info: Some(Arc::new(class)),
@@ -23,7 +23,7 @@ impl ResolvedType {
     /// as the type string.  Avoids cloning when the caller already holds
     /// an `Arc`.
     pub fn from_arc(class: Arc<ClassInfo>) -> Self {
-        let type_string = PhpType::Named(class.fqn().to_string());
+        let type_string = PhpType::Named(class.fqn());
         Self {
             type_string,
             class_info: Some(class),

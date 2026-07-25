@@ -28,9 +28,9 @@ impl PhpType {
         match self {
             PhpType::Named(s) => {
                 if is_keyword_type(s) {
-                    PhpType::Named(s.clone())
+                    PhpType::Named(*s)
                 } else {
-                    PhpType::Named(resolver(s))
+                    PhpType::Named(atom(&resolver(s)))
                 }
             }
 
@@ -157,7 +157,7 @@ impl PhpType {
     /// `array<int, App\Models\User>` becomes `array<int, User>`.
     pub fn shorten(&self) -> PhpType {
         match self {
-            PhpType::Named(s) => PhpType::Named(Self::short_name_of(s).to_owned()),
+            PhpType::Named(s) => PhpType::Named(atom(Self::short_name_of(s))),
 
             PhpType::Nullable(inner) => PhpType::Nullable(Box::new(inner.shorten())),
 
@@ -270,7 +270,7 @@ impl PhpType {
     /// assert_eq!(replaced.to_string(), "App\\User | null");
     /// ```
     pub fn replace_self(&self, class_name: &str) -> PhpType {
-        self.replace_self_with_type(&PhpType::Named(class_name.to_string()))
+        self.replace_self_with_type(&PhpType::Named(atom(class_name)))
     }
 
     /// Resolve relative class-reference keywords to concrete class names,
@@ -291,7 +291,7 @@ impl PhpType {
             Some(parent) => {
                 let subs = std::collections::HashMap::from([(
                     "parent".to_string(),
-                    PhpType::Named(parent.to_string()),
+                    PhpType::Named(atom(parent)),
                 )]);
                 replaced.substitute(&subs)
             }
@@ -305,9 +305,7 @@ impl PhpType {
     /// while preserving `static` for late-static-binding resolution.
     pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
         match self {
-            PhpType::Named(s) if s.eq_ignore_ascii_case("self") => {
-                PhpType::Named(class_name.to_string())
-            }
+            PhpType::Named(s) if s.eq_ignore_ascii_case("self") => PhpType::Named(atom(class_name)),
             PhpType::Named(_) | PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
             PhpType::Nullable(inner) => {
                 PhpType::Nullable(Box::new(inner.replace_bare_self(class_name)))
@@ -646,7 +644,7 @@ impl PhpType {
                 if let Some(replacement) = subs.get(name.as_str()) {
                     match replacement {
                         PhpType::Named(n) => PhpType::Generic(
-                            n.clone(),
+                            n.to_string(),
                             args.iter().map(|a| a.substitute(subs)).collect(),
                         ),
                         PhpType::Generic(base, _) => {
@@ -796,8 +794,8 @@ impl PhpType {
     fn collect_class_names(&self, names: &mut Vec<String>) {
         match self {
             PhpType::Named(s) => {
-                if !is_keyword_type(s) && !s.is_empty() && !names.contains(s) {
-                    names.push(s.clone());
+                if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
+                    names.push(s.to_string());
                 }
             }
 
@@ -882,8 +880,12 @@ impl PhpType {
     /// params/return, shapes, class-string inner types, etc.
     fn collect_top_level_class_names(&self, names: &mut Vec<String>) {
         match self {
-            PhpType::Named(s) if !is_keyword_type(s) && !s.is_empty() && !names.contains(s) => {
-                names.push(s.clone());
+            PhpType::Named(s)
+                if !is_keyword_type(s)
+                    && !s.is_empty()
+                    && !names.iter().any(|n| n == s.as_str()) =>
+            {
+                names.push(s.to_string());
             }
 
             PhpType::Nullable(inner) => inner.collect_top_level_class_names(names),

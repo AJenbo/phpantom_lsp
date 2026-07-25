@@ -16,6 +16,7 @@
 /// - **No-args** ([`resolve_conditional_without_args`]): used when no
 ///   arguments were provided (or none were preserved); walks the
 ///   conditional tree taking the "null default" branch at each level.
+use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -342,9 +343,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
 
                         let ty = if class_names.len() == 1 {
-                            PhpType::Named(class_names.into_iter().next().unwrap())
+                            PhpType::Named(atom(&class_names.into_iter().next().unwrap()))
                         } else {
-                            PhpType::Union(class_names.into_iter().map(PhpType::Named).collect())
+                            PhpType::Union(
+                                class_names
+                                    .into_iter()
+                                    .map(|n| PhpType::Named(atom(n.as_ref())))
+                                    .collect(),
+                            )
                         };
                         return Some(substitute_bound(ty));
                     }
@@ -384,7 +390,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         return choose_branch(satisfies_bound(&resolved));
                     }
 
-                    return Some(substitute_bound(PhpType::Named(resolved)));
+                    return Some(substitute_bound(PhpType::Named(atom(&resolved))));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -407,9 +413,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
 
                         let ty = if names.len() == 1 {
-                            PhpType::Named(names.into_iter().next().unwrap())
+                            PhpType::Named(atom(&names.into_iter().next().unwrap()))
                         } else {
-                            PhpType::Union(names.into_iter().map(PhpType::Named).collect())
+                            PhpType::Union(
+                                names
+                                    .into_iter()
+                                    .map(|n| PhpType::Named(atom(n.as_ref())))
+                                    .collect(),
+                            )
                         };
                         return Some(substitute_bound(ty));
                     }
@@ -898,7 +909,7 @@ pub fn evaluate_nested_conditionals_text(
                 class_loader,
                 tpl,
             )
-            .unwrap_or_else(|| PhpType::Named("mixed".into()));
+            .unwrap_or_else(|| PhpType::Named(atom("mixed")));
             // Template-default resolution hands back the winning branch
             // without recursing into it, so the branch may itself be a
             // conditional (e.g. `TGroupKey is \UnitEnum ? … : (TGroupKey is
@@ -911,7 +922,7 @@ pub fn evaluate_nested_conditionals_text(
             } else if resolved != *ty {
                 recurse(&resolved)
             } else {
-                PhpType::Named("mixed".into())
+                PhpType::Named(atom("mixed"))
             }
         }
         PhpType::Generic(name, args) => {
@@ -1065,7 +1076,8 @@ fn extract_class_name_from_text(text: &str) -> Option<String> {
 /// class constants and return `None`.
 fn class_const_condition_parts(condition: &PhpType) -> Option<(&str, &str)> {
     let raw = match condition {
-        PhpType::Raw(s) | PhpType::Named(s) => s.as_str(),
+        PhpType::Raw(s) => s.as_str(),
+        PhpType::Named(s) => s.as_str(),
         _ => return None,
     };
     let (class, member) = raw.rsplit_once("::")?;
@@ -1292,7 +1304,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         return choose_branch(satisfies_bound(&resolved));
                     }
 
-                    return Some(substitute_bound(PhpType::Named(resolved)));
+                    return Some(substitute_bound(PhpType::Named(atom(&resolved))));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -1312,9 +1324,14 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         }
 
                         let ty = if names.len() == 1 {
-                            PhpType::Named(names.into_iter().next().unwrap())
+                            PhpType::Named(atom(&names.into_iter().next().unwrap()))
                         } else {
-                            PhpType::Union(names.into_iter().map(PhpType::Named).collect())
+                            PhpType::Union(
+                                names
+                                    .into_iter()
+                                    .map(|n| PhpType::Named(atom(n.as_ref())))
+                                    .collect(),
+                            )
                         };
                         return Some(substitute_bound(ty));
                     }
@@ -1813,7 +1830,7 @@ mod tests {
 
     #[test]
     fn class_const_condition_parts_rejects_non_constants() {
-        assert!(class_const_condition_parts(&PhpType::Named("string".into())).is_none());
+        assert!(class_const_condition_parts(&PhpType::Named(atom("string"))).is_none());
         assert!(class_const_condition_parts(&PhpType::Raw("Foo::*".into())).is_none());
         assert!(class_const_condition_parts(&PhpType::Raw("Foo::class".into())).is_none());
         assert_eq!(
@@ -1847,7 +1864,7 @@ mod tests {
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
         let resolver = |t: &str| {
             if t == "$obj->toHtml()" {
-                Some(PhpType::Named("string".into()))
+                Some(PhpType::Named(atom("string")))
             } else {
                 None
             }
@@ -1908,7 +1925,7 @@ mod tests {
         let cond = PhpType::parse("($groupBy is (array|string) ? array-key : Value)");
         let params = [param("$groupBy")];
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
-        let resolver = |_: &str| Some(PhpType::Named("Closure".into()));
+        let resolver = |_: &str| Some(PhpType::Named(atom("Closure")));
         let tpl = TemplateContext {
             defaults: None,
             params: &[],
@@ -1986,13 +2003,13 @@ mod tests {
         defaults.insert(
             "T".to_string(),
             PhpType::Union(vec![
-                PhpType::Named("string".into()),
-                PhpType::Named("null".into()),
+                PhpType::Named(atom("string")),
+                PhpType::Named(atom("null")),
             ]),
         );
         let ty = ty.substitute(&defaults);
         assert!(ty.contains_conditional());
-        let resolver = |_: &str| Some(PhpType::Named("Closure".into()));
+        let resolver = |_: &str| Some(PhpType::Named(atom("Closure")));
         let tpl = TemplateContext {
             defaults: Some(&defaults),
             params: &[crate::atom::atom("T")],

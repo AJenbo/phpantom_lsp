@@ -7,6 +7,7 @@
 /// resolver pipeline.
 ///
 /// Consumers: deprecated diagnostics, find-references, code actions.
+use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -46,17 +47,17 @@ pub(crate) fn resolve_subject_type(
     match trimmed {
         "$this" | "self" | "static" => {
             let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
-            Some(PhpType::Named(fqn))
+            Some(PhpType::Named(atom(&fqn)))
         }
         "parent" => {
             let cls = find_class_at_offset(ctx.local_classes, access_offset)?;
             let parent = cls.parent_class.as_ref()?;
             let fqn = resolve_to_fqn(parent, ctx.use_map, ctx.namespace);
-            Some(PhpType::Named(fqn))
+            Some(PhpType::Named(atom(&fqn)))
         }
         _ if is_static && !trimmed.starts_with('$') => {
             let fqn = resolve_to_fqn(trimmed, ctx.use_map, ctx.namespace);
-            Some(PhpType::Named(fqn))
+            Some(PhpType::Named(atom(&fqn)))
         }
         _ if trimmed.starts_with('$') => {
             let current_class = find_class_at_offset(ctx.local_classes, access_offset);

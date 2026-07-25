@@ -9,7 +9,7 @@ use mago_syntax::cst::*;
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::docblock;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
@@ -167,10 +167,10 @@ fn infer_element_type<'b>(
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.class_loader,
                 );
-                Some(PhpType::Named(fqn))
+                Some(PhpType::Named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
-            Expression::Static(_) => Some(PhpType::Named(ctx.current_class.name.to_string())),
+            Expression::Self_(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Static(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
             _ => None,
         },
         Expression::Call(_) => {

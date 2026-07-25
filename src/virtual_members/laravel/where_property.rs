@@ -136,10 +136,7 @@ pub fn build_where_property_methods_for_class(
         .and_then(|t| t.base_name())
         .unwrap_or(ELOQUENT_BUILDER_FQN);
 
-    let return_type = PhpType::Generic(
-        builder_fqn.to_string(),
-        vec![PhpType::Named(class.fqn().to_string())],
-    );
+    let return_type = PhpType::Generic(builder_fqn.to_string(), vec![PhpType::Named(class.fqn())]);
 
     let value_param = ParameterInfo {
         name: atom("$value"),

@@ -15,6 +15,7 @@
 //! - `new ClassName(…)` — the class is loaded and the constructor's
 //!   `@throws` tags are propagated.
 
+use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -194,7 +195,7 @@ pub(crate) fn find_uncaught_throw_types_with_context(
             } else {
                 resolved
             };
-            Some(PhpType::Named(fqn))
+            Some(PhpType::Named(atom(&fqn)))
         }
     }
 
@@ -443,15 +444,12 @@ pub(crate) fn parse_param_type_map(signature: &str) -> Vec<(String, PhpType)> {
         let parsed = PhpType::parse(type_token);
         let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
         if let Some(name) = non_null.base_name() {
-            result.push((var_name.to_string(), PhpType::Named(name.to_string())));
+            result.push((var_name.to_string(), PhpType::Named(atom(name))));
         } else {
             // Fallback for scalars and other non-class types.
             let cleaned_type = type_token.trim_start_matches('?').trim_start_matches('\\');
             if !cleaned_type.is_empty() {
-                result.push((
-                    var_name.to_string(),
-                    PhpType::Named(cleaned_type.to_string()),
-                ));
+                result.push((var_name.to_string(), PhpType::Named(atom(cleaned_type))));
             }
         }
     }
@@ -482,11 +480,11 @@ pub(crate) fn find_cross_file_propagated_throws(
         .into_iter()
         .map(|(name, ty)| {
             let resolved = if let Some(base) = ty.base_name() {
-                PhpType::Named(crate::util::resolve_to_fqn(
+                PhpType::Named(atom(&crate::util::resolve_to_fqn(
                     base,
                     ctx.use_map,
                     ctx.file_namespace,
-                ))
+                )))
             } else {
                 ty
             };

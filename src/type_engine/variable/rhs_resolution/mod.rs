@@ -41,7 +41,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{Atom, AtomMap, bytes_to_str};
+use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
@@ -153,7 +153,7 @@ fn extract_match_arm_narrowings(
             if let PhpType::Named(ref name) = class_type
                 && let Some(cls) = (ctx.class_loader)(name)
             {
-                class_type = PhpType::Named(cls.fqn().to_string());
+                class_type = PhpType::Named(cls.fqn());
             }
             let resolved = type_resolution::type_hint_to_classes_typed(
                 &class_type,
@@ -189,12 +189,10 @@ fn extract_instanceof_pair(expr: &Expression<'_>) -> Option<(String, PhpType)> {
         };
         // RHS: the class name
         let class_type = match bin.rhs {
-            Expression::Identifier(ident) => {
-                PhpType::Named(bytes_to_str(ident.value()).to_string())
-            }
-            Expression::Self_(_) => PhpType::Named("self".to_string()),
-            Expression::Static(_) => PhpType::Named("static".to_string()),
-            Expression::Parent(_) => PhpType::Named("parent".to_string()),
+            Expression::Identifier(ident) => PhpType::Named(atom(bytes_to_str(ident.value()))),
+            Expression::Self_(_) => PhpType::Named(atom("self")),
+            Expression::Static(_) => PhpType::Named(atom("static")),
+            Expression::Parent(_) => PhpType::Named(atom("parent")),
             _ => return None,
         };
         Some((var_name, class_type))
@@ -862,7 +860,8 @@ fn match_type_pattern(
         (PhpType::Named(name), _)
             if template_params.iter().any(|t| t.as_str() == name.as_str()) =>
         {
-            subs.entry(name.clone()).or_insert_with(|| concrete.clone());
+            subs.entry(name.to_string())
+                .or_insert_with(|| concrete.clone());
         }
         // Generic types with matching base names — recurse into args.
         (PhpType::Generic(p_base, p_args), PhpType::Generic(c_base, c_args))
@@ -888,14 +887,14 @@ fn match_type_pattern(
                             for c_m in c_members {
                                 let c_base = c_m.base_name().unwrap_or_default();
                                 if c_base == bound_base {
-                                    subs.entry(name.clone()).or_insert_with(|| c_m.clone());
+                                    subs.entry(name.to_string()).or_insert_with(|| c_m.clone());
                                     break;
                                 }
                             }
                         } else {
                             // No bound — take the first concrete member.
                             if let Some(c_m) = c_members.first() {
-                                subs.entry(name.clone()).or_insert_with(|| c_m.clone());
+                                subs.entry(name.to_string()).or_insert_with(|| c_m.clone());
                             }
                         }
                     }

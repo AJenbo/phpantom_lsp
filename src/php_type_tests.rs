@@ -320,7 +320,7 @@ fn parse_generic_with_star_wildcard() {
         PhpType::Generic(name, args) => {
             assert_eq!(name, "Relation");
             assert_eq!(args.len(), 3);
-            assert_eq!(args[0], PhpType::Named("TRelatedModel".to_owned()));
+            assert_eq!(args[0], PhpType::Named(atom("TRelatedModel")));
             assert_eq!(args[1], PhpType::mixed());
             assert_eq!(args[2], PhpType::mixed());
         }
@@ -355,7 +355,7 @@ fn parse_benevolent_unwraps_to_inner_union() {
     match &ty {
         PhpType::Union(members) => {
             assert_eq!(members.len(), 2);
-            assert_eq!(members[0], PhpType::Named("Loop".to_owned()));
+            assert_eq!(members[0], PhpType::Named(atom("Loop")));
             assert_eq!(members[1], PhpType::null());
         }
         other => panic!("Expected Union, got {:?}", other),
@@ -365,7 +365,7 @@ fn parse_benevolent_unwraps_to_inner_union() {
 #[test]
 fn parse_benevolent_unwraps_single_class() {
     let ty = PhpType::parse("__benevolent<Foo>");
-    assert_eq!(ty, PhpType::Named("Foo".to_owned()));
+    assert_eq!(ty, PhpType::Named(atom("Foo")));
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn parse_benevolent_nested_in_generic() {
                 PhpType::Union(members) => {
                     assert_eq!(members.len(), 2);
                     assert_eq!(members[0], PhpType::string());
-                    assert_eq!(members[1], PhpType::Named("false".to_owned()));
+                    assert_eq!(members[1], PhpType::Named(atom("false")));
                 }
                 other => panic!("Expected Union, got {:?}", other),
             }
@@ -510,9 +510,9 @@ fn intersection_is_flattened() {
     match ty {
         PhpType::Intersection(members) => {
             assert_eq!(members.len(), 3);
-            assert_eq!(members[0], PhpType::Named("A".to_owned()));
-            assert_eq!(members[1], PhpType::Named("B".to_owned()));
-            assert_eq!(members[2], PhpType::Named("C".to_owned()));
+            assert_eq!(members[0], PhpType::Named(atom("A")));
+            assert_eq!(members[1], PhpType::Named(atom("B")));
+            assert_eq!(members[2], PhpType::Named(atom("C")));
         }
         other => panic!("Expected Intersection, got {other:?}"),
     }
@@ -537,7 +537,7 @@ fn class_string_with_param() {
     let ty = PhpType::parse("class-string<Foo>");
     match ty {
         PhpType::ClassString(Some(inner)) => {
-            assert_eq!(*inner, PhpType::Named("Foo".to_owned()));
+            assert_eq!(*inner, PhpType::Named(atom("Foo")));
         }
         other => panic!("Expected ClassString(Some), got {other:?}"),
     }
@@ -621,7 +621,7 @@ fn shape_value_type_named_key() {
     let ty = PhpType::parse("array{name: string, user: User}");
     assert_eq!(
         ty.shape_value_type("user"),
-        Some(&PhpType::Named("User".to_owned()))
+        Some(&PhpType::Named(atom("User")))
     );
     assert_eq!(ty.shape_value_type("name"), Some(&PhpType::string()));
     assert_eq!(ty.shape_value_type("missing"), None);
@@ -632,11 +632,11 @@ fn shape_value_type_positional() {
     let ty = PhpType::parse("array{User, Address}");
     assert_eq!(
         ty.shape_value_type("0"),
-        Some(&PhpType::Named("User".to_owned()))
+        Some(&PhpType::Named(atom("User")))
     );
     assert_eq!(
         ty.shape_value_type("1"),
-        Some(&PhpType::Named("Address".to_owned()))
+        Some(&PhpType::Named(atom("Address")))
     );
     assert_eq!(ty.shape_value_type("2"), None);
 }
@@ -646,11 +646,11 @@ fn shape_value_type_explicit_numeric_key() {
     let ty = PhpType::parse("array{0: User, 1: Address}");
     assert_eq!(
         ty.shape_value_type("0"),
-        Some(&PhpType::Named("User".to_owned()))
+        Some(&PhpType::Named(atom("User")))
     );
     assert_eq!(
         ty.shape_value_type("1"),
-        Some(&PhpType::Named("Address".to_owned()))
+        Some(&PhpType::Named(atom("Address")))
     );
 }
 
@@ -666,7 +666,7 @@ fn shape_value_type_union_of_shapes() {
     let ty = PhpType::parse("array{name: string}|array{name: string, config: Config}");
     assert_eq!(
         ty.shape_value_type("config"),
-        Some(&PhpType::Named("Config".to_owned()))
+        Some(&PhpType::Named(atom("Config")))
     );
     // Key present in both members returns the first match.
     assert_eq!(ty.shape_value_type("name"), Some(&PhpType::string()));
@@ -824,7 +824,7 @@ fn object_shape_property_type_test() {
     let ty = PhpType::parse("object{name: string, user: User}");
     assert_eq!(
         ty.object_shape_property_type("user"),
-        Some(&PhpType::Named("User".to_owned()))
+        Some(&PhpType::Named(atom("User")))
     );
     assert_eq!(
         ty.object_shape_property_type("name"),
@@ -851,7 +851,7 @@ fn slice_structure() {
     let ty = PhpType::parse("Foo[]");
     match ty {
         PhpType::Array(inner) => {
-            assert_eq!(*inner, PhpType::Named("Foo".to_owned()));
+            assert_eq!(*inner, PhpType::Named(atom("Foo")));
         }
         other => panic!("Expected Array (slice), got {other:?}"),
     }
@@ -895,7 +895,7 @@ fn key_of_structure() {
     let ty = PhpType::parse("key-of<T>");
     match ty {
         PhpType::KeyOf(inner) => {
-            assert_eq!(*inner, PhpType::Named("T".to_owned()));
+            assert_eq!(*inner, PhpType::Named(atom("T")));
         }
         other => panic!("Expected KeyOf, got {other:?}"),
     }
@@ -906,7 +906,7 @@ fn value_of_structure() {
     let ty = PhpType::parse("value-of<T>");
     match ty {
         PhpType::ValueOf(inner) => {
-            assert_eq!(*inner, PhpType::Named("T".to_owned()));
+            assert_eq!(*inner, PhpType::Named(atom("T")));
         }
         other => panic!("Expected ValueOf, got {other:?}"),
     }
@@ -919,8 +919,7 @@ fn value_of_shape_dedups_non_adjacent_values() {
     let ty = PhpType::parse("value-of<array{a: int, b: string, c: int}>");
     // `substitute` short-circuits on an empty map, so pass an unrelated
     // binding to force the `value-of` evaluation path to run.
-    let subs =
-        std::collections::HashMap::from([("T".to_string(), PhpType::Named("int".to_string()))]);
+    let subs = std::collections::HashMap::from([("T".to_string(), PhpType::Named(atom("int")))]);
     let evaluated = ty.substitute(&subs);
     match &evaluated {
         PhpType::Union(members) => {
@@ -953,7 +952,7 @@ fn parse_model_property_generic() {
         ty,
         PhpType::Generic(
             "model-property".to_string(),
-            vec![PhpType::Named("Process".to_string())]
+            vec![PhpType::Named(atom("Process"))]
         )
     );
 }
@@ -968,7 +967,7 @@ fn parse_model_property_nested_in_array() {
             vec![
                 PhpType::Generic(
                     "model-property".to_string(),
-                    vec![PhpType::Named("Process".to_string())]
+                    vec![PhpType::Named(atom("Process"))]
                 ),
                 PhpType::mixed(),
             ]
@@ -982,7 +981,7 @@ fn parse_model_property_nested_in_array() {
 fn extract_value_type_array_slice() {
     let ty = PhpType::parse("User[]");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1002,7 +1001,7 @@ fn extract_value_type_array_slice_scalar_not_skipped() {
 fn extract_value_type_list() {
     let ty = PhpType::parse("list<User>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1023,7 +1022,7 @@ fn iterable_element_type_homogeneous_shape_collapses() {
     // not a redundant union.
     let ty = PhpType::parse("array{User, User}");
     let elem = ty.iterable_element_type().unwrap();
-    assert_eq!(elem, PhpType::Named("User".to_owned()));
+    assert_eq!(elem, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1032,7 +1031,7 @@ fn iterable_element_type_delegates_for_generics() {
     let ty = PhpType::parse("list<User>");
     assert_eq!(
         ty.iterable_element_type().unwrap(),
-        PhpType::Named("User".to_owned())
+        PhpType::Named(atom("User"))
     );
 }
 
@@ -1040,14 +1039,14 @@ fn iterable_element_type_delegates_for_generics() {
 fn extract_value_type_array_two_params() {
     let ty = PhpType::parse("array<int, User>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
 fn extract_value_type_collection() {
     let ty = PhpType::parse("Collection<int, User>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1055,7 +1054,7 @@ fn extract_value_type_generator() {
     // Generator<TKey, TValue, TSend, TReturn> — value is 2nd param
     let ty = PhpType::parse("Generator<int, User, mixed, void>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1063,14 +1062,14 @@ fn extract_value_type_generator_single_param() {
     // Single-param Generator<User> — treated as value type
     let ty = PhpType::parse("Generator<User>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
 fn extract_value_type_nullable() {
     let ty = PhpType::parse("?list<User>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(*val, PhpType::Named("User".to_owned()));
+    assert_eq!(*val, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1081,7 +1080,7 @@ fn extract_value_type_scalar_returns_none() {
 
 #[test]
 fn extract_value_type_plain_class_returns_none() {
-    let ty = PhpType::Named("User".to_owned());
+    let ty = PhpType::Named(atom("User"));
     assert!(ty.extract_value_type(true).is_none());
 }
 
@@ -1090,7 +1089,7 @@ fn extract_value_type_union_with_generic_array() {
     // User|array<User> — the array member carries the element type.
     let ty = PhpType::parse("User|array<User>");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(val, &PhpType::Named("User".to_owned()));
+    assert_eq!(val, &PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1098,7 +1097,7 @@ fn extract_value_type_union_with_array_slice() {
     // string|User[] — the array-slice member carries the element type.
     let ty = PhpType::parse("string|User[]");
     let val = ty.extract_value_type(true).unwrap();
-    assert_eq!(val, &PhpType::Named("User".to_owned()));
+    assert_eq!(val, &PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1120,7 +1119,7 @@ fn extract_value_type_union_includes_scalar_element() {
     // User|array<int> — with skip_scalar=false, the int element is returned.
     let ty = PhpType::parse("User|array<int>");
     let val = ty.extract_value_type(false).unwrap();
-    assert_eq!(val, &PhpType::Named("int".to_owned()));
+    assert_eq!(val, &PhpType::Named(atom("int")));
 }
 
 #[test]
@@ -1171,7 +1170,7 @@ fn extract_key_type_slice_returns_none() {
 fn extract_key_type_class_key() {
     let ty = PhpType::parse("array<Request, Response>");
     let key = ty.extract_key_type(true).unwrap();
-    assert_eq!(*key, PhpType::Named("Request".to_owned()));
+    assert_eq!(*key, PhpType::Named(atom("Request")));
 }
 
 #[test]
@@ -1179,7 +1178,7 @@ fn extract_key_type_union_with_keyed_array() {
     // User|array<string, User> — the array member carries the key type.
     let ty = PhpType::parse("User|array<string, User>");
     let key = ty.extract_key_type(false).unwrap();
-    assert_eq!(*key, PhpType::Named("string".to_owned()));
+    assert_eq!(*key, PhpType::Named(atom("string")));
 }
 
 #[test]
@@ -1195,14 +1194,14 @@ fn extract_key_type_union_no_keyed_member() {
 fn non_null_type_nullable() {
     let ty = PhpType::parse("?User");
     let non_null = ty.non_null_type().unwrap();
-    assert_eq!(non_null, PhpType::Named("User".to_owned()));
+    assert_eq!(non_null, PhpType::Named(atom("User")));
 }
 
 #[test]
 fn non_null_type_union_with_null() {
     let ty = PhpType::parse("User|null");
     let non_null = ty.non_null_type().unwrap();
-    assert_eq!(non_null, PhpType::Named("User".to_owned()));
+    assert_eq!(non_null, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -1212,8 +1211,8 @@ fn non_null_type_union_multiple_non_null() {
     match non_null {
         PhpType::Union(members) => {
             assert_eq!(members.len(), 2);
-            assert_eq!(members[0], PhpType::Named("User".to_owned()));
-            assert_eq!(members[1], PhpType::Named("Admin".to_owned()));
+            assert_eq!(members[0], PhpType::Named(atom("User")));
+            assert_eq!(members[1], PhpType::Named(atom("Admin")));
         }
         other => panic!("Expected Union, got {other:?}"),
     }
@@ -1221,7 +1220,7 @@ fn non_null_type_union_multiple_non_null() {
 
 #[test]
 fn non_null_type_no_null() {
-    let ty = PhpType::Named("User".to_owned());
+    let ty = PhpType::Named(atom("User"));
     assert!(ty.non_null_type().is_none());
 }
 
@@ -1250,7 +1249,7 @@ fn all_members_scalar_nullable_int() {
 
 #[test]
 fn all_members_scalar_class() {
-    assert!(!PhpType::Named("User".to_owned()).all_members_scalar());
+    assert!(!PhpType::Named(atom("User")).all_members_scalar());
 }
 
 #[test]
@@ -1274,17 +1273,17 @@ fn intersection_members_of_intersection() {
 
 #[test]
 fn intersection_members_of_non_intersection() {
-    let ty = PhpType::Named("User".to_owned());
+    let ty = PhpType::Named(atom("User"));
     let members = ty.intersection_members();
     assert_eq!(members.len(), 1);
-    assert_eq!(*members[0], PhpType::Named("User".to_owned()));
+    assert_eq!(*members[0], PhpType::Named(atom("User")));
 }
 
 // ─── resolve_names tests ────────────────────────────────────────────────
 
 #[test]
 fn resolve_names_simple_class() {
-    let ty = PhpType::Named("User".to_owned());
+    let ty = PhpType::Named(atom("User"));
     let resolved = ty.resolve_names(&|name| format!("App\\Models\\{}", name));
     assert_eq!(resolved.to_string(), "App\\Models\\User");
 }
@@ -1351,7 +1350,7 @@ fn resolve_names_keyword_types_untouched() {
         "non-empty-string",
         "array-key",
     ] {
-        let ty = PhpType::Named(kw.to_string());
+        let ty = PhpType::Named(atom(kw));
         let resolved = ty.resolve_names(&|name| panic!("should not resolve {}", name));
         assert_eq!(resolved.to_string(), *kw);
     }
@@ -1375,13 +1374,13 @@ fn resolve_names_intersection() {
 
 #[test]
 fn shorten_plain_class() {
-    let ty = PhpType::Named("App\\Models\\User".to_owned());
+    let ty = PhpType::Named(atom("App\\Models\\User"));
     assert_eq!(ty.shorten().to_string(), "User");
 }
 
 #[test]
 fn shorten_already_short() {
-    let ty = PhpType::Named("User".to_owned());
+    let ty = PhpType::Named(atom("User"));
     assert_eq!(ty.shorten().to_string(), "User");
 }
 
@@ -1451,8 +1450,8 @@ fn is_scalar_keywords() {
 
 #[test]
 fn is_scalar_class_is_not() {
-    assert!(!PhpType::Named("User".to_owned()).is_scalar());
-    assert!(!PhpType::Named("App\\Models\\User".to_owned()).is_scalar());
+    assert!(!PhpType::Named(atom("User")).is_scalar());
+    assert!(!PhpType::Named(atom("App\\Models\\User")).is_scalar());
 }
 
 #[test]
@@ -1480,10 +1479,10 @@ fn is_scalar_nullable_class() {
 #[test]
 fn is_array_like_named() {
     assert!(PhpType::array().is_array_like());
-    assert!(PhpType::Named("list".to_owned()).is_array_like());
+    assert!(PhpType::Named(atom("list")).is_array_like());
     assert!(PhpType::iterable().is_array_like());
-    assert!(PhpType::Named("non-empty-array".to_owned()).is_array_like());
-    assert!(PhpType::Named("non-empty-list".to_owned()).is_array_like());
+    assert!(PhpType::Named(atom("non-empty-array")).is_array_like());
+    assert!(PhpType::Named(atom("non-empty-list")).is_array_like());
 }
 
 #[test]
@@ -1514,7 +1513,7 @@ fn is_array_like_nullable() {
 fn is_array_like_non_array() {
     assert!(!PhpType::string().is_array_like());
     assert!(!PhpType::int().is_array_like());
-    assert!(!PhpType::Named("User".to_owned()).is_array_like());
+    assert!(!PhpType::Named(atom("User")).is_array_like());
     assert!(!PhpType::null().is_array_like());
     assert!(!PhpType::parse("Collection<int, User>").is_array_like());
 }
@@ -1524,7 +1523,7 @@ fn is_array_like_non_array() {
 #[test]
 fn base_name_simple_class() {
     assert_eq!(
-        PhpType::Named("App\\Models\\User".to_owned()).base_name(),
+        PhpType::Named(atom("App\\Models\\User")).base_name(),
         Some("App\\Models\\User")
     );
 }
@@ -1532,7 +1531,7 @@ fn base_name_simple_class() {
 #[test]
 fn base_name_strips_leading_backslash() {
     assert_eq!(
-        PhpType::Named("\\App\\Models\\User".to_owned()).base_name(),
+        PhpType::Named(atom("\\App\\Models\\User")).base_name(),
         Some("App\\Models\\User")
     );
 }
@@ -1542,7 +1541,7 @@ fn base_name_generic_strips_leading_backslash() {
     assert_eq!(
         PhpType::Generic(
             "\\Collection".to_owned(),
-            vec![PhpType::Named("User".to_owned())]
+            vec![PhpType::Named(atom("User"))]
         )
         .base_name(),
         Some("Collection")
@@ -1552,7 +1551,7 @@ fn base_name_generic_strips_leading_backslash() {
 #[test]
 fn base_name_nullable_strips_leading_backslash() {
     assert_eq!(
-        PhpType::Nullable(Box::new(PhpType::Named("\\User".to_owned()))).base_name(),
+        PhpType::Nullable(Box::new(PhpType::Named(atom("\\User")))).base_name(),
         Some("User")
     );
 }
@@ -1591,25 +1590,25 @@ fn union_members_of_union() {
 
 #[test]
 fn union_members_of_non_union() {
-    let ty = PhpType::Named("User".to_owned());
+    let ty = PhpType::Named(atom("User"));
     let members = ty.union_members();
     assert_eq!(members.len(), 1);
-    assert_eq!(*members[0], PhpType::Named("User".to_owned()));
+    assert_eq!(*members[0], PhpType::Named(atom("User")));
 }
 
 // ─── equivalent tests ───────────────────────────────────────────────────
 
 #[test]
 fn equivalent_identical() {
-    let a = PhpType::Named("User".to_owned());
-    let b = PhpType::Named("User".to_owned());
+    let a = PhpType::Named(atom("User"));
+    let b = PhpType::Named(atom("User"));
     assert!(a.equivalent(&b));
 }
 
 #[test]
 fn equivalent_fqn_vs_short() {
-    let a = PhpType::Named("App\\Models\\User".to_owned());
-    let b = PhpType::Named("User".to_owned());
+    let a = PhpType::Named(atom("App\\Models\\User"));
+    let b = PhpType::Named(atom("User"));
     assert!(a.equivalent(&b));
 }
 
@@ -1661,8 +1660,8 @@ fn equivalent_nullable_vs_three_member_union_not_equal() {
 
 #[test]
 fn equivalent_different_types() {
-    let a = PhpType::Named("User".to_owned());
-    let b = PhpType::Named("Post".to_owned());
+    let a = PhpType::Named(atom("User"));
+    let b = PhpType::Named(atom("Post"));
     assert!(!a.equivalent(&b));
 }
 
@@ -2149,7 +2148,7 @@ fn callable_param_types_non_callable() {
 fn callable_return_type_with_return() {
     let ty = PhpType::parse("callable(int): User");
     let ret = ty.callable_return_type().unwrap();
-    assert_eq!(*ret, PhpType::Named("User".to_owned()));
+    assert_eq!(*ret, PhpType::Named(atom("User")));
 }
 
 #[test]
@@ -2166,14 +2165,14 @@ fn callable_return_type_without_return() {
 fn callable_return_type_nullable_callable() {
     let ty = PhpType::parse("?Closure(string): User");
     let ret = ty.callable_return_type().unwrap();
-    assert_eq!(*ret, PhpType::Named("User".to_owned()));
+    assert_eq!(*ret, PhpType::Named(atom("User")));
 }
 
 #[test]
 fn callable_return_type_union_with_callable() {
     let ty = PhpType::parse("Closure(int): Response|null");
     let ret = ty.callable_return_type().unwrap();
-    assert_eq!(*ret, PhpType::Named("Response".to_owned()));
+    assert_eq!(*ret, PhpType::Named(atom("Response")));
 }
 
 #[test]
@@ -2188,7 +2187,7 @@ fn callable_return_type_non_callable() {
 fn generator_send_type_full_generator() {
     let ty = PhpType::parse("Generator<int, string, MyClass, void>");
     let send = ty.generator_send_type(false).unwrap();
-    assert_eq!(*send, PhpType::Named("MyClass".to_owned()));
+    assert_eq!(*send, PhpType::Named(atom("MyClass")));
 }
 
 #[test]
@@ -2208,7 +2207,7 @@ fn generator_send_type_skip_scalar_true_skips_scalar() {
 fn generator_send_type_skip_scalar_true_keeps_class() {
     let ty = PhpType::parse("Generator<int, string, MyClass, void>");
     let send = ty.generator_send_type(true).unwrap();
-    assert_eq!(*send, PhpType::Named("MyClass".to_owned()));
+    assert_eq!(*send, PhpType::Named(atom("MyClass")));
 }
 
 #[test]
@@ -2219,7 +2218,7 @@ fn generator_send_type_fewer_than_three_params() {
 
 #[test]
 fn generator_send_type_non_generator() {
-    let ty = PhpType::Named("Collection".to_owned());
+    let ty = PhpType::Named(atom("Collection"));
     assert!(ty.generator_send_type(false).is_none());
 }
 
@@ -2227,7 +2226,7 @@ fn generator_send_type_non_generator() {
 fn generator_send_type_nullable_generator() {
     let ty = PhpType::parse("?Generator<int, string, MyClass, void>");
     let send = ty.generator_send_type(false).unwrap();
-    assert_eq!(*send, PhpType::Named("MyClass".to_owned()));
+    assert_eq!(*send, PhpType::Named(atom("MyClass")));
 }
 
 // ── Subtype checking tests ──────────────────────────────────────────
@@ -2302,29 +2301,29 @@ mod subtype_tests {
 
     #[test]
     fn positive_int_is_subtype_of_int() {
-        assert!(PhpType::Named("positive-int".into()).is_subtype_of(&PhpType::int()));
+        assert!(PhpType::Named(atom("positive-int")).is_subtype_of(&PhpType::int()));
     }
 
     #[test]
     fn non_empty_string_is_subtype_of_string() {
-        assert!(PhpType::Named("non-empty-string".into()).is_subtype_of(&PhpType::string()));
+        assert!(PhpType::Named(atom("non-empty-string")).is_subtype_of(&PhpType::string()));
     }
 
     #[test]
     fn class_string_is_subtype_of_string() {
-        assert!(PhpType::Named("class-string".into()).is_subtype_of(&PhpType::string()));
+        assert!(PhpType::Named(atom("class-string")).is_subtype_of(&PhpType::string()));
     }
 
     #[test]
     fn list_is_subtype_of_array() {
-        assert!(PhpType::Named("list".into()).is_subtype_of(&PhpType::array()));
+        assert!(PhpType::Named(atom("list")).is_subtype_of(&PhpType::array()));
     }
 
     #[test]
     fn non_empty_list_is_subtype_of_non_empty_array() {
         assert!(
-            PhpType::Named("non-empty-list".into())
-                .is_subtype_of(&PhpType::Named("non-empty-array".into()))
+            PhpType::Named(atom("non-empty-list"))
+                .is_subtype_of(&PhpType::Named(atom("non-empty-array")))
         );
     }
 
@@ -2335,52 +2334,52 @@ mod subtype_tests {
 
     #[test]
     fn closure_is_subtype_of_callable() {
-        assert!(PhpType::Named("Closure".into()).is_subtype_of(&PhpType::callable()));
+        assert!(PhpType::Named(atom("Closure")).is_subtype_of(&PhpType::callable()));
     }
 
     #[test]
     fn fqn_closure_is_subtype_of_callable() {
-        assert!(PhpType::Named("\\Closure".into()).is_subtype_of(&PhpType::callable()));
+        assert!(PhpType::Named(atom("\\Closure")).is_subtype_of(&PhpType::callable()));
     }
 
     #[test]
     fn fqn_closure_is_subtype_of_callable_union_null() {
         let callable_or_null = PhpType::Union(vec![PhpType::callable(), PhpType::null()]);
-        assert!(PhpType::Named("\\Closure".into()).is_subtype_of(&callable_or_null));
+        assert!(PhpType::Named(atom("\\Closure")).is_subtype_of(&callable_or_null));
     }
 
     // ── Scalar / numeric / array-key supertypes ─────────────────────
 
     #[test]
     fn int_is_subtype_of_scalar() {
-        assert!(PhpType::int().is_subtype_of(&PhpType::Named("scalar".into())));
+        assert!(PhpType::int().is_subtype_of(&PhpType::Named(atom("scalar"))));
     }
 
     #[test]
     fn string_is_subtype_of_array_key() {
-        assert!(PhpType::string().is_subtype_of(&PhpType::Named("array-key".into())));
+        assert!(PhpType::string().is_subtype_of(&PhpType::Named(atom("array-key"))));
     }
 
     #[test]
     fn array_key_is_subtype_of_int_string_union() {
         let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
-        assert!(PhpType::Named("array-key".into()).is_subtype_of(&int_or_string));
+        assert!(PhpType::Named(atom("array-key")).is_subtype_of(&int_or_string));
     }
 
     #[test]
     fn int_string_union_is_subtype_of_array_key() {
         let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
-        assert!(int_or_string.is_subtype_of(&PhpType::Named("array-key".into())));
+        assert!(int_or_string.is_subtype_of(&PhpType::Named(atom("array-key"))));
     }
 
     #[test]
     fn array_key_is_subtype_of_scalar() {
-        assert!(PhpType::Named("array-key".into()).is_subtype_of(&PhpType::Named("scalar".into())));
+        assert!(PhpType::Named(atom("array-key")).is_subtype_of(&PhpType::Named(atom("scalar"))));
     }
 
     #[test]
     fn array_key_is_not_subtype_of_int_alone() {
-        assert!(!PhpType::Named("array-key".into()).is_subtype_of(&PhpType::int()));
+        assert!(!PhpType::Named(atom("array-key")).is_subtype_of(&PhpType::int()));
     }
 
     #[test]
@@ -2426,20 +2425,20 @@ mod subtype_tests {
     fn intersection_is_subtype_when_any_member_is() {
         // Foo & Bar <: Foo
         let inter = PhpType::Intersection(vec![
-            PhpType::Named("Foo".into()),
-            PhpType::Named("Bar".into()),
+            PhpType::Named(atom("Foo")),
+            PhpType::Named(atom("Bar")),
         ]);
-        assert!(inter.is_subtype_of(&PhpType::Named("Foo".into())));
+        assert!(inter.is_subtype_of(&PhpType::Named(atom("Foo"))));
     }
 
     #[test]
     fn subtype_of_intersection_requires_all() {
         // Foo <: Foo & Bar — false (Foo is not necessarily a Bar)
         let inter = PhpType::Intersection(vec![
-            PhpType::Named("Foo".into()),
-            PhpType::Named("Bar".into()),
+            PhpType::Named(atom("Foo")),
+            PhpType::Named(atom("Bar")),
         ]);
-        assert!(!PhpType::Named("Foo".into()).is_subtype_of(&inter));
+        assert!(!PhpType::Named(atom("Foo")).is_subtype_of(&inter));
     }
 
     // ── Array / generic subtyping ───────────────────────────────────
@@ -2697,53 +2696,47 @@ mod subtype_tests {
 
     #[test]
     fn positive_integer_literal_is_subtype_of_non_negative_int() {
-        assert!(
-            PhpType::literal_int("1").is_subtype_of(&PhpType::Named("non-negative-int".into()))
-        );
+        assert!(PhpType::literal_int("1").is_subtype_of(&PhpType::Named(atom("non-negative-int"))));
     }
 
     #[test]
     fn positive_integer_literal_is_subtype_of_positive_int() {
-        assert!(PhpType::literal_int("1").is_subtype_of(&PhpType::Named("positive-int".into())));
+        assert!(PhpType::literal_int("1").is_subtype_of(&PhpType::Named(atom("positive-int"))));
     }
 
     #[test]
     fn zero_literal_is_not_subtype_of_positive_int() {
-        assert!(!PhpType::literal_int("0").is_subtype_of(&PhpType::Named("positive-int".into())));
+        assert!(!PhpType::literal_int("0").is_subtype_of(&PhpType::Named(atom("positive-int"))));
     }
 
     #[test]
     fn zero_literal_is_subtype_of_non_negative_int() {
-        assert!(
-            PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-negative-int".into()))
-        );
+        assert!(PhpType::literal_int("0").is_subtype_of(&PhpType::Named(atom("non-negative-int"))));
     }
 
     #[test]
     fn zero_literal_is_not_subtype_of_non_zero_int() {
-        assert!(!PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-zero-int".into())));
+        assert!(!PhpType::literal_int("0").is_subtype_of(&PhpType::Named(atom("non-zero-int"))));
     }
 
     #[test]
     fn positive_integer_literal_is_subtype_of_non_zero_int() {
-        assert!(PhpType::literal_int("1").is_subtype_of(&PhpType::Named("non-zero-int".into())));
+        assert!(PhpType::literal_int("1").is_subtype_of(&PhpType::Named(atom("non-zero-int"))));
     }
 
     #[test]
     fn negative_integer_literal_is_subtype_of_negative_int() {
-        assert!(PhpType::literal_int("-1").is_subtype_of(&PhpType::Named("negative-int".into())));
+        assert!(PhpType::literal_int("-1").is_subtype_of(&PhpType::Named(atom("negative-int"))));
     }
 
     #[test]
     fn positive_integer_literal_is_not_subtype_of_negative_int() {
-        assert!(!PhpType::literal_int("1").is_subtype_of(&PhpType::Named("negative-int".into())));
+        assert!(!PhpType::literal_int("1").is_subtype_of(&PhpType::Named(atom("negative-int"))));
     }
 
     #[test]
     fn zero_literal_is_subtype_of_non_positive_int() {
-        assert!(
-            PhpType::literal_int("0").is_subtype_of(&PhpType::Named("non-positive-int".into()))
-        );
+        assert!(PhpType::literal_int("0").is_subtype_of(&PhpType::Named(atom("non-positive-int"))));
     }
 
     // ── IntRange <: refined-int ──────────────────────────────────
@@ -2752,7 +2745,7 @@ mod subtype_tests {
     fn int_range_0_max_is_subtype_of_non_negative_int() {
         assert!(
             PhpType::IntRange("0".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-negative-int")))
         );
     }
 
@@ -2760,7 +2753,7 @@ mod subtype_tests {
     fn int_range_1_max_is_subtype_of_positive_int() {
         assert!(
             PhpType::IntRange("1".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("positive-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("positive-int")))
         );
     }
 
@@ -2769,7 +2762,7 @@ mod subtype_tests {
         // positive-int range is a subset of non-negative-int range
         assert!(
             PhpType::IntRange("1".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-negative-int")))
         );
     }
 
@@ -2777,7 +2770,7 @@ mod subtype_tests {
     fn int_range_min_neg1_is_subtype_of_negative_int() {
         assert!(
             PhpType::IntRange("min".into(), "-1".into())
-                .is_subtype_of(&PhpType::Named("negative-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("negative-int")))
         );
     }
 
@@ -2785,7 +2778,7 @@ mod subtype_tests {
     fn int_range_min_0_is_subtype_of_non_positive_int() {
         assert!(
             PhpType::IntRange("min".into(), "0".into())
-                .is_subtype_of(&PhpType::Named("non-positive-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-positive-int")))
         );
     }
 
@@ -2793,7 +2786,7 @@ mod subtype_tests {
     fn int_range_0_100_is_subtype_of_non_negative_int() {
         assert!(
             PhpType::IntRange("0".into(), "100".into())
-                .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-negative-int")))
         );
     }
 
@@ -2801,7 +2794,7 @@ mod subtype_tests {
     fn int_range_neg1_max_is_not_subtype_of_non_negative_int() {
         assert!(
             !PhpType::IntRange("-1".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-negative-int")))
         );
     }
 
@@ -2810,7 +2803,7 @@ mod subtype_tests {
         // 0..max includes 0 which is not positive
         assert!(
             !PhpType::IntRange("0".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("positive-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("positive-int")))
         );
     }
 
@@ -2819,7 +2812,7 @@ mod subtype_tests {
     #[test]
     fn non_negative_int_is_subtype_of_int_range_0_max() {
         assert!(
-            PhpType::Named("non-negative-int".into())
+            PhpType::Named(atom("non-negative-int"))
                 .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
         );
     }
@@ -2827,7 +2820,7 @@ mod subtype_tests {
     #[test]
     fn positive_int_is_subtype_of_int_range_0_max() {
         assert!(
-            PhpType::Named("positive-int".into())
+            PhpType::Named(atom("positive-int"))
                 .is_subtype_of(&PhpType::IntRange("0".into(), "max".into()))
         );
     }
@@ -2835,7 +2828,7 @@ mod subtype_tests {
     #[test]
     fn negative_int_is_subtype_of_int_range_min_neg1() {
         assert!(
-            PhpType::Named("negative-int".into())
+            PhpType::Named(atom("negative-int"))
                 .is_subtype_of(&PhpType::IntRange("min".into(), "-1".into()))
         );
     }
@@ -2843,7 +2836,7 @@ mod subtype_tests {
     #[test]
     fn positive_int_is_not_subtype_of_int_range_min_neg1() {
         assert!(
-            !PhpType::Named("positive-int".into())
+            !PhpType::Named(atom("positive-int"))
                 .is_subtype_of(&PhpType::IntRange("min".into(), "-1".into()))
         );
     }
@@ -2879,16 +2872,16 @@ mod subtype_tests {
     #[test]
     fn positive_int_is_subtype_of_non_negative_int() {
         assert!(
-            PhpType::Named("positive-int".into())
-                .is_subtype_of(&PhpType::Named("non-negative-int".into()))
+            PhpType::Named(atom("positive-int"))
+                .is_subtype_of(&PhpType::Named(atom("non-negative-int")))
         );
     }
 
     #[test]
     fn negative_int_is_subtype_of_non_positive_int() {
         assert!(
-            PhpType::Named("negative-int".into())
-                .is_subtype_of(&PhpType::Named("non-positive-int".into()))
+            PhpType::Named(atom("negative-int"))
+                .is_subtype_of(&PhpType::Named(atom("non-positive-int")))
         );
     }
 
@@ -2896,16 +2889,16 @@ mod subtype_tests {
     fn non_negative_int_is_not_subtype_of_positive_int() {
         // non-negative includes 0, positive doesn't
         assert!(
-            !PhpType::Named("non-negative-int".into())
-                .is_subtype_of(&PhpType::Named("positive-int".into()))
+            !PhpType::Named(atom("non-negative-int"))
+                .is_subtype_of(&PhpType::Named(atom("positive-int")))
         );
     }
 
     #[test]
     fn positive_int_is_not_subtype_of_negative_int() {
         assert!(
-            !PhpType::Named("positive-int".into())
-                .is_subtype_of(&PhpType::Named("negative-int".into()))
+            !PhpType::Named(atom("positive-int"))
+                .is_subtype_of(&PhpType::Named(atom("negative-int")))
         );
     }
 
@@ -2914,16 +2907,16 @@ mod subtype_tests {
     #[test]
     fn positive_int_is_subtype_of_non_zero_int() {
         assert!(
-            PhpType::Named("positive-int".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            PhpType::Named(atom("positive-int"))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
     #[test]
     fn negative_int_is_subtype_of_non_zero_int() {
         assert!(
-            PhpType::Named("negative-int".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            PhpType::Named(atom("negative-int"))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -2931,8 +2924,8 @@ mod subtype_tests {
     fn non_negative_int_is_not_subtype_of_non_zero_int() {
         // non-negative includes 0
         assert!(
-            !PhpType::Named("non-negative-int".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            !PhpType::Named(atom("non-negative-int"))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -2940,8 +2933,8 @@ mod subtype_tests {
     fn non_positive_int_is_not_subtype_of_non_zero_int() {
         // non-positive includes 0
         assert!(
-            !PhpType::Named("non-positive-int".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+            !PhpType::Named(atom("non-positive-int"))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -2949,7 +2942,7 @@ mod subtype_tests {
     fn int_range_1_max_is_subtype_of_non_zero_int() {
         assert!(
             PhpType::IntRange("1".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -2957,7 +2950,7 @@ mod subtype_tests {
     fn int_range_min_neg1_is_subtype_of_non_zero_int() {
         assert!(
             PhpType::IntRange("min".into(), "-1".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -2966,7 +2959,7 @@ mod subtype_tests {
         // includes 0
         assert!(
             !PhpType::IntRange("0".into(), "max".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -2975,7 +2968,7 @@ mod subtype_tests {
         // includes 0
         assert!(
             !PhpType::IntRange("-5".into(), "5".into())
-                .is_subtype_of(&PhpType::Named("non-zero-int".into()))
+                .is_subtype_of(&PhpType::Named(atom("non-zero-int")))
         );
     }
 
@@ -3003,19 +2996,19 @@ mod subtype_tests {
 
     #[test]
     fn unrelated_classes_are_not_subtypes() {
-        assert!(!PhpType::Named("Cat".into()).is_subtype_of(&PhpType::Named("Dog".into())));
+        assert!(!PhpType::Named(atom("Cat")).is_subtype_of(&PhpType::Named(atom("Dog"))));
     }
 
     // ── Aliases ─────────────────────────────────────────────────────
 
     #[test]
     fn integer_alias_subtype_of_int() {
-        assert!(PhpType::Named("integer".into()).is_subtype_of(&PhpType::int()));
+        assert!(PhpType::Named(atom("integer")).is_subtype_of(&PhpType::int()));
     }
 
     #[test]
     fn boolean_alias_subtype_of_bool() {
-        assert!(PhpType::Named("boolean".into()).is_subtype_of(&PhpType::bool()));
+        assert!(PhpType::Named(atom("boolean")).is_subtype_of(&PhpType::bool()));
     }
 
     // ── object shape <: object ──────────────────────────────────────
@@ -3068,14 +3061,14 @@ mod simplification_tests {
 
     #[test]
     fn scalar_refinement_absorbed() {
-        let t = PhpType::Union(vec![PhpType::Named("positive-int".into()), PhpType::int()]);
+        let t = PhpType::Union(vec![PhpType::Named(atom("positive-int")), PhpType::int()]);
         assert_eq!(t.simplified().to_string(), "int");
     }
 
     #[test]
     fn non_empty_string_absorbed_by_string() {
         let t = PhpType::Union(vec![
-            PhpType::Named("non-empty-string".into()),
+            PhpType::Named(atom("non-empty-string")),
             PhpType::string(),
         ]);
         assert_eq!(t.simplified().to_string(), "string");
@@ -3083,7 +3076,7 @@ mod simplification_tests {
 
     #[test]
     fn list_absorbed_by_array() {
-        let t = PhpType::Union(vec![PhpType::Named("list".into()), PhpType::array()]);
+        let t = PhpType::Union(vec![PhpType::Named(atom("list")), PhpType::array()]);
         assert_eq!(t.simplified().to_string(), "array");
     }
 
@@ -3095,8 +3088,8 @@ mod simplification_tests {
 
     #[test]
     fn single_member_intersection_unwrapped() {
-        let t = PhpType::Intersection(vec![PhpType::Named("Foo".into())]);
-        assert_eq!(t.simplified(), PhpType::Named("Foo".into()));
+        let t = PhpType::Intersection(vec![PhpType::Named(atom("Foo"))]);
+        assert_eq!(t.simplified(), PhpType::Named(atom("Foo")));
     }
 
     #[test]
@@ -3121,10 +3114,10 @@ mod simplification_tests {
     fn nested_union_flattened() {
         let t = PhpType::Union(vec![
             PhpType::Union(vec![
-                PhpType::Named("Foo".into()),
-                PhpType::Named("Bar".into()),
+                PhpType::Named(atom("Foo")),
+                PhpType::Named(atom("Bar")),
             ]),
-            PhpType::Named("Baz".into()),
+            PhpType::Named(atom("Baz")),
         ]);
         let s = t.simplified();
         if let PhpType::Union(members) = &s {
@@ -3138,10 +3131,10 @@ mod simplification_tests {
     fn nested_intersection_flattened() {
         let t = PhpType::Intersection(vec![
             PhpType::Intersection(vec![
-                PhpType::Named("Foo".into()),
-                PhpType::Named("Bar".into()),
+                PhpType::Named(atom("Foo")),
+                PhpType::Named(atom("Bar")),
             ]),
-            PhpType::Named("Baz".into()),
+            PhpType::Named(atom("Baz")),
         ]);
         let s = t.simplified();
         if let PhpType::Intersection(members) = &s {
@@ -3153,7 +3146,7 @@ mod simplification_tests {
 
     #[test]
     fn intersection_with_never_collapses() {
-        let t = PhpType::Intersection(vec![PhpType::Named("Foo".into()), PhpType::never()]);
+        let t = PhpType::Intersection(vec![PhpType::Named(atom("Foo")), PhpType::never()]);
         assert_eq!(t.simplified(), PhpType::never());
     }
 
@@ -3169,7 +3162,7 @@ mod simplification_tests {
 
     #[test]
     fn dedup_case_insensitive() {
-        let t = PhpType::Union(vec![PhpType::Named("String".into()), PhpType::string()]);
+        let t = PhpType::Union(vec![PhpType::Named(atom("String")), PhpType::string()]);
         // Should deduplicate — only one remains.
         let s = t.simplified();
         assert!(
@@ -3181,7 +3174,7 @@ mod simplification_tests {
     #[test]
     fn closure_subtype_of_callable() {
         // Ensure Closure <: callable works in subtype check (case-insensitive).
-        assert!(PhpType::Named("closure".into()).is_subtype_of(&PhpType::callable()));
+        assert!(PhpType::Named(atom("closure")).is_subtype_of(&PhpType::callable()));
     }
 }
 
@@ -3194,8 +3187,8 @@ mod distribute_tests {
     fn distribute_simple() {
         // (A|B) & C → (A&C) | (B&C)
         let t = PhpType::Intersection(vec![
-            PhpType::Union(vec![PhpType::Named("A".into()), PhpType::Named("B".into())]),
-            PhpType::Named("C".into()),
+            PhpType::Union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("B"))]),
+            PhpType::Named(atom("C")),
         ]);
         let d = t.distribute_intersection();
         if let PhpType::Union(members) = &d {
@@ -3208,8 +3201,8 @@ mod distribute_tests {
     #[test]
     fn distribute_no_union_unchanged() {
         let t = PhpType::Intersection(vec![
-            PhpType::Named("Foo".into()),
-            PhpType::Named("Bar".into()),
+            PhpType::Named(atom("Foo")),
+            PhpType::Named(atom("Bar")),
         ]);
         let d = t.distribute_intersection();
         assert_eq!(d, t);
@@ -3217,7 +3210,7 @@ mod distribute_tests {
 
     #[test]
     fn distribute_non_intersection_unchanged() {
-        let t = PhpType::Named("Foo".into());
+        let t = PhpType::Named(atom("Foo"));
         let d = t.distribute_intersection();
         assert_eq!(d, t);
     }
@@ -3226,8 +3219,8 @@ mod distribute_tests {
     fn distribute_two_unions() {
         // (A|B) & (C|D) → (A&C) | (A&D) | (B&C) | (B&D)
         let t = PhpType::Intersection(vec![
-            PhpType::Union(vec![PhpType::Named("A".into()), PhpType::Named("B".into())]),
-            PhpType::Union(vec![PhpType::Named("C".into()), PhpType::Named("D".into())]),
+            PhpType::Union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("B"))]),
+            PhpType::Union(vec![PhpType::Named(atom("C")), PhpType::Named(atom("D"))]),
         ]);
         let d = t.distribute_intersection();
         if let PhpType::Union(members) = &d {
@@ -3241,8 +3234,8 @@ mod distribute_tests {
     fn distribute_with_simplification() {
         // (A|A) & B → after distribution and simplification → A & B
         let t = PhpType::Intersection(vec![
-            PhpType::Union(vec![PhpType::Named("A".into()), PhpType::Named("A".into())]),
-            PhpType::Named("B".into()),
+            PhpType::Union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("A"))]),
+            PhpType::Named(atom("B")),
         ]);
         let d = t.distribute_intersection();
         // The union (A|A) deduplicates to A, so the result should be A&B.
@@ -3267,13 +3260,13 @@ mod predicate_tests {
 
     #[test]
     fn is_bool_true_for_boolean() {
-        assert!(PhpType::Named("boolean".into()).is_bool());
+        assert!(PhpType::Named(atom("boolean")).is_bool());
     }
 
     #[test]
     fn is_bool_case_insensitive() {
-        assert!(PhpType::Named("Bool".into()).is_bool());
-        assert!(PhpType::Named("BOOLEAN".into()).is_bool());
+        assert!(PhpType::Named(atom("Bool")).is_bool());
+        assert!(PhpType::Named(atom("BOOLEAN")).is_bool());
     }
 
     #[test]
@@ -3300,8 +3293,8 @@ mod predicate_tests {
 
     #[test]
     fn is_true_case_insensitive() {
-        assert!(PhpType::Named("True".into()).is_true());
-        assert!(PhpType::Named("TRUE".into()).is_true());
+        assert!(PhpType::Named(atom("True")).is_true());
+        assert!(PhpType::Named(atom("TRUE")).is_true());
     }
 
     #[test]
@@ -3328,8 +3321,8 @@ mod predicate_tests {
 
     #[test]
     fn is_false_case_insensitive() {
-        assert!(PhpType::Named("False".into()).is_false());
-        assert!(PhpType::Named("FALSE".into()).is_false());
+        assert!(PhpType::Named(atom("False")).is_false());
+        assert!(PhpType::Named(atom("FALSE")).is_false());
     }
 
     #[test]
@@ -3356,13 +3349,13 @@ mod predicate_tests {
 
     #[test]
     fn is_int_true_for_integer() {
-        assert!(PhpType::Named("integer".into()).is_int());
+        assert!(PhpType::Named(atom("integer")).is_int());
     }
 
     #[test]
     fn is_int_case_insensitive() {
-        assert!(PhpType::Named("Int".into()).is_int());
-        assert!(PhpType::Named("INTEGER".into()).is_int());
+        assert!(PhpType::Named(atom("Int")).is_int());
+        assert!(PhpType::Named(atom("INTEGER")).is_int());
     }
 
     #[test]
@@ -3384,8 +3377,8 @@ mod predicate_tests {
 
     #[test]
     fn is_string_type_case_insensitive() {
-        assert!(PhpType::Named("String".into()).is_string_type());
-        assert!(PhpType::Named("STRING".into()).is_string_type());
+        assert!(PhpType::Named(atom("String")).is_string_type());
+        assert!(PhpType::Named(atom("STRING")).is_string_type());
     }
 
     #[test]
@@ -3412,13 +3405,13 @@ mod predicate_tests {
 
     #[test]
     fn is_float_true_for_double() {
-        assert!(PhpType::Named("double".into()).is_float());
+        assert!(PhpType::Named(atom("double")).is_float());
     }
 
     #[test]
     fn is_float_case_insensitive() {
-        assert!(PhpType::Named("Float".into()).is_float());
-        assert!(PhpType::Named("DOUBLE".into()).is_float());
+        assert!(PhpType::Named(atom("Float")).is_float());
+        assert!(PhpType::Named(atom("DOUBLE")).is_float());
     }
 
     #[test]
@@ -3440,8 +3433,8 @@ mod predicate_tests {
 
     #[test]
     fn is_object_case_insensitive() {
-        assert!(PhpType::Named("Object".into()).is_object());
-        assert!(PhpType::Named("OBJECT".into()).is_object());
+        assert!(PhpType::Named(atom("Object")).is_object());
+        assert!(PhpType::Named(atom("OBJECT")).is_object());
     }
 
     #[test]
@@ -3451,7 +3444,7 @@ mod predicate_tests {
 
     #[test]
     fn is_object_false_for_class() {
-        assert!(!PhpType::Named("User".into()).is_object());
+        assert!(!PhpType::Named(atom("User")).is_object());
     }
 
     #[test]
@@ -3468,14 +3461,14 @@ mod predicate_tests {
 
     #[test]
     fn is_callable_case_insensitive() {
-        assert!(PhpType::Named("Callable".into()).is_callable());
-        assert!(PhpType::Named("CALLABLE".into()).is_callable());
+        assert!(PhpType::Named(atom("Callable")).is_callable());
+        assert!(PhpType::Named(atom("CALLABLE")).is_callable());
     }
 
     #[test]
     fn is_callable_true_for_closure() {
-        assert!(PhpType::Named("Closure".into()).is_callable());
-        assert!(PhpType::Named("closure".into()).is_callable());
+        assert!(PhpType::Named(atom("Closure")).is_callable());
+        assert!(PhpType::Named(atom("closure")).is_callable());
     }
 
     #[test]
@@ -3501,7 +3494,7 @@ mod predicate_tests {
     #[test]
     fn is_callable_nullable() {
         assert!(PhpType::Nullable(Box::new(PhpType::callable())).is_callable());
-        assert!(PhpType::Nullable(Box::new(PhpType::Named("Closure".into()))).is_callable());
+        assert!(PhpType::Nullable(Box::new(PhpType::Named(atom("Closure")))).is_callable());
     }
 
     #[test]
@@ -3523,7 +3516,7 @@ mod predicate_tests {
 
     #[test]
     fn is_self_like_true_for_this() {
-        assert!(PhpType::Named("$this".into()).is_self_like());
+        assert!(PhpType::Named(atom("$this")).is_self_like());
     }
 
     #[test]
@@ -3533,9 +3526,9 @@ mod predicate_tests {
 
     #[test]
     fn is_self_like_case_insensitive() {
-        assert!(PhpType::Named("Self".into()).is_self_like());
-        assert!(PhpType::Named("STATIC".into()).is_self_like());
-        assert!(PhpType::Named("Parent".into()).is_self_like());
+        assert!(PhpType::Named(atom("Self")).is_self_like());
+        assert!(PhpType::Named(atom("STATIC")).is_self_like());
+        assert!(PhpType::Named(atom("Parent")).is_self_like());
     }
 
     #[test]
@@ -3545,7 +3538,7 @@ mod predicate_tests {
 
     #[test]
     fn is_self_like_false_for_class() {
-        assert!(!PhpType::Named("User".into()).is_self_like());
+        assert!(!PhpType::Named(atom("User")).is_self_like());
     }
 
     #[test]
@@ -3565,7 +3558,7 @@ mod predicate_tests {
 
     #[test]
     fn is_self_ref_true_for_this() {
-        assert!(PhpType::Named("$this".to_string()).is_self_ref());
+        assert!(PhpType::Named(atom("$this")).is_self_ref());
     }
 
     #[test]
@@ -3575,8 +3568,8 @@ mod predicate_tests {
 
     #[test]
     fn is_self_ref_case_insensitive() {
-        assert!(PhpType::Named("SELF".to_string()).is_self_ref());
-        assert!(PhpType::Named("Static".to_string()).is_self_ref());
+        assert!(PhpType::Named(atom("SELF")).is_self_ref());
+        assert!(PhpType::Named(atom("Static")).is_self_ref());
     }
 
     #[test]
@@ -3586,7 +3579,7 @@ mod predicate_tests {
 
     #[test]
     fn is_self_ref_false_for_class() {
-        assert!(!PhpType::Named("Foo".to_string()).is_self_ref());
+        assert!(!PhpType::Named(atom("Foo")).is_self_ref());
     }
 
     // ── is_bool/is_true/is_false for non-matching types ────────
@@ -3732,14 +3725,14 @@ mod predicate_tests {
 
     #[test]
     fn is_empty_sentinel_true() {
-        assert!(PhpType::Named("__empty".to_string()).is_empty_sentinel());
+        assert!(PhpType::Named(atom("__empty")).is_empty_sentinel());
         assert!(PhpType::empty_sentinel().is_empty_sentinel());
     }
 
     #[test]
     fn is_named_case_sensitive() {
-        assert!(PhpType::Named("TModel".to_string()).is_named("TModel"));
-        assert!(!PhpType::Named("TModel".to_string()).is_named("tmodel"));
+        assert!(PhpType::Named(atom("TModel")).is_named("TModel"));
+        assert!(!PhpType::Named(atom("TModel")).is_named("tmodel"));
         assert!(PhpType::int().is_named("int"));
         assert!(!PhpType::int().is_named("INT"));
     }
@@ -3747,14 +3740,14 @@ mod predicate_tests {
     #[test]
     fn is_named_false_for_non_named() {
         assert!(!PhpType::Generic("list".to_string(), vec![PhpType::int()]).is_named("list"));
-        assert!(!PhpType::Nullable(Box::new(PhpType::Named("Foo".to_string()))).is_named("Foo"));
+        assert!(!PhpType::Nullable(Box::new(PhpType::Named(atom("Foo")))).is_named("Foo"));
     }
 
     #[test]
     fn is_named_ci_case_insensitive() {
-        assert!(PhpType::Named("stdClass".to_string()).is_named_ci("stdclass"));
-        assert!(PhpType::Named("stdclass".to_string()).is_named_ci("stdClass"));
-        assert!(!PhpType::Named("Foo".to_string()).is_named_ci("Bar"));
+        assert!(PhpType::Named(atom("stdClass")).is_named_ci("stdclass"));
+        assert!(PhpType::Named(atom("stdclass")).is_named_ci("stdClass"));
+        assert!(!PhpType::Named(atom("Foo")).is_named_ci("Bar"));
     }
 
     #[test]
@@ -3798,7 +3791,7 @@ mod predicate_tests {
 
     #[test]
     fn is_string_literal_false_for_named() {
-        assert!(!PhpType::Named("string".to_owned()).is_string_literal());
+        assert!(!PhpType::Named(atom("string")).is_string_literal());
     }
 
     #[test]
@@ -3818,7 +3811,7 @@ mod predicate_tests {
 
     #[test]
     fn is_int_literal_false_for_named() {
-        assert!(!PhpType::Named("int".to_owned()).is_int_literal());
+        assert!(!PhpType::Named(atom("int")).is_int_literal());
     }
 }
 

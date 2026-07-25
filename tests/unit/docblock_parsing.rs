@@ -3,6 +3,7 @@
 //! These tests exercise the public API of `phpantom_lsp::docblock` —
 //! tag extraction, type resolution, conditional return types, etc.
 
+use phpantom_lsp::atom::atom;
 use phpantom_lsp::docblock::*;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::*;
@@ -1141,7 +1142,7 @@ fn conditional_simple_class_string() {
             assert_eq!(param, "$abstract");
             assert!(!negated);
             assert!(matches!(condition.as_ref(), PhpType::ClassString(_)));
-            assert_eq!(**then_type, PhpType::Named("TClass".into()));
+            assert_eq!(**then_type, PhpType::Named(atom("TClass")));
             assert_eq!(**else_type, PhpType::mixed());
         }
         _ => panic!("Expected Conditional, got {:?}", cond),
@@ -1169,11 +1170,11 @@ fn conditional_null_check() {
             assert_eq!(*condition, PhpType::null());
             assert_eq!(
                 *then_type,
-                PhpType::Named("\\Illuminate\\Contracts\\Auth\\Factory".into())
+                PhpType::Named(atom("\\Illuminate\\Contracts\\Auth\\Factory"))
             );
             assert_eq!(
                 *else_type,
-                PhpType::Named("\\Illuminate\\Contracts\\Auth\\StatefulGuard".into())
+                PhpType::Named(atom("\\Illuminate\\Contracts\\Auth\\StatefulGuard"))
             );
         }
         _ => panic!("Expected Conditional"),
@@ -1199,7 +1200,7 @@ fn conditional_nested() {
             assert_eq!(param, "$abstract");
             assert!(!negated);
             assert!(matches!(condition.as_ref(), PhpType::ClassString(_)));
-            assert_eq!(**then_type, PhpType::Named("TClass".into()));
+            assert_eq!(**then_type, PhpType::Named(atom("TClass")));
             // else_type should be another conditional
             match else_type.as_ref() {
                 PhpType::Conditional {
@@ -1214,7 +1215,7 @@ fn conditional_nested() {
                     assert_eq!(**inner_cond, PhpType::null());
                     assert_eq!(
                         **inner_then,
-                        PhpType::Named("\\Illuminate\\Foundation\\Application".into())
+                        PhpType::Named(atom("\\Illuminate\\Foundation\\Application"))
                     );
                     assert_eq!(**inner_else, PhpType::mixed());
                 }
@@ -1270,14 +1271,16 @@ fn conditional_is_type() {
         } => {
             assert_eq!(param, "$job");
             assert!(!negated);
-            assert_eq!(*condition, PhpType::Named("\\Closure".into()));
+            assert_eq!(*condition, PhpType::Named(atom("\\Closure")));
             assert_eq!(
                 *then_type,
-                PhpType::Named("\\Illuminate\\Foundation\\Bus\\PendingClosureDispatch".into())
+                PhpType::Named(atom(
+                    "\\Illuminate\\Foundation\\Bus\\PendingClosureDispatch"
+                ))
             );
             assert_eq!(
                 *else_type,
-                PhpType::Named("\\Illuminate\\Foundation\\Bus\\PendingDispatch".into())
+                PhpType::Named(atom("\\Illuminate\\Foundation\\Bus\\PendingDispatch"))
             );
         }
         _ => panic!("Expected Conditional"),
@@ -2071,15 +2074,15 @@ fn conditional_resolves_with_template_default_false() {
         param: "TAsync".to_string(),
         negated: false,
         condition: Box::new(PhpType::false_()),
-        then_type: Box::new(PhpType::Named("Response".to_string())),
-        else_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+        then_type: Box::new(PhpType::Named(atom("Response"))),
+        else_type: Box::new(PhpType::Named(atom("PromiseInterface"))),
     };
 
     let mut defaults = HashMap::new();
     defaults.insert("TAsync".to_string(), PhpType::false_());
 
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
-    assert_eq!(result, Some(PhpType::Named("Response".to_string())));
+    assert_eq!(result, Some(PhpType::Named(atom("Response"))));
 }
 
 #[test]
@@ -2093,15 +2096,15 @@ fn conditional_resolves_with_template_default_true() {
         param: "TAsync".to_string(),
         negated: false,
         condition: Box::new(PhpType::false_()),
-        then_type: Box::new(PhpType::Named("Response".to_string())),
-        else_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+        then_type: Box::new(PhpType::Named(atom("Response"))),
+        else_type: Box::new(PhpType::Named(atom("PromiseInterface"))),
     };
 
     let mut defaults = HashMap::new();
     defaults.insert("TAsync".to_string(), PhpType::true_());
 
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
-    assert_eq!(result, Some(PhpType::Named("PromiseInterface".to_string())));
+    assert_eq!(result, Some(PhpType::Named(atom("PromiseInterface"))));
 }
 
 #[test]
@@ -2115,8 +2118,8 @@ fn conditional_no_template_default_falls_through() {
         param: "TAsync".to_string(),
         negated: false,
         condition: Box::new(PhpType::false_()),
-        then_type: Box::new(PhpType::Named("Response".to_string())),
-        else_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
+        then_type: Box::new(PhpType::Named(atom("Response"))),
+        else_type: Box::new(PhpType::Named(atom("PromiseInterface"))),
     };
 
     let defaults = HashMap::new();
@@ -2124,7 +2127,7 @@ fn conditional_no_template_default_falls_through() {
     // Empty defaults map — should not resolve via template default
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
     // Falls through to else branch since TAsync is not a $param either
-    assert_eq!(result, Some(PhpType::Named("PromiseInterface".to_string())));
+    assert_eq!(result, Some(PhpType::Named(atom("PromiseInterface"))));
 }
 
 #[test]
@@ -2138,8 +2141,8 @@ fn conditional_negated_with_template_default() {
         param: "TAsync".to_string(),
         negated: true,
         condition: Box::new(PhpType::false_()),
-        then_type: Box::new(PhpType::Named("PromiseInterface".to_string())),
-        else_type: Box::new(PhpType::Named("Response".to_string())),
+        then_type: Box::new(PhpType::Named(atom("PromiseInterface"))),
+        else_type: Box::new(PhpType::Named(atom("Response"))),
     };
 
     let mut defaults = HashMap::new();
@@ -2147,7 +2150,7 @@ fn conditional_negated_with_template_default() {
 
     // negated: TAsync is not false → false (since default IS false) → else branch → Response
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
-    assert_eq!(result, Some(PhpType::Named("Response".to_string())));
+    assert_eq!(result, Some(PhpType::Named(atom("Response"))));
 }
 
 #[test]

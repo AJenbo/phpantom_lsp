@@ -420,12 +420,12 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     // Apply all narrowed classes as a single group by
                     // building a union type.
                     let union_type = if narrowed_fqns.len() == 1 {
-                        PhpType::Named(narrowed_fqns[0].clone())
+                        PhpType::Named(atom(&narrowed_fqns[0]))
                     } else {
                         PhpType::Union(
                             narrowed_fqns
                                 .iter()
-                                .map(|n| PhpType::Named(n.clone()))
+                                .map(|n| PhpType::Named(atom(n)))
                                 .collect(),
                         )
                     };

@@ -349,28 +349,44 @@ The problem is needing them for every runtime analysis thread.
 - No stack overflows on the full test suite or the largest available
   project.
 
-#### Phase 4g: Carry `Atom` in `PhpType::Named`
+#### Phase 4g: Carry `Atom` in `PhpType::Named` ✓
 
-**Impact: Low-Medium. Effort: Medium.**
+Changed `PhpType::Named` to hold an `Atom` (interned string) instead of
+a `String`. `Named` values are drawn from a bounded set (class names,
+keywords, template parameters, `$this`) and are compared and cloned
+throughout the substitution hot path, so pointer-sized equality and
+free (`Copy`) cloning pay off; literal scalar values live in
+`PhpType::Literal`, so the interner is never fed unbounded free text.
+The substitution sites the FQN cache (Phase 4d) fed back into a fresh
+`String` — `PhpType::Named(cls.fqn().to_string())` in `template_subs.rs`,
+`return_types.rs`, `inheritance/mod.rs`, `rhs_resolution/mod.rs`, and the
+Laravel providers — now thread the cached `Atom` end-to-end
+(`PhpType::Named(cls.fqn())`) with no reallocation. `Atom`'s
+`Deref<Target = str>` means the ~160 read sites (comparisons, keyword
+checks, `base_name` extraction) were unaffected; only genuine
+`String`-typed sinks (`Vec<String>` keys, `Generic`'s `String` field)
+needed an explicit `.to_string()`.
 
-Deferred from Phase 4d. With the FQN now cached, the residual
-per-substitution string cost is `PhpType::Named(cls.fqn().to_string())`
-(and the equivalent patterns in `template_subs.rs`, `return_types.rs`,
-`inheritance/mod.rs`, `forward_walk/scope_state.rs`,
-`rhs_resolution/mod.rs`, and the Laravel builder providers). Each of
-these turns a cached `Atom` back into an owned `String` because
-`PhpType::Named` holds a `String`.
+#### Phase 4h: Intern composite per-member cache keys
 
-Changing `PhpType::Named` (and the analogous per-member cache keys such
-as `format!("{}::{}", class_fqn, method.name)` in `target_cache.rs` /
-`property_access.rs`) to carry `Atom` would let the resolution pipeline
-thread interned names end-to-end without re-allocating. This touches a
-core enum used throughout the type engine, so it is a standalone
-refactor rather than part of the 4d fqn-cache change.
+**Impact: Low. Effort: Low.**
+
+`target_cache.rs` (`BODY_INFER_MEMO`, the re-entry set) and
+`property_access.rs` key thread-local caches on
+`format!("{}::{}", class_fqn, method)`. These allocate a `String` per
+lookup. Interning them into a single `Atom` key would remove the
+allocation, but the key space is the `FQN × member` cartesian product,
+which is effectively unbounded — feeding it to the global `ustr`
+interner would leak one entry per distinct pair for the process
+lifetime (the exact "constructed once, never compared" case
+`atom.rs` warns against). Any fix here should therefore use a
+composite `(Atom, Atom)` tuple key (both halves already interned,
+no new interner entries) rather than interning the joined string.
 
 **Success criteria:**
-- `PhpType::Named` carries an interned name (no `String`
-  reallocation on the substitution hot path).
+- The `"FQN::member"` cache keys no longer allocate a `String` per
+  lookup.
+- No net growth in the global interner.
 - No test regressions.
 
 ---

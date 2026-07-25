@@ -226,7 +226,7 @@ fn resolve_named_type(
 
     // ── Type alias resolution ──────────────────────────────────────
     if let Some(alias_type) = resolve_type_alias_typed(
-        &PhpType::Named(name.to_string()),
+        &PhpType::Named(atom(name)),
         owning_class_name,
         all_classes,
         class_loader,
@@ -288,7 +288,7 @@ fn resolve_named_type(
             .iter()
             .map(|arg| {
                 if arg.is_self_ref() {
-                    PhpType::Named(owning_class_name.to_string())
+                    PhpType::Named(atom(owning_class_name))
                 } else {
                     arg.clone()
                 }

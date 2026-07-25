@@ -183,7 +183,7 @@ fn patch_range(func: &mut FunctionInfo) {
     func.conditional_return = Some(PhpType::Conditional {
         param: "$start".to_string(),
         negated: false,
-        condition: Box::new(PhpType::Named("string".to_string())),
+        condition: Box::new(PhpType::Named(atom("string"))),
         then_type: Box::new(PhpType::list(PhpType::string())),
         else_type: Box::new(PhpType::list(PhpType::Union(vec![
             PhpType::int(),
@@ -286,10 +286,7 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         .or_insert_with(|| {
             PhpType::Generic(
                 "Traversable".to_string(),
-                vec![
-                    PhpType::Named("TKey".to_string()),
-                    PhpType::Named("TValue".to_string()),
-                ],
+                vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
             )
         });
     add_implements_generics(class, "OuterIterator", &["TKey", "TValue"]);
@@ -302,8 +299,8 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     // Patch current() → TValue and key() → TKey.
     // phpstorm-stubs declare `current(): mixed` and `key(): mixed` which
     // hides the generic type.  PHPStan's stubs override these.
-    patch_method_return_type(class, "current", PhpType::Named("TValue".to_string()));
-    patch_method_return_type(class, "key", PhpType::Named("TKey".to_string()));
+    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
 
     // Patch the constructor: add template binding TIterator → $iterator
     // so that `new IteratorIterator(new Subject())` infers TIterator = Subject.
@@ -320,7 +317,7 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         // Update the parameter type hint from Traversable to TIterator
         // so that classify_template_binding recognises a Direct binding.
         if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$iterator") {
-            param.type_hint = Some(PhpType::Named("TIterator".to_string()));
+            param.type_hint = Some(PhpType::Named(atom("TIterator")));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
@@ -337,8 +334,8 @@ fn patch_filter_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_method_return_type(class, "current", PhpType::Named("TValue".to_string()));
-    patch_method_return_type(class, "key", PhpType::Named("TKey".to_string()));
+    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
 }
 
 /// Patch `NoRewindIterator` with template params inherited from `IteratorIterator`.
@@ -363,8 +360,8 @@ fn patch_caching_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_method_return_type(class, "current", PhpType::Named("TValue".to_string()));
-    patch_method_return_type(class, "key", PhpType::Named("TKey".to_string()));
+    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
     patch_constructor_iterator_binding(class);
 }
 
@@ -387,8 +384,8 @@ fn patch_limit_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_method_return_type(class, "current", PhpType::Named("TValue".to_string()));
-    patch_method_return_type(class, "key", PhpType::Named("TKey".to_string()));
+    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
     patch_constructor_iterator_binding(class);
 }
 
@@ -431,10 +428,7 @@ fn patch_array_iterator(class: &mut ClassInfo) {
         if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$array") {
             param.type_hint = Some(PhpType::Generic(
                 "array".to_string(),
-                vec![
-                    PhpType::Named("TKey".to_string()),
-                    PhpType::Named("TValue".to_string()),
-                ],
+                vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
             ));
         }
 
@@ -457,10 +451,7 @@ fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
         .or_insert_with(|| {
             PhpType::Generic(
                 "Traversable".to_string(),
-                vec![
-                    PhpType::Named("TKey".to_string()),
-                    PhpType::Named("TValue".to_string()),
-                ],
+                vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
             )
         });
     let parent_atom = atom(parent);
@@ -472,9 +463,9 @@ fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
         class.extends_generics.push((
             parent_atom,
             vec![
-                PhpType::Named("TKey".to_string()),
-                PhpType::Named("TValue".to_string()),
-                PhpType::Named("TIterator".to_string()),
+                PhpType::Named(atom("TKey")),
+                PhpType::Named(atom("TValue")),
+                PhpType::Named(atom("TIterator")),
             ],
         ));
     }
@@ -494,7 +485,7 @@ fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
             ctor.template_bindings.push(binding);
         }
         if let Some(param) = ctor.parameters.iter_mut().find(|p| p.name == "$iterator") {
-            param.type_hint = Some(PhpType::Named("TIterator".to_string()));
+            param.type_hint = Some(PhpType::Named(atom("TIterator")));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
@@ -542,10 +533,7 @@ fn add_templates(class: &mut ClassInfo, templates: &[(&str, Option<&str>)]) {
 /// Add an `@implements InterfaceName<Param1, Param2, ...>` entry where
 /// all type arguments are template parameter names (the common case).
 fn add_implements_generics(class: &mut ClassInfo, iface_name: &str, params: &[&str]) {
-    let args: Vec<PhpType> = params
-        .iter()
-        .map(|p| PhpType::Named((*p).to_string()))
-        .collect();
+    let args: Vec<PhpType> = params.iter().map(|p| PhpType::Named(atom(p))).collect();
     add_implements_generics_typed(class, iface_name, &args);
 }
 
@@ -614,8 +602,8 @@ mod tests {
                 .iter()
                 .any(|(n, args)| n.as_str() == "ArrayAccess"
                     && args.len() == 2
-                    && args[0] == PhpType::Named("TKey".to_string())
-                    && args[1] == PhpType::Named("TValue".to_string())),
+                    && args[0] == PhpType::Named(atom("TKey"))
+                    && args[1] == PhpType::Named(atom("TValue"))),
             "Should have @implements ArrayAccess<TKey, TValue>"
         );
     }

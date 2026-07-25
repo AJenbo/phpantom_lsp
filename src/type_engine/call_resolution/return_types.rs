@@ -2,6 +2,7 @@
 /// structured call expression + argument text to zero or more `ClassInfo`
 /// values, plus the auth/date facade helpers and literal/expression-to-type
 /// conversions it depends on.
+use crate::atom::atom;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -192,7 +193,7 @@ fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option
     match ty {
         PhpType::Named(name) => (name.trim_start_matches('\\')
             == crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
-            .then(|| PhpType::Named(configured_class.to_string())),
+            .then(|| PhpType::Named(atom(configured_class))),
         PhpType::Nullable(inner) => replace_support_carbon_return(inner, configured_class)
             .map(|inner| PhpType::Nullable(Box::new(inner))),
         PhpType::Union(members) => {
@@ -369,7 +370,7 @@ impl Backend {
                                     owner
                                         .parent_class
                                         .as_ref()
-                                        .map(|p| PhpType::Named(p.to_string()))
+                                        .map(|p| PhpType::Named(atom(p.as_ref())))
                                         .unwrap_or(substituted)
                                 } else if substituted.contains_self_ref() {
                                     match &rt.type_string {
@@ -498,10 +499,10 @@ impl Backend {
                             merged
                                 .parent_class
                                 .as_ref()
-                                .map(|p| PhpType::Named(p.to_string()))
+                                .map(|p| PhpType::Named(atom(p.as_ref())))
                                 .unwrap_or_else(|| ret.clone())
                         } else if ret.is_self_like() {
-                            PhpType::Named(merged.fqn().to_string())
+                            PhpType::Named(merged.fqn())
                         } else {
                             ret.clone()
                         };
@@ -1151,7 +1152,7 @@ impl Backend {
                     if let Some(ref parent_name) = class_info.parent_class {
                         let classes =
                             crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                &PhpType::Named(parent_name.to_string()),
+                                &PhpType::Named(atom(parent_name.as_ref())),
                                 &class_info.fqn(),
                                 all_classes,
                                 class_loader,
@@ -1559,7 +1560,7 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
 
     // Enums: any `EnumName::Case` resolves to the enum type itself.
     if cls.kind == ClassLikeKind::Enum {
-        return Some(PhpType::Named(cls.fqn().to_string()));
+        return Some(PhpType::Named(cls.fqn()));
     }
 
     // Class constants: look up the constant and use its type hint
@@ -1604,14 +1605,14 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
         || text.starts_with("function(")
         || text.starts_with("function (")
     {
-        return Some(PhpType::Named("Closure".to_string()));
+        return Some(PhpType::Named(atom("Closure")));
     }
 
     // String literals: "…" or '…'
     if (text.starts_with('"') && text.ends_with('"'))
         || (text.starts_with('\'') && text.ends_with('\''))
     {
-        return Some(PhpType::Named("string".to_string()));
+        return Some(PhpType::Named(atom("string")));
     }
 
     // null
@@ -1633,7 +1634,7 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
     if (text.starts_with('[') && text.ends_with(']'))
         || (text.starts_with("array(") && text.ends_with(')'))
     {
-        return Some(PhpType::Named("array".to_string()));
+        return Some(PhpType::Named(atom("array")));
     }
 
     // Numeric literals — try int first, then float.
@@ -1643,7 +1644,7 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
         && numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_')
         && numeric.bytes().any(|b| b.is_ascii_digit())
     {
-        return Some(PhpType::Named("int".to_string()));
+        return Some(PhpType::Named(atom("int")));
     }
     if !numeric.is_empty()
         && numeric
@@ -1652,7 +1653,7 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
         && numeric.bytes().filter(|&b| b == b'.').count() == 1
         && numeric.bytes().any(|b| b.is_ascii_digit())
     {
-        return Some(PhpType::Named("float".to_string()));
+        return Some(PhpType::Named(atom("float")));
     }
 
     None

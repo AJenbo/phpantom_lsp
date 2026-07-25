@@ -963,7 +963,7 @@ pub(crate) fn with_parsed_program<T: Default>(
 /// generics, shapes, or callables), the mapping is straightforward.
 pub(crate) fn extract_hint_type(hint: &Hint) -> PhpType {
     match hint {
-        Hint::Identifier(ident) => PhpType::Named(bytes_to_str(ident.value()).to_string()),
+        Hint::Identifier(ident) => PhpType::Named(atom(bytes_to_str(ident.value()))),
         Hint::Nullable(nullable) => PhpType::Nullable(Box::new(extract_hint_type(nullable.hint))),
         Hint::Union(union) => {
             let mut members = Vec::new();

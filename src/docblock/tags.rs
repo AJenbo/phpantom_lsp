@@ -263,9 +263,9 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
                         args.iter().map(strip_fqn_prefix_typed).collect();
                     (name.clone(), cleaned_args)
                 }
-                PhpType::Named(name) => (name.clone(), vec![]),
+                PhpType::Named(name) => (name.to_string(), vec![]),
                 PhpType::Nullable(inner) => match inner.as_ref() {
-                    PhpType::Named(name) => (name.clone(), vec![]),
+                    PhpType::Named(name) => (name.to_string(), vec![]),
                     PhpType::Generic(name, args) => {
                         let cleaned_args: Vec<PhpType> =
                             args.iter().map(strip_fqn_prefix_typed).collect();
@@ -313,7 +313,8 @@ pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> 
         // argument list does not leak into the class name.
         let (type_token, _remainder) = split_type_token(desc);
         let base = match PhpType::parse(type_token) {
-            PhpType::Generic(name, _) | PhpType::Named(name) => name,
+            PhpType::Generic(name, _) => name,
+            PhpType::Named(name) => name.to_string(),
             _ => continue,
         };
         if !base.is_empty() {
@@ -352,7 +353,8 @@ pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> 
         }
         let (type_token, _remainder) = split_type_token(desc);
         let interface = match PhpType::parse(type_token) {
-            PhpType::Generic(name, _) | PhpType::Named(name) => name,
+            PhpType::Generic(name, _) => name,
+            PhpType::Named(name) => name.to_string(),
             _ => continue,
         };
         if !interface.is_empty() {
