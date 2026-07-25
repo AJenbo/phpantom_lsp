@@ -87,7 +87,8 @@ impl Backend {
             return None;
         }
 
-        let start_pos = crate::text_position::offset_to_position(content, detected.content_start_offset);
+        let start_pos =
+            crate::text_position::offset_to_position(content, detected.content_start_offset);
         let edit_range = Range {
             start: start_pos,
             end: position,
