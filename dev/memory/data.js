@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784951485786,
+  "lastUpdate": 1784953419575,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20817,6 +20817,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 92.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "86a35b9274ad6a1ad2036ca7939cd46baa5c5b3e",
+          "message": "fix: complete chains after same-line closure close\n\nRecognize lines like `})->` as continuations when completing member\naccess after a multi-line closure argument. This lets the resolver rebuild\nthe full receiver instead of returning no suggestions until the chain\noperator is moved to a fresh line.\n\nCloses #282",
+          "timestamp": "2026-07-24T23:07:17-05:00",
+          "tree_id": "1c712d20e5a85c987f51b8811ad49a750f74aea1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/86a35b9274ad6a1ad2036ca7939cd46baa5c5b3e"
+        },
+        "date": 1784953416874,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.7,
             "unit": "MiB"
           }
         ]
