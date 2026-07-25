@@ -1435,7 +1435,13 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
             } else {
                 // IsType equivalent: check scalar types from AST literals.
                 if condition_is_scalar_type(condition.as_ref(), "string")
-                    && matches!(arg_expr, Some(Expression::Literal(Literal::String(_))))
+                    && matches!(
+                        arg_expr,
+                        Some(
+                            Expression::Literal(Literal::String(_))
+                                | Expression::CompositeString(_)
+                        )
+                    )
                 {
                     let take_then = !*negated;
                     return resolve_conditional_with_args_and_defaults(

@@ -155,6 +155,37 @@ class Service {
 }
 
 #[test]
+fn hover_conditional_return_with_interpolated_string_resolves_string_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/**
+ * @param string|null $key
+ * @return ($key is null ? \stdClass : ($key is string ? mixed : null))
+ */
+function config($key = null, $default = null) {}
+
+function test(string $cache): void {
+    $redisHost = config("{$cache}.host", 'localhost');
+
+    if ($redisHost === null) {
+        return;
+    }
+
+    $redisHost;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 14, 6).expect("expected hover on $redisHost");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("mixed"),
+        "interpolated string arg should resolve `$key is string` to the `mixed` branch, \
+         not fall through to `null`: {text}"
+    );
+}
+
+#[test]
 fn hover_variable_without_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
