@@ -1069,7 +1069,7 @@
   <a href="#phase-4h-intern-composite-per-member-cache-keys" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4h: Intern composite per-member cache keys
+        Phase 4h: Intern composite per-member cache keys ✓
       </span>
     </span>
   </a>
@@ -1671,7 +1671,7 @@
   <a href="#phase-4h-intern-composite-per-member-cache-keys" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4h: Intern composite per-member cache keys
+        Phase 4h: Intern composite per-member cache keys ✓
       </span>
     </span>
   </a>
@@ -2158,24 +2158,20 @@ Laravel providers — now thread the cached <code>Atom</code> end-to-end
 checks, <code>base_name</code> extraction) were unaffected; only genuine
 <code>String</code>-typed sinks (<code>Vec&lt;String&gt;</code> keys, <code>Generic</code>'s <code>String</code> field)
 needed an explicit <code>.to_string()</code>.</p>
-<h4 id="phase-4h-intern-composite-per-member-cache-keys">Phase 4h: Intern composite per-member cache keys<a class="headerlink" href="#phase-4h-intern-composite-per-member-cache-keys" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low. Effort: Low.</strong></p>
-<p><code>target_cache.rs</code> (<code>BODY_INFER_MEMO</code>, the re-entry set) and
-<code>property_access.rs</code> key thread-local caches on
-<code>format!("{}::{}", class_fqn, method)</code>. These allocate a <code>String</code> per
-lookup. Interning them into a single <code>Atom</code> key would remove the
-allocation, but the key space is the <code>FQN × member</code> cartesian product,
-which is effectively unbounded — feeding it to the global <code>ustr</code>
-interner would leak one entry per distinct pair for the process
-lifetime (the exact "constructed once, never compared" case
-<code>atom.rs</code> warns against). Any fix here should therefore use a
-composite <code>(Atom, Atom)</code> tuple key (both halves already interned,
-no new interner entries) rather than interning the joined string.</p>
-<p><strong>Success criteria:</strong>
-- The <code>"FQN::member"</code> cache keys no longer allocate a <code>String</code> per
-  lookup.
-- No net growth in the global interner.
-- No test regressions.</p>
+<h4 id="phase-4h-intern-composite-per-member-cache-keys">Phase 4h: Intern composite per-member cache keys ✓<a class="headerlink" href="#phase-4h-intern-composite-per-member-cache-keys" title="Permanent link">&para;</a></h4>
+<p><code>target_cache.rs</code> (<code>BODY_INFER_MEMO</code> and its <code>BODY_INFER_VISITED</code>
+re-entry set) and <code>property_access.rs</code> (<code>RESOLVING_THIS_PROP</code>) keyed
+thread-local caches on <code>format!("{}::{}", class_fqn, member)</code>, allocating
+a <code>String</code> per lookup. These now use a composite <code>(Atom, Atom)</code> tuple
+key. Both halves are drawn from bounded symbol-name spaces (class FQNs
+and member identifiers) and are already interned, so the tuple key
+allocates nothing per lookup and adds no new entries to the global
+interner. Interning the <em>joined</em> string instead would have leaked one
+entry per distinct <code>FQN × member</code> pair for the process lifetime (the
+"constructed once, never compared" case <code>atom.rs</code> warns against), so the
+tuple is the correct shape. <code>CALLABLE_TARGET_CACHE</code> is intentionally left
+on a string key: its key embeds generic argument text
+(<code>"FQN&lt;generics&gt;::method"</code>) and does not fit a two-<code>Atom</code> tuple.</p>
 <hr />
 <h2 id="success-criteria">Success criteria<a class="headerlink" href="#success-criteria" title="Permanent link">&para;</a></h2>
 <ul>
