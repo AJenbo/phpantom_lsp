@@ -1058,7 +1058,18 @@
   <a href="#phase-4g-carry-atom-in-phptypenamed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code>
+        Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code> ✓
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4h-intern-composite-per-member-cache-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4h: Intern composite per-member cache keys
       </span>
     </span>
   </a>
@@ -1649,7 +1660,18 @@
   <a href="#phase-4g-carry-atom-in-phptypenamed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code>
+        Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code> ✓
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4h-intern-composite-per-member-cache-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4h: Intern composite per-member cache keys
       </span>
     </span>
   </a>
@@ -2120,24 +2142,39 @@ The problem is needing them for every runtime analysis thread.</p>
 - <code>references/mod.rs</code> <code>PARSE_STACK_SIZE</code> reduced to 8 MB or removed.
 - No stack overflows on the full test suite or the largest available
   project.</p>
-<h4 id="phase-4g-carry-atom-in-phptypenamed">Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code><a class="headerlink" href="#phase-4g-carry-atom-in-phptypenamed" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium. Effort: Medium.</strong></p>
-<p>Deferred from Phase 4d. With the FQN now cached, the residual
-per-substitution string cost is <code>PhpType::Named(cls.fqn().to_string())</code>
-(and the equivalent patterns in <code>template_subs.rs</code>, <code>return_types.rs</code>,
-<code>inheritance/mod.rs</code>, <code>forward_walk/scope_state.rs</code>,
-<code>rhs_resolution/mod.rs</code>, and the Laravel builder providers). Each of
-these turns a cached <code>Atom</code> back into an owned <code>String</code> because
-<code>PhpType::Named</code> holds a <code>String</code>.</p>
-<p>Changing <code>PhpType::Named</code> (and the analogous per-member cache keys such
-as <code>format!("{}::{}", class_fqn, method.name)</code> in <code>target_cache.rs</code> /
-<code>property_access.rs</code>) to carry <code>Atom</code> would let the resolution pipeline
-thread interned names end-to-end without re-allocating. This touches a
-core enum used throughout the type engine, so it is a standalone
-refactor rather than part of the 4d fqn-cache change.</p>
+<h4 id="phase-4g-carry-atom-in-phptypenamed">Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code> ✓<a class="headerlink" href="#phase-4g-carry-atom-in-phptypenamed" title="Permanent link">&para;</a></h4>
+<p>Changed <code>PhpType::Named</code> to hold an <code>Atom</code> (interned string) instead of
+a <code>String</code>. <code>Named</code> values are drawn from a bounded set (class names,
+keywords, template parameters, <code>$this</code>) and are compared and cloned
+throughout the substitution hot path, so pointer-sized equality and
+free (<code>Copy</code>) cloning pay off; literal scalar values live in
+<code>PhpType::Literal</code>, so the interner is never fed unbounded free text.
+The substitution sites the FQN cache (Phase 4d) fed back into a fresh
+<code>String</code> — <code>PhpType::Named(cls.fqn().to_string())</code> in <code>template_subs.rs</code>,
+<code>return_types.rs</code>, <code>inheritance/mod.rs</code>, <code>rhs_resolution/mod.rs</code>, and the
+Laravel providers — now thread the cached <code>Atom</code> end-to-end
+(<code>PhpType::Named(cls.fqn())</code>) with no reallocation. <code>Atom</code>'s
+<code>Deref&lt;Target = str&gt;</code> means the ~160 read sites (comparisons, keyword
+checks, <code>base_name</code> extraction) were unaffected; only genuine
+<code>String</code>-typed sinks (<code>Vec&lt;String&gt;</code> keys, <code>Generic</code>'s <code>String</code> field)
+needed an explicit <code>.to_string()</code>.</p>
+<h4 id="phase-4h-intern-composite-per-member-cache-keys">Phase 4h: Intern composite per-member cache keys<a class="headerlink" href="#phase-4h-intern-composite-per-member-cache-keys" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low. Effort: Low.</strong></p>
+<p><code>target_cache.rs</code> (<code>BODY_INFER_MEMO</code>, the re-entry set) and
+<code>property_access.rs</code> key thread-local caches on
+<code>format!("{}::{}", class_fqn, method)</code>. These allocate a <code>String</code> per
+lookup. Interning them into a single <code>Atom</code> key would remove the
+allocation, but the key space is the <code>FQN × member</code> cartesian product,
+which is effectively unbounded — feeding it to the global <code>ustr</code>
+interner would leak one entry per distinct pair for the process
+lifetime (the exact "constructed once, never compared" case
+<code>atom.rs</code> warns against). Any fix here should therefore use a
+composite <code>(Atom, Atom)</code> tuple key (both halves already interned,
+no new interner entries) rather than interning the joined string.</p>
 <p><strong>Success criteria:</strong>
-- <code>PhpType::Named</code> carries an interned name (no <code>String</code>
-  reallocation on the substitution hot path).
+- The <code>"FQN::member"</code> cache keys no longer allocate a <code>String</code> per
+  lookup.
+- No net growth in the global interner.
 - No test regressions.</p>
 <hr />
 <h2 id="success-criteria">Success criteria<a class="headerlink" href="#success-criteria" title="Permanent link">&para;</a></h2>
