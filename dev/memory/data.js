@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784967361527,
+  "lastUpdate": 1784968018349,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21225,6 +21225,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e8ce13c9e37a928864f1c4fc47502a7e5696f4b4",
+          "message": "Fix race condition in laravel config parsing",
+          "timestamp": "2026-07-25T10:10:25+02:00",
+          "tree_id": "67bddcec232ab46babc410acac5c1390db06bab0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e8ce13c9e37a928864f1c4fc47502a7e5696f4b4"
+        },
+        "date": 1784968015252,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.4,
             "unit": "MiB"
           }
         ]
