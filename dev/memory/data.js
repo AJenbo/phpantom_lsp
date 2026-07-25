@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784955296033,
+  "lastUpdate": 1784955309621,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20919,6 +20919,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 97.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d7c76c1a83840ae7c7c87f4a8e8c2c2d40c83221",
+          "message": "Renaming a constructor-promoted property parameter now cascades to\n`$this->prop` usages",
+          "timestamp": "2026-07-25T06:38:52+02:00",
+          "tree_id": "1eb678b68f2c8f65d409a06bf6405a213eb80d08",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d7c76c1a83840ae7c7c87f4a8e8c2c2d40c83221"
+        },
+        "date": 1784955307318,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 94.2,
             "unit": "MiB"
           }
         ]
