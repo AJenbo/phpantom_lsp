@@ -927,6 +927,67 @@ Fixes, cheapest first (each stands alone):
 
 ---
 
+## P34. Eager class population is single-threaded
+
+**Impact: Medium · Effort: Medium**
+
+`populate_from_sorted` (`src/virtual_members/resolve.rs`) resolves the
+toposorted class list in a serial loop on one dedicated thread, in both
+the `analyze` Phase 1.5 and the LSP server's post-index
+`eager_populate_resolved_classes`. On a large Laravel project this is
+~1 s of single-core work in a release build and scales linearly with
+class count; on very large workspaces it is a visible single-threaded
+stretch between the (parallel) index and the (parallel) diagnostics
+pass.
+
+Resolution is already safe to run concurrently: the cycle-break
+in-flight set is keyed by `(thread, FQN)`, and two threads resolving
+the same class merely duplicate work, with one result winning the
+cache write. Two directions:
+
+1. **Work-stealing over the sorted list.** N workers pull indices from
+   an atomic counter over the existing toposorted vector. Most
+   dependencies are already cached by the time a dependent is pulled;
+   occasional duplicated resolution near list neighbours is bounded and
+   correct. Smallest change.
+2. **Topological generations.** Have the toposort emit levels
+   (classes whose dependencies are all in earlier levels) and fan each
+   level out across a scoped thread pool with a barrier between levels.
+   No duplicated work, slightly more coordination.
+
+Both need the workers on `PARSE_WORKER_STACK_SIZE` stacks, matching the
+current single populate thread.
+
+---
+
+## P35. Diagnostic passes reach only a fraction of available cores
+
+**Impact: Medium-High · Effort: Medium**
+
+Measured on a 32-core machine against a large Laravel project (release
+build): the `analyze` Phase 2 diagnostic pass runs at ~2 to ~13 cores,
+averaging roughly 4, despite spawning one worker per core with atomic
+work-stealing. Utilisation is lowest at the start of the pass and
+climbs as it progresses, which points at lock contention that eases as
+shared caches warm, rather than at work starvation. Likely suspects:
+`find_or_load_class` taking write locks while lazily parsing vendor
+files early in the pass, and write contention on the resolved-class
+cache and chain-resolution caches. The LSP workspace diagnostics pass
+uses the same collectors and likely has the same ceiling. Needs
+profiling to attribute the blocked time before picking a fix;
+re-measure after any change with the CPU-sampling loop in the Appendix.
+
+Projects that keep substantial code in `vendor/` (e.g. models shipped
+in a shared vendor package that the application depends on) hit this
+harder: eager population only walks classes from the indexed user
+files, so every vendor class is parsed lazily on first touch during
+the diagnostic pass. The observed CPU shape on such a project is
+bursty (alternating stalls and full-core bursts) consistent with one
+worker holding the load lock while the rest wait, then all proceeding
+until the next unparsed vendor class.
+
+---
+
 # Remaining anti-pattern fixes
 
 Most remaining depth-cap issues are addressed by ER5 (class

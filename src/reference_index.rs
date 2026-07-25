@@ -40,10 +40,36 @@ pub(crate) struct ReferenceIndexEntry {
     pub(crate) is_declaration: bool,
 }
 
-pub(crate) type ReferenceIndex = Arc<RwLock<HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>>>;
+/// The candidate index plus a reverse map of which keys each URI has
+/// entries under.
+///
+/// The reverse map keeps per-file eviction proportional to that file's
+/// own contributions.  Without it, evicting a URI means scanning every
+/// entry of every key in the index — an O(whole-index) pass under the
+/// write lock that serialises the parallel indexing workers (each file
+/// they publish evicts itself first) and grows with workspace size on
+/// every keystroke.
+#[derive(Default)]
+pub(crate) struct ReferenceIndexInner {
+    by_key: HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>,
+    uri_keys: HashMap<String, Vec<ReferenceIndexKey>>,
+}
+
+impl ReferenceIndexInner {
+    pub(crate) fn get(&self, key: &ReferenceIndexKey) -> Option<&Vec<ReferenceIndexEntry>> {
+        self.by_key.get(key)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.by_key.is_empty()
+    }
+}
+
+pub(crate) type ReferenceIndex = Arc<RwLock<ReferenceIndexInner>>;
 
 pub(crate) fn new_reference_index() -> ReferenceIndex {
-    Arc::new(RwLock::new(HashMap::new()))
+    Arc::new(RwLock::new(ReferenceIndexInner::default()))
 }
 
 impl Backend {
@@ -103,12 +129,18 @@ impl Backend {
             .filter_map(|(idx, item)| keep[idx].then_some(item))
             .collect();
 
-        let batch_uris: HashSet<String> = rebuilt.iter().map(|(uri, _)| uri.clone()).collect();
         let mut index = self.reference_index.write();
-        evict_reference_index_uris_locked(&mut index, &batch_uris);
-        for (_uri, entries) in rebuilt {
+        for (uri, _) in &rebuilt {
+            evict_reference_index_uri_locked(&mut index, uri);
+        }
+        for (uri, entries) in rebuilt {
+            let mut keys: HashSet<ReferenceIndexKey> = HashSet::new();
             for (key, entry) in entries {
-                index.entry(key).or_default().push(entry);
+                index.by_key.entry(key.clone()).or_default().push(entry);
+                keys.insert(key);
+            }
+            if !keys.is_empty() {
+                index.uri_keys.insert(uri, keys.into_iter().collect());
             }
         }
     }
@@ -272,28 +304,18 @@ impl Backend {
     }
 }
 
-fn evict_reference_index_uri_locked(
-    index: &mut HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>,
-    uri: &str,
-) {
-    index.retain(|_, entries| {
-        entries.retain(|entry| entry.uri != uri);
-        !entries.is_empty()
-    });
-}
-
-fn evict_reference_index_uris_locked(
-    index: &mut HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>,
-    uris: &HashSet<String>,
-) {
-    if uris.is_empty() {
+fn evict_reference_index_uri_locked(index: &mut ReferenceIndexInner, uri: &str) {
+    let Some(keys) = index.uri_keys.remove(uri) else {
         return;
+    };
+    for key in keys {
+        if let Some(entries) = index.by_key.get_mut(&key) {
+            entries.retain(|entry| entry.uri != uri);
+            if entries.is_empty() {
+                index.by_key.remove(&key);
+            }
+        }
     }
-
-    index.retain(|_, entries| {
-        entries.retain(|entry| !uris.contains(entry.uri.as_str()));
-        !entries.is_empty()
-    });
 }
 
 fn normalize_symbol_name(name: impl AsRef<str>) -> String {
@@ -574,20 +596,23 @@ mod tests {
     }
 
     #[test]
-    fn empty_batch_evict_and_zero_member_offset_are_noops() {
-        let mut index = HashMap::new();
-        index.insert(
-            ReferenceIndexKey::Class("Foo".to_string()),
+    fn evicting_unknown_uri_and_zero_member_offset_are_noops() {
+        let mut index = ReferenceIndexInner::default();
+        let key = ReferenceIndexKey::Class("Foo".to_string());
+        let uri = "file:///project/src/Foo.php".to_string();
+        index.by_key.insert(
+            key.clone(),
             vec![ReferenceIndexEntry {
-                uri: "file:///project/src/Foo.php".to_string(),
+                uri: uri.clone(),
                 start: 0,
                 end: 3,
                 is_declaration: true,
             }],
         );
+        index.uri_keys.insert(uri, vec![key.clone()]);
 
-        evict_reference_index_uris_locked(&mut index, &HashSet::new());
-        assert!(index.contains_key(&ReferenceIndexKey::Class("Foo".to_string())));
+        evict_reference_index_uri_locked(&mut index, "file:///project/src/Other.php");
+        assert!(index.by_key.contains_key(&key));
         assert_eq!(member_range(0, "name", true), None);
     }
 
