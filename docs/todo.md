@@ -33,6 +33,8 @@ within the same impact tier.
 | L18 | [`Macroable::mixin()` registrations](todo/laravel.md)                                                                          | Low         | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
+| F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
+| A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 
 ## Sprint 7 — 1.0 release & IDE extensions
 
@@ -116,7 +118,6 @@ unlikely to move the needle for most users.
 | A34 | [Unified code action handler architecture](todo/actions.md#a34-unified-code-action-handler-architecture) (closure-based resolve, unified fix type)                          | Medium      | Medium-High |
 | A37 | [Simplify with `?->`](todo/actions.md#a37-simplify-with-nullsafe-operator) (replace null-checked chains with the nullsafe operator)                                       | Low-Medium  | Medium      |
 | A38 | [Convert if/elseif chain to switch](todo/actions.md#a38-convert-ifelseif-chain-to-switch)                                                                                   | Low-Medium  | Medium      |
-| A39 | [Convert to string interpolation](todo/actions.md#a39-convert-to-string-interpolation) (`'Hello ' . $name` → `"Hello $name"`)                                               | Low         | Low         |
 | A43 | [Update docblock generics](todo/actions.md#a43-update-docblock-generics)                                                                                                    | Low         | Low-Medium  |
 |     | **[PHPStan Code Actions](todo/phpstan-actions.md)**                                                                                                                         |             |             |
 | H4  | `assign.byRefForeachExpr` — unset by-reference foreach variable                                                                                                             | Medium      | Medium      |
@@ -148,7 +149,6 @@ unlikely to move the needle for most users.
 | F14 | [Helix upstream PR](todo/lsp-features.md#f14-helix-upstream-pr) (depends on F13)                                                                                            | Low-Medium  | Low         |
 | F3  | [Incremental text sync](todo/lsp-features.md#f3-incremental-text-sync)                                                                                                       | Low-Medium  | Medium      |
 | F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type-brace-de-indent)                                                                                            | Low         | Low         |
-| F8  | [Test ↔ implementation navigation via `@covers`](todo/lsp-features.md#f8-test-implementation-navigation-via-covers)                                                        | Low         | Medium      |
 | F19 | [Connect to a remote/TCP language server](todo/lsp-features.md#f19-connect-to-a-remotetcp-language-server-vs-code-extension)                                               | Low         | Low-Medium  |
 |     | **[Signature Help](todo/signature-help.md)**                                                                                                                                |             |             |
 | S1  | [Attribute constructor signature help](todo/signature-help.md#s1-attribute-constructor-signature-help)                                                                      | Medium      | Medium      |
