@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784936658838,
+  "lastUpdate": 1784939034321,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20375,6 +20375,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 92.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d8549e06432afe506fd066e6a842e42956cf6146",
+          "message": "Update AGENTS.md",
+          "timestamp": "2026-07-25T02:08:25+02:00",
+          "tree_id": "74e2f479662173ed80d6364461bd5d21fdb0e7fe",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d8549e06432afe506fd066e6a842e42956cf6146"
+        },
+        "date": 1784939031421,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 48.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.9,
             "unit": "MiB"
           }
         ]
