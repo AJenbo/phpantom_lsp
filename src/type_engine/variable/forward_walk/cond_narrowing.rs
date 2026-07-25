@@ -722,7 +722,7 @@ pub(crate) fn apply_member_exists_narrowing<'b>(
                 } else {
                     narrowed
                         .properties
-                        .push(PropertyInfo::virtual_property(&member, None));
+                        .push(Arc::new(PropertyInfo::virtual_property(&member, None)));
                 }
                 rt.class_info = Some(Arc::new(narrowed));
                 changed = true;

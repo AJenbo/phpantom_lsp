@@ -312,7 +312,7 @@ pub(crate) fn collect_overridable_properties(
             if own.contains(&lower) || !seen.insert(lower) {
                 continue;
             }
-            results.push((prop.clone(), declaring.clone(), false));
+            results.push(((**prop).clone(), declaring.clone(), false));
         }
         let mut collector = PropertyCollector {
             partial,
@@ -384,7 +384,7 @@ impl PropertyCollector<'_> {
                 continue;
             }
             self.results
-                .push((prop.clone(), declaring.clone(), self.skip_override_attr));
+                .push(((**prop).clone(), declaring.clone(), self.skip_override_attr));
         }
     }
 }
@@ -428,7 +428,7 @@ pub(crate) fn collect_overridable_constants(
             if own.contains(&lower) || !seen.insert(lower) {
                 continue;
             }
-            results.push((c.clone(), declaring.clone()));
+            results.push(((**c).clone(), declaring.clone()));
         }
         parent_name = parent.parent_class;
         depth += 1;
@@ -949,7 +949,7 @@ mod tests {
     fn collects_parent_constants() {
         let mut base = make_class("Base");
         base.constants = vec![
-            ConstantInfo {
+            Arc::new(ConstantInfo {
                 name: atom("STATUS_OK"),
                 name_offset: 0,
                 type_hint: None,
@@ -962,8 +962,8 @@ mod tests {
                 enum_value: None,
                 value: Some("1".into()),
                 is_virtual: false,
-            },
-            ConstantInfo {
+            }),
+            Arc::new(ConstantInfo {
                 name: atom("SECRET"),
                 name_offset: 0,
                 type_hint: None,
@@ -976,7 +976,7 @@ mod tests {
                 enum_value: None,
                 value: None,
                 is_virtual: false,
-            },
+            }),
         ]
         .into();
 

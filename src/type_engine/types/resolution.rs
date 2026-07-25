@@ -144,19 +144,21 @@ fn type_hint_to_classes_typed_depth(
             let properties = SharedVec::from_vec(
                 entries
                     .iter()
-                    .map(|e| PropertyInfo {
-                        name: atom(&e.key.clone().unwrap_or_default()),
-                        name_offset: 0,
-                        type_hint: Some(e.value_type.clone()),
-                        native_type_hint: None,
-                        description: None,
-                        is_static: false,
-                        visibility: Visibility::Public,
-                        deprecation_message: None,
-                        deprecated_replacement: None,
-                        see_refs: Vec::new(),
-                        is_virtual: true,
-                        source: None,
+                    .map(|e| {
+                        Arc::new(PropertyInfo {
+                            name: atom(&e.key.clone().unwrap_or_default()),
+                            name_offset: 0,
+                            type_hint: Some(e.value_type.clone()),
+                            native_type_hint: None,
+                            description: None,
+                            is_static: false,
+                            visibility: Visibility::Public,
+                            deprecation_message: None,
+                            deprecated_replacement: None,
+                            see_refs: Vec::new(),
+                            is_virtual: true,
+                            source: None,
+                        })
                     })
                     .collect(),
             );

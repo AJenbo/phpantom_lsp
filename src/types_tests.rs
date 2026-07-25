@@ -521,12 +521,12 @@ fn class_signature_eq_methods_different_signature() {
 fn class_signature_eq_properties_order_insensitive() {
     let a = ClassInfo {
         name: crate::atom::atom("Foo"),
-        properties: vec![prop("x", "int"), prop("y", "string")].into(),
+        properties: vec![Arc::new(prop("x", "int")), Arc::new(prop("y", "string"))].into(),
         ..Default::default()
     };
     let b = ClassInfo {
         name: crate::atom::atom("Foo"),
-        properties: vec![prop("y", "string"), prop("x", "int")].into(),
+        properties: vec![Arc::new(prop("y", "string")), Arc::new(prop("x", "int"))].into(),
         ..Default::default()
     };
     assert!(a.signature_eq(&b));
@@ -536,12 +536,12 @@ fn class_signature_eq_properties_order_insensitive() {
 fn class_signature_eq_constants_order_insensitive() {
     let a = ClassInfo {
         name: crate::atom::atom("Foo"),
-        constants: vec![constant("A"), constant("B")].into(),
+        constants: vec![Arc::new(constant("A")), Arc::new(constant("B"))].into(),
         ..Default::default()
     };
     let b = ClassInfo {
         name: crate::atom::atom("Foo"),
-        constants: vec![constant("B"), constant("A")].into(),
+        constants: vec![Arc::new(constant("B")), Arc::new(constant("A"))].into(),
         ..Default::default()
     };
     assert!(a.signature_eq(&b));
@@ -743,8 +743,8 @@ fn class_signature_eq_body_only_change() {
         end_offset: 500,
         keyword_offset: 5,
         methods: vec![Arc::new(m_a)].into(),
-        properties: vec![p_a].into(),
-        constants: vec![c_a].into(),
+        properties: vec![Arc::new(p_a)].into(),
+        constants: vec![Arc::new(c_a)].into(),
         links: vec!["https://same.example.com".to_string()],
         ..Default::default()
     };
@@ -767,8 +767,8 @@ fn class_signature_eq_body_only_change() {
         end_offset: 510,
         keyword_offset: 10,
         methods: vec![Arc::new(m_b)].into(),
-        properties: vec![p_b].into(),
-        constants: vec![c_b].into(),
+        properties: vec![Arc::new(p_b)].into(),
+        constants: vec![Arc::new(c_b)].into(),
         links: vec!["https://same.example.com".to_string()],
         ..Default::default()
     };
@@ -812,7 +812,7 @@ fn class_signature_eq_property_description_change_triggers_eviction() {
     p_a.description = Some("Old prop desc".to_string());
     let a = ClassInfo {
         name: crate::atom::atom("Foo"),
-        properties: vec![p_a].into(),
+        properties: vec![Arc::new(p_a)].into(),
         ..Default::default()
     };
 
@@ -820,7 +820,7 @@ fn class_signature_eq_property_description_change_triggers_eviction() {
     p_b.description = Some("New prop desc".to_string());
     let b = ClassInfo {
         name: crate::atom::atom("Foo"),
-        properties: vec![p_b].into(),
+        properties: vec![Arc::new(p_b)].into(),
         ..Default::default()
     };
 

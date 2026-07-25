@@ -87,7 +87,7 @@ fn merge_adds_new_properties() {
     let mut class = make_class("Foo");
     class
         .properties
-        .push(make_property("existing", Some("string")));
+        .push(Arc::new(make_property("existing", Some("string"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -308,7 +308,7 @@ fn merge_does_not_overwrite_existing_property() {
     let mut class = make_class("Foo");
     class
         .properties
-        .push(make_property("value", Some("string")));
+        .push(Arc::new(make_property("value", Some("string"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -329,7 +329,9 @@ fn merge_does_not_overwrite_existing_property() {
 #[test]
 fn merge_replaces_mixed_property_with_specific_type() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("vat", Some("mixed")));
+    class
+        .properties
+        .push(Arc::new(make_property("vat", Some("mixed"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -350,7 +352,7 @@ fn merge_replaces_mixed_property_with_specific_type() {
 #[test]
 fn merge_replaces_untyped_property_with_specific_type() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("vat", None));
+    class.properties.push(Arc::new(make_property("vat", None)));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -371,7 +373,9 @@ fn merge_replaces_untyped_property_with_specific_type() {
 #[test]
 fn merge_does_not_replace_mixed_with_mixed() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("col", Some("mixed")));
+    class
+        .properties
+        .push(Arc::new(make_property("col", Some("mixed"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -388,7 +392,9 @@ fn merge_does_not_replace_mixed_with_mixed() {
 #[test]
 fn merge_does_not_replace_specific_type_with_mixed() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("col", Some("string")));
+    class
+        .properties
+        .push(Arc::new(make_property("col", Some("string"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -409,7 +415,9 @@ fn merge_does_not_replace_specific_type_with_mixed() {
 #[test]
 fn merge_generic_type_beats_bare_type() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("tags", Some("array")));
+    class
+        .properties
+        .push(Arc::new(make_property("tags", Some("array"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -430,7 +438,9 @@ fn merge_generic_type_beats_bare_type() {
 #[test]
 fn merge_bare_type_beats_mixed() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("tags", Some("mixed")));
+    class
+        .properties
+        .push(Arc::new(make_property("tags", Some("mixed"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -453,7 +463,7 @@ fn merge_bare_type_does_not_replace_generic() {
     let mut class = make_class("Foo");
     class
         .properties
-        .push(make_property("tags", Some("array<int>")));
+        .push(Arc::new(make_property("tags", Some("array<int>"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -476,7 +486,7 @@ fn merge_same_specificity_preserves_first_writer() {
     let mut class = make_class("Foo");
     class
         .properties
-        .push(make_property("tags", Some("array<int>")));
+        .push(Arc::new(make_property("tags", Some("array<int>"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -497,7 +507,9 @@ fn merge_same_specificity_preserves_first_writer() {
 #[test]
 fn merge_mixed_does_not_replace_bare_type() {
     let mut class = make_class("Foo");
-    class.properties.push(make_property("tags", Some("array")));
+    class
+        .properties
+        .push(Arc::new(make_property("tags", Some("array"))));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -520,11 +532,11 @@ fn merge_native_type_hint_beats_untyped_virtual() {
     // A property with no type_hint but a native_type_hint should score
     // higher than an untyped virtual property (specificity 0).
     let mut class = make_class("Foo");
-    class.properties.push(PropertyInfo {
+    class.properties.push(Arc::new(PropertyInfo {
         native_type_hint: Some(PhpType::parse("string")),
         type_hint: None,
         ..PropertyInfo::virtual_property("name", None)
-    });
+    }));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -551,11 +563,11 @@ fn merge_native_type_hint_beats_mixed_virtual() {
     // A property whose type_hint is None but native_type_hint is "int"
     // should not be replaced by a virtual property typed "mixed".
     let mut class = make_class("Foo");
-    class.properties.push(PropertyInfo {
+    class.properties.push(Arc::new(PropertyInfo {
         native_type_hint: Some(PhpType::parse("int")),
         type_hint: None,
         ..PropertyInfo::virtual_property("code", None)
-    });
+    }));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -586,11 +598,11 @@ fn merge_specific_virtual_beats_native_only() {
     // Actually: both score 1, so the existing property is preserved
     // (first-writer-wins at the same tier).
     let mut class = make_class("Foo");
-    class.properties.push(PropertyInfo {
+    class.properties.push(Arc::new(PropertyInfo {
         native_type_hint: Some(PhpType::parse("string")),
         type_hint: None,
         ..PropertyInfo::virtual_property("col", None)
-    });
+    }));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -619,11 +631,11 @@ fn merge_generic_virtual_beats_native_bare() {
     // should replace a property that only has a native bare type
     // ("array", score 1 via native fallback).
     let mut class = make_class("Foo");
-    class.properties.push(PropertyInfo {
+    class.properties.push(Arc::new(PropertyInfo {
         native_type_hint: Some(PhpType::parse("array")),
         type_hint: None,
         ..PropertyInfo::virtual_property("tags", None)
-    });
+    }));
 
     let virtual_members = VirtualMembers {
         methods: Vec::new(),
@@ -647,7 +659,9 @@ fn merge_handles_empty_virtual_members() {
     class
         .methods
         .push(Arc::new(make_method("foo", Some("void"))));
-    class.properties.push(make_property("bar", Some("int")));
+    class
+        .properties
+        .push(Arc::new(make_property("bar", Some("int"))));
 
     merge_virtual_members(
         &mut class,
@@ -1542,7 +1556,7 @@ fn resolve_class_fully_merges_transitive_interface_constants() {
 
     let mut unit_value = make_class("Carbon\\Constants\\UnitValue");
     unit_value.kind = ClassLikeKind::Interface;
-    unit_value.constants.push(ConstantInfo {
+    unit_value.constants.push(Arc::new(ConstantInfo {
         name: crate::atom::atom("JANUARY"),
         name_offset: 0,
         type_hint: Some(PhpType::parse("int")),
@@ -1555,7 +1569,7 @@ fn resolve_class_fully_merges_transitive_interface_constants() {
         enum_value: None,
         value: Some("1".to_string()),
         is_virtual: false,
-    });
+    }));
 
     let mut json_serializable = make_class("JsonSerializable");
     json_serializable.kind = ClassLikeKind::Interface;

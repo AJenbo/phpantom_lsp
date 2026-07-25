@@ -155,10 +155,10 @@ pub(crate) fn inject_pivot(index: &LaravelPivotIndex, class: Arc<ClassInfo>) -> 
     }
 
     let mut cloned = ClassInfo::clone(&class);
-    cloned.properties.push(PropertyInfo {
+    cloned.properties.push(Arc::new(PropertyInfo {
         source: Some(PropertySource::Pivot),
         ..PropertyInfo::virtual_property_typed("pivot", Some(pivot_ty))
-    });
+    }));
     Arc::new(cloned)
 }
 

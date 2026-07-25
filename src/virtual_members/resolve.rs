@@ -17,7 +17,8 @@ use std::sync::Arc;
 use crate::atom::atom;
 use crate::inheritance::{
     ClassRef, apply_substitution_to_method, apply_substitution_to_property,
-    enrich_method_arc_from_ancestor, enrich_property_from_ancestor, resolve_class_with_inheritance,
+    enrich_method_arc_from_ancestor, enrich_property_arc_from_ancestor,
+    resolve_class_with_inheritance,
 };
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
@@ -720,9 +721,16 @@ fn merge_interface_members_into(
             .iter()
             .any(|p| crate::inheritance::property_references_params(p, &sub_keys))
         {
+            let fp = super::cache::TransformFingerprint::new(Some(iface_subs), None, 0);
             for property in resolved_iface.properties.make_mut().iter_mut() {
                 if crate::inheritance::property_references_params(property, &sub_keys) {
-                    apply_substitution_to_property(property, iface_subs);
+                    let transformed =
+                        super::cache::intern_transformed_property(property, fp, || {
+                            let mut p = (**property).clone();
+                            apply_substitution_to_property(&mut p, iface_subs);
+                            p
+                        });
+                    *property = transformed;
                 }
             }
         }
@@ -777,7 +785,7 @@ fn merge_interface_members_into(
             .iter_mut()
             .find(|p| p.name == property.name)
         {
-            enrich_property_from_ancestor(existing, &property);
+            enrich_property_arc_from_ancestor(existing, &property);
         } else {
             merged.properties.push(property);
         }

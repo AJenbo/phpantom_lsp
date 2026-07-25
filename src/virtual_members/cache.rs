@@ -14,7 +14,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::RwLock;
 
 use crate::atom::Atom;
-use crate::types::{ClassInfo, MethodInfo};
+use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
 use crate::virtual_members::laravel::database_schema::SchemaIndex;
 
 /// Cache key for [`ResolvedClassCache`]: fully-qualified class name
@@ -101,6 +101,17 @@ pub struct ResolvedCacheInner {
     /// `Weak::upgrade` + `ptr_eq` validation and the entry is simply
     /// replaced, so stale entries can never leak a wrong method.
     substituted_methods: HashMap<(usize, u128), SubstitutedEntry>,
+    /// Interned transformed properties, keyed the same way as
+    /// [`substituted_methods`](Self::substituted_methods) (origin
+    /// `Arc<PropertyInfo>` identity plus a [`TransformFingerprint`]).
+    ///
+    /// Properties are transformed only by template substitution during
+    /// the inheritance merge, so the fingerprint carries just the
+    /// substitution map.  As with methods, every subclass of the same
+    /// generic parent substitutes the same template bounds and so
+    /// produces value-identical transformed properties, which interning
+    /// collapses to one allocation shared across all of them.
+    substituted_properties: HashMap<(usize, u128), SubstitutedPropertyEntry>,
 }
 
 /// One interned transformed method: the origin witness plus the shared
@@ -109,6 +120,14 @@ pub struct ResolvedCacheInner {
 struct SubstitutedEntry {
     witness: Weak<MethodInfo>,
     value: Arc<MethodInfo>,
+}
+
+/// One interned transformed property: the origin witness plus the shared
+/// transformed value.  See
+/// [`ResolvedCacheInner::substituted_properties`].
+struct SubstitutedPropertyEntry {
+    witness: Weak<PropertyInfo>,
+    value: Arc<PropertyInfo>,
 }
 
 /// Ceiling on the interned-method map.  Reaching it clears the map (the
@@ -127,6 +146,7 @@ impl Default for ResolvedCacheInner {
             schema_index: SchemaIndex::default(),
             in_flight: HashSet::new(),
             substituted_methods: HashMap::new(),
+            substituted_properties: HashMap::new(),
         }
     }
 }
@@ -222,6 +242,7 @@ impl ResolvedCacheInner {
         self.fqn_keys.clear();
         self.reverse_deps.clear();
         self.substituted_methods.clear();
+        self.substituted_properties.clear();
     }
 
     /// Look up an interned transformed method for `origin` under the
@@ -259,6 +280,47 @@ impl ResolvedCacheInner {
         self.substituted_methods.insert(
             (Arc::as_ptr(origin) as usize, fp),
             SubstitutedEntry {
+                witness: Arc::downgrade(origin),
+                value,
+            },
+        );
+    }
+
+    /// Look up an interned transformed property for `origin` under the
+    /// transform identified by `fp`.
+    ///
+    /// The witness validation mirrors
+    /// [`get_substituted`](Self::get_substituted): a stale entry whose
+    /// origin died (its address reused) fails `Weak::upgrade` + `ptr_eq`
+    /// and is treated as a miss.
+    pub(crate) fn get_substituted_property(
+        &self,
+        origin: &Arc<PropertyInfo>,
+        fp: u128,
+    ) -> Option<Arc<PropertyInfo>> {
+        let key = (Arc::as_ptr(origin) as usize, fp);
+        let entry = self.substituted_properties.get(&key)?;
+        let alive = entry.witness.upgrade()?;
+        if Arc::ptr_eq(&alive, origin) {
+            Some(Arc::clone(&entry.value))
+        } else {
+            None
+        }
+    }
+
+    /// Intern a transformed property built from `origin` under `fp`.
+    pub(crate) fn insert_substituted_property(
+        &mut self,
+        origin: &Arc<PropertyInfo>,
+        fp: u128,
+        value: Arc<PropertyInfo>,
+    ) {
+        if self.substituted_properties.len() >= SUBSTITUTED_METHODS_CAP {
+            self.substituted_properties.clear();
+        }
+        self.substituted_properties.insert(
+            (Arc::as_ptr(origin) as usize, fp),
+            SubstitutedPropertyEntry {
                 witness: Arc::downgrade(origin),
                 value,
             },
@@ -492,6 +554,33 @@ pub(crate) fn intern_transformed_method(
     cache
         .write()
         .insert_substituted(origin, fp.0, Arc::clone(&value));
+    value
+}
+
+/// Return a transformed copy of `origin`, shared through the active
+/// resolved-class cache's property interning store when possible.
+///
+/// The property analogue of [`intern_transformed_method`]: when a cache
+/// is active on this thread and already holds a value for `(origin, fp)`,
+/// that shared `Arc` is returned and `build` is never called.  Otherwise
+/// `build` produces the transformed `PropertyInfo`, which is interned
+/// (when a cache is active) so every later merge that applies the same
+/// transform to the same origin shares the allocation.
+pub(crate) fn intern_transformed_property(
+    origin: &Arc<PropertyInfo>,
+    fp: TransformFingerprint,
+    build: impl FnOnce() -> PropertyInfo,
+) -> Arc<PropertyInfo> {
+    let Some(cache) = active_resolved_class_cache() else {
+        return Arc::new(build());
+    };
+    if let Some(hit) = cache.read().get_substituted_property(origin, fp.0) {
+        return hit;
+    }
+    let value = Arc::new(build());
+    cache
+        .write()
+        .insert_substituted_property(origin, fp.0, Arc::clone(&value));
     value
 }
 

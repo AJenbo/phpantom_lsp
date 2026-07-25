@@ -1593,9 +1593,22 @@ pub struct ClassInfo {
     /// the index is stale and the helpers fall back to linear scan.
     pub indexed_method_count: u32,
     /// The properties defined directly in this class.
-    pub properties: SharedVec<PropertyInfo>,
+    ///
+    /// Each property is wrapped in `Arc` (like [`methods`](Self::methods))
+    /// so the inheritance merge shares property metadata across parent and
+    /// child classes instead of deep-cloning the `PropertyInfo` struct.
+    /// When no generic substitution is needed, merging a parent property
+    /// into a child is a plain `Arc::clone`; when substitution applies, the
+    /// transformed copy is interned (see
+    /// [`intern_transformed_property`](crate::virtual_members::intern_transformed_property))
+    /// so value-identical results collapse to one allocation.
+    pub properties: SharedVec<Arc<PropertyInfo>>,
     /// The constants defined directly in this class.
-    pub constants: SharedVec<ConstantInfo>,
+    ///
+    /// Wrapped in `Arc` so inheritance merging shares the allocation:
+    /// constants are never transformed on inheritance, so an inherited
+    /// constant is always a plain `Arc::clone` of the declaring class's.
+    pub constants: SharedVec<Arc<ConstantInfo>>,
     /// Byte offset where the class body starts (left brace).
     pub start_offset: u32,
     /// Byte offset where the class body ends (right brace).
@@ -1954,6 +1967,34 @@ impl ClassInfo {
             .iter()
             .find(|m| m.name.eq_ignore_ascii_case(name))
             .map(Arc::clone)
+    }
+
+    /// Look up a property by name (case-sensitive, per PHP semantics).
+    ///
+    /// Linear scan: unlike methods there is no property index, because
+    /// property lookups are far less frequent than method lookups and
+    /// most classes have few properties.
+    #[inline]
+    pub fn get_property(&self, name: &str) -> Option<&PropertyInfo> {
+        self.properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|arc| arc.as_ref())
+    }
+
+    /// Check whether a property with the given name exists (case-sensitive).
+    #[inline]
+    pub fn has_property(&self, name: &str) -> bool {
+        self.properties.iter().any(|p| p.name == name)
+    }
+
+    /// Look up a constant by name (case-sensitive, per PHP semantics).
+    #[inline]
+    pub fn get_constant(&self, name: &str) -> Option<&ConstantInfo> {
+        self.constants
+            .iter()
+            .find(|c| c.name == name)
+            .map(|arc| arc.as_ref())
     }
 
     /// Compare two `ClassInfo` values by signature-relevant fields only.

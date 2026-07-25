@@ -393,9 +393,16 @@ pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[PhpType]) -> Cl
         .iter()
         .any(|p| property_references_params(p, &sub_keys))
     {
+        let fp = crate::virtual_members::TransformFingerprint::new(Some(&subs), None, 0);
         for property in result.properties.make_mut() {
             if property_references_params(property, &sub_keys) {
-                apply_substitution_to_property(property, &subs);
+                let transformed =
+                    crate::virtual_members::intern_transformed_property(property, fp, || {
+                        let mut p = (**property).clone();
+                        apply_substitution_to_property(&mut p, &subs);
+                        p
+                    });
+                *property = transformed;
             }
         }
     }

@@ -563,10 +563,9 @@ mod tests {
             name: crate::atom::atom("Foo"),
             ..crate::types::ClassInfo::default()
         };
-        class.properties =
-            crate::types::SharedVec::from_vec(vec![crate::types::PropertyInfo::virtual_property(
-                "name", None,
-            )]);
+        class.properties = crate::types::SharedVec::from_vec(vec![Arc::new(
+            crate::types::PropertyInfo::virtual_property("name", None),
+        )]);
         backend
             .symbols
             .uri_classes_index

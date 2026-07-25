@@ -327,6 +327,38 @@ pub(crate) fn enrich_single_parameter(
 /// Propagates type hints and descriptions from the ancestor when the
 /// child lacks its own docblock overrides.  The same
 /// effective-vs-native comparison is used as for method return types.
+/// Copy-on-write wrapper around [`enrich_property_from_ancestor`].
+///
+/// The property analogue of [`enrich_method_arc_from_ancestor`]: the
+/// shared `Arc<PropertyInfo>` is only deep-cloned when the enrichment
+/// would actually change a field, which keeps inherited properties
+/// sharing their allocation in the common no-op case.
+pub(crate) fn enrich_property_arc_from_ancestor(
+    existing: &mut Arc<PropertyInfo>,
+    ancestor: &PropertyInfo,
+) {
+    if property_enrichment_would_change(existing, ancestor) {
+        enrich_property_from_ancestor(Arc::make_mut(existing), ancestor);
+    }
+}
+
+/// Whether [`enrich_property_from_ancestor`] would change any field of
+/// `existing`.  Mirrors the apply function's conditions exactly (keep the
+/// two in sync); an overwrite with an equal value counts as "no change".
+fn property_enrichment_would_change(existing: &PropertyInfo, ancestor: &PropertyInfo) -> bool {
+    // Type hint.
+    if (existing.type_hint.is_none() && ancestor.type_hint.is_some()
+        || lacks_docblock_override(&existing.type_hint, &existing.native_type_hint)
+            && ancestor_has_richer_type(&ancestor.type_hint, &ancestor.native_type_hint))
+        && existing.type_hint != ancestor.type_hint
+    {
+        return true;
+    }
+
+    // Description.
+    existing.description.is_none() && ancestor.description.is_some()
+}
+
 pub(crate) fn enrich_property_from_ancestor(existing: &mut PropertyInfo, ancestor: &PropertyInfo) {
     // ── Type hint ───────────────────────────────────────────────
     // Same logic as method return types: propagate when the child

@@ -262,8 +262,16 @@ impl Backend {
                         kind: ClassLikeKind::Class,
                         name: class_name,
                         methods: methods.into_iter().map(Arc::new).collect::<Vec<_>>().into(),
-                        properties: properties.into(),
-                        constants: constants.into(),
+                        properties: properties
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
+                        constants: constants
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
                         start_offset,
                         end_offset,
                         keyword_offset,
@@ -366,8 +374,16 @@ impl Backend {
                         kind: ClassLikeKind::Interface,
                         name: iface_name,
                         methods: methods.into_iter().map(Arc::new).collect::<Vec<_>>().into(),
-                        properties: properties.into(),
-                        constants: constants.into(),
+                        properties: properties
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
+                        constants: constants
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
                         start_offset,
                         end_offset,
                         keyword_offset,
@@ -456,8 +472,16 @@ impl Backend {
                         kind: ClassLikeKind::Trait,
                         name: trait_name,
                         methods: methods.into_iter().map(Arc::new).collect::<Vec<_>>().into(),
-                        properties: properties.into(),
-                        constants: constants.into(),
+                        properties: properties
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
+                        constants: constants
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
                         start_offset,
                         end_offset,
                         keyword_offset,
@@ -595,8 +619,16 @@ impl Backend {
                         kind: ClassLikeKind::Enum,
                         name: enum_name,
                         methods: methods.into_iter().map(Arc::new).collect::<Vec<_>>().into(),
-                        properties: properties.into(),
-                        constants: constants.into(),
+                        properties: properties
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
+                        constants: constants
+                            .into_iter()
+                            .map(Arc::new)
+                            .collect::<Vec<_>>()
+                            .into(),
                         start_offset,
                         end_offset,
                         keyword_offset,

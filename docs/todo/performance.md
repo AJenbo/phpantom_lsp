@@ -913,18 +913,20 @@ holds ~247 KB per resolved class.
 
 Two compounding causes:
 
-1. **Inheritance flattening stores a full member copy per class.** Each
+1. **Inheritance flattening stores a member slot per class.** Each
    fully-resolved class stores the complete flattened member set (own +
-   trait + parent + interface + mixin). On the measured project that is
-   648 K method slots across 3 K classes (~214 methods/class), even
-   though only ~20 K unique `MethodInfo` values exist in `method_store`.
-   `resolve_class_with_inheritance` (`inheritance.rs`) shares the
-   `Arc<MethodInfo>` for any inherited method that does not mention a
-   substituted template parameter, so most slots point back at the base
-   class, but every method that does reference a template param (and
-   every class that overrides or enriches one) still holds a distinct
-   allocation. The flattening itself is what the separated-metadata fix
-   below would eliminate.
+   trait + parent + interface + mixin), so a project with ~3 K classes
+   at ~214 members each holds ~648 K method slots. The distinct
+   *allocations* behind those slots are now heavily shared for methods,
+   properties, and constants alike: a slot the merge does not rewrite
+   points back at its source `Arc<MethodInfo>`/`Arc<PropertyInfo>`/
+   `Arc<ConstantInfo>`, and the copies a merge does produce (template
+   substitution, trait / interface / enrichment merges, Eloquent Builder
+   and scope forwarding) are interned so value-identical results
+   collapse to one allocation with a shared parameter list. What remains
+   per class is the flattened `Vec<Arc<_>>` itself — one pointer slot
+   per visible member — which the separated-metadata fix below would
+   eliminate.
 
 2. **The cache is retained for the whole session, unbounded.** Eager
    population plus lazy resolution during the pass fill the cache with
@@ -943,14 +945,19 @@ Fixes, cheapest first (each stands alone):
    cycles are broken by the cache's in-flight set, which `clear()`
    deliberately leaves untouched, so clearing mid-resolution cannot
    resurrect unbounded recursion. **Low-Medium.**
-2. **Separated metadata.** The structural fix: store method
-   identifier `Atom`s per class and keep a single global `MethodInfo`
-   store, resolving members on demand instead of flattening a cloned copy
-   into every class (Mago's model). Eliminates the flattening entirely.
-   This was the endgame of the (now-completed) eager-resolution track;
-   profiling closed it as not worth the rewrite for analysis *speed*,
-   but it remains a valid direction for *memory* if the cache bound above
-   proves insufficient. **High.**
+2. **Separated metadata.** The structural fix for the remaining
+   per-class pointer vectors: store member identifier `Atom`s per class
+   and keep a single global member store, resolving members on demand
+   instead of flattening a per-class `Vec` of pointers (Mago's model).
+   With member *allocations* already shared and interned across methods,
+   properties, and constants, the win left here is the pointer slots
+   themselves. This needs substitution moved to query time to fit
+   PHPantom's transform-on-inherit model (an inherited member is not
+   byte-identical to the declaring class's once template substitution or
+   bare-`self` rewriting applies, so a pure `(fqn, name)` redirect would
+   lose the transform). Profiling closed this as not worth the rewrite
+   for analysis *speed*; it remains a valid direction for *memory* if the
+   cache bound above proves insufficient. **High.**
 
 ---
 

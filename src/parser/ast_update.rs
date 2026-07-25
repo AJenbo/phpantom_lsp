@@ -1347,11 +1347,12 @@ impl Backend {
                 }
             }
             for prop in class.properties.make_mut() {
-                if let Some(ref hint) = prop.type_hint {
-                    let resolved = hint.resolve_names(&resolver);
-                    if resolved != *hint {
-                        prop.type_hint = Some(resolved);
-                    }
+                let Some(hint) = prop.type_hint.as_ref() else {
+                    continue;
+                };
+                let resolved = hint.resolve_names(&resolver);
+                if resolved != *hint {
+                    Arc::make_mut(prop).type_hint = Some(resolved);
                 }
             }
 

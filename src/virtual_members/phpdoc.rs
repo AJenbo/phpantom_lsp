@@ -842,7 +842,7 @@ fn collect_mixin_members(
             if !collector.dedup.properties.insert(property.name.to_string()) {
                 continue;
             }
-            let mut property = property.clone();
+            let mut property = (**property).clone();
             if !subs.is_empty() {
                 inheritance::apply_substitution_to_property(&mut property, &subs);
             }
@@ -857,7 +857,7 @@ fn collect_mixin_members(
             if !collector.dedup.constants.insert(constant.name.to_string()) {
                 continue;
             }
-            collector.constants.push(constant.clone());
+            collector.constants.push((**constant).clone());
         }
 
         // ── Phase: @method/@property tags from the mixin's own docblock ──

@@ -14,11 +14,13 @@ use crate::util::short_name;
 use crate::virtual_members::laravel::{
     extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
 };
-use crate::virtual_members::{TransformFingerprint, intern_transformed_method};
+use crate::virtual_members::{
+    TransformFingerprint, intern_transformed_method, intern_transformed_property,
+};
 
 use super::generics::{
     apply_substitution_to_method, apply_substitution_to_property, method_references_params,
-    right_align_offset,
+    property_references_params, right_align_offset,
 };
 use super::{MergeDedup, TraitContext};
 
@@ -175,7 +177,7 @@ pub(crate) fn merge_traits_into(
                 if !dedup.properties.insert(property.name) {
                     continue;
                 }
-                merged.properties.push(property.clone());
+                merged.properties.push(Arc::clone(property));
             }
 
             // Merge parent constants
@@ -186,7 +188,7 @@ pub(crate) fn merge_traits_into(
                 if !dedup.constants.insert(constant.name) {
                     continue;
                 }
-                merged.constants.push(constant.clone());
+                merged.constants.push(Arc::clone(constant));
             }
 
             current = parent;
@@ -288,24 +290,30 @@ pub(crate) fn merge_traits_into(
             }
         }
 
-        // Merge trait properties — apply substitution.
+        // Merge trait properties — apply substitution, sharing the `Arc`
+        // (or the interned transformed copy) as the method loop does.
         for property in &trait_info.properties {
             if !dedup.properties.insert(property.name) {
                 continue;
             }
-            let mut property = property.clone();
-            if !trait_subs.is_empty() {
-                apply_substitution_to_property(&mut property, &trait_subs);
+            if !property_references_params(property, &sub_keys) {
+                merged.properties.push(Arc::clone(property));
+                continue;
             }
-            merged.properties.push(property);
+            let transformed = intern_transformed_property(property, fp_sub, || {
+                let mut p = (**property).clone();
+                apply_substitution_to_property(&mut p, &trait_subs);
+                p
+            });
+            merged.properties.push(transformed);
         }
 
-        // Merge trait constants
+        // Merge trait constants — never transformed, plain `Arc::clone`.
         for constant in &trait_info.constants {
             if !dedup.constants.insert(constant.name) {
                 continue;
             }
-            merged.constants.push(constant.clone());
+            merged.constants.push(Arc::clone(constant));
         }
 
         // Apply `as` alias declarations that create new method names.

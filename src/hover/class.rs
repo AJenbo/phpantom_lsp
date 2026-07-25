@@ -157,7 +157,12 @@ const MAX_BODY_ITEMS: usize = 30;
 /// If there are more than [`MAX_BODY_ITEMS`] cases, the list is truncated
 /// with a `// and N more…` comment.
 fn build_enum_case_body(cls: &ClassInfo) -> String {
-    let cases: Vec<&ConstantInfo> = cls.constants.iter().filter(|c| c.is_enum_case).collect();
+    let cases: Vec<&ConstantInfo> = cls
+        .constants
+        .iter()
+        .filter(|c| c.is_enum_case)
+        .map(|c| c.as_ref())
+        .collect();
 
     if cases.is_empty() {
         return String::new();

@@ -57,7 +57,9 @@ pub use cache::{
     ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, evict_fqn,
     new_resolved_class_cache, with_active_resolved_class_cache,
 };
-pub(crate) use cache::{TransformFingerprint, intern_transformed_method};
+pub(crate) use cache::{
+    TransformFingerprint, intern_transformed_method, intern_transformed_property,
+};
 pub use resolve::{
     populate_from_sorted, resolve_class_fully, resolve_class_fully_cached,
     resolve_class_fully_maybe_cached, resolve_class_fully_with_generics,
@@ -223,19 +225,19 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
             if property_type_specificity(&property)
                 > property_type_specificity(&class.properties[idx])
             {
-                class.properties.make_mut()[idx] = property;
+                class.properties.make_mut()[idx] = Arc::new(property);
             }
         } else {
             let new_idx = class.properties.len();
             prop_index.insert(property.name.to_string(), new_idx);
-            class.properties.push(property);
+            class.properties.push(Arc::new(property));
         }
     }
     let mut const_names: HashSet<String> =
         class.constants.iter().map(|c| c.name.to_string()).collect();
     for constant in virtual_members.constants {
         if const_names.insert(constant.name.to_string()) {
-            class.constants.push(constant);
+            class.constants.push(Arc::new(constant));
         }
     }
 }

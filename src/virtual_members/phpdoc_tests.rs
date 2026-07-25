@@ -314,10 +314,11 @@ fn provides_public_properties_from_mixin() {
     class.mixins = vec![atom("Bar")];
 
     let mut bar = make_class("Bar");
-    bar.properties.push(make_property("name", Some("string")));
+    bar.properties
+        .push(Arc::new(make_property("name", Some("string"))));
     let mut protected_prop = make_property("internal", Some("int"));
     protected_prop.visibility = Visibility::Protected;
-    bar.properties.push(protected_prop);
+    bar.properties.push(Arc::new(protected_prop));
 
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
@@ -339,10 +340,10 @@ fn provides_public_constants_from_mixin() {
     class.mixins = vec![atom("Bar")];
 
     let mut bar = make_class("Bar");
-    bar.constants.push(make_constant("MAX_SIZE"));
+    bar.constants.push(Arc::new(make_constant("MAX_SIZE")));
     let mut private_const = make_constant("INTERNAL");
     private_const.visibility = Visibility::Private;
-    bar.constants.push(private_const);
+    bar.constants.push(Arc::new(private_const));
 
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
@@ -649,8 +650,10 @@ fn property_tag_beats_mixin_property() {
     class.mixins = vec![atom("Bar")];
 
     let mut bar = make_class("Bar");
-    bar.properties.push(make_property("name", Some("int")));
-    bar.properties.push(make_property("email", Some("string")));
+    bar.properties
+        .push(Arc::new(make_property("name", Some("int"))));
+    bar.properties
+        .push(Arc::new(make_property("email", Some("string"))));
 
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {
@@ -683,7 +686,8 @@ fn mixin_only_no_docblock() {
     let mut bar = make_class("Bar");
     bar.methods
         .push(Arc::new(make_method("barMethod", Some("void"))));
-    bar.properties.push(make_property("barProp", Some("int")));
+    bar.properties
+        .push(Arc::new(make_property("barProp", Some("int"))));
 
     let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
         if name == "Bar" {

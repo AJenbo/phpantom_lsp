@@ -184,10 +184,10 @@ fn inject_respects_declared_pivot() {
     let mut permission_with_pivot = model("App\\Models\\Permission");
     permission_with_pivot
         .properties
-        .push(PropertyInfo::virtual_property_typed(
+        .push(Arc::new(PropertyInfo::virtual_property_typed(
             "pivot",
             Some(&PhpType::Named(atom("App\\Models\\Custom"))),
-        ));
+        )));
     let out = inject_pivot(&index, Arc::new(permission_with_pivot));
     let pivots: Vec<_> = out
         .properties

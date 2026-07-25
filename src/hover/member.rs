@@ -446,10 +446,10 @@ impl Backend {
                 .get_method_ci(member_name)
                 .map(|m| HoverMemberHit::Method(Box::new(m.clone())))
         } else {
-            if let Some(prop) = class.properties.iter().find(|p| p.name == member_name) {
+            if let Some(prop) = class.get_property(member_name) {
                 return Some(HoverMemberHit::Property(Box::new(prop.clone())));
             }
-            if let Some(constant) = class.constants.iter().find(|c| c.name == member_name) {
+            if let Some(constant) = class.get_constant(member_name) {
                 return Some(HoverMemberHit::Constant(Box::new(constant.clone())));
             }
             class

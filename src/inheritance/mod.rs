@@ -27,11 +27,13 @@ use std::sync::Arc;
 use crate::atom::{Atom, AtomSet, atom};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, Visibility};
-use crate::virtual_members::{TransformFingerprint, intern_transformed_method};
+use crate::virtual_members::{
+    TransformFingerprint, intern_transformed_method, intern_transformed_property,
+};
 
 // Re-export functions that are used internally
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
-pub(crate) use enrichment::enrich_property_from_ancestor;
+pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 
 #[cfg(test)]
 pub(crate) use generics::apply_substitution;
@@ -405,15 +407,16 @@ pub(crate) fn resolve_class_with_inheritance(
             merged.methods.push(transformed);
         }
 
-        // Merge parent properties — same enrichment logic.
+        // Merge parent properties — same enrichment logic as methods.
+        // The substitution transform reuses `fp_sub` (a property and a
+        // method with the same substitution map fingerprint to the same
+        // value, but they intern into separate maps keyed by origin type,
+        // so there is no collision).
         for property in &parent.properties {
             if property.visibility == Visibility::Private {
                 continue;
             }
-            let mut ancestor_property = property.clone();
-            if property_references_params(property, &sub_keys) {
-                apply_substitution_to_property(&mut ancestor_property, &level_subs);
-            }
+            let needs_sub = property_references_params(property, &sub_keys);
             if !dedup.properties.insert(property.name) {
                 // Child already has this property — enrich it from parent.
                 if let Some(existing) = merged
@@ -422,14 +425,36 @@ pub(crate) fn resolve_class_with_inheritance(
                     .iter_mut()
                     .find(|p| p.name == property.name)
                 {
-                    enrich_property_from_ancestor(existing, &ancestor_property);
+                    if needs_sub {
+                        let ancestor_property =
+                            intern_transformed_property(property, fp_sub, || {
+                                let mut p = (**property).clone();
+                                apply_substitution_to_property(&mut p, &level_subs);
+                                p
+                            });
+                        enrich_property_arc_from_ancestor(existing, &ancestor_property);
+                    } else {
+                        enrich_property_arc_from_ancestor(existing, property);
+                    }
                 }
                 continue;
             }
-            merged.properties.push(ancestor_property);
+            if !needs_sub {
+                // Substitution is a no-op: keep the shared `Arc`.
+                merged.properties.push(Arc::clone(property));
+                continue;
+            }
+            let transformed = intern_transformed_property(property, fp_sub, || {
+                let mut p = (**property).clone();
+                apply_substitution_to_property(&mut p, &level_subs);
+                p
+            });
+            merged.properties.push(transformed);
         }
 
-        // Merge parent constants
+        // Merge parent constants.  Constants are never transformed on
+        // inheritance, so an inherited constant is always a plain
+        // `Arc::clone` of the declaring class's.
         for constant in &parent.constants {
             if constant.visibility == Visibility::Private {
                 continue;
@@ -437,7 +462,7 @@ pub(crate) fn resolve_class_with_inheritance(
             if !dedup.constants.insert(constant.name) {
                 continue;
             }
-            merged.constants.push(constant.clone());
+            merged.constants.push(Arc::clone(constant));
         }
 
         // Carry the substitution map forward for the next level.
@@ -501,7 +526,7 @@ pub(crate) fn resolve_class_with_inheritance(
             .iter_mut()
             .find(|p| p.name == "value")
         {
-            prop.type_hint = Some(specific_type);
+            Arc::make_mut(prop).type_hint = Some(specific_type);
         }
     }
 

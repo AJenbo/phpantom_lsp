@@ -1,5 +1,6 @@
 use crate::atom::atom;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo, Visibility};
@@ -268,10 +269,11 @@ fn custom_timestamp_column_names() {
 fn synthesizes_from_declared_properties() {
     let mut user = make_model("App\\Models\\User");
     user.laravel_mut().timestamps = Some(false);
-    user.properties.push(PropertyInfo::virtual_property(
-        "display_name",
-        Some("string"),
-    ));
+    user.properties
+        .push(Arc::new(PropertyInfo::virtual_property(
+            "display_name",
+            Some("string"),
+        )));
 
     let methods = build_where_property_methods_for_class(&user, &HashSet::new());
 
@@ -373,7 +375,10 @@ fn docblock_property_deduplicates_with_existing_properties() {
     user.laravel_mut().timestamps = Some(false);
     // Same property in both properties vec and docblock — only one where method.
     user.properties
-        .push(PropertyInfo::virtual_property("brand_id", Some("int")));
+        .push(Arc::new(PropertyInfo::virtual_property(
+            "brand_id",
+            Some("int"),
+        )));
     user.class_docblock = Some("/** @property int $brand_id */".to_string());
 
     let methods = build_where_property_methods_for_class(&user, &HashSet::new());
@@ -392,7 +397,10 @@ fn all_sources_combined() {
     user.laravel_mut().column_names = vec!["nickname".to_string()];
     user.laravel_mut().timestamps = Some(true);
     user.properties
-        .push(PropertyInfo::virtual_property("avatar_url", Some("string")));
+        .push(Arc::new(PropertyInfo::virtual_property(
+            "avatar_url",
+            Some("string"),
+        )));
 
     let methods = build_where_property_methods_for_class(&user, &HashSet::new());
 
