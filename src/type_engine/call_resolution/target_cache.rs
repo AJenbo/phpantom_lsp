@@ -7,6 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use crate::Backend;
+use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
 use crate::types::*;
 
@@ -26,6 +27,9 @@ type BodyReturnInferrerFn = Box<dyn Fn(&str, &MethodInfo) -> Option<PhpType>>;
 /// down.
 type AuthUserResolverFn = Box<dyn Fn(Option<&str>) -> Option<PhpType>>;
 
+/// Memoized body-return-inference results, keyed by `(FQN, method)`.
+type BodyInferMemo = HashMap<(Atom, Atom), Option<PhpType>>;
+
 thread_local! {
     /// When `Some`, `resolve_instance_method_callable` caches results
     /// by `"FQN::method_lower"`.  Activated by
@@ -44,14 +48,14 @@ thread_local! {
         const { RefCell::new(None) };
 
     /// Re-entry guard for body return inference.  Tracks
-    /// `"FQN::method"` keys currently being inferred to prevent
+    /// `(FQN, method)` keys currently being inferred to prevent
     /// infinite recursion when a method body references another
     /// method that also lacks a return type.
-    static BODY_INFER_VISITED: RefCell<HashSet<String>> =
+    static BODY_INFER_VISITED: RefCell<HashSet<(Atom, Atom)>> =
         RefCell::new(HashSet::new());
 
     /// When `Some`, memoizes completed body return inference results by
-    /// `"FQN::method"`.  Activated together with [`BODY_RETURN_INFERRER`]
+    /// `(FQN, method)`.  Activated together with [`BODY_RETURN_INFERRER`]
     /// and cleared when the owning guard drops, so the memo lives exactly
     /// as long as one request / one file's diagnostic pass.
     ///
@@ -60,7 +64,7 @@ thread_local! {
     /// files where most methods lack declared return types, the repeated
     /// walks compound into a multi-minute blowup (each walk itself
     /// triggers inference for the callees it contains).
-    static BODY_INFER_MEMO: RefCell<Option<HashMap<String, Option<PhpType>>>> =
+    static BODY_INFER_MEMO: RefCell<Option<BodyInferMemo>> =
         const { RefCell::new(None) };
 
     /// Current nesting depth of body return inference.  Caps the
@@ -176,8 +180,12 @@ pub(crate) fn with_body_return_inferrer(inferrer: BodyReturnInferrerFn) -> BodyR
 const MAX_BODY_INFER_DEPTH: u8 = 3;
 
 pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -> Option<PhpType> {
-    // Build the memo / re-entry key.
-    let key = format!("{}::{}", class_fqn, method.name);
+    // Build the memo / re-entry key as an interned `(FQN, method)`
+    // tuple.  Both halves come from bounded symbol-name spaces and are
+    // already interned, so the key allocates nothing and adds no new
+    // entries to the global interner (a joined `"FQN::method"` string
+    // would leak one entry per distinct pair for the process lifetime).
+    let key = (atom(class_fqn), method.name);
 
     // Serve a memoized result from an earlier completed inference in
     // this request.  Checked before the depth cap so that deep call
@@ -197,7 +205,7 @@ pub(crate) fn try_infer_body_return_type(class_fqn: &str, method: &MethodInfo) -
     // Check + insert into the visited set (re-entry guard).
     let already_visiting = BODY_INFER_VISITED.with(|cell| {
         let mut set = cell.borrow_mut();
-        !set.insert(key.clone())
+        !set.insert(key)
     });
     if already_visiting {
         return None;

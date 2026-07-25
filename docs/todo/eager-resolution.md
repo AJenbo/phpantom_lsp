@@ -367,27 +367,21 @@ checks, `base_name` extraction) were unaffected; only genuine
 `String`-typed sinks (`Vec<String>` keys, `Generic`'s `String` field)
 needed an explicit `.to_string()`.
 
-#### Phase 4h: Intern composite per-member cache keys
+#### Phase 4h: Intern composite per-member cache keys ✓
 
-**Impact: Low. Effort: Low.**
-
-`target_cache.rs` (`BODY_INFER_MEMO`, the re-entry set) and
-`property_access.rs` key thread-local caches on
-`format!("{}::{}", class_fqn, method)`. These allocate a `String` per
-lookup. Interning them into a single `Atom` key would remove the
-allocation, but the key space is the `FQN × member` cartesian product,
-which is effectively unbounded — feeding it to the global `ustr`
-interner would leak one entry per distinct pair for the process
-lifetime (the exact "constructed once, never compared" case
-`atom.rs` warns against). Any fix here should therefore use a
-composite `(Atom, Atom)` tuple key (both halves already interned,
-no new interner entries) rather than interning the joined string.
-
-**Success criteria:**
-- The `"FQN::member"` cache keys no longer allocate a `String` per
-  lookup.
-- No net growth in the global interner.
-- No test regressions.
+`target_cache.rs` (`BODY_INFER_MEMO` and its `BODY_INFER_VISITED`
+re-entry set) and `property_access.rs` (`RESOLVING_THIS_PROP`) keyed
+thread-local caches on `format!("{}::{}", class_fqn, member)`, allocating
+a `String` per lookup. These now use a composite `(Atom, Atom)` tuple
+key. Both halves are drawn from bounded symbol-name spaces (class FQNs
+and member identifiers) and are already interned, so the tuple key
+allocates nothing per lookup and adds no new entries to the global
+interner. Interning the *joined* string instead would have leaked one
+entry per distinct `FQN × member` pair for the process lifetime (the
+"constructed once, never compared" case `atom.rs` warns against), so the
+tuple is the correct shape. `CALLABLE_TARGET_CACHE` is intentionally left
+on a string key: its key embeds generic argument text
+(`"FQN<generics>::method"`) and does not fit a two-`Atom` tuple.
 
 ---
 

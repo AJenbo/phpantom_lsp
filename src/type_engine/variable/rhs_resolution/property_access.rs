@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
@@ -433,11 +433,16 @@ pub(super) fn try_resolve_this_property_from_assignment(
     // resolved, return empty so the caller falls back to the declared
     // property type instead of recursing.
     thread_local! {
-        static RESOLVING_THIS_PROP: std::cell::RefCell<HashSet<String>> =
+        static RESOLVING_THIS_PROP: std::cell::RefCell<HashSet<(Atom, Atom)>> =
             std::cell::RefCell::new(HashSet::new());
     }
-    let key = format!("{}::{}", ctx.current_class.name, prop_name);
-    let newly_inserted = RESOLVING_THIS_PROP.with(|set| set.borrow_mut().insert(key.clone()));
+    // Key on `(class, prop)` as interned atoms rather than a joined
+    // `"Class::prop"` string: both halves are already interned, so the
+    // tuple key allocates nothing per lookup and adds no new entries to
+    // the global interner (the joined string would leak one entry per
+    // distinct pair for the process lifetime).
+    let key = (ctx.current_class.name, atom(prop_name));
+    let newly_inserted = RESOLVING_THIS_PROP.with(|set| set.borrow_mut().insert(key));
     if !newly_inserted {
         // Same property is already mid-resolution: break the cycle.
         return Vec::new();

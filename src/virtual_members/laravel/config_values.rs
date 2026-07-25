@@ -26,7 +26,7 @@ use mago_database::file::FileId;
 use mago_syntax::cst::*;
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry};
 
 /// A statically-classified Laravel config value.
@@ -142,7 +142,7 @@ impl ConfigValue {
             ConfigValue::Bool => PhpType::bool(),
             ConfigValue::Null => PhpType::null(),
             ConfigValue::ClassString(name) => {
-                PhpType::ClassString(Some(Box::new(PhpType::Named(name.clone()))))
+                PhpType::ClassString(Some(Box::new(PhpType::Named(atom(name)))))
             }
             ConfigValue::OneOf(arms) => {
                 let mut members: Vec<PhpType> = Vec::new();
