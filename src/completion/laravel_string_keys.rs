@@ -324,6 +324,30 @@ impl Backend {
             }
         }
 
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
+            let framework_config = root.join("vendor/laravel/framework/config");
+            if framework_config.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&framework_config)
+            {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.extension().is_some_and(|e| e == "php") {
+                        continue;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    let prefix = stem.to_string();
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let decls = collect_laravel_config_declarations(&content, &prefix);
+                        for d in decls {
+                            keys.push(d.key);
+                        }
+                    }
+                }
+            }
+        }
+
         keys.sort();
         keys.dedup();
         keys

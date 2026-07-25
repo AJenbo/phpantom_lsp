@@ -478,9 +478,11 @@ impl Backend {
     fn enumerate_config_trees(&self) -> Vec<(String, ConfigNode)> {
         use crate::virtual_members::laravel::laravel_config_prefix_from_uri;
 
-        let snapshot = self.user_file_symbol_maps();
         let mut trees = Vec::new();
+        let mut seen_prefixes = std::collections::HashSet::new();
 
+        // 1. Project config files take highest precedence.
+        let snapshot = self.user_file_symbol_maps();
         for (file_uri, _) in &snapshot {
             let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
                 continue;
@@ -489,15 +491,48 @@ impl Backend {
                 continue;
             };
             if let Some(tree) = parse_config_tree(&content) {
+                seen_prefixes.insert(prefix.clone());
                 trees.push((prefix, tree));
             }
         }
 
+        // 2. Package config files from service providers.
         for res in &self.laravel_provider_resources.read().config_files {
+            if seen_prefixes.contains(&res.namespace) {
+                continue;
+            }
             if let Ok(content) = std::fs::read_to_string(&res.path)
                 && let Some(tree) = parse_config_tree(&content)
             {
+                seen_prefixes.insert(res.namespace.clone());
                 trees.push((res.namespace.clone(), tree));
+            }
+        }
+
+        // 3. Laravel framework default configs from vendor.
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
+            let framework_config = root.join("vendor/laravel/framework/config");
+            if framework_config.is_dir()
+                && let Ok(entries) = std::fs::read_dir(&framework_config)
+            {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.extension().is_some_and(|e| e == "php") {
+                        continue;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    let prefix = stem.to_string();
+                    if seen_prefixes.contains(&prefix) {
+                        continue;
+                    }
+                    if let Ok(content) = std::fs::read_to_string(&path)
+                        && let Some(tree) = parse_config_tree(&content)
+                    {
+                        trees.push((prefix, tree));
+                    }
+                }
             }
         }
 

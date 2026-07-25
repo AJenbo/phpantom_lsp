@@ -249,6 +249,52 @@ function test(): void {
 }
 
 #[test]
+fn hover_config_vendor_framework_fallback() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "config/app.php",
+                "<?php\nreturn [\n    'name' => env('APP_NAME', 'Laravel'),\n];\n",
+            ),
+            (
+                "vendor/laravel/framework/config/app.php",
+                "<?php\nreturn [\n    'name' => env('APP_NAME', 'Laravel'),\n    'faker_locale' => 'en_US',\n    'timezone' => 'UTC',\n];\n",
+            ),
+            (
+                "vendor/laravel/framework/config/cache.php",
+                "<?php\nreturn [\n    'default' => env('CACHE_STORE', 'database'),\n    'prefix' => env('CACHE_PREFIX', ''),\n];\n",
+            ),
+        ],
+    );
+
+    let uri = "file:///test_vendor_config.php";
+    let content = r#"<?php
+function test(): void {
+    $locale = config('app.faker_locale');
+    $locale;
+    $cache = config('cache.default');
+    $cache;
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let h = hover_at(&backend, uri, content, 3, 6).expect("hover on $locale");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string"),
+        "vendor framework config should provide app.faker_locale as string: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 5, 6).expect("hover on $cache");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string"),
+        "vendor framework config should provide cache.default as string: {text}"
+    );
+}
+
+#[test]
 fn hover_variable_without_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
