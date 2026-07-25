@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PHP attributes use decorator semantic highlighting.** Attribute class names in `#[...]` now emit the `decorator` semantic token instead of `class`, so editor themes can color attributes differently from normal class references. Contributed by @calebdw.
 - **Go-to-definition on overriding methods jumps to the parent declaration.** When the cursor is on a method definition that overrides a parent or implements an interface method, go-to-definition now navigates to the prototype declaration instead of returning call-site references. Similarly, go-to-definition on a class name jumps to the parent class when one exists. Methods and classes that don't override anything still show usages as before. Contributed by @calebdw.
 - **Go-to-definition on overridden properties and constants jumps to the prototype declaration.** Declaration-site navigation now follows overridden properties and constants to the nearest parent or trait declaration, matching the override behavior for methods. Contributed by @calebdw.
 - **Code lens navigation works on Cursor, VSCodium, Neovim, and other editors.** Clicking a code lens annotation (e.g. "overrides Parent::method") now uses the standard `window/showDocument` LSP request instead of editor-specific commands (`vscode.open`, `editor.action.showReferences`) that only worked on VS Code. Contributed by @calebdw.

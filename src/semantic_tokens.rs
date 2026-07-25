@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::unknown_members::member_exists;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
+use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 
 // ─── Token type indices ─────────────────────────────────────────────────────
@@ -258,7 +258,9 @@ impl Backend {
                     // already highlights the import prolog per name segment;
                     // a single token spanning the whole path (backslashes
                     // included) would visibly override that coloring.
-                    if *context == crate::symbol_map::ClassRefContext::UseImport {
+                    if *context == ClassRefContext::Attribute {
+                        (TT_DECORATOR, 0)
+                    } else if *context == ClassRefContext::UseImport {
                         if !is_blade {
                             continue;
                         }

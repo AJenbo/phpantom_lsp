@@ -30,6 +30,7 @@ const TT_VARIABLE: u32 = 7;
 const TT_PROPERTY: u32 = 8;
 const TT_FUNCTION: u32 = 9;
 const TT_METHOD: u32 = 10;
+const TT_DECORATOR: u32 = 11;
 #[allow(dead_code)]
 const TT_ENUM_MEMBER: u32 = 12;
 #[allow(dead_code)]
@@ -225,6 +226,28 @@ function make() {
         !item_refs.is_empty(),
         "expected class reference for new Item()"
     );
+}
+
+#[test]
+fn attribute_class_reference_uses_decorator_token() {
+    let php = r#"<?php
+#[MyAttribute]
+class Example {}
+
+new MyAttribute();
+
+class MyAttribute {}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+
+    let attribute = find_decoded(&decoded, 1, 2).expect("expected token for attribute class");
+    assert_eq!(attribute.token_type, TT_DECORATOR);
+    assert_eq!(attribute.length, 11);
+
+    let new_expression = find_decoded(&decoded, 4, 4).expect("expected token for class reference");
+    assert_eq!(new_expression.token_type, TT_CLASS);
+    assert_eq!(new_expression.length, 11);
 }
 
 #[test]
