@@ -3260,89 +3260,91 @@ sit next to.</p>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   # Data model
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── types/                  # Core structures (ClassInfo, MethodInfo, ResolvedType, SubjectExpr, …)
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── php_type/               # PHP type representation: parse, display, normalize, subtype, transform
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│                           # Extracting and resolving the subject before -&gt;, ?-&gt;, ::
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│   # Parsing &amp; indexing
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── parser/                 # mago-syntax AST → ClassInfo/FunctionInfo (classes, functions, use statements, attributes, incremental update_ast)
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── docblock/               # PHPDoc parsing (tags, templates, shapes, conditional types, type_strings)
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── symbol_map/             # Precomputed per-file symbol spans, definition sites, call sites
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── scope_collector/        # Variable scope-map construction
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── composer.rs             # composer.json / PSR-4 autoload parsing
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>├── names.rs                # Name resolution (FQN, use-map, namespace)
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>├── reference_index.rs      # Workspace-wide reference index for find-references / rename
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│   # Class &amp; type resolution
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>├── inheritance/            # Parent/trait/mixin member merging, generics substitution
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>├── stubs.rs, stub_patches.rs  # Embedded phpstorm-stubs index + hand patches
-<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>├── phar.rs                 # Class discovery inside PHAR archives
-<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   # The shared type engine (lives under completion/, see note below)
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>├── completion/
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│   # Parsing &amp; indexing
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├── parser/                 # mago-syntax AST → ClassInfo/FunctionInfo (classes, functions, use statements, attributes, incremental update_ast)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── docblock/               # PHPDoc parsing (tags, templates, shapes, conditional types, type_strings)
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── symbol_map/             # Precomputed per-file symbol spans, definition sites, call sites
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── scope_collector/        # Variable scope-map construction
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── classmap_scanner/       # Byte-level PHP scanning for class discovery (no full parse)
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>├── composer.rs             # composer.json / PSR-4 autoload parsing
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>├── names.rs                # Name resolution (FQN, use-map, namespace)
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── reference_index.rs      # Workspace-wide reference index for find-references / rename
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│   # Class &amp; type resolution
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>├── inheritance/            # Parent/trait/mixin member merging, generics substitution
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>├── stubs.rs, stub_patches.rs  # Embedded phpstorm-stubs index + hand patches
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>├── phar.rs                 # Class discovery inside PHAR archives
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│   # The shared type engine (&quot;what is the type of this expression here?&quot;)
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>├── type_engine/
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   ├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│   │                       # Extracting and resolving the subject before -&gt;, ?-&gt;, ::
 <a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache, property narrowing
 <a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   ├── variable/           # Variable type resolution via assignment scanning
 <a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│   │   ├── forward_walk/   #   the forward walker (shared by diagnostics, hover, go-to-def, sig help)
 <a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│   │   ├── rhs_resolution/ #   right-hand-side expression resolution
 <a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│   │   └── …               #   closure/foreach/class-string/raw-type resolution
 <a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>│   ├── call_resolution/    # Call expression + callable target resolution, return types, arg types
-<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>│   ├── types/              # Type-hint → ClassInfo, narrowing/, conditional return types
-<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>│   │                       # ---- completion-specific below ----
-<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>│   ├── handler/            # Completion request orchestration (member access, class constants, named args, phpdoc)
-<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>│   ├── context/            # Context-specific completion (catch, class, keyword, namespace, override, type-hint, …)
-<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>│   ├── phpdoc/             # PHPDoc tag completion + docblock generation/
-<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>│   ├── source/             # Source-text scanning (comment position, throws analysis)
-<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>│   ├── builder.rs          # Build LSP CompletionItems from resolved ClassInfo
-<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>│   └── …                   # target.rs, array_shape.rs, named_args.rs, use_edit.rs, eloquent_string.rs, laravel_route_controller.rs, …
-<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>│
-<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>│   # LSP features (one module each)
-<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
-<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
-<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>├── references/, rename/, highlight/
-<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
-<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting.rs
-<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>├── linked_editing.rs, selection_range.rs, type_hierarchy.rs
-<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>│
-<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>│   # Diagnostics
-<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── diagnostics/
-<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>│   ├── mod.rs              # Native collection/publishing orchestration + scheduling
-<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
-<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
-<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
-<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
-<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   # External tools &amp; CLI subcommands
-<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
-<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
-<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
-<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>├── self_update.rs          # Binary self-update
-<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>│   # Blade &amp; shared utilities
-<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
-<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
-<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>
-<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
-<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
-<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>tests/
-<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
-<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
-<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
-<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>├── psalm_assertions/, phpstan_nsrt/   # `$var =&gt; &#39;ExpectedType&#39;` assertion suites ported from Psalm / PHPStan
-<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>└── assert_type_runner.rs, fixture_runner.rs
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>│   └── types/              # Type-hint → ClassInfo, narrowing/, conditional return types
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>│
+<a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>│   # Completion (uses the type engine above)
+<a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>├── completion/
+<a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>│   ├── handler/            # Completion request orchestration (member access, class constants, named args, phpdoc)
+<a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>│   ├── context/            # Context-specific completion (catch, class, keyword, namespace, override, type-hint, …)
+<a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>│   ├── phpdoc/             # PHPDoc tag completion + docblock generation/
+<a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>│   ├── source/             # Source-text scanning (comment position, throws analysis)
+<a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>│   ├── variable/           # Variable-name completion + scope collection
+<a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>│   ├── builder.rs          # Build LSP CompletionItems from resolved ClassInfo
+<a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>│   └── …                   # target.rs, array_shape.rs, named_args.rs, use_edit.rs, eloquent_string.rs, laravel_route_controller.rs, …
+<a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>│
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>│   # LSP features (one module each)
+<a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
+<a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+<a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>├── references/, rename/, highlight/
+<a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
+<a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting.rs
+<a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── linked_editing.rs, selection_range.rs, type_hierarchy.rs
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>│
+<a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>│   # Diagnostics
+<a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>├── diagnostics/
+<a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   ├── mod.rs              # Native collection/publishing orchestration + scheduling
+<a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
+<a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
+<a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
+<a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│
+<a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│   # External tools &amp; CLI subcommands
+<a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+<a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+<a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>├── self_update.rs          # Binary self-update
+<a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>│
+<a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>│   # Blade &amp; shared utilities
+<a id="__codelineno-0-75" name="__codelineno-0-75" href="#__codelineno-0-75"></a>├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
+<a id="__codelineno-0-76" name="__codelineno-0-76" href="#__codelineno-0-76"></a>└── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
+<a id="__codelineno-0-77" name="__codelineno-0-77" href="#__codelineno-0-77"></a>
+<a id="__codelineno-0-78" name="__codelineno-0-78" href="#__codelineno-0-78"></a>build.rs                    # Parses PhpStormStubsMap.php, generates the stub index at build time
+<a id="__codelineno-0-79" name="__codelineno-0-79" href="#__codelineno-0-79"></a>stubs/                      # Composer vendor dir for jetbrains/phpstorm-stubs
+<a id="__codelineno-0-80" name="__codelineno-0-80" href="#__codelineno-0-80"></a>tests/
+<a id="__codelineno-0-81" name="__codelineno-0-81" href="#__codelineno-0-81"></a>├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
+<a id="__codelineno-0-82" name="__codelineno-0-82" href="#__codelineno-0-82"></a>├── unit/                   # Unit tests (composer, docblock, named args, …)
+<a id="__codelineno-0-83" name="__codelineno-0-83" href="#__codelineno-0-83"></a>├── fixtures/               # Fixtures driven by fixture_runner.rs
+<a id="__codelineno-0-84" name="__codelineno-0-84" href="#__codelineno-0-84"></a>├── psalm_assertions/, phpstan_nsrt/   # `$var =&gt; &#39;ExpectedType&#39;` assertion suites ported from Psalm / PHPStan
+<a id="__codelineno-0-85" name="__codelineno-0-85" href="#__codelineno-0-85"></a>└── assert_type_runner.rs, fixture_runner.rs
 </code></pre></div>
-<p><strong>The shared type engine lives under <code>completion/</code>, despite the name.</strong>
-<code>completion/resolver/</code>, <code>completion/variable/</code> (including the
-<code>forward_walk/</code> forward walker), <code>completion/call_resolution/</code>, and
-<code>completion/types/</code> are the project's single type-resolution engine —
-they answer "what is the type of this expression here?" and are consumed
-by diagnostics, hover, go-to-definition, and signature help, not just
-completion (see <a href="#forward-walker">Forward Walker</a> and
-<a href="#name-resolution">Name Resolution</a> below). This naming is a known wart;
-extracting the engine into its own top-level module is tracked in
-<a href="../todo/refactor/"><code>docs/todo/refactor.md</code></a>.</p>
+<p><strong>The shared type engine lives under <code>type_engine/</code>.</strong> <code>type_engine/resolver/</code>,
+<code>type_engine/variable/</code> (including the <code>forward_walk/</code> forward walker),
+<code>type_engine/call_resolution/</code>, <code>type_engine/types/</code>, and the subject
+extraction/resolution files are the project's single type-resolution engine —
+they answer "what is the type of this expression here?" and are consumed by
+diagnostics, hover, go-to-definition, and signature help, not just completion
+(see <a href="#forward-walker">Forward Walker</a> and <a href="#name-resolution">Name Resolution</a>
+below). Do not build a second type-resolution path: extend the engine here so
+every consumer benefits.</p>
 <h2 id="external-crates">External Crates<a class="headerlink" href="#external-crates" title="Permanent link">&para;</a></h2>
 <p>PHPantom uses three crates from the <a href="https://github.com/carthage-software/mago">Mago</a>
 project for PHP parsing and type representation:</p>
@@ -3779,7 +3781,7 @@ paths are converted to URI strings at init time.</p>
 <li><strong><code>array_reduce</code></strong> — phpstorm-stubs declare <code>mixed</code> return type. The actual return type is the type of the initial value (3rd argument). The patch adds <code>@template TReturn</code> bound to <code>$initial</code> and sets the return type to <code>TReturn</code>, matching PHPStan's <code>stubs/arrayFunctions.stub</code>.</li>
 </ol>
 <p>This is analogous to the <a href="#laravel-class-patches">Laravel Class Patches</a> system but for built-in PHP functions rather than framework classes. When phpstorm-stubs gains proper annotations for a patched function, the corresponding patch can be deleted.</p>
-<p><strong>When to add a patch here vs. hardcoded logic in <code>rhs_resolution.rs</code>:</strong> if the correct behaviour can be expressed with <code>@template</code> / <code>@return</code> annotations (i.e. PHPStan's own stubs already have the fix), it belongs in <code>stub_patches.rs</code>. If the behaviour requires inspecting call-site argument <em>values</em> at resolution time (e.g. <code>array_map</code>'s callback return type, or <code>array_filter</code> preserving the input array's element type), it must stay as hardcoded logic in <code>rhs_resolution.rs</code> / <code>raw_type_inference.rs</code>. Those functions are tracked in <code>ARRAY_PRESERVING_FUNCS</code> and <code>ARRAY_ELEMENT_FUNCS</code> in <code>completion/variable/mod.rs</code>, with the full inventory in <code>docs/todo/completion.md</code> C1.</p>
+<p><strong>When to add a patch here vs. hardcoded logic in <code>rhs_resolution.rs</code>:</strong> if the correct behaviour can be expressed with <code>@template</code> / <code>@return</code> annotations (i.e. PHPStan's own stubs already have the fix), it belongs in <code>stub_patches.rs</code>. If the behaviour requires inspecting call-site argument <em>values</em> at resolution time (e.g. <code>array_map</code>'s callback return type, or <code>array_filter</code> preserving the input array's element type), it must stay as hardcoded logic in <code>rhs_resolution.rs</code> / <code>raw_type_inference.rs</code>. Those functions are tracked in <code>ARRAY_PRESERVING_FUNCS</code> and <code>ARRAY_ELEMENT_FUNCS</code> in <code>type_engine/variable/mod.rs</code>, with the full inventory in <code>docs/todo/completion.md</code> C1.</p>
 <h4 id="class-patches">Class patches<a class="headerlink" href="#class-patches" title="Permanent link">&para;</a></h4>
 <p>Class stub patches work the same way but are applied by <code>apply_class_stub_patches(class)</code> in <code>parse_and_cache_content_versioned</code> for URIs starting with <code>phpantom-stub://</code> or <code>phpantom-stub-fn://</code>. Current class patches add <code>@template</code> parameters and <code>@implements</code> generics to SPL collection classes (<code>ArrayIterator</code>, <code>ArrayObject</code>, <code>SplDoublyLinkedList</code>, <code>SplQueue</code>, <code>SplStack</code>, <code>SplPriorityQueue</code>, <code>SplFixedArray</code>, <code>SplObjectStorage</code>, <code>WeakMap</code>) that are missing them in phpstorm-stubs. These patches enable generic type substitution through the interface chain (e.g. <code>ArrayIterator&lt;int, Rule&gt;::current()</code> resolves to <code>Rule</code> via <code>Iterator::current()</code> returning <code>TValue</code>).</p>
 <h3 id="runtime-lookup-constants">Runtime Lookup — Constants<a class="headerlink" href="#runtime-lookup-constants" title="Permanent link">&para;</a></h3>
@@ -3883,10 +3885,10 @@ paths are converted to URI strings at init time.</p>
 <p>Instead, scope injection happens in three places:</p>
 <ol>
 <li>
-<p><strong>Post-generic-substitution hook</strong> (<code>completion/resolver.rs</code>, inside <code>type_hint_to_classes_depth</code>): after <code>resolve_class_fully</code> + <code>apply_generic_args</code> produces a <code>Builder&lt;User&gt;</code> class, the resolver detects that the result is an Eloquent Builder with a concrete model generic argument. It calls <code>build_scope_methods_for_builder(model_name, class_loader)</code> which loads the model, fully resolves it, extracts scope methods, and returns them as instance methods with <code>static</code> in return types substituted to the concrete model name. These are merged onto the Builder's method list, giving <code>$q-&gt;active()</code> after <code>$q = User::where(...)</code>.</p>
+<p><strong>Post-generic-substitution hook</strong> (<code>type_engine/resolver/</code>, inside <code>type_hint_to_classes_depth</code>): after <code>resolve_class_fully</code> + <code>apply_generic_args</code> produces a <code>Builder&lt;User&gt;</code> class, the resolver detects that the result is an Eloquent Builder with a concrete model generic argument. It calls <code>build_scope_methods_for_builder(model_name, class_loader)</code> which loads the model, fully resolves it, extracts scope methods, and returns them as instance methods with <code>static</code> in return types substituted to the concrete model name. These are merged onto the Builder's method list, giving <code>$q-&gt;active()</code> after <code>$q = User::where(...)</code>.</p>
 </li>
 <li>
-<p><strong>Scope body Builder enrichment</strong> (<code>completion/variable_resolution.rs</code>, <code>enrich_builder_type_in_scope</code>): inside a scope method body, the <code>$query</code> parameter is typically typed as <code>Builder</code> without generic arguments. The enrichment function detects when the enclosing method is a scope (either the <code>scopeX</code> naming convention or the <code>#[Scope]</code> attribute) on a class that extends Eloquent Model, and the parameter type is <code>Builder</code> without generics. It rewrites the type to <code>Builder&lt;EnclosingModel&gt;</code>, which then flows through the generic-args path and triggers the post-substitution hook above. This makes <code>$query-&gt;otherScope()</code> resolve inside scope bodies.</p>
+<p><strong>Scope body Builder enrichment</strong> (<code>type_engine/variable/resolution.rs</code>, <code>enrich_builder_type_in_scope</code>): inside a scope method body, the <code>$query</code> parameter is typically typed as <code>Builder</code> without generic arguments. The enrichment function detects when the enclosing method is a scope (either the <code>scopeX</code> naming convention or the <code>#[Scope]</code> attribute) on a class that extends Eloquent Model, and the parameter type is <code>Builder</code> without generics. It rewrites the type to <code>Builder&lt;EnclosingModel&gt;</code>, which then flows through the generic-args path and triggers the post-substitution hook above. This makes <code>$query-&gt;otherScope()</code> resolve inside scope bodies.</p>
 </li>
 <li>
 <p><strong>Go-to-definition fallback</strong> (<code>definition/member.rs</code>, <code>find_scope_on_builder_model</code>): when go-to-definition resolves a member on a Builder class and the normal lookup chain (own members, traits, parents, mixins, builder forwarding) fails, this fallback checks whether the member is a scope method injected from the model. It confirms the resolved candidate (with injected scopes) has the method, extracts the model name from the scope method's return type generic argument, loads the model, and finds the declaration through the model's inheritance chain. For <code>scopeX</code>-style scopes it looks for <code>scopeXxx</code>; for <code>#[Scope]</code>-attributed methods it falls back to the original method name. This bridges the gap between completion (which works on the merged ClassInfo) and GTD (which traces back to the declaring source file).</p>
@@ -4372,7 +4374,7 @@ native diagnostic set.</p>
 <h3 id="workspace-diagnostics-files-that-are-not-open">Workspace diagnostics (files that are not open)<a class="headerlink" href="#workspace-diagnostics-files-that-are-not-open" title="Permanent link">&para;</a></h3>
 <p>Everything above diagnoses files the user has opened. <code>src/diagnostics/workspace.rs</code> covers the rest of the project: after the full background index finishes (which itself only starts after startup indexing completes), it runs the same fast/slow collectors over every unopened user file on a throttled worker pool, then runs each configured external tool once over the whole project (only when that tool has its own project-level config file, e.g. <code>phpstan.neon</code>). Results are stored in <code>Backend::workspace_diags</code> and reported through <code>workspace/diagnostic</code> (or pushed directly for non-pull clients). This pass never runs before the server is usable — it is chained onto the tail of the full-index task, so it can never compete with startup for CPU. Toggle with <code>[diagnostics] workspace</code> / <code>workspace-external</code> in <code>.phpantom.toml</code>.</p>
 <h2 id="forward-walker">Forward Walker<a class="headerlink" href="#forward-walker" title="Permanent link">&para;</a></h2>
-<p>The forward walker (<code>src/completion/variable/forward_walk.rs</code>) walks
+<p>The forward walker (<code>src/type_engine/variable/forward_walk/</code>) walks
 method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.</p>

@@ -1394,9 +1394,9 @@ resolution helpers shared between <code>closure_resolution.rs</code> and
 </code></pre></div>
 <p>The forward walker's closure-argument inference
 (<code>walk_closures_in_call_args</code> and <code>walk_closure_in_partial_call_args</code> in
-<code>src/completion/variable/forward_walk/diagnostic_walk.rs</code>, and the
+<code>src/type_engine/variable/forward_walk/diagnostic_walk.rs</code>, and the
 completion/hover-path counterpart <code>infer_callable_params_for_call</code> in
-<code>src/completion/variable/forward_walk/callable_inference.rs</code>) computes
+<code>src/type_engine/variable/forward_walk/callable_inference.rs</code>) computes
 <code>arg_idx</code> from <code>arguments.iter().enumerate()</code> — the argument's position
 in the <em>call</em>. That index is then used directly as the <em>declared</em>
 parameter index, both to decide whether the argument at that slot is a

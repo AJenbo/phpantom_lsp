@@ -2012,7 +2012,7 @@ removes those guards and the depth caps they protect:</p>
 </li>
 <li>
 <p><strong><code>RESOLVE_DEPTH</code> and <code>MAX_RESOLVE_TARGET_DEPTH</code> (60) in
-   <code>completion/resolver.rs</code>.</strong> Thread-local depth counter for
+   <code>type_engine/resolver/</code>.</strong> Thread-local depth counter for
    <code>resolve_target_classes_expr_inner</code>. Guards against mutual
    recursion between subject resolution, call-return resolution,
    and variable resolution. The limit of 60 (vs typical chain

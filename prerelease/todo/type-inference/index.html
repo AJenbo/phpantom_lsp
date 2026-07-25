@@ -2299,7 +2299,7 @@ emits the concrete callable signature in the <code>@param</code> tag.</p>
 <hr />
 <h2 id="t20-type-narrowing-reconciliation-engine">T20. Type narrowing reconciliation engine<a class="headerlink" href="#t20-type-narrowing-reconciliation-engine" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: High</strong></p>
-<p>PHPantom's type narrowing in <code>completion/types/narrowing.rs</code> handles
+<p>PHPantom's type narrowing in <code>type_engine/types/narrowing/</code> handles
 basic patterns (instanceof, is_* calls, null checks) but lacks the
 algebraic framework that PHPStan and Psalm use. Key gaps:</p>
 <ol>

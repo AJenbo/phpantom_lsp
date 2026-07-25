@@ -2426,7 +2426,7 @@ completion resolver. No model, no data files, no latency.</p>
 <h3 id="context-gathering">Context Gathering<a class="headerlink" href="#context-gathering" title="Permanent link">&para;</a></h3>
 <p>The template engine reuses existing infrastructure:</p>
 <ul>
-<li><strong>Variable types:</strong> <code>completion/variable/resolution.rs</code> already
+<li><strong>Variable types:</strong> <code>type_engine/variable/resolution.rs</code> already
   resolves every variable in scope to a type. The template engine
   calls the same pipeline.</li>
 <li><strong>Containing function:</strong> The AST map already stores <code>MethodInfo</code>

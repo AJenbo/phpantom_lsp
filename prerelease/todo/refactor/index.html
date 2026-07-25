@@ -1838,61 +1838,7 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>One task remains. It is a pure internal refactor and gets no changelog
-entry unless the work uncovers and fixes a concrete user-visible bug. Run
-the Rust CI checks (<code>cargo nextest run</code>, <code>cargo clippy -- -D warnings</code>,
-<code>cargo clippy --tests -- -D warnings</code>, <code>cargo fmt</code>) after the task.</p>
-<h2 id="5-extract-the-shared-type-engine-out-of-completion">5. Extract the shared type engine out of <code>completion/</code><a class="headerlink" href="#5-extract-the-shared-type-engine-out-of-completion" title="Permanent link">&para;</a></h2>
-<p><strong>What to do.</strong> Despite the name, <code>src/completion/</code> houses the
-project's single type-resolution engine — the code that answers "what
-is the type of this expression here?" — consumed by diagnostics, hover,
-go-to-definition, and signature help, not just completion. The name
-misleads every new contributor and buries the most load-bearing
-subsystem inside a feature module. Move the engine into a top-level
-module (proposed <code>src/type_engine/</code>; name negotiable but <strong>not</strong>
-<code>resolve</code>/<code>resolution</code>, which collide with the existing <code>resolution.rs</code>
-class/function <em>name</em> lookup), leaving <code>completion/</code> with only
-completion-specific code. This is pure code motion — <code>impl Backend</code>
-blocks can live in any file of the crate, so methods move without
-becoming free functions.</p>
-<p><strong>Engine subtrees to move</strong> (whole directories): <code>completion/resolver/</code>,
-<code>completion/call_resolution/</code>, <code>completion/types/</code>, and the
-type-resolution half of <code>completion/variable/</code> — <code>resolution.rs</code>,
-<code>forward_walk/</code>, <code>rhs_resolution/</code>, <code>foreach_resolution.rs</code>,
-<code>closure_resolution.rs</code>, <code>class_string_resolution.rs</code>,
-<code>raw_type_inference.rs</code>. The root-level <code>subject_expr.rs</code>,
-<code>subject_extraction.rs</code>, and <code>subject_resolution.rs</code> are part of the
-engine too — fold them in.</p>
-<p><strong>Stays in <code>completion/</code>:</strong> <code>handler/</code>, <code>context/</code>, <code>phpdoc/</code>,
-<code>builder.rs</code>, <code>target.rs</code>, <code>array_shape.rs</code>, <code>array_callable.rs</code>,
-<code>named_args.rs</code>, <code>use_edit.rs</code>, <code>eloquent_string.rs</code>,
-<code>laravel_route_controller.rs</code>, <code>laravel_string_keys.rs</code>, and the one
-non-clean split: <code>completion/variable/completion.rs</code> is variable <em>name</em>
-completion (scope collection for the completion list), not type
-resolution, so it stays while its sibling type-resolution files move.</p>
-<p><strong>Steps.</strong>
-1. Create the new module and move the engine subtrees into it, updating
-   <code>mod</code>/<code>use</code> declarations.
-2. Split <code>completion/variable/</code>: keep <code>completion.rs</code> (and any
-   scope-collection helpers only it uses) under <code>completion/</code>; move the
-   rest under <code>&lt;engine&gt;/variable/</code>.
-3. Update imports crate-wide (<code>crate::completion::resolver::…</code> →
-   <code>crate::type_engine::resolver::…</code>, etc.). Add thin <code>pub use</code>
-   re-exports in <code>completion/mod.rs</code> only if they meaningfully shrink
-   the diff; otherwise fix call sites directly.
-4. Update the module map and the "shared type engine lives under
-   <code>completion/</code>" note in <code>docs/ARCHITECTURE.md</code>, and the Project
-   Structure landmark in <code>AGENTS.md</code>, to point at the new module.</p>
-<p><strong>Acceptance.</strong> <code>cargo nextest run</code> passes with only mechanical
-import-path updates; behavior is unchanged; <code>completion/</code> contains only
-completion features; the type engine has one obvious top-level home.</p>
-<p><strong>Why it matters.</strong> Anti-pattern #6 in <code>AGENTS.md</code> ("do not build a
-second type-resolution path") depends on the engine being
-discoverable. While it hides under <code>completion/</code>, contributors reach
-for a "simpler" local resolver instead of finding the shared one. This
-is the largest churn of the set (crate-wide import moves), so it goes
-last.</p>
-<hr />
+<p>No outstanding items.</p>
 
 
 
