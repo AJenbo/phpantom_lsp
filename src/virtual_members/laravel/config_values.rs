@@ -232,6 +232,27 @@ impl ConfigNode {
             ConfigNode::Array(_) => None,
         }
     }
+
+    /// Fill in keys present in `defaults` but absent here, recursing into
+    /// nested arrays.  Keys already present keep their higher-precedence
+    /// value, so a project config file wins over the framework defaults it
+    /// only partially overrides.  A leaf on either side is authoritative: an
+    /// existing leaf is never replaced by a default array, and a default leaf
+    /// never merges into an existing array.
+    fn merge_defaults(&mut self, defaults: ConfigNode) {
+        let ConfigNode::Array(target) = self else {
+            return;
+        };
+        let ConfigNode::Array(source) = defaults else {
+            return;
+        };
+        for (key, default_child) in source {
+            match target.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, existing)) => existing.merge_defaults(default_child),
+                None => target.push((key, default_child)),
+            }
+        }
+    }
 }
 
 /// Parse a `config/*.php` file's returned array into an owned [`ConfigNode`].
@@ -478,8 +499,16 @@ impl Backend {
     fn enumerate_config_trees(&self) -> Vec<(String, ConfigNode)> {
         use crate::virtual_members::laravel::laravel_config_prefix_from_uri;
 
-        let mut trees = Vec::new();
-        let mut seen_prefixes = std::collections::HashSet::new();
+        // Lower-precedence sources only fill keys the higher-precedence tree
+        // for the same prefix leaves unset, so a project `config/app.php` that
+        // publishes just a handful of keys still inherits the framework
+        // defaults for everything it does not override.
+        let mut trees: Vec<(String, ConfigNode)> = Vec::new();
+        let mut merge =
+            |prefix: String, tree: ConfigNode| match trees.iter_mut().find(|(p, _)| *p == prefix) {
+                Some((_, existing)) => existing.merge_defaults(tree),
+                None => trees.push((prefix, tree)),
+            };
 
         // 1. Project config files take highest precedence.
         let snapshot = self.user_file_symbol_maps();
@@ -491,21 +520,16 @@ impl Backend {
                 continue;
             };
             if let Some(tree) = parse_config_tree(&content) {
-                seen_prefixes.insert(prefix.clone());
-                trees.push((prefix, tree));
+                merge(prefix, tree);
             }
         }
 
         // 2. Package config files from service providers.
         for res in &self.laravel_provider_resources.read().config_files {
-            if seen_prefixes.contains(&res.namespace) {
-                continue;
-            }
             if let Ok(content) = std::fs::read_to_string(&res.path)
                 && let Some(tree) = parse_config_tree(&content)
             {
-                seen_prefixes.insert(res.namespace.clone());
-                trees.push((res.namespace.clone(), tree));
+                merge(res.namespace.clone(), tree);
             }
         }
 
@@ -523,14 +547,10 @@ impl Backend {
                     let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                         continue;
                     };
-                    let prefix = stem.to_string();
-                    if seen_prefixes.contains(&prefix) {
-                        continue;
-                    }
                     if let Ok(content) = std::fs::read_to_string(&path)
                         && let Some(tree) = parse_config_tree(&content)
                     {
-                        trees.push((prefix, tree));
+                        merge(stem.to_string(), tree);
                     }
                 }
             }
