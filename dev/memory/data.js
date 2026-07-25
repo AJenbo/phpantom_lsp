@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784956341530,
+  "lastUpdate": 1784957316177,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21055,6 +21055,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 91.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "c7cd659042fdc0396d7b55137f479e3532738afe",
+          "message": "feat: scan vendor framework config files as fallback\n\nScan vendor/laravel/framework/config/ for default config values\nwhen the project does not override them with its own config/ file.\nProject configs take precedence, then package service provider\nconfigs, then framework defaults.\n\nAlso adds the same vendor scanning to config key enumeration so\ncompletion and diagnostics know about framework default keys.",
+          "timestamp": "2026-07-25T00:14:22-05:00",
+          "tree_id": "de6837d1913800b9cdc833e7c42dfc70d37112b3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c7cd659042fdc0396d7b55137f479e3532738afe"
+        },
+        "date": 1784957314044,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95.6,
             "unit": "MiB"
           }
         ]
