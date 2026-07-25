@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784945810930,
+  "lastUpdate": 1784947124135,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20579,6 +20579,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 96.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "8ae35c63d07ea9cefacccd14d5016c010cbb821c",
+          "message": "fix: highlight PHP attributes as decorators\n\nAttribute usages need a semantic token distinct from normal class references so editor themes can color #[...] separately from classes used in types or expressions. Reuse the existing attribute class-reference context to emit the standard decorator token.\\n\\nCloses #117",
+          "timestamp": "2026-07-24T21:22:18-05:00",
+          "tree_id": "b698560e5e3f7b226f8b3828f65015a8e9661dec",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8ae35c63d07ea9cefacccd14d5016c010cbb821c"
+        },
+        "date": 1784947121341,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 48.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95.9,
             "unit": "MiB"
           }
         ]
