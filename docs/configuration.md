@@ -62,6 +62,21 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 | ---------- | ------ | -------- | ----------- |
 | `strategy` | string | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
 
+### `[semantic_tokens]`
+
+PHPantom defaults to `contextual` semantic tokens so editor syntax
+highlighting remains in charge of ordinary PHP syntax.
+
+| Key    | Type   | Default        | Description |
+| ------ | ------ | -------------- | ----------- |
+| `mode` | string | `"contextual"` | Semantic token mode: `"contextual"`, `"full"`, or `"off"`. |
+
+| Mode | Behaviour |
+| --- | --- |
+| `"contextual"` | Emit only context-sensitive tokens that complement Tree-sitter/TextMate highlighting, such as parameters, PHPDoc template parameters, deprecated references, and static member accesses. |
+| `"full"` | Emit the complete semantic token stream, including ordinary classes, variables, functions, methods, properties, comments, keywords, attributes, and Blade tokens. |
+| `"off"` | Return no semantic tokens. |
+
 ### `[formatting]`
 
 | Key            | Type    | Default | Description |

@@ -86,6 +86,22 @@
         }
       }
     },
+    "semantic_tokens": {
+      "type": "object",
+      "description": "Controls LSP semantic token highlighting.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "description": "Semantic token emission mode. \"contextual\" emits only context-sensitive tokens that complement editor syntax highlighting. \"full\" emits the complete semantic token stream. \"off\" disables semantic tokens.",
+          "enum": [
+            "contextual",
+            "full",
+            "off"
+          ],
+          "default": "contextual"
+        }
+      }
+    },
     "laravel": {
       "type": "object",
       "description": "Laravel-specific analysis settings.",

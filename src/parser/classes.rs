@@ -1425,6 +1425,17 @@ impl Backend {
                     }
                 }
                 ClassLikeMember::EnumCase(enum_case) => {
+                    let case_docblock_text = doc_ctx.and_then(|ctx| {
+                        docblock::get_docblock_text_for_node(ctx.trivias, ctx.content, member)
+                    });
+                    let case_docblock_info =
+                        case_docblock_text.and_then(docblock::parse_docblock_for_tags);
+                    let depr_info = {
+                        let docblock_msg = case_docblock_info
+                            .as_ref()
+                            .and_then(docblock::extract_deprecation_message_from_info);
+                        merge_deprecation_info(docblock_msg, &enum_case.attribute_lists, doc_ctx)
+                    };
                     let case_name = atom_bytes(enum_case.item.name().value);
                     let case_name_offset = enum_case.item.name().span.start.offset;
                     let enum_value = if let EnumCaseItem::Backed(backed) = &enum_case.item {
@@ -1441,8 +1452,8 @@ impl Backend {
                         name_offset: case_name_offset,
                         type_hint: None,
                         visibility: Visibility::Public,
-                        deprecation_message: None,
-                        deprecated_replacement: None,
+                        deprecation_message: depr_info.message,
+                        deprecated_replacement: depr_info.replacement,
                         see_refs: Vec::new(),
                         description: None,
                         is_enum_case: true,

@@ -4,11 +4,21 @@
 //! calls `handle_semantic_tokens_full` and asserts on the returned tokens.
 
 use crate::common::create_test_backend;
+use phpantom_lsp::config::{Config, SemanticTokensMode};
 use tower_lsp::lsp_types::*;
 
 /// Helper: open a file in the backend and return semantic tokens.
 fn get_tokens(php: &str) -> Vec<SemanticToken> {
+    get_tokens_with_mode(php, Some(SemanticTokensMode::Full))
+}
+
+fn get_tokens_with_mode(php: &str, mode: Option<SemanticTokensMode>) -> Vec<SemanticToken> {
     let backend = create_test_backend();
+    if let Some(mode) = mode {
+        let mut config = Config::default();
+        config.semantic_tokens.mode = Some(mode);
+        backend.set_config(config);
+    }
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
     let result = backend.handle_semantic_tokens_full(uri, php);
@@ -248,6 +258,46 @@ class MyAttribute {}
     let new_expression = find_decoded(&decoded, 4, 4).expect("expected token for class reference");
     assert_eq!(new_expression.token_type, TT_CLASS);
     assert_eq!(new_expression.length, 11);
+}
+
+#[test]
+fn default_contextual_mode_keeps_parameters_but_skips_attribute_classes() {
+    let php = r#"<?php
+#[MyAttribute]
+function example(string $name): void {
+    $local = $name;
+}
+
+class MyAttribute {}
+"#;
+    let tokens = get_tokens_with_mode(php, None);
+    let decoded = decode_tokens(&tokens);
+
+    let parameter = find_decoded(&decoded, 2, 24).expect("expected token for parameter");
+    assert_eq!(parameter.token_type, TT_PARAMETER);
+    assert_eq!(parameter.length, 5);
+
+    assert!(
+        decoded.iter().all(|tok| tok.token_type != TT_DECORATOR),
+        "contextual mode should leave attribute highlighting to the editor grammar"
+    );
+    assert!(
+        decoded
+            .iter()
+            .all(|tok| tok.token_type != TT_VARIABLE || tok.modifiers != TM_DEFINITION),
+        "contextual mode should not repaint ordinary local variables"
+    );
+}
+
+#[test]
+fn semantic_tokens_can_be_disabled() {
+    let php = r#"<?php
+function example(string $name): void {
+    echo $name;
+}
+"#;
+    let tokens = get_tokens_with_mode(php, Some(SemanticTokensMode::Off));
+    assert!(tokens.is_empty());
 }
 
 #[test]
@@ -616,6 +666,154 @@ class Config {
 }
 
 #[test]
+fn class_constant_access_uses_enum_member_token() {
+    let php = r#"<?php
+class Config {
+    public const VERSION = '1.0';
+
+    public function version(): string {
+        return self::VERSION;
+    }
+}
+"#;
+    let tokens = get_tokens(php);
+    let decoded = decode_tokens(&tokens);
+
+    let version_access = find_decoded(&decoded, 5, 21).expect("expected token for self::VERSION");
+    assert_eq!(version_access.token_type, TT_ENUM_MEMBER);
+    assert!(version_access.modifiers & TM_READONLY != 0);
+}
+
+#[test]
+fn contextual_mode_skips_non_deprecated_class_constants() {
+    let php = r#"<?php
+class Config {
+    public const VERSION = '1.0';
+
+    public function version(): string {
+        return self::VERSION;
+    }
+}
+"#;
+    let tokens = get_tokens_with_mode(php, Some(SemanticTokensMode::Contextual));
+    let decoded = decode_tokens(&tokens);
+
+    assert!(
+        find_decoded(&decoded, 5, 21).is_none(),
+        "contextual mode should leave ordinary constants to syntax highlighting"
+    );
+}
+
+#[test]
+fn contextual_mode_keeps_deprecated_class_constants() {
+    let php = r#"<?php
+class Config {
+    #[Deprecated]
+    public const VERSION = '1.0';
+
+    public function version(): string {
+        return self::VERSION;
+    }
+}
+"#;
+    let tokens = get_tokens_with_mode(php, Some(SemanticTokensMode::Contextual));
+    let decoded = decode_tokens(&tokens);
+
+    let version_access = find_decoded(&decoded, 6, 21)
+        .expect("expected token for deprecated self::VERSION in contextual mode");
+    assert_eq!(version_access.token_type, TT_ENUM_MEMBER);
+    assert!(version_access.modifiers & TM_DEPRECATED != 0);
+}
+
+#[test]
+fn contextual_mode_skips_non_deprecated_enum_cases() {
+    let php = r#"<?php
+enum Priority: int {
+    case Low = 1;
+    case Normal = 2;
+
+    public function label(): string {
+        return match ($this) {
+            self::Low => 'info',
+            self::Normal => 'muted',
+        };
+    }
+}
+"#;
+    let tokens = get_tokens_with_mode(php, Some(SemanticTokensMode::Contextual));
+    let decoded = decode_tokens(&tokens);
+
+    assert!(
+        find_decoded(&decoded, 7, 18).is_none(),
+        "contextual mode should leave ordinary enum cases to syntax highlighting"
+    );
+    assert!(
+        find_decoded(&decoded, 8, 18).is_none(),
+        "contextual mode should leave ordinary enum cases to syntax highlighting"
+    );
+}
+
+#[test]
+fn contextual_mode_keeps_attribute_deprecated_enum_cases() {
+    let php = r#"<?php
+enum Priority: int {
+    #[Deprecated]
+    case Low = 1;
+    case Normal = 2;
+
+    public function label(): string {
+        return match ($this) {
+            self::Low => 'info',
+            self::Normal => 'muted',
+        };
+    }
+}
+"#;
+    let tokens = get_tokens_with_mode(php, Some(SemanticTokensMode::Contextual));
+    let decoded = decode_tokens(&tokens);
+
+    let low = find_decoded(&decoded, 8, 18)
+        .expect("expected token for deprecated self::Low in contextual mode");
+    assert_eq!(low.token_type, TT_ENUM_MEMBER);
+    assert!(low.modifiers & TM_DEPRECATED != 0);
+
+    assert!(
+        find_decoded(&decoded, 9, 18).is_none(),
+        "contextual mode should still skip non-deprecated enum cases"
+    );
+}
+
+#[test]
+fn contextual_mode_keeps_docblock_deprecated_enum_cases() {
+    let php = r#"<?php
+enum Priority: int {
+    /** @deprecated Use Normal */
+    case Low = 1;
+    case Normal = 2;
+
+    public function label(): string {
+        return match ($this) {
+            self::Low => 'info',
+            self::Normal => 'muted',
+        };
+    }
+}
+"#;
+    let tokens = get_tokens_with_mode(php, Some(SemanticTokensMode::Contextual));
+    let decoded = decode_tokens(&tokens);
+
+    let low = find_decoded(&decoded, 8, 18)
+        .expect("expected token for deprecated self::Low in contextual mode");
+    assert_eq!(low.token_type, TT_ENUM_MEMBER);
+    assert!(low.modifiers & TM_DEPRECATED != 0);
+
+    assert!(
+        find_decoded(&decoded, 9, 18).is_none(),
+        "contextual mode should still skip non-deprecated enum cases"
+    );
+}
+
+#[test]
 fn interface_reference_resolves_correctly() {
     let php = r#"<?php
 interface Countable {
@@ -791,18 +989,10 @@ function test() {
 "#;
     let tokens = get_tokens(php);
     let decoded = decode_tokens(&tokens);
-    // $version on line 5 should be a property with static modifier
-    let _version_access: Vec<_> = decoded
-        .iter()
-        .filter(|t| t.token_type == TT_PROPERTY && t.line == 5 && t.modifiers & TM_STATIC != 0)
-        .collect();
-    // The static property access may appear as a variable or property depending
-    // on how the symbol map classifies it. Just check we have something on that line.
-    let any_on_line_5: Vec<_> = decoded.iter().filter(|t| t.line == 5).collect();
-    assert!(
-        !any_on_line_5.is_empty(),
-        "expected at least one token on line 5 (static property access)"
-    );
+    let version_access =
+        find_decoded(&decoded, 5, 17).expect("expected token for Config::$version");
+    assert_eq!(version_access.token_type, TT_PROPERTY);
+    assert!(version_access.modifiers & TM_STATIC != 0);
 }
 
 #[test]
@@ -1138,6 +1328,9 @@ namespace App\Models;
 
 fn get_blade_tokens(blade: &str) -> Vec<DecodedToken> {
     let backend = create_test_backend();
+    let mut config = Config::default();
+    config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
+    backend.set_config(config);
     let uri = "file:///test.blade.php";
     // Populate open_files so collect_blade_tokens can read the original content.
     backend

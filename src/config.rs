@@ -25,6 +25,8 @@ pub struct Config {
     pub diagnostics: DiagnosticsConfig,
     /// Indexing strategy and file discovery settings.
     pub indexing: IndexingConfig,
+    /// Semantic token highlighting settings.
+    pub semantic_tokens: SemanticTokensConfig,
     /// Formatting proxy settings.
     pub formatting: FormattingConfig,
     /// PHPStan proxy settings.
@@ -35,6 +37,65 @@ pub struct Config {
     pub mago: MagoConfig,
     /// Laravel-specific analysis settings.
     pub laravel: LaravelConfig,
+}
+
+/// `[semantic_tokens]` section — controls LSP semantic highlighting.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SemanticTokensConfig {
+    /// Semantic token emission mode.
+    ///
+    /// - `"contextual"` (default) — emit only context-sensitive tokens
+    ///   that syntax grammars usually cannot infer.
+    /// - `"full"` — emit the complete semantic token stream.
+    /// - `"off"` — return no semantic tokens.
+    pub mode: Option<SemanticTokensMode>,
+}
+
+impl SemanticTokensConfig {
+    pub fn mode(&self) -> SemanticTokensMode {
+        self.mode.unwrap_or_default()
+    }
+}
+
+/// Semantic token emission mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SemanticTokensMode {
+    /// Emit only context-sensitive tokens that complement editor syntax highlighting.
+    #[default]
+    Contextual,
+    /// Emit every token PHPantom can classify.
+    Full,
+    /// Disable semantic tokens.
+    Off,
+}
+
+impl<'de> Deserialize<'de> for SemanticTokensMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "contextual" => Ok(SemanticTokensMode::Contextual),
+            "full" => Ok(SemanticTokensMode::Full),
+            "off" => Ok(SemanticTokensMode::Off),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["contextual", "full", "off"],
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for SemanticTokensMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SemanticTokensMode::Contextual => write!(f, "contextual"),
+            SemanticTokensMode::Full => write!(f, "full"),
+            SemanticTokensMode::Off => write!(f, "off"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -667,6 +728,10 @@ mod tests {
         assert!(!config.diagnostics.report_magic_properties_enabled());
         assert!(config.diagnostics.ignore.is_empty());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
+        assert_eq!(
+            config.semantic_tokens.mode(),
+            SemanticTokensMode::Contextual
+        );
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.formatting.timeout.is_none());
@@ -697,6 +762,10 @@ mod tests {
         assert!(!config.diagnostics.report_magic_properties_enabled());
         assert!(config.diagnostics.ignore.is_empty());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
+        assert_eq!(
+            config.semantic_tokens.mode(),
+            SemanticTokensMode::Contextual
+        );
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.phpstan.command.is_none());
@@ -715,6 +784,10 @@ mod tests {
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
         assert_eq!(config.indexing.strategy(), IndexingStrategy::Full);
+        assert_eq!(
+            config.semantic_tokens.mode(),
+            SemanticTokensMode::Contextual
+        );
         assert!(config.formatting.php_cs_fixer.is_none());
         assert!(config.formatting.phpcbf.is_none());
         assert!(config.phpstan.command.is_none());
@@ -959,6 +1032,9 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 [indexing]
 strategy = "self"
 
+[semantic_tokens]
+mode = "full"
+
 [formatting]
 php-cs-fixer = ""
 phpcbf = "/usr/local/bin/phpcbf"
@@ -996,6 +1072,7 @@ analyze-timeout = 45000
             Some("deprecated_usage")
         );
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+        assert_eq!(config.semantic_tokens.mode, Some(SemanticTokensMode::Full));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(
             config.formatting.phpcbf.as_deref(),
@@ -1027,6 +1104,45 @@ analyze-timeout = 45000
         std::fs::write(&path, "[indexing]\nstrategy = \"composer\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Composer));
+    }
+
+    #[test]
+    fn parses_semantic_tokens_mode_contextual() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[semantic_tokens]\nmode = \"contextual\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(
+            config.semantic_tokens.mode(),
+            SemanticTokensMode::Contextual
+        );
+    }
+
+    #[test]
+    fn parses_semantic_tokens_mode_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[semantic_tokens]\nmode = \"full\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.semantic_tokens.mode(), SemanticTokensMode::Full);
+    }
+
+    #[test]
+    fn parses_semantic_tokens_mode_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[semantic_tokens]\nmode = \"off\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.semantic_tokens.mode(), SemanticTokensMode::Off);
+    }
+
+    #[test]
+    fn invalid_semantic_tokens_mode_returns_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[semantic_tokens]\nmode = \"bogus\"\n").unwrap();
+        let result = load_config(dir.path());
+        assert!(result.is_err());
     }
 
     #[test]

@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::config::SemanticTokensMode;
 use crate::diagnostics::unknown_members::member_exists;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::{ClassInfo, ClassLikeKind};
@@ -137,11 +138,19 @@ impl Backend {
     ) -> Option<SemanticTokensResult> {
         let symbol_map = self.symbol_maps.read().get(uri)?.clone();
         let ctx = self.file_context(uri);
+        let mode = self.config().semantic_tokens.mode();
+
+        if mode == SemanticTokensMode::Off {
+            return Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: Vec::new(),
+            }));
+        }
 
         let vc_handle = self.blade_virtual_content.read();
         let effective_content = vc_handle.get(uri).map(|s| s.as_str()).unwrap_or(content);
 
-        let mut tokens = self.collect_tokens(&symbol_map, effective_content, uri, &ctx);
+        let mut tokens = self.collect_tokens(&symbol_map, effective_content, uri, &ctx, mode);
 
         // Sort by position (line, then character) to prepare for delta encoding.
         tokens.sort_by(|a, b| a.line.cmp(&b.line).then(a.start_char.cmp(&b.start_char)));
@@ -192,7 +201,9 @@ impl Backend {
             // directly in original Blade coordinates.  The `content` parameter
             // is the virtual PHP (swapped by `with_file_content`), so we must
             // read the original Blade source from `open_files`.
-            if let Some(blade_content) = self.get_file_content(uri) {
+            if mode == SemanticTokensMode::Full
+                && let Some(blade_content) = self.get_file_content(uri)
+            {
                 tokens.extend(Self::collect_blade_tokens(&blade_content));
             }
 
@@ -230,6 +241,7 @@ impl Backend {
         content: &str,
         uri: &str,
         ctx: &crate::types::FileContext,
+        mode: SemanticTokensMode,
     ) -> Vec<AbsoluteToken> {
         let mut tokens = Vec::with_capacity(symbol_map.spans.len());
 
@@ -259,6 +271,9 @@ impl Backend {
                     // a single token spanning the whole path (backslashes
                     // included) would visibly override that coloring.
                     if *context == ClassRefContext::Attribute {
+                        if mode == SemanticTokensMode::Contextual {
+                            continue;
+                        }
                         (TT_DECORATOR, 0)
                     } else if *context == ClassRefContext::UseImport {
                         if !is_blade {
@@ -268,13 +283,19 @@ impl Backend {
                     } else if self.is_template_param(name, span.start, symbol_map) {
                         (TT_TYPE_PARAMETER, 0)
                     } else {
-                        let tt = self.resolve_class_token_type(name, *is_fqn, ctx, span.start);
                         let mods = self.resolve_class_modifiers(name, *is_fqn, ctx, span.start);
+                        if mode == SemanticTokensMode::Contextual && mods == 0 {
+                            continue;
+                        }
+                        let tt = self.resolve_class_token_type(name, *is_fqn, ctx, span.start);
                         (tt, mods)
                     }
                 }
 
                 SymbolKind::ClassDeclaration { name } => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
                     let tt = self.resolve_declaration_token_type(name, uri, ctx);
                     let mut mods = TM_DECLARATION;
                     // Check if the declared class itself is deprecated or abstract.
@@ -290,25 +311,35 @@ impl Backend {
                     is_docblock_reference,
                     is_array_callable: _,
                 } => {
-                    let tt = if *is_method_call {
-                        TT_METHOD
-                    } else {
-                        TT_PROPERTY
-                    };
-                    let base_mods = if *is_static { TM_STATIC } else { 0 };
+                    let static_property_syntax = *is_static
+                        && content
+                            .get(span.start as usize..span.end as usize)
+                            .is_some_and(|s| s.starts_with('$'));
 
                     // Verify the member exists on the resolved subject class
                     // and pick up deprecated/static modifiers from it.
-                    match self.resolve_member_modifiers(
+                    match self.resolve_member_semantics(
                         subject_text,
                         member_name,
                         *is_static,
                         *is_method_call,
                         *is_docblock_reference,
+                        static_property_syntax,
                         span.start,
                         ctx,
                     ) {
-                        Some(mods) => (tt, base_mods | mods),
+                        Some((tt, mods)) => {
+                            if mode == SemanticTokensMode::Contextual
+                                && tt == TT_ENUM_MEMBER
+                                && mods & TM_DEPRECATED == 0
+                            {
+                                continue;
+                            }
+                            if mode == SemanticTokensMode::Contextual && mods == 0 {
+                                continue;
+                            }
+                            (tt, mods)
+                        }
                         // The subject resolved to a known class and the
                         // member is verifiably absent — skip the token so
                         // the text keeps its default coloring (e.g. a plain
@@ -318,6 +349,9 @@ impl Backend {
                 }
 
                 SymbolKind::MemberDeclaration { name, is_static } => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
                     // Determine if it's a method, property, or constant
                     // by checking the source text at the span.
                     let tt = self.classify_member_declaration(name, span.start, uri, ctx);
@@ -336,6 +370,9 @@ impl Backend {
                     if symbol_map.is_at_var_definition(name, span.start) {
                         mods |= TM_DEFINITION;
                     }
+                    if mode == SemanticTokensMode::Contextual && tt == TT_VARIABLE {
+                        continue;
+                    }
                     (tt, mods)
                 }
 
@@ -343,25 +380,40 @@ impl Backend {
                     name: _,
                     is_definition,
                 } => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
                     let mods = if *is_definition { TM_DECLARATION } else { 0 };
                     (TT_FUNCTION, mods)
                 }
 
-                SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
-                    SelfStaticParentKind::This => (TT_VARIABLE, TM_READONLY | TM_DEFAULT_LIBRARY),
-                    SelfStaticParentKind::Parent => {
-                        let tt = self
-                            .resolve_self_static_parent_token_type(ssp_kind, uri, ctx, span.start);
-                        (tt, TM_DEFAULT_LIBRARY)
+                SymbolKind::SelfStaticParent(ssp_kind) => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
                     }
-                    SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => {
-                        let tt = self
-                            .resolve_self_static_parent_token_type(ssp_kind, uri, ctx, span.start);
-                        (tt, TM_DEFAULT_LIBRARY)
+                    match ssp_kind {
+                        SelfStaticParentKind::This => {
+                            (TT_VARIABLE, TM_READONLY | TM_DEFAULT_LIBRARY)
+                        }
+                        SelfStaticParentKind::Parent => {
+                            let tt = self.resolve_self_static_parent_token_type(
+                                ssp_kind, uri, ctx, span.start,
+                            );
+                            (tt, TM_DEFAULT_LIBRARY)
+                        }
+                        SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => {
+                            let tt = self.resolve_self_static_parent_token_type(
+                                ssp_kind, uri, ctx, span.start,
+                            );
+                            (tt, TM_DEFAULT_LIBRARY)
+                        }
                     }
-                },
+                }
 
                 SymbolKind::NamespaceDeclaration { .. } => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
                     // Same reasoning as use imports: leave the namespace
                     // declaration to the editor's own grammar in regular
                     // PHP files; emit only where no PHP grammar runs.
@@ -372,6 +424,9 @@ impl Backend {
                 }
 
                 SymbolKind::ConstantReference { name: _ } => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
                     // Check if this is a PHP attribute name (starts after `#[`).
                     let is_attr = span.start >= 2
                         && content
@@ -387,11 +442,26 @@ impl Backend {
                     }
                 }
 
-                SymbolKind::Keyword => (TT_KEYWORD, 0),
+                SymbolKind::Keyword => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
+                    (TT_KEYWORD, 0)
+                }
 
-                SymbolKind::CastType => (TT_TYPE, 0),
+                SymbolKind::CastType => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
+                    (TT_TYPE, 0)
+                }
 
-                SymbolKind::Comment => (TT_COMMENT, 0),
+                SymbolKind::Comment => {
+                    if mode == SemanticTokensMode::Contextual {
+                        continue;
+                    }
+                    (TT_COMMENT, 0)
+                }
 
                 SymbolKind::LaravelStringKey { .. } | SymbolKind::LaravelMacroString { .. } => {
                     continue;
@@ -414,49 +484,53 @@ impl Backend {
         // and @var keywords inside docblocks).  Without this, a single
         // comment token covering `/** @var \App\Foo $x */` would hide
         // the more specific inner tokens.
-        for span in crate::phpstan_ignore::phpstan_ignore_tag_spans(content) {
-            let length = span.end.saturating_sub(span.start) as u32;
-            if length == 0 {
-                continue;
+        if mode == SemanticTokensMode::Full {
+            for span in crate::phpstan_ignore::phpstan_ignore_tag_spans(content) {
+                let length = span.end.saturating_sub(span.start) as u32;
+                if length == 0 {
+                    continue;
+                }
+                let position = line_index.position(span.start);
+                if !crate::completion::comment_position::is_inside_non_doc_comment(
+                    content, position,
+                ) && !crate::completion::comment_position::is_inside_docblock(content, position)
+                {
+                    continue;
+                }
+                if let Some(abs) = offset_to_absolute(
+                    content,
+                    &line_index,
+                    span.start as u32,
+                    length,
+                    TT_KEYWORD,
+                    0,
+                ) {
+                    tokens.push(abs);
+                }
             }
-            let position = line_index.position(span.start);
-            if !crate::completion::comment_position::is_inside_non_doc_comment(content, position)
-                && !crate::completion::comment_position::is_inside_docblock(content, position)
-            {
-                continue;
-            }
-            if let Some(abs) = offset_to_absolute(
-                content,
-                &line_index,
-                span.start as u32,
-                length,
-                TT_KEYWORD,
-                0,
-            ) {
-                tokens.push(abs);
-            }
-        }
 
-        for span in crate::phpstan_ignore::phpstan_ignore_code_spans(content) {
-            let length = span.end.saturating_sub(span.start) as u32;
-            if length == 0 {
-                continue;
-            }
-            let position = line_index.position(span.start);
-            if !crate::completion::comment_position::is_inside_non_doc_comment(content, position)
-                && !crate::completion::comment_position::is_inside_docblock(content, position)
-            {
-                continue;
-            }
-            if let Some(abs) = offset_to_absolute(
-                content,
-                &line_index,
-                span.start as u32,
-                length,
-                TT_ENUM_MEMBER,
-                0,
-            ) {
-                tokens.push(abs);
+            for span in crate::phpstan_ignore::phpstan_ignore_code_spans(content) {
+                let length = span.end.saturating_sub(span.start) as u32;
+                if length == 0 {
+                    continue;
+                }
+                let position = line_index.position(span.start);
+                if !crate::completion::comment_position::is_inside_non_doc_comment(
+                    content, position,
+                ) && !crate::completion::comment_position::is_inside_docblock(content, position)
+                {
+                    continue;
+                }
+                if let Some(abs) = offset_to_absolute(
+                    content,
+                    &line_index,
+                    span.start as u32,
+                    length,
+                    TT_ENUM_MEMBER,
+                    0,
+                ) {
+                    tokens.push(abs);
+                }
             }
         }
 
@@ -575,15 +649,14 @@ impl Backend {
         mods
     }
 
-    /// Resolve member-level modifiers (deprecated, readonly, static) by
-    /// looking up the member in the subject's resolved class, and verify
-    /// that the member exists at all.
+    /// Resolve member-level token type and modifiers by looking up the
+    /// member in the subject's resolved class, and verify that the member
+    /// exists at all.
     ///
     /// Returns:
-    /// - `Some(mods)` — the member was found (`mods` carries its
-    ///   deprecated/static/readonly bits), or the subject could not be
-    ///   cheaply resolved to a single class (variables, call chains,
-    ///   unknown classes) and the token is emitted unmodified.
+    /// - `Some((token_type, mods))` — the member was found, or the subject
+    ///   could not be cheaply resolved to a single class (variables, call
+    ///   chains, unknown classes) and the token is emitted unmodified.
     /// - `None` — the subject resolved to a known class and the member is
     ///   verifiably absent (including magic-method fallbacks).  The caller
     ///   skips the token so the text keeps its default coloring.
@@ -594,24 +667,25 @@ impl Backend {
     /// expression resolution, which is too expensive to run for every
     /// member access on every semantic-tokens request.
     #[allow(clippy::too_many_arguments)]
-    fn resolve_member_modifiers(
+    fn resolve_member_semantics(
         &self,
         subject_text: &str,
         member_name: &str,
         is_static: bool,
         is_method_call: bool,
         is_docblock_reference: bool,
+        static_property_syntax: bool,
         offset: u32,
         ctx: &crate::types::FileContext,
-    ) -> Option<u32> {
-        /// The subject could not be verified — emit the token as-is.
-        const UNVERIFIED: Option<u32> = Some(0);
+    ) -> Option<(u32, u32)> {
+        // The subject could not be verified — emit the token as-is.
+        let unverified = Some((fallback_member_token_type(is_method_call), 0));
 
         // Docblock references (`@see Order::$channel_type`) use `::` for
         // every member kind, so the static/instance split below does not
         // apply.  Keep emitting unconditionally.
         if is_docblock_reference {
-            return UNVERIFIED;
+            return unverified;
         }
 
         let base: Arc<ClassInfo> = match subject_text {
@@ -624,22 +698,22 @@ impl Backend {
                     .filter(|c| offset >= c.start_offset && offset <= c.end_offset)
                     .max_by_key(|c| c.start_offset)
                 else {
-                    return UNVERIFIED;
+                    return unverified;
                 };
                 // Inside a trait, `$this`/`self`/`static` refer to the
                 // (unknown) using class — members that live there cannot
                 // be verified against the trait alone.
                 if enclosing.kind == ClassLikeKind::Trait {
-                    return UNVERIFIED;
+                    return unverified;
                 }
                 if subject_text == "parent" {
                     let Some(ref parent_name) = enclosing.parent_class else {
-                        return UNVERIFIED;
+                        return unverified;
                     };
                     let fqn = ctx.resolve_name_at(parent_name, offset);
                     match self.find_or_load_class(&fqn) {
                         Some(c) => c,
-                        None => return UNVERIFIED,
+                        None => return unverified,
                     }
                 } else {
                     Arc::clone(enclosing)
@@ -652,17 +726,17 @@ impl Backend {
                 };
                 match self.find_or_load_class(&fqn) {
                     Some(c) => c,
-                    None => return UNVERIFIED,
+                    None => return unverified,
                 }
             }
             // Variables and expression chains: full resolution is too
             // expensive here — emit unconditionally.
-            _ => return UNVERIFIED,
+            _ => return unverified,
         };
 
         // stdClass is the universal object container — any member goes.
         if base.name == "stdClass" {
-            return UNVERIFIED;
+            return unverified;
         }
 
         let class_loader = |name: &str| self.find_or_load_class(name);
@@ -673,12 +747,21 @@ impl Backend {
         );
 
         if member_exists(&resolved, member_name, is_static, is_method_call) {
-            return Some(member_extra_modifiers(
+            let tt = member_access_token_type(
                 &resolved,
                 member_name,
                 is_static,
                 is_method_call,
-            ));
+                static_property_syntax,
+            );
+            let mods = member_extra_modifiers(
+                &resolved,
+                member_name,
+                is_static,
+                is_method_call,
+                static_property_syntax,
+            );
+            return Some((tt, mods));
         }
 
         // Magic catch-alls: the member is dispatchable at runtime even
@@ -690,7 +773,7 @@ impl Backend {
                 .iter()
                 .any(|m| m.name.eq_ignore_ascii_case(magic))
             {
-                return UNVERIFIED;
+                return unverified;
             }
         } else if !is_static
             && resolved
@@ -698,7 +781,7 @@ impl Backend {
                 .iter()
                 .any(|m| m.name.eq_ignore_ascii_case("__get"))
         {
-            return UNVERIFIED;
+            return unverified;
         }
 
         None
@@ -981,6 +1064,33 @@ fn is_bare_class_name(s: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\')
 }
 
+fn fallback_member_token_type(is_method_call: bool) -> u32 {
+    if is_method_call {
+        TT_METHOD
+    } else {
+        TT_PROPERTY
+    }
+}
+
+fn member_access_token_type(
+    class: &ClassInfo,
+    member_name: &str,
+    is_static: bool,
+    is_method_call: bool,
+    static_property_syntax: bool,
+) -> u32 {
+    if is_method_call {
+        return TT_METHOD;
+    }
+
+    if is_static && !static_property_syntax && class.constants.iter().any(|c| c.name == member_name)
+    {
+        return TT_ENUM_MEMBER;
+    }
+
+    TT_PROPERTY
+}
+
 /// Collect modifier bits (deprecated, static, readonly) for a member that
 /// is known to exist on the fully-resolved class.
 fn member_extra_modifiers(
@@ -988,6 +1098,7 @@ fn member_extra_modifiers(
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
+    static_property_syntax: bool,
 ) -> u32 {
     let mut mods = 0;
     if is_method_call {
@@ -1004,9 +1115,12 @@ fn member_extra_modifiers(
             }
         }
     } else if is_static {
+        mods |= TM_STATIC;
         // Constants first (most common in `Class::NAME` usage), then
         // static properties (`Class::$prop`).
-        if let Some(c) = class.constants.iter().find(|c| c.name == member_name) {
+        if !static_property_syntax
+            && let Some(c) = class.constants.iter().find(|c| c.name == member_name)
+        {
             mods |= TM_READONLY;
             if c.deprecation_message.is_some() {
                 mods |= TM_DEPRECATED;
@@ -1226,6 +1340,7 @@ fn split_comments_around_inner(tokens: &mut Vec<AbsoluteToken>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     #[test]
     fn legend_has_correct_type_count() {
@@ -1317,6 +1432,9 @@ mod tests {
     #[test]
     fn test_blade_interpolation_alignment() {
         let backend = Backend::new_test();
+        let mut config = Config::default();
+        config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
+        backend.set_config(config);
         let uri = "file:///test.blade.php";
         // Blade: src="{{ \App\Library\MyImage::get('foo.png') }}"
         // Index: 012345678
@@ -1363,6 +1481,9 @@ mod tests {
     #[test]
     fn test_blade_foreach_alignment() {
         let backend = Backend::new_test();
+        let mut config = Config::default();
+        config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
+        backend.set_config(config);
         let uri = "file:///test.blade.php";
         // Blade: @foreach ($items as $item)
         // Col:    01234567890
