@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784949614463,
+  "lastUpdate": 1784950770971,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20681,6 +20681,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 94.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "54c8bcb8dd29a2b52bd26ed39fffdb8d2de2c4ba",
+          "message": "feat: add semantic token modes\n\nDefault semantic tokens to a contextual stream so editor syntax grammars remain in charge of ordinary PHP highlighting. Keep the previous broad stream available with full mode and provide an off switch for users who want no LSP semantic highlighting.\\n\\nDocument the new setting in the configuration reference and schema.",
+          "timestamp": "2026-07-24T22:23:25-05:00",
+          "tree_id": "6b07430ca4a7e1b019fd1434aec207500b5ccb67",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/54c8bcb8dd29a2b52bd26ed39fffdb8d2de2c4ba"
+        },
+        "date": 1784950767924,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 95.7,
             "unit": "MiB"
           }
         ]
