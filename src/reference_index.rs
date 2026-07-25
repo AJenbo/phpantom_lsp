@@ -147,7 +147,7 @@ impl Backend {
             }
         }
 
-        if let Some(classes) = self.uri_classes_index.read().get(uri).cloned() {
+        if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in classes {
                 for prop in &class.properties {
                     let Some((start, end)) = member_range(prop.name_offset, &prop.name, true)
@@ -257,6 +257,7 @@ impl Backend {
             return false;
         }
         !self
+            .workspace
             .vendor_uri_prefixes
             .lock()
             .iter()
@@ -545,6 +546,7 @@ mod tests {
                 "name", None,
             )]);
         backend
+            .symbols
             .uri_classes_index
             .write()
             .insert(uri.clone(), vec![Arc::new(class)]);

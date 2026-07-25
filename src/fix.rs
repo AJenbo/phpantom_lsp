@@ -238,7 +238,7 @@ pub async fn run(options: FixOptions) -> i32 {
     // ── 2. Index project ────────────────────────────────────────────
     let backend = Backend::new_headless();
     *backend.workspace_root().write() = Some(root.to_path_buf());
-    *backend.config.lock() = cfg.clone();
+    *backend.workspace.config.lock() = cfg.clone();
 
     let composer_package = composer::read_composer_package(root);
 

@@ -153,7 +153,7 @@ impl Backend {
             }
 
             // Only PSR-4 file-backed classes autoload by path.
-            let decl_uri = match self.fqn_uri_index.read().get(canonical) {
+            let decl_uri = match self.symbols.fqn_uri_index.read().get(canonical) {
                 Some(u) => u.clone(),
                 None => continue,
             };

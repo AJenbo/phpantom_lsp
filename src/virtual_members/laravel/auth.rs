@@ -166,7 +166,7 @@ fn project_auth_implementors(
         false,
         true,
     );
-    let uri_index = backend.fqn_uri_index.read();
+    let uri_index = backend.symbols.fqn_uri_index.read();
     implementors
         .into_iter()
         .map(|cls| cls.fqn().to_string())
@@ -185,7 +185,7 @@ fn project_auth_implementors(
 /// Read the project's `config/auth.php`, preferring an open editor buffer over
 /// the on-disk copy.
 fn read_auth_config(backend: &Backend) -> Option<String> {
-    let root = backend.workspace_root.read().clone()?;
+    let root = backend.workspace.workspace_root.read().clone()?;
     let path = root.join("config").join("auth.php");
     if !path.is_file() {
         return None;

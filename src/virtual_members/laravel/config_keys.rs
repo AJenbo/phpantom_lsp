@@ -212,7 +212,7 @@ pub(crate) fn find_config_references(
 /// no file re-parse is needed for the usage side.
 pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Option<Location> {
     let parts: Vec<&str> = key.split('.').collect();
-    let root = backend.workspace_root.read().clone()?;
+    let root = backend.workspace.workspace_root.read().clone()?;
     let config_dir = root.join("config");
 
     for i in 1..=parts.len() {

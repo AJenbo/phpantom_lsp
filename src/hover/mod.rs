@@ -47,7 +47,7 @@ impl Backend {
     /// Return a Markdown provenance line for a class FQN, or `None` for
     /// project-local classes.
     pub(crate) fn provenance_line_for_class(&self, fqn: &str) -> Option<String> {
-        let class_uri = self.fqn_uri_index.read().get(fqn).cloned()?;
+        let class_uri = self.symbols.fqn_uri_index.read().get(fqn).cloned()?;
         let (origin, pkg_name) = self.package_info_for_uri(&class_uri);
         format_provenance_line(origin, pkg_name.as_deref())
     }
@@ -61,6 +61,7 @@ impl Backend {
     /// scan but not yet parsed.
     pub(crate) fn provenance_line_for_function(&self, func_name: &str) -> Option<String> {
         let uri = self
+            .symbols
             .global_functions
             .read()
             .get(func_name)
@@ -70,6 +71,7 @@ impl Backend {
             return format_provenance_line(origin, pkg_name.as_deref());
         }
         let path = self
+            .symbols
             .autoload_function_index
             .read()
             .get(func_name)
@@ -535,6 +537,7 @@ impl Backend {
                     // custom view directories (from `config/view.php`)
                     // display cleanly rather than as absolute paths.
                     let short_path = self
+                        .workspace
                         .workspace_root
                         .read()
                         .as_deref()

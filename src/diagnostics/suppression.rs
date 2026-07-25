@@ -44,7 +44,7 @@ impl Backend {
     /// This is called during `assemble_and_push` so that the squiggly
     /// line disappears before the text edit is applied.
     pub(crate) fn filter_suppressed(&self, mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-        let mut suppressed = self.diag_suppressed.lock();
+        let mut suppressed = self.diag.suppressed.lock();
         if suppressed.is_empty() {
             return diagnostics;
         }

@@ -123,7 +123,7 @@ impl Backend {
         // ── Classes, interfaces, traits, enums (from uri_classes_index) ───────
         // Also emits methods, properties, and class constants.
         {
-            let uri_classes = self.uri_classes_index.read();
+            let uri_classes = self.symbols.uri_classes_index.read();
             for (file_uri, classes) in uri_classes.iter() {
                 for class in classes {
                     // Skip anonymous classes (empty name or name starting with
@@ -310,7 +310,7 @@ impl Backend {
 
         // ── Standalone functions ────────────────────────────────────
         {
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             for (_name, (file_uri, func)) in fmap.iter() {
                 let display_name = function_display_name(func);
 
@@ -359,7 +359,7 @@ impl Backend {
 
         // ── Global defines / constants ──────────────────────────────
         {
-            let dmap = self.global_defines.read();
+            let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
                 let tier = match match_tier(name, &query_lower) {
                     Some(t) => t,
@@ -390,8 +390,8 @@ impl Backend {
         // would dump thousands of vendor classes into the picker.
         if !query_lower.is_empty() {
             // Grab the fqn_index for rich metadata (kind, deprecation).
-            let fqn_idx = self.fqn_class_index.read();
-            let idx = self.fqn_uri_index.read();
+            let fqn_idx = self.symbols.fqn_class_index.read();
+            let idx = self.symbols.fqn_uri_index.read();
             for (fqn, file_uri) in idx.iter() {
                 if seen_fqns.contains(fqn) {
                     continue;
@@ -460,7 +460,7 @@ impl Backend {
         // Only searched when the user has typed a query, same rationale
         // as above.
         if !query_lower.is_empty() {
-            let cmap = self.fqn_uri_index.read();
+            let cmap = self.symbols.fqn_uri_index.read();
             for (fqn, file_uri) in cmap.iter() {
                 if seen_fqns.contains(fqn) {
                     continue;

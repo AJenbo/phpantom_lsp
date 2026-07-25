@@ -31,7 +31,7 @@ impl Backend {
     /// a parent class method or implements an interface method.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
-            let map = self.uri_classes_index.read();
+            let map = self.symbols.uri_classes_index.read();
             map.get(uri)?.clone()
         };
 

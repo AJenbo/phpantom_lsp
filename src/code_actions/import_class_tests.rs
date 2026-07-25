@@ -85,7 +85,7 @@ fn bulk_import_offered_when_multiple_unresolved() {
 
     // Add candidates.
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/Request.php".to_string(),
@@ -143,7 +143,7 @@ fn bulk_import_not_offered_for_single_unresolved() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/Request.php".to_string(),
@@ -185,7 +185,7 @@ fn bulk_import_not_offered_when_cursor_elsewhere() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/Request.php".to_string(),
@@ -229,7 +229,7 @@ fn resolve_import_all_inserts_use_statements() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/Request.php".to_string(),
@@ -285,7 +285,7 @@ fn resolve_import_all_adds_blank_line_after_namespace() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Spatie\\LaravelData\\Attributes\\MapInputName".to_string(),
             "file:///vendor/MapInputName.php".to_string(),
@@ -371,7 +371,7 @@ final class Foo extends Data
 
     // Add candidates for the two unresolved attribute names.
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Spatie\\LaravelData\\Attributes\\MapInputName".to_string(),
             "file:///vendor/MapInputName.php".to_string(),
@@ -437,7 +437,7 @@ fn resolve_import_all_skips_conflicting_short_names() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         // Two different classes named "Exception"
         cmap.insert(
             "Exception".to_string(),
@@ -487,7 +487,7 @@ fn resolve_import_all_skips_ambiguous_names() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/Request.php".to_string(),
@@ -536,7 +536,7 @@ fn resolve_import_all_imports_unambiguous_skips_ambiguous() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/Request.php".to_string(),
@@ -590,7 +590,7 @@ fn find_candidates_from_fqn_uri_index() {
     let backend = crate::Backend::new_test();
     // Populate class index with a known class.
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "App\\Models\\User".to_string(),
             "file:///fake/path/User.php".to_string(),
@@ -611,7 +611,7 @@ fn find_candidates_from_fqn_uri_index() {
 fn find_candidates_case_insensitive() {
     let backend = crate::Backend::new_test();
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Vendor\\Obscure\\ZYGOMORPHIC".to_string(),
             "file:///fake/path.php".to_string(),
@@ -629,7 +629,7 @@ fn find_candidates_deduplicates() {
     let backend = crate::Backend::new_test();
     // Add the same FQN to fqn_uri_index — should only appear once.
     {
-        let mut idx = backend.fqn_uri_index.write();
+        let mut idx = backend.symbols.fqn_uri_index.write();
         idx.insert("App\\Foo".to_string(), "file:///foo.php".to_string());
     }
 
@@ -652,7 +652,7 @@ fn import_action_offered_for_unresolved_class() {
 
     // Add a candidate to the class index.
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -706,7 +706,7 @@ fn no_import_action_when_already_imported() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -755,7 +755,7 @@ fn no_import_action_for_fqn_reference() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -802,7 +802,7 @@ fn import_action_inserts_use_statement() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -859,7 +859,7 @@ fn import_skips_conflict_with_existing_import() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -911,7 +911,7 @@ fn import_action_offered_in_no_namespace_file_for_new_expression() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -966,7 +966,7 @@ fn import_action_offered_in_no_namespace_file_for_static_call() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Carbon\\Carbon".to_string(),
             "file:///vendor/nesbot/carbon/src/Carbon/Carbon.php".to_string(),
@@ -1020,7 +1020,7 @@ fn import_action_inserts_use_after_php_open_in_no_namespace_file() {
     backend.update_ast(uri, content);
 
     {
-        let mut cmap = backend.fqn_uri_index.write();
+        let mut cmap = backend.symbols.fqn_uri_index.write();
         cmap.insert(
             "Illuminate\\Http\\Request".to_string(),
             "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php".to_string(),
@@ -1076,7 +1076,7 @@ fn no_import_action_for_known_global_class_in_no_namespace_file() {
     backend.update_ast(uri_dep, content_dep);
 
     {
-        let mut idx = backend.fqn_uri_index.write();
+        let mut idx = backend.symbols.fqn_uri_index.write();
         idx.insert("Helper".to_string(), uri_dep.to_string());
     }
 
@@ -1140,7 +1140,7 @@ fn import_action_offered_when_namespaced_class_in_uri_classes_index() {
     let content_dep = "<?php\nnamespace Carbon;\n\nclass Carbon {}\n";
     backend.update_ast(uri_dep, content_dep);
     {
-        let mut idx = backend.fqn_uri_index.write();
+        let mut idx = backend.symbols.fqn_uri_index.write();
         idx.insert("Carbon\\Carbon".to_string(), uri_dep.to_string());
     }
 

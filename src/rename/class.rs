@@ -62,7 +62,7 @@ impl Backend {
         let old_short = crate::util::short_name(old_fqn);
 
         // Find the definition file URI from the fqn_uri_index.
-        let def_uri_str = self.fqn_uri_index.read().get(old_fqn).cloned()?;
+        let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
 
         let def_url = Url::parse(&def_uri_str).ok()?;
         let def_path = def_url.to_file_path().ok()?;
@@ -377,7 +377,12 @@ impl Backend {
 
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
-        let def_uri_str = self.fqn_uri_index.read().get(old_fqn_normalized).cloned();
+        let def_uri_str = self
+            .symbols
+            .fqn_uri_index
+            .read()
+            .get(old_fqn_normalized)
+            .cloned();
 
         for (file_uri_str, file_locations) in &locations_by_file {
             let file_content = match self.get_file_content(file_uri_str) {
@@ -559,7 +564,7 @@ impl Backend {
             return None;
         }
 
-        let def_uri_str = self.fqn_uri_index.read().get(old_fqn).cloned()?;
+        let def_uri_str = self.symbols.fqn_uri_index.read().get(old_fqn).cloned()?;
         let old_url = Url::parse(&def_uri_str).ok()?;
 
         let workspace_root = self.workspace_root().read().clone()?;

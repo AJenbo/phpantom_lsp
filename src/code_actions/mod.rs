@@ -466,7 +466,7 @@ impl Backend {
             // This handles both PHPStan (cached) and native (recomputed)
             // diagnostics uniformly.
             {
-                let mut suppressed = self.diag_suppressed.lock();
+                let mut suppressed = self.diag.suppressed.lock();
                 suppressed.extend(diags.iter().cloned());
             }
 

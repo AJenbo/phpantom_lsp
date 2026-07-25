@@ -44,7 +44,7 @@ impl Backend {
         let mut symbols: Vec<DocumentSymbol> = Vec::new();
 
         // ── Classes, interfaces, traits, enums ──────────────────────
-        if let Some(classes) = self.uri_classes_index.read().get(uri).cloned() {
+        if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in &classes {
                 if let Some(sym) = class_to_symbol(class, &idx) {
                     symbols.push(sym);
@@ -54,7 +54,7 @@ impl Backend {
 
         // ── Standalone functions ────────────────────────────────────
         {
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             for (_name, (file_uri, func)) in fmap.iter() {
                 if file_uri == uri
                     && let Some(sym) = function_to_symbol(func, &idx)
@@ -66,7 +66,7 @@ impl Backend {
 
         // ── Global defines / constants ──────────────────────────────
         {
-            let dmap = self.global_defines.read();
+            let dmap = self.symbols.global_defines.read();
             for (name, info) in dmap.iter() {
                 if info.file_uri == uri && info.name_offset > 0 {
                     let pos = idx.position(info.name_offset as usize);

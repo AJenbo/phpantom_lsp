@@ -320,10 +320,17 @@ impl Backend {
                         &loader,
                     )
                 })
-                .and_then(|decl| backend.fqn_uri_index.read().get(&decl.fqn()).cloned())
+                .and_then(|decl| {
+                    backend
+                        .symbols
+                        .fqn_uri_index
+                        .read()
+                        .get(&decl.fqn())
+                        .cloned()
+                })
                 // Fall back to the receiver's own file when the declaring
                 // class could not be located (e.g. only known via the AST).
-                .or_else(|| backend.fqn_uri_index.read().get(class_fqn).cloned())?;
+                .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
 
             // Read the file content.
             let content = backend.get_file_content(&file_uri)?;

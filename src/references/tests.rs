@@ -48,7 +48,7 @@ fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
     let mut index = backend.laravel_macros.write();
     index.set_file(
         uri.to_string(),
-        extract_macro_registrations(text, Some(*backend.php_version.lock())),
+        extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );
     index.rebuild();
     backend
@@ -2302,15 +2302,35 @@ fn workspace_indexing_batch_merges_disk_files() {
     );
     assert!(
         backend
+            .symbols
             .fqn_class_index
             .read()
             .contains_key("App\\Contracts\\Service")
     );
-    assert!(backend.fqn_class_index.read().contains_key("App\\Impl\\A"));
-    assert!(backend.global_functions.read().contains_key("App\\helper"));
-    assert!(backend.global_defines.read().contains_key("APP_FLAG"));
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Impl\\A")
+    );
+    assert!(
+        backend
+            .symbols
+            .global_functions
+            .read()
+            .contains_key("App\\helper")
+    );
+    assert!(
+        backend
+            .symbols
+            .global_defines
+            .read()
+            .contains_key("APP_FLAG")
+    );
 
     let service_children = backend
+        .symbols
         .gti_index
         .read()
         .get("App\\Contracts\\Service")
@@ -2347,7 +2367,7 @@ fn workspace_indexing_batch_merges_disk_files() {
 #[test]
 fn indexing_work_order_processes_largest_files_first() {
     assert_eq!(
-        super::largest_first_work_order(&[10, 1, 50, 3]),
+        crate::indexing::preload::largest_first_work_order(&[10, 1, 50, 3]),
         vec![2, 0, 3, 1]
     );
 }
@@ -2424,7 +2444,7 @@ fn workspace_index_progress_covers_known_files_and_refresh_walks() {
     std::fs::write(&disk_path, "<?php\nnamespace App;\nclass Disk {}\n").expect("disk file");
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
-    backend.fqn_uri_index.write().insert(
+    backend.symbols.fqn_uri_index.write().insert(
         "App\\Known".to_string(),
         crate::util::path_to_uri(&known_path),
     );
@@ -2466,14 +2486,32 @@ fn workspace_index_progress_covers_known_files_and_refresh_walks() {
             .map(|(pct, _)| *pct),
         Some(100)
     );
-    assert!(backend.fqn_class_index.read().contains_key("App\\Known"));
-    assert!(backend.fqn_class_index.read().contains_key("App\\Disk"));
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Known")
+    );
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Disk")
+    );
 
     let refresh_path = src.join("Refresh.php");
     std::fs::write(&refresh_path, "<?php\nnamespace App;\nclass Refresh {}\n")
         .expect("refresh file");
     backend.ensure_workspace_indexed_with_progress(None);
-    assert!(backend.fqn_class_index.read().contains_key("App\\Refresh"));
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Refresh")
+    );
 }
 
 #[test]
@@ -2559,6 +2597,7 @@ fn parse_files_parallel_with_progress_merges_large_batches() {
     for idx in 0..3 {
         assert!(
             backend
+                .symbols
                 .fqn_class_index
                 .read()
                 .contains_key(format!("App\\File{idx}").as_str())
@@ -2594,7 +2633,13 @@ fn parse_paths_parallel_with_progress_handles_small_batches_and_missing_files() 
         }),
     );
 
-    assert!(backend.fqn_class_index.read().contains_key("App\\First"));
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\First")
+    );
     assert!(progress.lock().expect("progress lock").iter().any(
         |(done, total, done_units, total_units)| {
             *done == 2 && *total == 2 && *done_units == *total_units
@@ -2604,11 +2649,26 @@ fn parse_paths_parallel_with_progress_handles_small_batches_and_missing_files() 
 
 #[test]
 fn workspace_parse_percentage_handles_empty_and_weighted_totals() {
-    assert_eq!(super::workspace_parse_percentage(0, 0), 95);
-    assert_eq!(super::workspace_parse_percentage(0, 200), 5);
-    assert_eq!(super::workspace_parse_percentage(100, 200), 50);
-    assert_eq!(super::workspace_parse_percentage(200, 200), 95);
-    assert_eq!(super::workspace_parse_percentage(500, 200), 95);
+    assert_eq!(
+        crate::indexing::preload::workspace_parse_percentage(0, 0),
+        95
+    );
+    assert_eq!(
+        crate::indexing::preload::workspace_parse_percentage(0, 200),
+        5
+    );
+    assert_eq!(
+        crate::indexing::preload::workspace_parse_percentage(100, 200),
+        50
+    );
+    assert_eq!(
+        crate::indexing::preload::workspace_parse_percentage(200, 200),
+        95
+    );
+    assert_eq!(
+        crate::indexing::preload::workspace_parse_percentage(500, 200),
+        95
+    );
 }
 
 #[test]

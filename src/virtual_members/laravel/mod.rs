@@ -81,6 +81,7 @@ mod auth;
 mod builder;
 mod builder_injection;
 mod casts;
+mod completion_cache;
 mod config_keys;
 pub(crate) mod config_values;
 pub(crate) mod database_schema;

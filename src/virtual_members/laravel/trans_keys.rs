@@ -84,7 +84,7 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
         }
     }
 
-    if let Some(root) = backend.workspace_root.read().clone() {
+    if let Some(root) = backend.workspace.workspace_root.read().clone() {
         for sub in &["lang", "resources/lang"] {
             let dir = root.join(sub);
             let Ok(entries) = std::fs::read_dir(&dir) else {

@@ -58,7 +58,7 @@ fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
     let mut index = backend.laravel_macros.write();
     index.set_file(
         uri.to_string(),
-        extract_macro_registrations(text, Some(*backend.php_version.lock())),
+        extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );
     index.rebuild();
     backend

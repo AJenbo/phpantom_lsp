@@ -942,6 +942,7 @@ impl Backend {
             };
 
             let origin_tier = self
+                .symbols
                 .fqn_origin_index
                 .read()
                 .get(fqn)
@@ -970,6 +971,7 @@ impl Backend {
         // re-acquire the same lock — parking_lot RwLock is not
         // reentrant).
         let fqn_keys: Vec<String> = self
+            .symbols
             .fqn_uri_index
             .read()
             .keys()
@@ -1217,7 +1219,7 @@ impl Backend {
         if self.find_class_in_uri_classes_index(fqn).is_some() {
             return false;
         }
-        if self.fqn_uri_index.read().contains_key(fqn) {
+        if self.symbols.fqn_uri_index.read().contains_key(fqn) {
             return false;
         }
 
@@ -1242,6 +1244,7 @@ impl Backend {
         // 2. Known classes exist under this FQN as a namespace prefix.
         let prefix = format!("{}\\", fqn);
         if self
+            .symbols
             .fqn_uri_index
             .read()
             .keys()

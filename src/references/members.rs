@@ -479,6 +479,7 @@ impl Backend {
         mode: ReferenceSearchMode,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -515,6 +516,7 @@ impl Backend {
         mode: ReferenceSearchMode,
     ) -> Option<HashSet<String>> {
         let classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -686,7 +688,7 @@ impl Backend {
             .collect();
         let mut model_seeds = Vec::new();
         {
-            let class_index = self.fqn_class_index.read();
+            let class_index = self.symbols.fqn_class_index.read();
             for (class_fqn, class_info) in class_index.iter() {
                 if let Some(laravel) = class_info.laravel() {
                     if let Some(normalized) = laravel
@@ -727,7 +729,7 @@ impl Backend {
             queue.push_back(normalize_fqn(model_fqn).to_string());
         }
 
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {
@@ -846,7 +848,7 @@ impl Backend {
 
         let mut model_roots = Vec::new();
         {
-            let class_index = self.fqn_class_index.read();
+            let class_index = self.symbols.fqn_class_index.read();
             for (class_fqn, class_info) in class_index.iter() {
                 if let Some(laravel) = class_info.laravel() {
                     if let Some(builder_fqn) = laravel
@@ -922,7 +924,7 @@ impl Backend {
     fn collect_descendants_for_roots(&self, roots: HashSet<String>) -> HashSet<String> {
         let mut scope = roots.clone();
         let mut queue: std::collections::VecDeque<String> = roots.into_iter().collect();
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {
@@ -965,7 +967,7 @@ impl Backend {
             .map(|fqn| normalize_fqn(fqn).to_string())
             .collect();
         let mut queue: std::collections::VecDeque<String> = scope.iter().cloned().collect();
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {

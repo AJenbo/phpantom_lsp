@@ -61,6 +61,7 @@ impl Backend {
     ) -> Option<InferredReturnType> {
         // Set up the resolution infrastructure from Backend state.
         let local_classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

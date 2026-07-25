@@ -358,7 +358,7 @@ impl Backend {
 
         // Walk down from each owner, including inheriting descendants and
         // pruning at overrides.
-        let gti = self.gti_index.read();
+        let gti = self.symbols.gti_index.read();
         let mut queue: std::collections::VecDeque<String> = owners.iter().cloned().collect();
         let mut seen: HashSet<String> = owners.iter().cloned().collect();
         while let Some(fqn) = queue.pop_front() {
@@ -391,6 +391,7 @@ impl Backend {
         offset: u32,
     ) -> Option<String> {
         let classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

@@ -185,8 +185,10 @@ mod implementation_errors;
 mod invalid_class_kind;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
+mod pull;
 mod return_type_errors;
 mod stale;
+pub(crate) mod state;
 pub(crate) mod suppression;
 mod syntax_errors;
 mod type_errors;
@@ -517,7 +519,7 @@ impl Backend {
         };
 
         {
-            let mut cache = self.diag_last_fast.lock();
+            let mut cache = self.diag.last_fast.lock();
             cache.insert(uri_str.to_string(), fast_diagnostics.clone());
         }
 
@@ -553,7 +555,7 @@ impl Backend {
         };
 
         {
-            let mut cache = self.diag_last_slow.lock();
+            let mut cache = self.diag.last_slow.lock();
             cache.insert(uri_str.to_string(), slow_diagnostics);
         }
 
@@ -598,13 +600,13 @@ impl Backend {
         let mut full = Vec::new();
 
         {
-            let cache = self.diag_last_fast.lock();
+            let cache = self.diag.last_fast.lock();
             if let Some(fast) = cache.get(uri_str) {
                 full.extend(fast.iter().cloned());
             }
         }
         {
-            let cache = self.diag_last_slow.lock();
+            let cache = self.diag.last_slow.lock();
             if let Some(slow) = cache.get(uri_str) {
                 full.extend(slow.iter().cloned());
             }
@@ -671,10 +673,12 @@ impl Backend {
 
         // ── Apply [[diagnostics.ignore]] config rules ────────────────
         {
-            let rules = ignore_rules::compile_ignore_rules(&self.config.lock().diagnostics.ignore);
+            let rules = ignore_rules::compile_ignore_rules(
+                &self.workspace.config.lock().diagnostics.ignore,
+            );
             if !rules.is_empty()
                 && let Ok(file_path) = uri.to_file_path()
-                && let Some(root) = self.workspace_root.read().clone()
+                && let Some(root) = self.workspace.workspace_root.read().clone()
             {
                 let relative_path = file_path
                     .strip_prefix(&root)
@@ -708,11 +712,11 @@ impl Backend {
             // avoids duplicate diagnostics in clients that keep pushed and
             // pulled diagnostics in separate namespaces.
             {
-                let mut cache = self.diag_last_full.lock();
+                let mut cache = self.diag.last_full.lock();
                 cache.insert(uri_str.to_string(), full);
             }
             {
-                let mut ids = self.diag_result_ids.lock();
+                let mut ids = self.diag.result_ids.lock();
                 let id = ids.entry(uri_str.to_string()).or_insert(0);
                 *id += 1;
             }
@@ -758,11 +762,11 @@ impl Backend {
         // In pull mode the worker pushes only fast diagnostics and
         // caches the full set in `diag_last_full` for pull responses.
         {
-            let mut pending = self.diag_pending_uris.lock();
+            let mut pending = self.diag.pending_uris.lock();
             pending.insert(uri.clone());
         }
-        self.diag_version.fetch_add(1, Ordering::Release);
-        self.diag_notify.notify_one();
+        self.diag.version.fetch_add(1, Ordering::Release);
+        self.diag.notify.notify_one();
 
         // External tools (PHPStan, PHPCS, Mago) are NOT scheduled here.
         // They are expensive (seconds per run) and would block save-
@@ -819,7 +823,7 @@ impl Backend {
             // Invalidate cached full diagnostics so the next pull
             // triggers a fresh computation.  Do NOT remove resultIds —
             // see the comment in schedule_diagnostics for why.
-            let mut cache = self.diag_last_full.lock();
+            let mut cache = self.diag.last_full.lock();
             for uri in &uris {
                 cache.remove(uri);
             }
@@ -830,11 +834,11 @@ impl Backend {
         // In pull mode the worker pushes only fast diagnostics and
         // caches the full set in `diag_last_full` for pull responses.
         {
-            let mut pending = self.diag_pending_uris.lock();
+            let mut pending = self.diag.pending_uris.lock();
             pending.extend(uris);
         }
-        self.diag_version.fetch_add(1, Ordering::Release);
-        self.diag_notify.notify_one();
+        self.diag.version.fetch_add(1, Ordering::Release);
+        self.diag.notify.notify_one();
     }
 
     /// Compute native diagnostics for a single file (pull-mode path).
@@ -869,10 +873,10 @@ impl Backend {
         // returns whatever is currently cached (stale results are kept until
         // the refresh, so the editor never flickers to empty).
         {
-            let mut pending = self.diag_pending_uris.lock();
+            let mut pending = self.diag.pending_uris.lock();
             pending.insert(uri_str.to_string());
         }
-        self.diag_notify.notify_one();
+        self.diag.notify.notify_one();
     }
 
     /// Long-lived background task that processes diagnostic requests.
@@ -907,7 +911,7 @@ impl Backend {
             }
 
             // ── Step 1: wait for work ───────────────────────────────
-            self.diag_notify.notified().await;
+            self.diag.notify.notified().await;
 
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
@@ -915,9 +919,9 @@ impl Backend {
 
             // ── Step 2: debounce ────────────────────────────────────
             loop {
-                let version_before = self.diag_version.load(Ordering::Acquire);
+                let version_before = self.diag.version.load(Ordering::Acquire);
                 tokio::time::sleep(std::time::Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS)).await;
-                let version_after = self.diag_version.load(Ordering::Acquire);
+                let version_after = self.diag.version.load(Ordering::Acquire);
                 if version_before == version_after {
                     // No new edits during the sleep — proceed.
                     break;
@@ -927,7 +931,7 @@ impl Backend {
 
             // ── Step 3: snapshot all pending URIs ────────────────────
             let uris: std::collections::HashSet<String> = {
-                let mut pending = self.diag_pending_uris.lock();
+                let mut pending = self.diag.pending_uris.lock();
                 std::mem::take(&mut *pending)
             };
             if uris.is_empty() {
@@ -958,7 +962,11 @@ impl Backend {
         // PHPStan/PHPCS/Mago findings instead of losing them until the
         // next project-wide run.  Only meaningful once the background
         // workspace pass has started.
-        if self.workspace_diag_pass_started.load(Ordering::Acquire) {
+        if self
+            .diag
+            .workspace_diag_pass_started
+            .load(Ordering::Acquire)
+        {
             let migrations: [(&'static str, Vec<Diagnostic>); 4] = [
                 (
                     "phpstan",
@@ -997,23 +1005,23 @@ impl Backend {
                         .unwrap_or_default(),
                 ),
             ];
-            let mut ws = self.workspace_diags.lock();
+            let mut ws = self.diag.workspace_diags.lock();
             for (source, diags) in migrations {
                 ws.set_external_for_uri(source, uri_str, diags);
             }
         }
 
         // Remove all per-source caches so we don't leak memory.
-        self.diag_last_fast.lock().remove(uri_str);
-        self.diag_last_slow.lock().remove(uri_str);
+        self.diag.last_fast.lock().remove(uri_str);
+        self.diag.last_slow.lock().remove(uri_str);
         // Remove cached PHPStan, PHPCS, and Mago diagnostics too.
         self.phpstan_tool.last_diags.lock().remove(uri_str);
         self.phpcs_tool.last_diags.lock().remove(uri_str);
         self.mago_lint_tool.last_diags.lock().remove(uri_str);
         self.mago_analyze_tool.last_diags.lock().remove(uri_str);
         // Remove pull-diagnostic caches.
-        self.diag_result_ids.lock().remove(uri_str);
-        self.diag_last_full.lock().remove(uri_str);
+        self.diag.result_ids.lock().remove(uri_str);
+        self.diag.last_full.lock().remove(uri_str);
 
         let client = match &self.client {
             Some(c) => c,
@@ -1046,7 +1054,11 @@ impl Backend {
         // Recompute the file's workspace diagnostics from disk so the
         // closed file's entry reflects the saved state (the startup
         // snapshot may be stale after in-editor edits).
-        if self.workspace_diag_pass_started.load(Ordering::Acquire) {
+        if self
+            .diag
+            .workspace_diag_pass_started
+            .load(Ordering::Acquire)
+        {
             let backend = self.clone_for_diagnostic_worker();
             let uri = uri_str.to_string();
             tokio::spawn(async move {
@@ -1209,11 +1221,11 @@ mod tests {
         backend.trigger_diagnostics_for_pull(uri);
 
         assert!(
-            backend.diag_pending_uris.lock().contains(uri),
+            backend.diag.pending_uris.lock().contains(uri),
             "pull must schedule the file for the background worker"
         );
         assert!(
-            !backend.diag_last_full.lock().contains_key(uri),
+            !backend.diag.last_full.lock().contains_key(uri),
             "pull must not compute diagnostics inline on the request path"
         );
     }
@@ -1247,6 +1259,7 @@ mod tests {
         // ensure_workspace_indexed Phase 1 will try to parse it.
         let unindexed_uri = format!("file://{}", unindexed_file.to_str().unwrap());
         backend
+            .symbols
             .fqn_uri_index
             .write()
             .insert("Unindexed".to_string(), unindexed_uri);

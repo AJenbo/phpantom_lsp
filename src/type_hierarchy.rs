@@ -46,6 +46,7 @@ impl Backend {
             }
             MapSymbolKind::SelfStaticParent(ssp_kind) => {
                 let classes: Vec<std::sync::Arc<ClassInfo>> = self
+                    .symbols
                     .uri_classes_index
                     .read()
                     .get(uri)
@@ -180,6 +181,7 @@ impl Backend {
                 // Last resort: try to find the URI from the fqn_uri_index
                 // and read from disk / open_files.
                 let uri = self
+                    .symbols
                     .fqn_uri_index
                     .read()
                     .get(fqn)

@@ -103,7 +103,9 @@ use parking_lot::{Mutex, RwLock};
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{CompletionItem, FileChangeType};
 
-use ci_map::{CiMap, CiSet};
+use ci_map::CiMap;
+use symbol_index::SymbolIndex;
+use workspace_env::WorkspaceEnv;
 
 /// A single parse error entry: `(message, start_byte_offset, end_byte_offset)`.
 ///
@@ -227,6 +229,7 @@ mod folding;
 mod formatting;
 mod highlight;
 mod hover;
+mod indexing;
 pub(crate) mod inheritance;
 mod inlay_hints;
 mod linked_editing;
@@ -256,6 +259,7 @@ pub mod stubs;
 pub mod subject_expr;
 pub(crate) mod subject_extraction;
 pub(crate) mod subject_resolution;
+mod symbol_index;
 pub(crate) mod symbol_map;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
@@ -264,6 +268,7 @@ mod type_hierarchy;
 pub mod types;
 mod util;
 pub(crate) mod virtual_members;
+mod workspace_env;
 mod workspace_symbols;
 
 #[cfg(test)]
@@ -385,8 +390,8 @@ pub struct Backend {
     /// Empty string when the client does not report its identity.
     pub(crate) client_name: Mutex<String>,
     pub(crate) open_files: Arc<RwLock<HashMap<String, Arc<String>>>>,
-    /// Maps a file URI to a list of ClassInfo extracted from that file.
-    pub(crate) uri_classes_index: Arc<RwLock<HashMap<String, Vec<Arc<ClassInfo>>>>>,
+    /// Symbol discovery and lookup indexes (classes, functions, constants).
+    pub(crate) symbols: SymbolIndex,
     /// Per-file precomputed symbol location maps for O(log n) lookup.
     ///
     /// Built during `update_ast` by walking the AST and recording every
@@ -423,10 +428,8 @@ pub struct Backend {
     pub(crate) client: Option<Client>,
     /// Whether to update ASTs synchronously.  Used for testing.
     pub(crate) sync_ast_updates: bool,
-    /// The root directory of the workspace (set during `initialize`).
-    pub(crate) workspace_root: Arc<RwLock<Option<PathBuf>>>,
-    /// PSR-4 autoload mappings parsed from `composer.json`.
-    pub(crate) psr4_mappings: Arc<RwLock<Vec<composer::Psr4Mapping>>>,
+    /// Workspace-level configuration and PSR-4/vendor location metadata.
+    pub(crate) workspace: WorkspaceEnv,
     /// Maps a file URI to its `use` statement mappings (short name → fully qualified name).
     /// For example, `use Klarna\Rest\Resource;` produces `"Resource" → "Klarna\Rest\Resource"`.
     pub(crate) file_imports: Arc<RwLock<HashMap<String, HashMap<String, String>>>>,
@@ -446,119 +449,6 @@ pub struct Backend {
     /// one entry; multi-namespace files (using `namespace Foo { }` blocks)
     /// have one entry per block.
     pub(crate) file_namespaces: Arc<RwLock<HashMap<String, Vec<NamespaceSpan>>>>,
-    /// Global function definitions indexed by function name (short name).
-    ///
-    /// The value is `(file_uri, FunctionInfo)` so we can jump to the definition.
-    /// Populated from files listed in Composer's `autoload_files.php` at init
-    /// time, and also from any opened/changed files that contain standalone
-    /// function declarations.
-    /// Function names are case-insensitive in PHP, so the map folds
-    /// keys to lowercase while preserving the declared spelling.
-    pub(crate) global_functions: Arc<RwLock<CiMap<(String, FunctionInfo)>>>,
-    /// Global constants defined via `define('NAME', value)` calls or
-    /// top-level `const NAME = value;` statements.
-    ///
-    /// Maps constant name → [`DefineInfo`] containing the file URI,
-    /// byte offset of the definition, and the initializer value text.
-    ///
-    /// Populated from files listed in Composer's `autoload_files.php` at
-    /// init time, and also from any opened/changed files that contain
-    /// `define()` calls or `const` statements.  Used for constant name
-    /// completions, hover (showing the value), and go-to-definition.
-    pub(crate) global_defines: Arc<RwLock<HashMap<String, DefineInfo>>>,
-    /// Per-URI record of the standalone-function FQNs and `define()`/`const`
-    /// names contributed to [`global_functions`](Self::global_functions) and
-    /// [`global_defines`](Self::global_defines) by the most recent parse of
-    /// each file.
-    ///
-    /// Value is `(function_fqns, define_names)`.  On re-parse this lets
-    /// [`update_ast`](Self::update_ast) evict the symbols an edit deleted or
-    /// renamed in `O(old + new)` — a targeted eviction analogous to the
-    /// `old_fqns` class eviction — instead of scanning the whole global maps
-    /// on every keystroke.
-    pub(crate) uri_globals_index: Arc<RwLock<HashMap<String, UriGlobals>>>,
-    /// Autoload function index: function FQN → file path on disk.
-    ///
-    /// Populated by the lightweight `find_symbols` byte-level scan
-    /// during initialization.  For non-Composer projects the full-scan
-    /// walks all workspace files; for Composer projects it scans the
-    /// files listed in `autoload_files.php` (and their `require_once`
-    /// chains).  Maps standalone function names to the file that
-    /// defines them so that [`find_or_load_function`] can lazily call
-    /// `update_ast` on first access instead of eagerly parsing every
-    /// file at startup.
-    pub(crate) autoload_function_index: Arc<RwLock<CiMap<PathBuf>>>,
-    /// Completion provenance for autoloaded function symbols.
-    pub(crate) autoload_function_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
-    /// Autoload constant index: constant name → file path on disk.
-    ///
-    /// Populated alongside `autoload_function_index` by the
-    /// `find_symbols` byte-level scan during initialization.  Maps
-    /// `define()` constants and top-level `const` declarations to
-    /// the file that defines them for lazy resolution via
-    /// `update_ast` on first access.
-    pub(crate) autoload_constant_index: Arc<RwLock<HashMap<String, PathBuf>>>,
-    /// Completion provenance for autoloaded constant symbols.
-    pub(crate) autoload_constant_origin_index: Arc<RwLock<HashMap<String, ClassCompletionOrigin>>>,
-    /// Paths of all files discovered through Composer's
-    /// `autoload_files.php` (and their `require_once` chains).
-    ///
-    /// The byte-level `find_symbols` scanner only discovers top-level
-    /// function and constant declarations.  Functions wrapped in
-    /// `if (! function_exists(...))` guards (common in Laravel
-    /// helpers) are at brace depth 1 and are missed by the scanner.
-    /// This list is the safety net: when `find_or_load_function` or
-    /// `resolve_constant_definition` cannot find a symbol in any
-    /// index or stubs, it lazily parses each of these files via
-    /// `update_ast` until the symbol is found.  Each file is parsed
-    /// at most once (subsequent lookups hit `global_functions` /
-    /// `global_defines`).
-    pub(crate) autoload_file_paths: Arc<RwLock<Vec<PathBuf>>>,
-    /// Index of fully-qualified class names to file URIs.
-    ///
-    /// This allows reliable lookup of classes that don't follow PSR-4
-    /// conventions, e.g. classes defined in files listed by Composer's
-    /// `autoload_files.php`.  The key is the FQN (e.g.
-    /// `"Laravel\\Foundation\\Application"`) and the value is the file URI
-    /// where the class is defined.
-    ///
-    /// Populated from four sources:
-    /// - `update_ast` (using the file's namespace + class short name)
-    ///   whenever a file is opened or changed.
-    /// - The `find_symbols` byte-level scan of Composer autoload files
-    ///   during server initialization (so classes in autoload files are
-    ///   discoverable by `find_or_load_class` without an eager AST parse).
-    /// - The workspace full-scan for non-Composer projects.
-    /// - Entries from Composer's `autoload_classmap.php` (merged during
-    ///   server initialization).
-    pub(crate) fqn_uri_index: Arc<RwLock<CiMap<String>>>,
-    /// Completion provenance for fully-qualified class names.
-    ///
-    /// Used only for ranking class-name completion candidates.  Tracks
-    /// whether a class comes from project code, core/stubs, an explicit
-    /// Composer dependency, or a transitive vendor dependency.
-    pub(crate) fqn_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
-    /// Secondary index mapping fully-qualified class names directly to
-    /// their parsed `ClassInfo`.
-    ///
-    /// This turns every Phase 1 lookup in [`find_or_load_class`] into an
-    /// O(1) hash lookup instead of scanning all files in `uri_classes_index`.
-    /// Maintained alongside `fqn_uri_index` in `update_ast_inner` and
-    /// `parse_and_cache_content_versioned`.
-    pub(crate) fqn_class_index: Arc<RwLock<CiMap<Arc<ClassInfo>>>>,
-    /// Negative-result cache for [`find_or_load_class`].
-    ///
-    /// Stores fully-qualified class names that have been looked up and
-    /// confirmed not to exist in any resolution phase (fqn_class_index,
-    /// fqn_uri_index, PSR-4, stubs).  Subsequent lookups for the same name
-    /// short-circuit with `None` instead of repeating the full
-    /// multi-phase search.
-    ///
-    /// Entries are removed when new classes are discovered (in
-    /// `update_ast_inner` and `parse_and_cache_content_versioned`) so
-    /// that a class which becomes available after lazy loading is not
-    /// permanently suppressed.
-    pub(crate) class_not_found_cache: Arc<RwLock<CiSet>>,
     /// Parsed phar archives keyed by the phar file's absolute path.
     ///
     /// Populated during Composer autoload scanning when a bootstrap file
@@ -602,6 +492,9 @@ pub struct Backend {
     /// and cleared whenever a file is re-parsed (`update_ast` /
     /// `parse_and_cache_content`) so that stale results never survive
     /// an edit.
+    ///
+    /// Uses `parking_lot::Mutex` because it is frequently written (cache
+    /// stores) and RwLock read→write upgrades are error-prone.
     pub(crate) resolved_class_cache: virtual_members::ResolvedClassCache,
     /// Memoized authenticated-user model type, derived from `config/auth.php`.
     ///
@@ -684,23 +577,6 @@ pub struct Backend {
     /// across those requests, so cache the unfiltered member list and let
     /// each request apply only its current prefix filter.
     pub(crate) member_completion_cache: Arc<Mutex<HashMap<String, Vec<CompletionItem>>>>,
-    /// Global method store: `(class_fqn, method_name)` → `Arc<MethodInfo>`.
-    ///
-    /// Populated alongside `fqn_index` whenever classes are parsed or
-    /// loaded.  Currently a read-only mirror of the methods already stored
-    /// inside `ClassInfo.methods`; future phases will make this the
-    /// authoritative source and shrink `ClassInfo.methods` to just names.
-    pub(crate) method_store: types::MethodStore,
-    /// Reverse inheritance index: parent FQN → list of child FQNs.
-    ///
-    /// For each class/interface/trait, maps the FQNs of its parents
-    /// (parent_class, interfaces, used_traits) to the child's FQN.
-    /// Used by `find_implementors` for O(1) lookup of direct children
-    /// instead of scanning all `uri_classes_index` entries.
-    ///
-    /// Populated incrementally in `update_ast_inner` and
-    /// `parse_and_cache_content_versioned` as files are parsed.
-    pub(crate) gti_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Embedded PHP stubs for built-in functions (e.g. `array_map`,
     /// `str_contains`, …).  Maps function name → raw PHP source code.
     ///
@@ -717,81 +593,8 @@ pub struct Backend {
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted when resolving standalone constant references.
     pub(crate) stub_constant_index: RwLock<HashMap<&'static str, &'static str>>,
-    /// The target PHP version used for version-aware stub filtering.
-    ///
-    /// Detected from `composer.json` (`require.php`) during server
-    /// initialization.  When no version constraint is found, defaults
-    /// to PHP 8.5.  Stub elements annotated with
-    /// `#[PhpStormStubsElementAvailable]` are filtered against this
-    /// version so that only the correct variant is presented.
-    ///
-    /// Wrapped in a `Mutex` so that `set_php_version` can be called
-    /// during `initialized` (which receives `&self`, not `&mut self`).
-    pub(crate) php_version: Mutex<types::PhpVersion>,
-    // NOTE: php_version, vendor_uri_prefixes, vendor_dir_paths, config,
-    // and diag_pending_uris use parking_lot::Mutex (not RwLock) because
-    // they are rarely accessed or always written.
-    /// `file://` URI prefixes for all known vendor directories, used to
-    /// skip diagnostics, find references, and rename for vendor files.
-    ///
-    /// Built during `initialized` from the workspace root and
-    /// `composer.json`'s `config.vendor-dir` (default `"vendor"`).
-    /// Example: `["file:///home/user/project/vendor/"]`.
-    ///
-    /// In monorepo mode, contains one prefix per discovered subproject
-    /// vendor directory.  When empty, vendor-skipping is disabled.
-    pub(crate) vendor_uri_prefixes: Mutex<Vec<String>>,
-    /// Absolute paths of all known vendor directories.
-    ///
-    /// Cached during `initialized` so that cross-file scans (find
-    /// references, go-to-implementation) can skip vendor directories
-    /// without re-reading `composer.json` on every request.
-    ///
-    /// In monorepo mode, contains one path per discovered subproject
-    /// vendor directory.  For single-project workspaces, contains
-    /// exactly one entry.
-    pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
-    /// Canonical vendor package roots paired with completion provenance.
-    ///
-    /// Used to classify function/constant/class symbols by whether they
-    /// originate from explicit or transitive Composer dependencies.
-    pub(crate) vendor_package_origin_roots:
-        Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin, String)>>>,
-    /// Monotonically increasing version counter for diagnostic debouncing.
-    ///
-    /// Bumped on every `did_change`.  A background diagnostic task
-    /// checks this counter after a quiet period and only publishes
-    /// results when the counter hasn't moved, meaning the user
-    /// stopped typing.
-    pub(crate) diag_version: Arc<AtomicU64>,
-    /// Notification handle used to wake the diagnostic worker task.
-    ///
-    /// [`schedule_diagnostics`](Self::schedule_diagnostics) calls
-    /// `notify_one()` after bumping `diag_version`; the worker awaits
-    /// `notified()` in its main loop.
-    pub(crate) diag_notify: Arc<tokio::sync::Notify>,
-    /// File URIs that need a diagnostic pass, set by
-    /// [`schedule_diagnostics`](Self::schedule_diagnostics) and consumed
-    /// by the diagnostic worker.  When a class signature changes, all
-    /// open files are queued so that cross-file diagnostics (unknown
-    /// member, unknown class, deprecated usage) are refreshed.
-    ///
-    /// Wrapped in `Arc` so the diagnostic worker task (spawned during
-    /// `initialized`) shares the same slot as the main `Backend`.
-    ///
-    /// A `HashSet` deduplicates queued URIs in O(1); the worker drains
-    /// the whole set on each wake, so insertion order does not matter.
-    pub(crate) diag_pending_uris: Arc<Mutex<HashSet<String>>>,
-    /// Last-published slow diagnostics (unknown classes, unknown members, etc.)
-    /// per file URI.  Used by the two-phase diagnostic publisher: the fast
-    /// phase merges fresh fast diagnostics with the previous slow diagnostics
-    /// so the editor never shows a flicker where slow diagnostics disappear
-    /// and then reappear.
-    pub(crate) diag_last_slow: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
-    /// Last-computed fast diagnostics (syntax errors, unused imports,
-    /// unused variables) per file URI.  Used by `assemble_and_push` to
-    /// merge fast results with other source caches without recomputing.
-    pub(crate) diag_last_fast: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+    /// Diagnostic debouncing state and the pull-model diagnostic caches.
+    pub(crate) diag: crate::diagnostics::state::DiagnosticState,
     /// PHPStan's dedicated background worker state (extremely slow and
     /// resource-intensive, so it runs separately from native diagnostics).
     pub(crate) phpstan_tool: ExternalToolWorker,
@@ -801,42 +604,6 @@ pub struct Backend {
     pub(crate) mago_lint_tool: ExternalToolWorker,
     /// Mago analyze's dedicated background worker state.
     pub(crate) mago_analyze_tool: ExternalToolWorker,
-    /// Per-file `resultId` for pull diagnostics (`textDocument/diagnostic`).
-    ///
-    /// Maps file URI → monotonically increasing counter.  Bumped whenever
-    /// the diagnostics for a file change (on every `did_change` or when
-    /// PHPStan finishes).  The client sends the previous `resultId` back
-    /// in the next pull request; if it matches, the server returns
-    /// `Unchanged` instead of recomputing.
-    pub(crate) diag_result_ids: Arc<Mutex<HashMap<String, u64>>>,
-    /// Combined diagnostic cache for pull diagnostics.
-    ///
-    /// Stores the last-computed full diagnostic set (fast + slow + PHPStan + PHPCS)
-    /// per file URI.  When the client pulls diagnostics, the server
-    /// returns this cached set.  Updated by the background diagnostic
-    /// worker after each pass and by the PHPStan worker after each run.
-    pub(crate) diag_last_full: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
-    /// Diagnostics for files that are not open in the editor, computed
-    /// by the background workspace diagnostics pass.
-    ///
-    /// Populated after the full background index finishes: the native
-    /// collectors run over every user file, and project-wide external
-    /// tool runs (PHPStan, PHPCS, Mago) add their results per source.
-    /// The `workspace/diagnostic` pull handler reports these for files
-    /// the user has not opened; in push mode they are published
-    /// directly.  When a file closes, its live per-file results are
-    /// migrated here so closed files keep accurate diagnostics.
-    pub(crate) workspace_diags: Arc<Mutex<diagnostics::workspace::WorkspaceDiagnostics>>,
-    /// Prevents duplicate background workspace diagnostics passes.
-    pub(crate) workspace_diag_pass_started: Arc<std::sync::atomic::AtomicBool>,
-    /// Diagnostics to suppress from the next publish cycle.
-    ///
-    /// When a `codeAction/resolve` handler eagerly clears a diagnostic
-    /// (e.g. an unused-import warning), it pushes the diagnostic here.
-    /// The next `publish_diagnostics_for_file` call filters these out
-    /// before sending to the client, then clears the set.  This lets
-    /// the squiggly line disappear before the text edit is applied.
-    pub(crate) diag_suppressed: Arc<Mutex<Vec<tower_lsp::lsp_types::Diagnostic>>>,
     /// Whether the client supports pull diagnostics.
     ///
     /// Set during `initialize` based on the client's
@@ -885,17 +652,6 @@ pub struct Backend {
     /// false-positive "class not found" / "function not found" errors.
     pub(crate) init_complete: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
-    // NOTE: resolved_class_cache uses parking_lot::Mutex because it is
-    // frequently written (cache stores) and RwLock read→write upgrades
-    // are error-prone.
-    /// Per-project configuration loaded from `.phpantom.toml`.
-    ///
-    /// Read once during `initialized` from the workspace root directory.
-    /// When the file is missing or cannot be parsed, all settings use
-    /// their defaults.  Wrapped in a `Mutex` so that `initialized`
-    /// (which receives `&self`) can set it after loading the file.
-    /// The diagnostic worker snapshots the value at spawn time.
-    pub(crate) config: Mutex<config::Config>,
     /// Virtual PHP content generated from Blade files.
     pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
     /// Source maps from virtual PHP back to original Blade positions.
@@ -1028,33 +784,17 @@ impl Backend {
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
             client_name: Mutex::new(String::new()),
             open_files: Arc::new(RwLock::new(HashMap::new())),
-            uri_classes_index: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            symbols: SymbolIndex::new(),
+            workspace: WorkspaceEnv::new(),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
-            workspace_root: Arc::new(RwLock::new(None)),
-            vendor_uri_prefixes: Mutex::new(Vec::new()),
-            vendor_dir_paths: Mutex::new(Vec::new()),
-            vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
-            psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
-            global_functions: Arc::new(RwLock::new(CiMap::new())),
-            global_defines: Arc::new(RwLock::new(HashMap::new())),
-            uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
-            autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
-            autoload_function_origin_index: Arc::new(RwLock::new(CiMap::new())),
-            autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
-            autoload_constant_origin_index: Arc::new(RwLock::new(HashMap::new())),
-            autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
-            fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
-            fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
-            fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
-            class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
@@ -1085,26 +825,12 @@ impl Backend {
                 virtual_members::laravel::database_schema::SchemaIndex::default(),
             )),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
-            method_store: Arc::new(RwLock::new(HashMap::new())),
-            gti_index: Arc::new(RwLock::new(HashMap::new())),
-            php_version: Mutex::new(types::PhpVersion::default()),
-            diag_version: Arc::new(AtomicU64::new(0)),
-            diag_notify: Arc::new(tokio::sync::Notify::new()),
-            diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
-            diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
-            diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
+            diag: crate::diagnostics::state::DiagnosticState::new(),
             phpstan_tool: ExternalToolWorker::new(),
             phpcs_tool: ExternalToolWorker::new(),
             mago_lint_tool: ExternalToolWorker::new(),
             mago_analyze_tool: ExternalToolWorker::new(),
-            diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
-            diag_last_full: Arc::new(Mutex::new(HashMap::new())),
-            workspace_diags: Arc::new(Mutex::new(
-                diagnostics::workspace::WorkspaceDiagnostics::default(),
-            )),
-            workspace_diag_pass_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
-            diag_suppressed: Arc::new(Mutex::new(Vec::new())),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1114,7 +840,6 @@ impl Backend {
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            config: Mutex::new(config::Config::default()),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
@@ -1138,33 +863,17 @@ impl Backend {
             version: env!("PHPANTOM_GIT_VERSION").to_string(),
             client_name: Mutex::new(String::new()),
             open_files: Arc::new(RwLock::new(HashMap::new())),
-            uri_classes_index: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            symbols: SymbolIndex::new(),
+            workspace: WorkspaceEnv::new(),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
-            workspace_root: Arc::new(RwLock::new(None)),
-            vendor_uri_prefixes: Mutex::new(Vec::new()),
-            vendor_dir_paths: Mutex::new(Vec::new()),
-            vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
-            psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             file_imports: Arc::new(RwLock::new(HashMap::new())),
             resolved_names: Arc::new(RwLock::new(HashMap::new())),
             file_namespaces: Arc::new(RwLock::new(HashMap::new())),
-            global_functions: Arc::new(RwLock::new(CiMap::new())),
-            global_defines: Arc::new(RwLock::new(HashMap::new())),
-            uri_globals_index: Arc::new(RwLock::new(HashMap::new())),
-            autoload_function_index: Arc::new(RwLock::new(CiMap::new())),
-            autoload_function_origin_index: Arc::new(RwLock::new(CiMap::new())),
-            autoload_constant_index: Arc::new(RwLock::new(HashMap::new())),
-            autoload_constant_origin_index: Arc::new(RwLock::new(HashMap::new())),
-            autoload_file_paths: Arc::new(RwLock::new(Vec::new())),
-            fqn_uri_index: Arc::new(RwLock::new(CiMap::new())),
-            fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
-            fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
-            class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
@@ -1195,25 +904,11 @@ impl Backend {
                 virtual_members::laravel::database_schema::SchemaIndex::default(),
             )),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
-            method_store: Arc::new(RwLock::new(HashMap::new())),
-            gti_index: Arc::new(RwLock::new(HashMap::new())),
-            php_version: Mutex::new(types::PhpVersion::default()),
-            diag_version: Arc::new(AtomicU64::new(0)),
-            diag_notify: Arc::new(tokio::sync::Notify::new()),
-            diag_pending_uris: Arc::new(Mutex::new(HashSet::new())),
-            diag_last_slow: Arc::new(Mutex::new(HashMap::new())),
-            diag_last_fast: Arc::new(Mutex::new(HashMap::new())),
+            diag: crate::diagnostics::state::DiagnosticState::new(),
             phpstan_tool: ExternalToolWorker::new(),
             phpcs_tool: ExternalToolWorker::new(),
             mago_lint_tool: ExternalToolWorker::new(),
             mago_analyze_tool: ExternalToolWorker::new(),
-            diag_result_ids: Arc::new(Mutex::new(HashMap::new())),
-            diag_last_full: Arc::new(Mutex::new(HashMap::new())),
-            workspace_diags: Arc::new(Mutex::new(
-                diagnostics::workspace::WorkspaceDiagnostics::default(),
-            )),
-            workspace_diag_pass_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            diag_suppressed: Arc::new(Mutex::new(Vec::new())),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1223,7 +918,6 @@ impl Backend {
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            config: Mutex::new(config::Config::default()),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
@@ -1321,8 +1015,11 @@ impl Backend {
     ) -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
         Self {
-            workspace_root: Arc::new(RwLock::new(Some(workspace_root))),
-            psr4_mappings: Arc::new(RwLock::new(psr4_mappings)),
+            workspace: WorkspaceEnv {
+                workspace_root: Arc::new(RwLock::new(Some(workspace_root))),
+                psr4_mappings: Arc::new(RwLock::new(psr4_mappings)),
+                ..WorkspaceEnv::new()
+            },
             ..Self::test_defaults()
         }
     }
@@ -1332,37 +1029,37 @@ impl Backend {
     /// Borrow the workspace root mutex (used by integration tests to set a
     /// custom workspace directory).
     pub fn workspace_root(&self) -> &Arc<RwLock<Option<PathBuf>>> {
-        &self.workspace_root
+        &self.workspace.workspace_root
     }
 
     /// Borrow the global functions mutex (used by integration tests to
     /// inject user-defined functions or inspect the cache).
     pub fn global_functions(&self) -> &Arc<RwLock<CiMap<(String, FunctionInfo)>>> {
-        &self.global_functions
+        &self.symbols.global_functions
     }
 
     /// Borrow the global defines mutex (used by integration tests to
     /// inject user-defined constants or inspect the cache).
     pub fn global_defines(&self) -> &Arc<RwLock<HashMap<String, DefineInfo>>> {
-        &self.global_defines
+        &self.symbols.global_defines
     }
 
     /// Borrow the class index mutex (used by integration tests to
     /// populate discovered class entries).
     pub fn fqn_uri_index(&self) -> &Arc<RwLock<CiMap<String>>> {
-        &self.fqn_uri_index
+        &self.symbols.fqn_uri_index
     }
 
     /// Borrow the FQN → ClassInfo index mutex (used by integration tests
     /// to populate class metadata for context-aware completion filtering).
     pub fn fqn_class_index(&self) -> &Arc<RwLock<CiMap<Arc<ClassInfo>>>> {
-        &self.fqn_class_index
+        &self.symbols.fqn_class_index
     }
 
     /// Borrow the PSR-4 mappings mutex (used by integration tests to
     /// configure autoload mappings).
     pub fn psr4_mappings(&self) -> &Arc<RwLock<Vec<composer::Psr4Mapping>>> {
-        &self.psr4_mappings
+        &self.workspace.psr4_mappings
     }
 
     /// Borrow the configured Laravel date class (used by integration tests
@@ -1404,29 +1101,29 @@ impl Backend {
     /// Borrow the autoload function index (used by integration tests to
     /// populate discovered function entries for non-Composer projects).
     pub fn autoload_function_index(&self) -> &Arc<RwLock<CiMap<PathBuf>>> {
-        &self.autoload_function_index
+        &self.symbols.autoload_function_index
     }
 
     pub fn autoload_function_origin_index(&self) -> &Arc<RwLock<CiMap<ClassCompletionOrigin>>> {
-        &self.autoload_function_origin_index
+        &self.symbols.autoload_function_origin_index
     }
 
     /// Borrow the autoload constant index (used by integration tests to
     /// populate discovered constant entries for non-Composer projects).
     pub fn autoload_constant_index(&self) -> &Arc<RwLock<HashMap<String, PathBuf>>> {
-        &self.autoload_constant_index
+        &self.symbols.autoload_constant_index
     }
 
     pub fn autoload_constant_origin_index(
         &self,
     ) -> &Arc<RwLock<HashMap<String, ClassCompletionOrigin>>> {
-        &self.autoload_constant_origin_index
+        &self.symbols.autoload_constant_origin_index
     }
 
     /// Borrow the autoload file paths list (used by integration tests
     /// to simulate Composer autoload file discovery).
     pub fn autoload_file_paths(&self) -> &Arc<RwLock<Vec<PathBuf>>> {
-        &self.autoload_file_paths
+        &self.symbols.autoload_file_paths
     }
 
     /// Borrow the open files map (used by integration tests to inject
@@ -1449,11 +1146,11 @@ impl Backend {
         &self,
         path: &Path,
     ) -> (ClassCompletionOrigin, Option<String>) {
-        let vendor_paths = self.vendor_dir_paths.lock();
+        let vendor_paths = self.workspace.vendor_dir_paths.lock();
         let is_under_vendor = vendor_paths.iter().any(|vp| path.starts_with(vp));
         drop(vendor_paths);
 
-        let roots = self.vendor_package_origin_roots.read();
+        let roots = self.workspace.vendor_package_origin_roots.read();
 
         if is_under_vendor {
             for (root, origin, pkg_name) in roots.iter() {
@@ -1472,7 +1169,7 @@ impl Backend {
         // otherwise show the package provenance.
         for (root, origin, pkg_name) in roots.iter() {
             if path.starts_with(root) {
-                let ws = self.workspace_root.read();
+                let ws = self.workspace.workspace_root.read();
                 if let Some(ref workspace) = *ws {
                     let canonical_ws = workspace
                         .canonicalize()
@@ -1528,7 +1225,7 @@ impl Backend {
 
     /// Return the configured PHP version.
     pub fn php_version(&self) -> types::PhpVersion {
-        *self.php_version.lock()
+        *self.workspace.php_version.lock()
     }
 
     /// Populate the method store from a slice of classes.
@@ -1537,7 +1234,7 @@ impl Backend {
     /// `(class_fqn, method.name)`.  Called from `update_ast_inner`
     /// and `parse_and_cache_content_versioned` after classes are parsed.
     pub(crate) fn populate_method_store(&self, classes: &[Arc<ClassInfo>]) {
-        let mut store = self.method_store.write();
+        let mut store = self.symbols.method_store.write();
         for cls in classes {
             let fqn = cls.fqn().to_string();
             for method in &cls.methods {
@@ -1556,7 +1253,7 @@ impl Backend {
         if fqns.is_empty() {
             return;
         }
-        let mut store = self.method_store.write();
+        let mut store = self.symbols.method_store.write();
         for fqn in fqns {
             store.retain(|k, _| k.0 != *fqn);
         }
@@ -1567,7 +1264,7 @@ impl Backend {
     /// into the child list of every parent (parent_class, interfaces,
     /// used_traits).
     pub(crate) fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
-        let mut gti = self.gti_index.write();
+        let mut gti = self.symbols.gti_index.write();
         for cls in classes {
             if cls.name.starts_with("__anonymous@") {
                 continue;
@@ -1605,7 +1302,7 @@ impl Backend {
             return;
         }
         let fqn_set: HashSet<&str> = fqns.iter().map(|s| s.as_str()).collect();
-        let mut gti = self.gti_index.write();
+        let mut gti = self.symbols.gti_index.write();
         for children in gti.values_mut() {
             children.retain(|child| !fqn_set.contains(child.as_str()));
         }
@@ -1661,7 +1358,7 @@ impl Backend {
         // evicted without re-scanning.
         let mut dropped_fqns: Vec<String> = Vec::new();
         {
-            let mut idx = self.fqn_uri_index.write();
+            let mut idx = self.symbols.fqn_uri_index.write();
             idx.retain(|fqn, v| {
                 if uri_set.contains(v.as_str()) {
                     dropped_fqns.push(fqn.to_owned());
@@ -1672,7 +1369,7 @@ impl Backend {
             });
         }
         {
-            let mut fci = self.fqn_class_index.write();
+            let mut fci = self.symbols.fqn_class_index.write();
             for fqn in &dropped_fqns {
                 fci.remove(fqn);
             }
@@ -1680,16 +1377,20 @@ impl Backend {
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
 
-        self.autoload_function_index
+        self.symbols
+            .autoload_function_index
             .write()
             .retain(|_, v| !path_set.contains(v));
-        self.autoload_constant_index
+        self.symbols
+            .autoload_constant_index
             .write()
             .retain(|_, v| !path_set.contains(v));
-        self.global_functions
+        self.symbols
+            .global_functions
             .write()
             .retain(|_, (u, _)| !uri_set.contains(u.as_str()));
-        self.global_defines
+        self.symbols
+            .global_defines
             .write()
             .retain(|_, d| !uri_set.contains(d.file_uri.as_str()));
 
@@ -1708,14 +1409,14 @@ impl Backend {
             };
             for uri in spellings {
                 self.clear_file_maps(uri);
-                self.uri_classes_index.write().remove(uri);
+                self.symbols.uri_classes_index.write().remove(uri);
                 self.parsed_uris.write().remove(uri);
                 // The global_functions/global_defines entries for these URIs
                 // were just retained out above; drop the per-URI tracking
                 // record too so deleted files don't leave a stale entry
                 // behind.  Created/changed files rebuild it when re-parsed
                 // below.
-                self.uri_globals_index.write().remove(uri);
+                self.symbols.uri_globals_index.write().remove(uri);
             }
         }
 
@@ -1731,7 +1432,7 @@ impl Backend {
 
             let classes = crate::classmap_scanner::scan_file(path);
             {
-                let mut idx = self.fqn_uri_index.write();
+                let mut idx = self.symbols.fqn_uri_index.write();
                 for fqn in classes {
                     idx.insert(fqn, uri_str.clone());
                 }
@@ -1739,13 +1440,13 @@ impl Backend {
 
             let scan = crate::classmap_scanner::scan_file_full(path);
             {
-                let mut fi = self.autoload_function_index.write();
+                let mut fi = self.symbols.autoload_function_index.write();
                 for fqn in scan.functions {
                     fi.or_insert_with(fqn, || path.clone());
                 }
             }
             {
-                let mut ci = self.autoload_constant_index.write();
+                let mut ci = self.symbols.autoload_constant_index.write();
                 for name in scan.constants {
                     ci.entry(name).or_insert_with(|| path.clone());
                 }
@@ -1774,35 +1475,21 @@ impl Backend {
             version: self.version.clone(),
             client_name: Mutex::new(self.client_name.lock().clone()),
             open_files: Arc::clone(&self.open_files),
-            uri_classes_index: Arc::clone(&self.uri_classes_index),
             symbol_maps: Arc::clone(&self.symbol_maps),
             reference_index: Arc::clone(&self.reference_index),
+            symbols: self.symbols.clone(),
             parse_errors: Arc::clone(&self.parse_errors),
             did_change_parse_locks: Arc::clone(&self.did_change_parse_locks),
             whole_file_coalesce: Arc::clone(&self.whole_file_coalesce),
             // RwLock fields are shared by Arc::clone — the diagnostic
             // worker reads them concurrently with the main Backend.
             client: self.client.clone(),
-            workspace_root: Arc::clone(&self.workspace_root),
-            psr4_mappings: Arc::clone(&self.psr4_mappings),
             file_imports: Arc::clone(&self.file_imports),
             resolved_names: Arc::clone(&self.resolved_names),
             file_namespaces: Arc::clone(&self.file_namespaces),
-            global_functions: Arc::clone(&self.global_functions),
-            global_defines: Arc::clone(&self.global_defines),
-            uri_globals_index: Arc::clone(&self.uri_globals_index),
-            autoload_function_index: Arc::clone(&self.autoload_function_index),
-            autoload_function_origin_index: Arc::clone(&self.autoload_function_origin_index),
-            autoload_constant_index: Arc::clone(&self.autoload_constant_index),
-            autoload_constant_origin_index: Arc::clone(&self.autoload_constant_origin_index),
-            autoload_file_paths: Arc::clone(&self.autoload_file_paths),
-            fqn_uri_index: Arc::clone(&self.fqn_uri_index),
-            fqn_origin_index: Arc::clone(&self.fqn_origin_index),
-            fqn_class_index: Arc::clone(&self.fqn_class_index),
             phar_archives: Arc::clone(&self.phar_archives),
             parsed_uris: Arc::clone(&self.parsed_uris),
             parse_inflight: Arc::clone(&self.parse_inflight),
-            class_not_found_cache: Arc::clone(&self.class_not_found_cache),
             stub_index: RwLock::new(self.stub_index.read().clone()),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
@@ -1820,29 +1507,14 @@ impl Backend {
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             schema_index: Arc::clone(&self.schema_index),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
-            method_store: Arc::clone(&self.method_store),
-            gti_index: Arc::clone(&self.gti_index),
             stub_function_index: RwLock::new(self.stub_function_index.read().clone()),
             stub_constant_index: RwLock::new(self.stub_constant_index.read().clone()),
-            php_version: Mutex::new(self.php_version()),
-            vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
-            vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
-            vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
-            diag_version: Arc::clone(&self.diag_version),
-            diag_notify: Arc::clone(&self.diag_notify),
-            diag_pending_uris: Arc::clone(&self.diag_pending_uris),
-            diag_last_slow: Arc::clone(&self.diag_last_slow),
-            diag_last_fast: Arc::clone(&self.diag_last_fast),
+            diag: self.diag.clone(),
+            workspace: self.workspace.clone(),
             phpstan_tool: self.phpstan_tool.clone(),
             phpcs_tool: self.phpcs_tool.clone(),
             mago_lint_tool: self.mago_lint_tool.clone(),
             mago_analyze_tool: self.mago_analyze_tool.clone(),
-            diag_result_ids: Arc::clone(&self.diag_result_ids),
-            diag_last_full: Arc::clone(&self.diag_last_full),
-            workspace_diags: Arc::clone(&self.workspace_diags),
-            workspace_diag_pass_started: Arc::clone(&self.workspace_diag_pass_started),
-
-            diag_suppressed: Arc::clone(&self.diag_suppressed),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
@@ -1852,7 +1524,6 @@ impl Backend {
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             init_complete: Arc::clone(&self.init_complete),
             shutdown_flag: Arc::clone(&self.shutdown_flag),
-            config: Mutex::new(self.config.lock().clone()),
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),
             blade_source_maps: Arc::clone(&self.blade_source_maps),
             blade_uris: Arc::clone(&self.blade_uris),
@@ -1880,7 +1551,7 @@ impl Backend {
     /// Returns a clone of the [`Config`](config::Config) loaded from
     /// `.phpantom.toml` (or the default config when the file is missing).
     pub fn config(&self) -> config::Config {
-        self.config.lock().clone()
+        self.workspace.config.lock().clone()
     }
 
     /// Replace the current configuration.
@@ -1888,7 +1559,7 @@ impl Backend {
     /// Used by integration tests to enable opt-in diagnostics like
     /// `unresolved-member-access` without needing a `.phpantom.toml` file.
     pub fn set_config(&self, config: config::Config) {
-        *self.config.lock() = config;
+        *self.workspace.config.lock() = config;
     }
 
     /// Set the PHP version (used by integration tests and during
@@ -1898,7 +1569,7 @@ impl Backend {
     /// `stub_constant_index` to remove entries that do not exist in
     /// the given PHP version.
     pub fn set_php_version(&self, version: types::PhpVersion) {
-        *self.php_version.lock() = version;
+        *self.workspace.php_version.lock() = version;
         self.stub_function_index
             .write()
             .retain(|name, source| !stubs::is_stub_function_removed(source, name, version));

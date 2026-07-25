@@ -170,6 +170,7 @@ impl Backend {
         uri: &str,
     ) -> Vec<DocumentHighlight> {
         let ctx_classes: Vec<std::sync::Arc<crate::types::ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -354,6 +355,7 @@ impl Backend {
         uri: &str,
     ) -> Vec<DocumentHighlight> {
         let ctx_classes: Vec<std::sync::Arc<crate::types::ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

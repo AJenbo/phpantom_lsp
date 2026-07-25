@@ -300,6 +300,7 @@ class Panel {}
         assert!(backend.find_or_load_class("Filament\\Panel").is_none());
         assert!(
             backend
+                .symbols
                 .class_not_found_cache
                 .read()
                 .contains("Filament\\Panel"),
@@ -308,11 +309,11 @@ class Panel {}
 
         // Simulate init completing: load the classmap, then clear the
         // negative cache (mirrors the server.rs `initialized` handler).
-        backend.fqn_uri_index.write().insert(
+        backend.symbols.fqn_uri_index.write().insert(
             "Filament\\Panel".to_string(),
             crate::util::path_to_uri(&vendor_class_path),
         );
-        backend.class_not_found_cache.write().clear();
+        backend.symbols.class_not_found_cache.write().clear();
 
         // After the clear, the lookup must succeed.
         let result = backend.find_or_load_class("Filament\\Panel");

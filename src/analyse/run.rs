@@ -63,7 +63,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // calls are no-ops.
     let backend = Backend::new_headless();
     *backend.workspace_root().write() = Some(root.to_path_buf());
-    *backend.config.lock() = cfg.clone();
+    *backend.workspace.config.lock() = cfg.clone();
 
     let composer_package = composer::read_composer_package(root);
 
@@ -199,7 +199,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     // read lock, then drop the lock before resolving.  Resolution may
     // call find_or_load_class which takes write locks on uri_classes_index.
     let sorted_fqns = {
-        let uri_classes_index = backend.uri_classes_index.read();
+        let uri_classes_index = backend.symbols.uri_classes_index.read();
         crate::toposort::toposort_from_uri_classes_index(&uri_classes_index)
     };
     // Run on a dedicated large-stack thread: `resolve_class_fully_inner`
@@ -661,7 +661,7 @@ pub(crate) fn discover_user_files(
     source_dirs.sort();
     source_dirs.dedup();
 
-    let vendor_dirs: Vec<PathBuf> = backend.vendor_dir_paths.lock().clone();
+    let vendor_dirs: Vec<PathBuf> = backend.workspace.vendor_dir_paths.lock().clone();
 
     // When an explicit path filter points outside all PSR-4 source
     // directories (e.g. into vendor/), walk the filter path directly

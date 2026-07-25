@@ -23,8 +23,8 @@
 ///   from a debounced background worker.  Each `did_change` bumps a
 ///   version counter; the worker waits for a quiet period before
 ///   publishing.
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -37,11 +37,9 @@ use tower_lsp::lsp_types::request::{
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
 use crate::config::IndexingStrategy;
 use crate::formatting;
-use crate::phar;
 
 /// Run `f` on a blocking thread in a way that survives `$/cancelRequest`.
 ///
@@ -79,7 +77,7 @@ impl LanguageServer for Backend {
             .and_then(|uri| uri.to_file_path().ok());
 
         if let Some(root) = workspace_root {
-            *self.workspace_root.write() = Some(root);
+            *self.workspace.workspace_root.write() = Some(root);
         }
 
         // Store the client name for quirks-mode adjustments.
@@ -278,7 +276,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         // Parse composer.json for PSR-4 mappings if we have a workspace root
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
             // ── Load project configuration ──────────────────────────────
@@ -287,7 +285,7 @@ impl LanguageServer for Backend {
             // from the very first file load.
             match crate::config::load_config(&root) {
                 Ok(cfg) => {
-                    *self.config.lock() = cfg;
+                    *self.workspace.config.lock() = cfg;
                 }
                 Err(e) => {
                     self.log(
@@ -391,7 +389,7 @@ impl LanguageServer for Backend {
                 poller.finish().await;
             }
             if let Some(ref tok) = progress_token {
-                let classmap_count = self.fqn_uri_index.read().len();
+                let classmap_count = self.symbols.fqn_uri_index.read().len();
                 self.progress_end(tok, Some(format!("Indexed {} classes", classmap_count)))
                     .await;
             }
@@ -511,7 +509,7 @@ impl LanguageServer for Backend {
         // clear, those stale entries cause false-positive "Class not found"
         // diagnostics even though hover and go-to-definition (which run
         // later) resolve the same symbols correctly.
-        self.class_not_found_cache.write().clear();
+        self.symbols.class_not_found_cache.write().clear();
 
         // Clear the resolved-class cache for the same reason.  A request
         // that arrives while indexing is still in progress (the editor
@@ -587,7 +585,7 @@ impl LanguageServer for Backend {
         self.shutdown_flag.store(true, Ordering::Release);
         // Wake all workers so they see the flag immediately instead
         // of sleeping until the next edit arrives.
-        self.diag_notify.notify_one();
+        self.diag.notify.notify_one();
         self.phpstan_tool.notify.notify_one();
         self.phpcs_tool.notify.notify_one();
         self.mago_lint_tool.notify.notify_one();
@@ -802,7 +800,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
         let Some(root) = workspace_root else {
             return;
         };
@@ -1520,7 +1518,7 @@ impl LanguageServer for Backend {
         let config = self.config();
 
         // Read Composer metadata for require-dev detection and bin-dir.
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
         let composer_json: Option<composer::ComposerPackage> = workspace_root
             .as_deref()
             .and_then(composer::read_composer_package);
@@ -1590,213 +1588,14 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult> {
-        let uri_str = params.text_document.uri.to_string();
-
-        // Check resultId — if the client sends back the same resultId we
-        // last returned AND the full cache is still present (not
-        // invalidated by schedule_diagnostics), the diagnostics have not
-        // changed and we can return Unchanged immediately.
-        let cache_present = self.diag_last_full.lock().contains_key(&uri_str);
-        if cache_present && let Some(prev_id) = &params.previous_result_id {
-            let ids = self.diag_result_ids.lock();
-            if let Some(&current_id) = ids.get(&uri_str)
-                && prev_id == &current_id.to_string()
-            {
-                return Ok(DocumentDiagnosticReportResult::Report(
-                    DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
-                        related_documents: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id: current_id.to_string(),
-                        },
-                    }),
-                ));
-            }
-        }
-
-        // In pull mode the pull request *triggers* native diagnostic
-        // computation (no debounce — the IDE decided "now is the time").
-        // If the full cache is missing for this URI, run the native
-        // pipeline immediately and block until it finishes.  External
-        // tool results (PHPStan, PHPCS, Mago) are delivered
-        // incrementally via publishDiagnostics as each finishes; we do
-        // not block on them here to keep the pull response fast.
-        let needs_compute = {
-            let cache = self.diag_last_full.lock();
-            !cache.contains_key(&uri_str)
-        };
-
-        if needs_compute {
-            self.trigger_diagnostics_for_pull(&uri_str);
-        }
-
-        let (diagnostics, result_id) = {
-            let cache = self.diag_last_full.lock();
-            let ids = self.diag_result_ids.lock();
-            let diags = cache.get(&uri_str).cloned().unwrap_or_default();
-            let rid = ids.get(&uri_str).copied().unwrap_or(0).to_string();
-            (diags, rid)
-        };
-
-        Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
-                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: Some(result_id),
-                    items: diagnostics,
-                },
-            }),
-        ))
+        self.document_pull_diagnostic(params)
     }
 
     async fn workspace_diagnostic(
         &self,
         params: WorkspaceDiagnosticParams,
     ) -> Result<WorkspaceDiagnosticReportResult> {
-        // Build a set of previous result IDs sent by the client so we
-        // can return Unchanged for files that haven't changed.
-        let previous: HashMap<&str, &str> = params
-            .previous_result_ids
-            .iter()
-            .map(|p| (p.uri.as_str(), p.value.as_str()))
-            .collect();
-
-        let open_uris: Vec<String> = {
-            let files = self.open_files.read();
-            files.keys().cloned().collect()
-        };
-
-        let mut items = Vec::new();
-
-        for uri_str in &open_uris {
-            // Read the current resultId for this file.
-            let current_id = {
-                let ids = self.diag_result_ids.lock();
-                ids.get(uri_str.as_str()).copied().unwrap_or(0)
-            };
-
-            // Check if the client already has up-to-date diagnostics.
-            // The resultId must match AND the full cache must be present.
-            // When `schedule_diagnostics` invalidates the cache (removing
-            // diag_last_full), the resultId is intentionally kept so it
-            // doesn't reset to 0.  But we must not return "unchanged"
-            // when the cache is missing — that means fresh computation
-            // is needed.
-            let cache_present = self.diag_last_full.lock().contains_key(uri_str.as_str());
-            if cache_present
-                && let Some(prev_id) = previous.get(uri_str.as_str())
-                && *prev_id == current_id.to_string()
-            {
-                let uri = match uri_str.parse::<Url>() {
-                    Ok(u) => u,
-                    Err(_) => continue,
-                };
-                items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
-                    WorkspaceUnchangedDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id: current_id.to_string(),
-                        },
-                    },
-                ));
-                continue;
-            }
-
-            // If the cache is missing, trigger computation (same as
-            // textDocument/diagnostic).
-            let needs_compute = {
-                let cache = self.diag_last_full.lock();
-                !cache.contains_key(uri_str.as_str())
-            };
-            if needs_compute {
-                self.trigger_diagnostics_for_pull(uri_str);
-            }
-
-            let diagnostics = {
-                let cache = self.diag_last_full.lock();
-                cache.get(uri_str.as_str()).cloned().unwrap_or_default()
-            };
-
-            // Re-read the resultId after potential computation.
-            let current_id = {
-                let ids = self.diag_result_ids.lock();
-                ids.get(uri_str.as_str()).copied().unwrap_or(0)
-            };
-
-            let uri = match uri_str.parse::<Url>() {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-
-            items.push(WorkspaceDocumentDiagnosticReport::Full(
-                WorkspaceFullDocumentDiagnosticReport {
-                    uri,
-                    version: None,
-                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                        result_id: Some(current_id.to_string()),
-                        items: diagnostics,
-                    },
-                },
-            ));
-        }
-
-        // ── Background workspace diagnostics (unopened files) ────────
-        // Files the user has not opened are diagnosed by the background
-        // workspace pass; report its cached results here.  Open files
-        // are skipped — the live per-file pipeline above owns them.
-        let open_uris: HashSet<&str> = open_uris.iter().map(|u| u.as_str()).collect();
-        let workspace_items: Vec<(String, String, Option<Vec<Diagnostic>>)> = {
-            let ws = self.workspace_diags.lock();
-            ws.tracked_uris()
-                .into_iter()
-                .filter(|uri| !open_uris.contains(uri.as_str()))
-                .filter_map(|uri| {
-                    let result_id = ws.result_id(&uri)?;
-                    // Only clone the merged set when the client's
-                    // previous result id is stale; unchanged files
-                    // are answered without touching the diagnostics.
-                    let diags = if previous.get(uri.as_str()) == Some(&result_id.as_str()) {
-                        None
-                    } else {
-                        Some(ws.merged(&uri))
-                    };
-                    Some((uri, result_id, diags))
-                })
-                .collect()
-        };
-
-        for (uri_str, result_id, diagnostics) in workspace_items {
-            let Ok(uri) = uri_str.parse::<Url>() else {
-                continue;
-            };
-
-            match diagnostics {
-                // The client already has this exact result set.
-                None => items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
-                    WorkspaceUnchangedDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id,
-                        },
-                    },
-                )),
-                Some(diags) => items.push(WorkspaceDocumentDiagnosticReport::Full(
-                    WorkspaceFullDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                            result_id: Some(result_id),
-                            items: diags,
-                        },
-                    },
-                )),
-            }
-        }
-
-        Ok(WorkspaceDiagnosticReportResult::Report(
-            WorkspaceDiagnosticReport { items },
-        ))
+        self.workspace_pull_diagnostic(params)
     }
 }
 
@@ -1836,16 +1635,6 @@ fn wrap_locations(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
     }
 }
 
-fn vendor_uri_prefixes_for_path(vendor_path: &std::path::Path) -> Vec<String> {
-    let mut prefixes = vec![format!("{}/", crate::util::path_to_uri(vendor_path))];
-    if let Ok(canonical) = vendor_path.canonicalize() {
-        prefixes.push(format!("{}/", crate::util::path_to_uri(&canonical)));
-    }
-    prefixes.sort();
-    prefixes.dedup();
-    prefixes
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1878,7 +1667,7 @@ impl Backend {
         if self.config().indexing.strategy() != IndexingStrategy::Full {
             return;
         }
-        if self.workspace_root.read().is_none() {
+        if self.workspace.workspace_root.read().is_none() {
             return;
         }
         if self.full_index_in_progress.swap(true, Ordering::AcqRel) {
@@ -2071,35 +1860,6 @@ impl Backend {
 
     // ── Initialization helpers ───────────────────────────────────────────
 
-    /// Pre-resolve Laravel's shared builder classes so the first
-    /// `Model::query()->` or `Model::with()->` completion does not pay
-    /// the full inheritance + mixin + patch cost on the editor hot path.
-    ///
-    /// This intentionally warms only framework-level classes. Per-model
-    /// generic specialisations like `Builder<User>` still depend on the
-    /// concrete model and are resolved on demand.
-    fn warm_laravel_completion_cache(&self) -> usize {
-        let loader = |name: &str| self.find_or_load_class(name);
-        let mut warmed = 0usize;
-
-        for fqn in [
-            crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN,
-            "Illuminate\\Database\\Query\\Builder",
-        ] {
-            let Some(class_info) = self.find_or_load_class(fqn) else {
-                continue;
-            };
-            crate::virtual_members::resolve_class_fully_cached(
-                &class_info,
-                &loader,
-                &self.resolved_class_cache,
-            );
-            warmed += 1;
-        }
-
-        warmed
-    }
-
     /// Build the Laravel macro index by scanning the project's own source
     /// service providers, plus one level of classes they import, for
     /// `Target::macro('name', closure)` registrations.
@@ -2113,7 +1873,7 @@ impl Backend {
     /// once after indexing for Laravel projects. Files are byte-prefiltered for
     /// `macro(` so only candidates are parsed.
     fn build_laravel_macro_index(&self) {
-        let php_version = Some(*self.php_version.lock());
+        let php_version = Some(*self.workspace.php_version.lock());
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
         let mut candidate_uris: std::collections::HashSet<String> =
@@ -2128,7 +1888,7 @@ impl Backend {
         // The app's provider registration files are seeds too: adding a
         // provider there must trigger a rebuild.  Their reference
         // fingerprint is the provider class list itself.
-        if let Some(root) = self.workspace_root.read().clone() {
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
             for rel in ["bootstrap/providers.php", "config/app.php"] {
                 let path = root.join(rel);
                 let uri = crate::util::path_to_uri(&path);
@@ -2264,7 +2024,7 @@ impl Backend {
         // providers are registered, so a `Date::use()` in a newly added (or
         // removed) provider is picked up on the next scan.
         let mut seed_uris: std::collections::HashSet<String> = std::collections::HashSet::new();
-        if let Some(root) = self.workspace_root.read().clone() {
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
             for rel in ["bootstrap/providers.php", "config/app.php"] {
                 seed_uris.insert(crate::util::path_to_uri(&root.join(rel)));
             }
@@ -2310,7 +2070,7 @@ impl Backend {
             }
         };
 
-        for vendor_dir in self.vendor_dir_paths.lock().iter() {
+        for vendor_dir in self.workspace.vendor_dir_paths.lock().iter() {
             let installed = vendor_dir.join("composer").join("installed.json");
             if let Ok(content) = std::fs::read_to_string(&installed) {
                 for fqn in crate::virtual_members::laravel::parse_installed_providers(&content) {
@@ -2319,7 +2079,7 @@ impl Backend {
             }
         }
 
-        if let Some(root) = self.workspace_root.read().clone() {
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
             for rel in ["bootstrap/providers.php", "config/app.php"] {
                 let path = root.join(rel);
                 let uri = crate::util::path_to_uri(&path);
@@ -2342,12 +2102,12 @@ impl Backend {
     /// class if it is not yet in the FQN → URI index.  Used to locate provider
     /// source files for the macro scan.
     fn resolve_class_uri(&self, fqn: &str) -> Option<String> {
-        if let Some(uri) = self.fqn_uri_index.read().get(fqn).cloned() {
+        if let Some(uri) = self.symbols.fqn_uri_index.read().get(fqn).cloned() {
             return Some(uri);
         }
         // Not indexed yet: loading the class populates its FQN → URI entry.
         self.find_or_load_class(fqn);
-        self.fqn_uri_index.read().get(fqn).cloned()
+        self.symbols.fqn_uri_index.read().get(fqn).cloned()
     }
 
     /// Expand every `Target::mixin(new X)` / `Target::mixin(X::class)`
@@ -2447,7 +2207,7 @@ impl Backend {
             return;
         }
 
-        let php_version = Some(*self.php_version.lock());
+        let php_version = Some(*self.workspace.php_version.lock());
         let mut regs =
             crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
         self.infer_laravel_macro_return_types(&mut regs, uri, content);
@@ -2481,7 +2241,7 @@ impl Backend {
     /// references are the provider class list rather than method-body class
     /// references.
     fn is_laravel_provider_list_uri(&self, uri: &str) -> bool {
-        let Some(root) = self.workspace_root.read().clone() else {
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
             return false;
         };
         ["bootstrap/providers.php", "config/app.php"]
@@ -2492,7 +2252,12 @@ impl Backend {
     pub(crate) fn build_provider_resources(&self) {
         let mut resources = crate::virtual_members::laravel::ProviderResources::default();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let workspace_root = self.workspace_root.read().clone().unwrap_or_default();
+        let workspace_root = self
+            .workspace
+            .workspace_root
+            .read()
+            .clone()
+            .unwrap_or_default();
 
         for fqn in self.laravel_provider_fqns() {
             let Some(uri) = self.resolve_class_uri(&fqn) else {
@@ -2660,7 +2425,7 @@ impl Backend {
             return helper_path.starts_with(&root);
         }
 
-        if let Some(root) = self.workspace_root.read().clone()
+        if let Some(root) = self.workspace.workspace_root.read().clone()
             && provider_path.starts_with(&root)
         {
             return helper_path.starts_with(&root) && !self.is_in_vendor_dir(&helper_path);
@@ -2670,7 +2435,7 @@ impl Backend {
     }
 
     fn vendor_package_root(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
-        for vendor_dir in self.vendor_dir_paths.lock().iter() {
+        for vendor_dir in self.workspace.vendor_dir_paths.lock().iter() {
             if let Ok(rel) = path.strip_prefix(vendor_dir)
                 && let mut comps = rel.components()
                 && let (Some(vendor), Some(package)) = (comps.next(), comps.next())
@@ -2682,629 +2447,16 @@ impl Backend {
     }
 
     fn is_in_vendor_dir(&self, path: &std::path::Path) -> bool {
-        self.vendor_dir_paths
+        self.workspace
+            .vendor_dir_paths
             .lock()
             .iter()
             .any(|vendor_dir| path.starts_with(vendor_dir))
     }
 
-    /// Initialize a single-project workspace (root `composer.json` exists).
-    ///
-    /// This is the standard fast path: read PSR-4 mappings, build the
-    /// classmap, scan autoload files.  Unchanged from the pre-monorepo
-    /// behaviour except that vendor fields are now collections.
-    pub(crate) async fn init_single_project(
-        &self,
-        root: &std::path::Path,
-        php_version: crate::types::PhpVersion,
-        composer_json: Option<composer::ComposerPackage>,
-        progress: Option<&crate::progress::ScanProgress>,
-    ) {
-        if let Some(p) = progress {
-            p.set_percentage(10, "Reading composer.json");
-        }
-
-        // Classify the project so Laravel-specific resolution (Eloquent
-        // members, config/view/route keys, contract bindings, patches) is
-        // skipped when no Laravel/Illuminate dependency is present.
-        let is_laravel = composer_json
-            .as_ref()
-            .map(composer::is_laravel_project)
-            .unwrap_or(false);
-        self.resolved_class_cache.write().set_laravel(is_laravel);
-
-        let (mappings, vendor_dir) = match &composer_json {
-            Some(pkg) => {
-                let mappings = composer::extract_psr4_mappings_from_package(pkg);
-                let vendor_dir = composer::get_vendor_dir(pkg);
-                (mappings, vendor_dir)
-            }
-            None => (Vec::new(), "vendor".to_string()),
-        };
-
-        // Cache the vendor dir path so cross-file scans can skip it
-        // without re-reading composer.json on every request.
-        let vendor_path = root.join(&vendor_dir);
-        self.add_vendor_dir(&vendor_path);
-
-        // Include PSR-4 mappings from path-repository packages (local
-        // packages symlinked into vendor/, e.g. internachi/modular modules).
-        let path_repo_mappings = composer::extract_path_repo_psr4_mappings(root, &vendor_dir);
-        let mut all_mappings = mappings;
-        all_mappings.extend(path_repo_mappings);
-        // Keep the merged list longest-prefix-first so path-repo namespaces
-        // are matched before any shorter root prefix (e.g. an empty-prefix
-        // root fallback).
-        all_mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
-        *self.psr4_mappings.write() = all_mappings;
-
-        // ── Build the classmap ──────────────────────────────────────
-        let strategy = self.config().indexing.strategy();
-
-        // The classmap build owns the 15..70 range of the bar; the
-        // scan helpers divide it into contiguous per-phase windows
-        // with per-file counts.
-        if let Some(p) = progress {
-            p.set_scope(15, 70, "Building class index");
-        }
-
-        let explicit_deps = composer_json
-            .as_ref()
-            .map(crate::composer::explicit_dependency_names)
-            .unwrap_or_default();
-
-        let (classmap, source_label) = match strategy {
-            IndexingStrategy::None => {
-                let cm = composer::parse_autoload_classmap(root, &vendor_dir);
-                (cm, "composer")
-            }
-            IndexingStrategy::SelfScan | IndexingStrategy::Full => {
-                // "self" strategy: scan every PHP file under the
-                // workspace root (ignoring .gitignore, hidden dirs,
-                // etc.) to discover all classes, functions, and
-                // constants — regardless of whether they appear in
-                // composer.json's autoload sections.
-                //
-                // Explicitly skip the vendor directory so it is never
-                // walked even when it is not in .gitignore.  Vendor
-                // packages are scanned separately via installed.json
-                // so that third-party classes are still indexed.
-                let mut skip_dirs = HashSet::new();
-                skip_dirs.insert(vendor_path.clone());
-                if let Some(p) = progress {
-                    p.begin_phase(0.0, 0.3, "Scanning workspace files");
-                }
-                let mut scan =
-                    classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
-
-                // Merge vendor packages (excluded from the workspace
-                // walk above, scanned separately here).
-                if let Some(p) = progress {
-                    p.begin_phase(0.3, 1.0, "Scanning vendor packages");
-                }
-                let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
-                    root,
-                    &vendor_dir,
-                    &HashSet::new(),
-                    &explicit_deps,
-                    progress,
-                );
-                for (fqcn, path) in vendor_scan.classmap {
-                    scan.classmap.entry(fqcn).or_insert(path);
-                }
-                for (fqn, path) in vendor_scan.function_index {
-                    scan.function_index.entry(fqn).or_insert(path);
-                }
-                for (name, path) in vendor_scan.constant_index {
-                    scan.constant_index.entry(name).or_insert(path);
-                }
-
-                self.populate_autoload_indices(&scan);
-                (scan.classmap, "self-scan")
-            }
-            IndexingStrategy::Composer => {
-                // ── Merged classmap + self-scan pipeline ─────────────
-                let composer_cm = composer::parse_autoload_classmap(root, &vendor_dir);
-                let skip_paths: HashSet<PathBuf> = composer_cm.values().cloned().collect();
-                let scan = self.build_self_scan_composer(
-                    root,
-                    &vendor_dir,
-                    composer_json.as_ref(),
-                    &skip_paths,
-                    progress,
-                );
-                self.populate_autoload_indices(&scan);
-                let mut merged = composer_cm;
-                for (fqcn, path) in scan.classmap {
-                    merged.entry(fqcn).or_insert(path);
-                }
-                (merged, "composer+scan")
-            }
-        };
-
-        let vendor_package_roots =
-            classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
-
-        let class_entries: Vec<(String, PathBuf)> = classmap.into_iter().collect();
-        let symbol_count = class_entries.len();
-        {
-            let mut idx = self.fqn_uri_index.write();
-            let mut origins = self.fqn_origin_index.write();
-            origins.clear();
-            for (fqn, path) in class_entries {
-                let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
-                origins.insert(fqn.clone(), origin);
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
-        }
-        // Cache the package roots so path-based origin lookups
-        // (functions, constants) can classify lazily parsed symbols.
-        *self.vendor_package_origin_roots.write() = vendor_package_roots;
-
-        // ── Drupal: scan web-root directories (gitignore bypassed) ──
-        // Drupal's .gitignore excludes web/core, web/modules/contrib,
-        // etc. because they are managed by Composer — but those paths
-        // contain every base interface and hook definition that modules
-        // depend on.  detect_drupal_web_root() returns None for
-        // non-Drupal projects so this block is a no-op in that case.
-        if let Some(ref pkg) = composer_json
-            && let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg)
-        {
-            if let Some(p) = progress {
-                p.set_scope(70, 74, "Scanning Drupal directories");
-            }
-            let drupal_result =
-                classmap_scanner::scan_drupal_directories(&drupal_web_root, progress);
-            let drupal_count = drupal_result.classmap.len()
-                + drupal_result.function_index.len()
-                + drupal_result.constant_index.len();
-            {
-                let mut idx = self.fqn_uri_index.write();
-                for (fqn, path) in drupal_result.classmap {
-                    idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-                }
-            }
-            {
-                let mut fi = self.autoload_function_index.write();
-                for (fqn, path) in drupal_result.function_index {
-                    fi.or_insert_with(fqn, || path);
-                }
-            }
-            {
-                let mut ci = self.autoload_constant_index.write();
-                for (name, path) in drupal_result.constant_index {
-                    ci.entry(name).or_insert(path);
-                }
-            }
-            tracing::info!(
-                "PHPantom: Drupal web root {:?}, {} symbols indexed",
-                drupal_web_root,
-                drupal_count
-            );
-        }
-
-        // ── PSR-0 (legacy) classmap ─────────────────────────────────
-        // Packages that declare `autoload.psr-0` in their composer.json
-        // (e.g. HTMLPurifier) are listed in `autoload_namespaces.php`.
-        // Scan the listed directories and merge discovered classes into
-        // the classmap so they are resolvable via `find_or_load_class`.
-        let psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
-        if !psr0_cm.is_empty() {
-            let count = psr0_cm.len();
-            let mut idx = self.fqn_uri_index.write();
-            for (fqn, path) in psr0_cm {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
-            tracing::info!("PSR-0: {} classes from autoload_namespaces.php", count);
-        }
-
-        // ── Autoload files ──────────────────────────────────────────
-        if let Some(p) = progress {
-            p.set_scope(74, 85, "Scanning autoload files");
-        }
-
-        self.scan_autoload_files(root, &vendor_dir, progress);
-
-        let symbol_count = symbol_count
-            + self.autoload_function_index.read().len()
-            + self.autoload_constant_index.read().len();
-
-        self.log(
-            MessageType::INFO,
-            format!(
-                "PHPantom v{}: PHP {}, {} symbols from {}, stubs {}",
-                self.version,
-                php_version,
-                symbol_count,
-                source_label,
-                crate::stubs::STUBS_VERSION
-            ),
-        )
-        .await;
-    }
-
-    /// Initialize a monorepo workspace (no root `composer.json`, but
-    /// subprojects with their own `composer.json` were discovered).
-    ///
-    /// Each subproject is processed through the Composer pipeline (PSR-4,
-    /// classmap, autoload files, vendor packages).  After all subprojects
-    /// are processed, a gitignore-aware full-scan picks up loose PHP files
-    /// outside any subproject directory.
-    async fn init_monorepo(
-        &self,
-        root: &std::path::Path,
-        subprojects: &[(PathBuf, String)],
-        php_version: crate::types::PhpVersion,
-        progress: Option<&crate::progress::ScanProgress>,
-    ) {
-        // Log the discovered subprojects.
-        let sub_list: Vec<String> = subprojects
-            .iter()
-            .filter_map(|(p, _)| {
-                p.strip_prefix(root)
-                    .ok()
-                    .map(|r| format!("  {}", r.display()))
-            })
-            .collect();
-        self.log(
-            MessageType::INFO,
-            format!(
-                "PHPantom: No root composer.json. Found {} Composer project(s):\n{}",
-                subprojects.len(),
-                sub_list.join("\n")
-            ),
-        )
-        .await;
-
-        // Collect subproject root paths for the skip set.
-        let mut skip_dirs: HashSet<PathBuf> = HashSet::new();
-        let sub_count = subprojects.len();
-
-        // The workspace is treated as Laravel when any subproject depends on
-        // Laravel/Illuminate, so Laravel-specific resolution runs there while
-        // pure non-Laravel workspaces skip it.
-        let mut any_laravel = false;
-
-        for (sub_idx, (sub_root, vendor_dir)) in subprojects.iter().enumerate() {
-            // Each subproject owns an equal slice of the 10..80 range;
-            // the loose-file scan gets 80..85.  Every report inside the
-            // slice carries the subproject prefix, and the scan helpers
-            // divide the slice into per-phase windows with file counts.
-            let sub_lo = 10 + (sub_idx as u32 * 70) / sub_count.max(1) as u32;
-            let sub_hi = 10 + ((sub_idx as u32 + 1) * 70) / sub_count.max(1) as u32;
-            // The autoload byte-scan is a small fraction of a
-            // subproject's work; the classmap build dominates.
-            let sub_mid = sub_lo + (sub_hi - sub_lo) / 5;
-            if let Some(p) = progress {
-                let label = sub_root
-                    .strip_prefix(root)
-                    .unwrap_or(sub_root)
-                    .display()
-                    .to_string();
-                p.set_label_prefix(format!(
-                    "Subproject {} / {}: {}",
-                    sub_idx + 1,
-                    sub_count,
-                    label
-                ));
-                p.set_scope(sub_lo, sub_mid, "Scanning autoload files");
-            }
-            skip_dirs.insert(sub_root.clone());
-
-            if !any_laravel
-                && let Some(pkg) = composer::read_composer_package(sub_root)
-                && composer::is_laravel_project(&pkg)
-            {
-                any_laravel = true;
-            }
-
-            // ── PSR-4 mappings ──────────────────────────────────────
-            let (mappings, _) = composer::parse_composer_json(sub_root);
-
-            // Resolve base_path values to absolute paths so that
-            // resolve_class_path works regardless of workspace_root.
-            let abs_mappings: Vec<composer::Psr4Mapping> = mappings
-                .into_iter()
-                .map(|m| {
-                    let abs_base = sub_root.join(&m.base_path).to_string_lossy().to_string();
-                    composer::Psr4Mapping {
-                        prefix: m.prefix,
-                        base_path: composer::normalise_path(&abs_base),
-                    }
-                })
-                .collect();
-            {
-                let mut psr4 = self.psr4_mappings.write();
-                psr4.extend(abs_mappings);
-            }
-
-            // ── Vendor dir tracking ─────────────────────────────────
-            let vendor_path = sub_root.join(vendor_dir);
-            self.add_vendor_dir(&vendor_path);
-
-            // ── Autoload files ──────────────────────────────────────
-            self.scan_autoload_files(sub_root, vendor_dir, progress);
-
-            // ── Merged classmap + self-scan ──────────────────────────
-            // Load the subproject's Composer classmap as a skip set,
-            // then self-scan its PSR-4 directories and vendor packages
-            // for anything the classmap missed.
-            let mut sub_cm = composer::parse_autoload_classmap(sub_root, vendor_dir);
-            // Merge PSR-0 classes for this subproject.
-            let psr0_cm = composer::parse_autoload_namespaces(sub_root, vendor_dir);
-            for (fqn, path) in psr0_cm {
-                sub_cm.entry(fqn).or_insert(path);
-            }
-            let sub_skip: HashSet<PathBuf> = sub_cm.values().cloned().collect();
-            if let Some(p) = progress {
-                p.set_scope(sub_mid, sub_hi, "Building class index");
-            }
-            let scan =
-                self.build_self_scan_composer(sub_root, vendor_dir, None, &sub_skip, progress);
-            self.populate_autoload_indices(&scan);
-            {
-                let mut idx = self.fqn_uri_index.write();
-                for (fqcn, path) in sub_cm {
-                    idx.or_insert_with(fqcn, || crate::util::path_to_uri(&path));
-                }
-                for (fqcn, path) in scan.classmap {
-                    idx.or_insert_with(fqcn, || crate::util::path_to_uri(&path));
-                }
-            }
-        }
-
-        self.resolved_class_cache.write().set_laravel(any_laravel);
-
-        // Re-sort PSR-4 mappings by prefix length descending so
-        // longest-prefix-first matching works.
-        {
-            let mut psr4 = self.psr4_mappings.write();
-            psr4.sort_by_key(|b| std::cmp::Reverse(b.prefix.len()));
-        }
-
-        // ── Full-scan loose files ───────────────────────────────────
-        // Walk the workspace for PHP files outside any subproject
-        // directory, using gitignore-aware walking.
-        if let Some(p) = progress {
-            p.set_label_prefix("");
-            p.set_scope(80, 85, "Scanning loose PHP files");
-        }
-
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
-        self.populate_autoload_indices(&scan);
-        {
-            let mut idx = self.fqn_uri_index.write();
-            for (fqcn, path) in scan.classmap {
-                idx.or_insert_with(fqcn, || crate::util::path_to_uri(&path));
-            }
-        }
-
-        let symbol_count = self.fqn_uri_index.read().len()
-            + self.autoload_function_index.read().len()
-            + self.autoload_constant_index.read().len();
-
-        self.log(
-            MessageType::INFO,
-            format!(
-                "PHPantom v{}: PHP {}, {} symbols from {} subprojects, stubs {}",
-                self.version,
-                php_version,
-                symbol_count,
-                subprojects.len(),
-                crate::stubs::STUBS_VERSION
-            ),
-        )
-        .await;
-    }
-
-    /// Initialize a pure non-Composer workspace (no `composer.json`
-    /// anywhere).  Full-scans all PHP files in the workspace.
-    async fn init_no_composer(
-        &self,
-        root: &std::path::Path,
-        php_version: crate::types::PhpVersion,
-        progress: Option<&crate::progress::ScanProgress>,
-    ) {
-        self.log(
-            MessageType::INFO,
-            "PHPantom: No composer.json found. Scanning workspace for PHP classes.".to_string(),
-        )
-        .await;
-
-        if let Some(p) = progress {
-            p.set_scope(10, 85, "Scanning workspace for PHP files");
-        }
-
-        // No composer.json means no Laravel/Illuminate dependency, so
-        // Laravel-specific resolution is disabled.
-        self.resolved_class_cache.write().set_laravel(false);
-
-        let skip_dirs = HashSet::new();
-        let scan = classmap_scanner::scan_workspace_fallback_full(root, &skip_dirs, progress);
-        self.populate_autoload_indices(&scan);
-
-        let symbol_count = scan.classmap.len();
-        {
-            let mut idx = self.fqn_uri_index.write();
-            for (fqn, path) in scan.classmap {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
-        }
-
-        let symbol_count = symbol_count
-            + self.autoload_function_index.read().len()
-            + self.autoload_constant_index.read().len();
-
-        self.log(
-            MessageType::INFO,
-            format!(
-                "PHPantom v{}: PHP {}, {} symbols from workspace scan, stubs {}",
-                self.version,
-                php_version,
-                symbol_count,
-                crate::stubs::STUBS_VERSION
-            ),
-        )
-        .await;
-    }
-
-    /// Register a vendor directory path and its URI prefix for
-    /// vendor-file detection.
-    pub(crate) fn add_vendor_dir(&self, vendor_path: &std::path::Path) {
-        // Store the absolute path for filesystem-level skip logic.
-        {
-            let mut paths = self.vendor_dir_paths.lock();
-            paths.push(vendor_path.to_path_buf());
-        }
-        // Store URI prefixes for URI-level skip logic (diagnostics, find
-        // references, rename).  Keep both raw and canonical forms so macOS
-        // `/tmp` vs `/private/tmp` style aliases do not leak vendor files into
-        // workspace indexing.
-        let new_prefixes = vendor_uri_prefixes_for_path(vendor_path);
-        {
-            let mut prefixes = self.vendor_uri_prefixes.lock();
-            for prefix in new_prefixes {
-                if !prefixes.contains(&prefix) {
-                    prefixes.push(prefix);
-                }
-            }
-        }
-    }
-
-    /// Apply a `workspace/didChangeWatchedFiles` batch to the indexes.
-    ///
-    /// Returns `true` if any PHP file or composer change was acted on (so the
-    /// caller can ask the editor to re-pull diagnostics).  Runs entirely on a
-    /// blocking thread; it parses no files on the async runtime.
-    ///
-    /// Editors cannot watch the filesystem while the window is unfocused, so
-    /// on refocus they resynchronise by reporting the *entire* workspace as
-    /// "changed" in one notification (hundreds of KiB of events).  Almost
-    /// none of those files actually changed, and most were never parsed:
-    /// PHPantom loads class details lazily, holding only a name→file pointer
-    /// in the discovery index until something resolves the class.  Re-reading
-    /// and re-scanning every reported file from disk would do thousands of
-    /// wasted syscalls on every refocus.
-    ///
-    /// So a plain content change is only acted on for files we have actually
-    /// parsed (whose cached details would otherwise go stale).  Created and
-    /// deleted files are always handled: a creation makes a new class
-    /// discoverable, and a deletion must purge a now-dangling entry, both of
-    /// which matter even for files we never loaded.
-    pub(crate) fn apply_watched_file_changes(
-        &self,
-        params: &DidChangeWatchedFilesParams,
-        root: &std::path::Path,
-    ) -> bool {
-        let mut composer_changed = false;
-        let mut schema_full_rebuild = false;
-        let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
-        let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
-        {
-            let open = self.open_files.read();
-            let parsed = self.parsed_uris.read();
-            let laravel_config = self.config().laravel;
-            for change in &params.changes {
-                let path_str = change.uri.path();
-                if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
-                    composer_changed = true;
-                    continue;
-                }
-                if let Ok(file_path) = change.uri.to_file_path()
-                    && crate::virtual_members::laravel::database_schema::SchemaIndex::watched_path_affects_schema(
-                        root,
-                        &laravel_config,
-                        &file_path,
-                    )
-                {
-                    if laravel_config.migrations.enabled()
-                        && crate::virtual_members::laravel::database_schema::is_migration_php_file(
-                            root,
-                            &laravel_config.migrations,
-                            &file_path,
-                        )
-                    {
-                        migration_changes.push((file_path, change.typ));
-                    } else {
-                        schema_full_rebuild = true;
-                    }
-                    continue;
-                }
-                if !path_str.ends_with(".php") {
-                    continue;
-                }
-
-                // Open files are already tracked via did_open/did_change.
-                let uri_str = change.uri.to_string();
-                if open.contains_key(&uri_str) {
-                    continue;
-                }
-                let Ok(file_path) = change.uri.to_file_path() else {
-                    continue;
-                };
-
-                if change.typ == FileChangeType::CHANGED {
-                    // `parsed_uris` records the editor URI for open files and
-                    // the canonical `file://` URI for lazily loaded ones;
-                    // check both spellings.
-                    let canonical_uri = crate::util::path_to_uri(&file_path);
-                    let loaded =
-                        parsed.contains(&uri_str) || parsed.contains(canonical_uri.as_str());
-                    if !loaded {
-                        continue;
-                    }
-                }
-
-                php_changes.push((uri_str, file_path, change.typ));
-            }
-        }
-
-        if php_changes.is_empty()
-            && !composer_changed
-            && !schema_full_rebuild
-            && migration_changes.is_empty()
-        {
-            return false;
-        }
-
-        if !php_changes.is_empty() {
-            tracing::info!(
-                "PHPantom: {} watched PHP file(s) changed on disk, refreshing indexes",
-                php_changes.len()
-            );
-            self.reindex_files_batch(&php_changes);
-            // A class that was previously "not found" may now exist, and
-            // resolved class info / member completions may be stale for a
-            // class whose file changed.
-            self.class_not_found_cache.write().clear();
-            self.resolved_class_cache.write().clear();
-            self.auth_user_type_cache.write().clear();
-            *self.laravel_aliases.write() = None;
-            self.member_completion_cache.lock().clear();
-        }
-
-        if composer_changed {
-            tracing::info!("PHPantom: composer files changed, rescanning vendor");
-            self.rescan_composer_indexes(root);
-        }
-
-        if schema_full_rebuild {
-            tracing::info!("PHPantom: Laravel schema files changed, reloading schema index");
-            self.reload_laravel_schema_index(root);
-        } else if !migration_changes.is_empty() {
-            tracing::info!(
-                "PHPantom: {} migration file(s) changed, incremental schema update",
-                migration_changes.len()
-            );
-            self.update_laravel_migrations(&migration_changes);
-        }
-
-        true
-    }
-
-    fn reload_laravel_schema_index(&self, root: &std::path::Path) {
+    pub(crate) fn reload_laravel_schema_index(&self, root: &std::path::Path) {
         if let Ok(cfg) = crate::config::load_config(root) {
-            *self.config.lock() = cfg;
+            *self.workspace.config.lock() = cfg;
         }
 
         let laravel_config = self.config().laravel;
@@ -3333,7 +2485,7 @@ impl Backend {
         self.member_completion_cache.lock().clear();
     }
 
-    fn update_laravel_migrations(&self, changes: &[(PathBuf, FileChangeType)]) {
+    pub(crate) fn update_laravel_migrations(&self, changes: &[(PathBuf, FileChangeType)]) {
         let mut index = self.schema_index.write();
         let mut any_changed = false;
         for (path, change_type) in changes {
@@ -3361,563 +2513,6 @@ impl Backend {
             self.member_completion_cache.lock().clear();
         }
     }
-
-    /// Rebuild the vendor-derived indexes after a `composer.json` /
-    /// `composer.lock` change (e.g. a `composer install` or `update`).
-    ///
-    /// Re-reads PSR-4 mappings, rebuilds the vendor classmap and the
-    /// autoload function/constant indexes, rescans autoload files, and
-    /// clears the resolved-class caches so stale vendor versions do not
-    /// linger.  This is the synchronous body of
-    /// [`did_change_watched_files`](Self::did_change_watched_files)'s
-    /// composer branch, factored out so it can run on a blocking thread.
-    pub(crate) fn rescan_composer_indexes(&self, root: &std::path::Path) {
-        // Re-read composer.json for updated PSR-4 mappings.
-        if let Some(pkg) = composer::read_composer_package(root) {
-            let mut mappings = composer::extract_psr4_mappings_from_package(&pkg);
-            let vendor_dir = composer::get_vendor_dir(&pkg);
-            mappings.extend(composer::extract_path_repo_psr4_mappings(root, &vendor_dir));
-            // Keep the merged list longest-prefix-first so path-repo
-            // namespaces are matched before any shorter root prefix.
-            mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
-            *self.psr4_mappings.write() = mappings;
-
-            let vendor_path = root.join(&vendor_dir);
-
-            // Rebuild vendor classmap, tracking dependency provenance so
-            // completion ranking stays accurate after a composer change.
-            let explicit_deps = composer::explicit_dependency_names(&pkg);
-            let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
-                root,
-                &vendor_dir,
-                &HashSet::new(),
-                &explicit_deps,
-                None,
-            );
-            let vendor_package_roots =
-                classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
-            {
-                let vendor_uri_prefixes = vendor_uri_prefixes_for_path(&vendor_path);
-
-                // Remove old vendor entries and insert new ones.
-                let mut idx = self.fqn_uri_index.write();
-                let mut origins = self.fqn_origin_index.write();
-                idx.retain(|_, v| {
-                    !vendor_uri_prefixes
-                        .iter()
-                        .any(|prefix| v.starts_with(prefix.as_str()))
-                });
-                for (fqn, path) in vendor_scan.classmap {
-                    let origin = classify_class_origin(&path, &vendor_path, &vendor_package_roots);
-                    origins.insert(fqn.clone(), origin);
-                    idx.insert(fqn, crate::util::path_to_uri(&path));
-                }
-            }
-            {
-                let mut fi = self.autoload_function_index.write();
-                let mut origins = self.autoload_function_origin_index.write();
-                // Purge functions that pointed into the old vendor tree
-                // before re-inserting, so symbols removed by a
-                // `composer update` no longer resolve.
-                fi.retain(|_, v| !v.starts_with(&vendor_path));
-                for (fqn, path) in vendor_scan.function_index {
-                    let origin = vendor_scan
-                        .function_origins
-                        .get(&fqn)
-                        .copied()
-                        .unwrap_or(crate::ClassCompletionOrigin::Project);
-                    origins.insert(fqn.clone(), origin);
-                    fi.insert(fqn, path);
-                }
-            }
-            {
-                let mut ci = self.autoload_constant_index.write();
-                let mut origins = self.autoload_constant_origin_index.write();
-                // Same for constants from the old vendor tree.
-                ci.retain(|_, v| !v.starts_with(&vendor_path));
-                for (name, path) in vendor_scan.constant_index {
-                    let origin = vendor_scan
-                        .constant_origins
-                        .get(&name)
-                        .copied()
-                        .unwrap_or(crate::ClassCompletionOrigin::Project);
-                    origins.insert(name.clone(), origin);
-                    ci.insert(name, path);
-                }
-            }
-
-            // Refresh the cached package roots for path-based lookups.
-            *self.vendor_package_origin_roots.write() = vendor_package_roots;
-
-            // Rescan autoload files (they may have changed).
-            self.scan_autoload_files(root, &vendor_dir, None);
-        }
-
-        // Clear all cached class info since vendor classes may have
-        // changed versions.
-        self.fqn_class_index.write().clear();
-        self.method_store.write().clear();
-        self.gti_index.write().clear();
-        self.class_not_found_cache.write().clear();
-        self.resolved_class_cache.write().clear();
-        self.member_completion_cache.lock().clear();
-    }
-
-    /// Scan autoload files for a single project root and populate the
-    /// autoload indices.  Returns the number of autoload file entries
-    /// found.
-    pub(crate) fn scan_autoload_files(
-        &self,
-        project_root: &std::path::Path,
-        vendor_dir: &str,
-        progress: Option<&crate::progress::ScanProgress>,
-    ) -> usize {
-        let autoload_files = composer::parse_autoload_files(project_root, vendor_dir);
-        let autoload_count = autoload_files.len();
-
-        // Some frameworks (e.g. CakePHP) ship global function aliases in a
-        // `*_global.php` sibling that is loaded via the application
-        // bootstrap rather than Composer's `files` autoload, so it never
-        // appears in `autoload_files.php`. Seed those siblings too, so
-        // globals like `__()`/`h()` are indexed instead of resolving to
-        // "unknown function".
-        let sibling_globals = composer::discover_global_sibling_files(&autoload_files);
-
-        // Work queue + visited set for following require_once chains.
-        let mut file_queue: Vec<PathBuf> = autoload_files;
-        file_queue.extend(sibling_globals);
-        let mut visited: HashSet<PathBuf> = HashSet::new();
-
-        // Every queued file is popped exactly once, so counting queue
-        // pushes as total and pops as done keeps the counters balanced
-        // even as `require_once` chains grow the queue.
-        if let Some(p) = progress {
-            p.begin_phase(0.0, 0.4, "Scanning autoload files");
-            p.add_total(file_queue.len() as u64);
-        }
-
-        while let Some(file_path) = file_queue.pop() {
-            if let Some(p) = progress {
-                p.add_done(1);
-            }
-            // Canonicalise to avoid revisiting the same file via
-            // different relative paths.
-            let canonical = file_path.canonicalize().unwrap_or(file_path);
-            if !visited.insert(canonical.clone()) {
-                continue;
-            }
-
-            if let Ok(content) = std::fs::read(&canonical) {
-                let uri = crate::util::path_to_uri(&canonical);
-
-                // Lightweight byte-level scan: extract symbol names
-                // without building a full AST.
-                let scan = classmap_scanner::find_symbols(&content);
-
-                // Populate function index.
-                {
-                    let mut idx = self.autoload_function_index.write();
-                    for fqn in &scan.functions {
-                        idx.or_insert_with(fqn.as_str(), || canonical.clone());
-                    }
-                }
-
-                // Populate constant index.
-                {
-                    let mut idx = self.autoload_constant_index.write();
-                    for name in &scan.constants {
-                        idx.entry(name.clone()).or_insert_with(|| canonical.clone());
-                    }
-                }
-
-                // Populate fqn_uri_index so find_or_load_class can
-                // lazily parse these classes later.
-                {
-                    let mut idx = self.fqn_uri_index.write();
-                    for fqn in &scan.classes {
-                        idx.or_insert_with(fqn.as_str(), || uri.clone());
-                    }
-                }
-
-                let content_str = String::from_utf8_lossy(&content);
-
-                // ── Phar detection ──────────────────────────────────
-                // If this autoload file references a .phar archive,
-                // parse the phar and scan its PHP files for classes.
-                if let Some(file_dir) = canonical.parent() {
-                    let phar_paths = composer::detect_phar_references(&content_str, file_dir);
-                    for phar_path in phar_paths {
-                        self.scan_phar_archive(&phar_path);
-                    }
-                }
-
-                // Follow require_once statements to discover more files.
-                let require_paths = composer::extract_require_once_paths(&content_str);
-                if let Some(file_dir) = canonical.parent() {
-                    for rel_path in require_paths {
-                        let resolved = file_dir.join(&rel_path);
-                        if resolved.is_file() {
-                            if let Some(p) = progress {
-                                p.add_total(1);
-                            }
-                            file_queue.push(resolved);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Record the visited autoload file paths and eagerly parse them.
-        //
-        // The byte-level scan above only discovers symbols at brace
-        // depth 0.  Functions guarded by `if (! function_exists(...))`
-        // (common in Laravel and similar helper files) live at brace
-        // depth > 0 and are missed.  Without a full parse they would only
-        // be found by the last-resort fallback in `find_or_load_function`,
-        // which blocks the first interactive request that needs such a
-        // function while it serially parses every unparsed autoload file.
-        //
-        // Parsing them here in parallel moves that one-time cost to
-        // startup.  The paths are still recorded so the fallback (which
-        // skips already-parsed files) remains correct for anything that
-        // slips through.
-        let visited: Vec<PathBuf> = visited.into_iter().collect();
-        {
-            let mut paths = self.autoload_file_paths.write();
-            paths.extend(visited.iter().cloned());
-        }
-        if let Some(p) = progress {
-            p.begin_phase(0.4, 1.0, "Parsing autoload helpers");
-        }
-        self.preload_autoload_files_with_progress(&visited, progress);
-
-        autoload_count
-    }
-
-    /// Eagerly full-parse the given autoload helper files in parallel.
-    ///
-    /// [`scan_autoload_files`](Self::scan_autoload_files) only byte-scans
-    /// these files, which misses functions defined inside
-    /// `function_exists` guards.  A full parse populates `global_functions`
-    /// with those guarded helpers so that
-    /// [`find_or_load_function`](Self::find_or_load_function) resolves them
-    /// via its fast path instead of falling back to a serial parse of
-    /// every autoload file on the first interactive lookup.
-    ///
-    /// Files already present in `parsed_uris` are skipped.
-    pub fn preload_autoload_files(&self, paths: &[PathBuf]) {
-        self.preload_autoload_files_with_progress(paths, None);
-    }
-
-    /// Like [`preload_autoload_files`](Self::preload_autoload_files),
-    /// reporting per-file progress when a sink is attached.
-    pub(crate) fn preload_autoload_files_with_progress(
-        &self,
-        paths: &[PathBuf],
-        progress: Option<&crate::progress::ScanProgress>,
-    ) {
-        // Skip files that have already been parsed (e.g. opened in the
-        // editor before indexing reached them).
-        let pending: Vec<&PathBuf> = paths
-            .iter()
-            .filter(|p| {
-                let uri = crate::util::path_to_uri(p);
-                !self.parsed_uris.read().contains(&uri)
-            })
-            .collect();
-
-        let file_count = pending.len();
-        if file_count == 0 {
-            return;
-        }
-        if let Some(p) = progress {
-            p.add_total(file_count as u64);
-        }
-
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .min(file_count);
-        let next_idx = std::sync::atomic::AtomicUsize::new(0);
-        let pending = &pending;
-        let next_idx = &next_idx;
-
-        std::thread::scope(|s| {
-            for _ in 0..n_threads {
-                std::thread::Builder::new()
-                    .name("autoload-preload".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-                            if let Some(p) = progress {
-                                p.add_done(1);
-                            }
-                            let path = pending[i];
-                            if let Ok(content) = std::fs::read_to_string(path) {
-                                let uri = crate::util::path_to_uri(path);
-                                self.update_ast(&uri, &content);
-                            }
-                        }
-                    })
-                    .expect("failed to spawn autoload-preload thread");
-            }
-        });
-    }
-
-    /// Parse a `.phar` archive and register its PHP classes in the
-    /// fqn_uri_index for lazy loading.
-    ///
-    /// The phar's raw bytes are read from disk, parsed by
-    /// [`phar::PharArchive`], and stored in
-    /// [`phar_archives`](crate::Backend::phar_archives).  Each `.php`
-    /// file inside the archive is scanned with the lightweight
-    /// [`find_classes`](classmap_scanner::find_classes) byte scanner,
-    /// and discovered classes are registered in:
-    ///
-    /// - `fqn_uri_index` — with a sentinel path like
-    ///   `/path/to/phpstan.phar!src/Type/Type.php` (the `!` separator
-    ///   tells [`parse_and_cache_file`](crate::Backend::parse_and_cache_file)
-    ///   to extract content from the phar instead of reading from disk)
-    ///   and a `phar://` URI for completions and workspace symbols
-    fn scan_phar_archive(&self, phar_path: &Path) {
-        // Avoid scanning the same phar twice.
-        if self.phar_archives.read().contains_key(phar_path) {
-            return;
-        }
-
-        let data = match std::fs::read(phar_path) {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-
-        let archive = match phar::PharArchive::parse(data) {
-            Some(a) => a,
-            None => {
-                tracing::warn!("failed to parse phar archive: {}", phar_path.display());
-                return;
-            }
-        };
-
-        // Collect PHP file paths first so we can iterate while
-        // holding the archive reference.
-        let php_files: Vec<String> = archive
-            .file_paths()
-            .filter(|p| p.ends_with(".php"))
-            .map(String::from)
-            .collect();
-
-        let mut classmap_entries: Vec<(String, PathBuf)> = Vec::new();
-        let mut fqn_uri_entries: Vec<(String, String)> = Vec::new();
-
-        for internal_path in &php_files {
-            if let Some(content) = archive.read_file(internal_path) {
-                let classes = classmap_scanner::find_classes(content);
-                for fqn in classes {
-                    // Sentinel path: "archive.phar!internal/path.php"
-                    let sentinel =
-                        PathBuf::from(format!("{}!{}", phar_path.display(), internal_path));
-                    let phar_uri = format!("phar://{}/{}", phar_path.display(), internal_path);
-                    classmap_entries.push((fqn.clone(), sentinel));
-                    fqn_uri_entries.push((fqn, phar_uri));
-                }
-            }
-        }
-
-        let class_count = classmap_entries.len();
-
-        // Register classes in the fqn_uri_index.
-        {
-            let mut idx = self.fqn_uri_index.write();
-            for (fqn, path) in classmap_entries {
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
-            }
-            for (fqn, uri) in fqn_uri_entries {
-                idx.or_insert_with(fqn, || uri);
-            }
-        }
-
-        // Clear the negative class cache so that classes previously
-        // looked up (and cached as "not found") before the phar was
-        // scanned can now be resolved.
-        if class_count > 0 {
-            self.class_not_found_cache.write().clear();
-        }
-
-        tracing::info!(
-            "scanned phar {}: {} PHP files, {} classes",
-            phar_path.display(),
-            php_files.len(),
-            class_count,
-        );
-
-        // Store the parsed archive for lazy content extraction.
-        self.phar_archives
-            .write()
-            .insert(phar_path.to_owned(), archive);
-    }
-
-    /// Build a workspace scan by self-scanning a Composer project's
-    /// autoload directories (PSR-4 + classmap + vendor packages).
-    ///
-    /// Used by the merged classmap + self-scan pipeline and by the
-    /// `"self"` / `"full"` indexing strategies.  The `project_root`
-    /// is the directory containing `composer.json` (either the
-    /// workspace root for single-project, or a subproject root for
-    /// monorepo).
-    ///
-    /// `skip_paths` contains absolute file paths that should be
-    /// excluded from scanning (typically the file paths already
-    /// present in the Composer classmap).  Pass an empty set to
-    /// scan everything.
-    pub(crate) fn build_self_scan_composer(
-        &self,
-        project_root: &std::path::Path,
-        vendor_dir: &str,
-        preloaded_package: Option<&composer::ComposerPackage>,
-        skip_paths: &HashSet<PathBuf>,
-        progress: Option<&crate::progress::ScanProgress>,
-    ) -> WorkspaceScanResult {
-        // Use the pre-parsed package when available; only read from disk
-        // as a fallback (e.g. monorepo subproject calls).
-        let owned_package;
-        let package = match preloaded_package {
-            Some(p) => p,
-            None => {
-                owned_package = composer::read_composer_package(project_root);
-                match owned_package.as_ref() {
-                    Some(p) => p,
-                    None => {
-                        let skip_dirs = HashSet::new();
-                        if let Some(p) = progress {
-                            p.begin_phase(0.0, 1.0, "Scanning workspace files");
-                        }
-                        return classmap_scanner::scan_workspace_fallback_full(
-                            project_root,
-                            &skip_dirs,
-                            progress,
-                        );
-                    }
-                }
-            }
-        };
-
-        let scan_dirs = composer::extract_scan_dirs(package);
-
-        let psr4_dirs: Vec<(String, PathBuf)> = scan_dirs
-            .psr4
-            .iter()
-            .map(|(prefix, dir)| (prefix.clone(), project_root.join(dir)))
-            .collect();
-
-        let classmap_dirs: Vec<PathBuf> = scan_dirs
-            .classmap
-            .iter()
-            .map(|dir| project_root.join(dir))
-            .collect();
-
-        // Scan user source directories (classes only for PSR-4).
-        // Project sources are a small slice of the file count; vendor
-        // packages dominate, so they get most of the current scope.
-        if let Some(p) = progress {
-            p.begin_phase(0.0, 0.2, "Scanning project files");
-        }
-        let vendor_dir_paths = vec![project_root.join(vendor_dir)];
-        let classmap = classmap_scanner::scan_psr4_directories_with_skip(
-            &psr4_dirs,
-            &classmap_dirs,
-            &vendor_dir_paths,
-            skip_paths,
-            progress,
-        );
-
-        // Scan vendor packages from installed.json.
-        if let Some(p) = progress {
-            p.begin_phase(0.2, 1.0, "Scanning vendor packages");
-        }
-        let explicit_deps = crate::composer::explicit_dependency_names(package);
-        let vendor_scan = classmap_scanner::scan_vendor_packages_with_skip(
-            project_root,
-            vendor_dir,
-            skip_paths,
-            &explicit_deps,
-            progress,
-        );
-
-        let mut result = WorkspaceScanResult {
-            classmap,
-            ..Default::default()
-        };
-
-        for (fqcn, path) in vendor_scan.classmap {
-            result.classmap.entry(fqcn).or_insert(path);
-        }
-        for (fqn, path) in vendor_scan.function_index {
-            result.function_index.entry(fqn).or_insert(path);
-        }
-        for (name, path) in vendor_scan.constant_index {
-            result.constant_index.entry(name).or_insert(path);
-        }
-
-        result
-    }
-
-    /// Store the function and constant indices from a workspace scan
-    /// into the backend's shared maps.
-    ///
-    /// Only has an effect for non-Composer projects (the "no
-    /// `composer.json`" scenario) where the full-scan populates
-    /// function and constant entries.  For Composer projects the scan
-    /// result's function and constant indices are empty because those
-    /// symbols are discovered via the `autoload_files.php` scan loop
-    /// in `initialized()` instead.
-    pub(crate) fn populate_autoload_indices(&self, scan: &WorkspaceScanResult) {
-        if !scan.function_index.is_empty() {
-            let mut idx = self.autoload_function_index.write();
-            let mut origins = self.autoload_function_origin_index.write();
-            for (fqn, path) in &scan.function_index {
-                idx.or_insert_with(fqn.as_str(), || path.clone());
-                let origin = scan
-                    .function_origins
-                    .get(fqn)
-                    .copied()
-                    .unwrap_or(crate::ClassCompletionOrigin::Project);
-                origins.insert(fqn.clone(), origin);
-            }
-        }
-        if !scan.constant_index.is_empty() {
-            let mut idx = self.autoload_constant_index.write();
-            let mut origins = self.autoload_constant_origin_index.write();
-            for (name, path) in &scan.constant_index {
-                idx.entry(name.clone()).or_insert_with(|| path.clone());
-                let origin = scan
-                    .constant_origins
-                    .get(name)
-                    .copied()
-                    .unwrap_or(crate::ClassCompletionOrigin::Project);
-                origins.insert(name.clone(), origin);
-            }
-        }
-    }
-}
-
-fn classify_class_origin(
-    path: &Path,
-    vendor_path: &Path,
-    vendor_package_roots: &[(PathBuf, crate::ClassCompletionOrigin, String)],
-) -> crate::ClassCompletionOrigin {
-    if !path.starts_with(vendor_path) {
-        return crate::ClassCompletionOrigin::Project;
-    }
-    for (root, origin, _pkg_name) in vendor_package_roots {
-        if path.starts_with(root) {
-            return *origin;
-        }
-    }
-    crate::ClassCompletionOrigin::VendorTransitive
 }
 
 #[cfg(test)]

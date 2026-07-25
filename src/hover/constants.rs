@@ -24,6 +24,7 @@ impl Backend {
     pub(crate) fn lookup_global_constant(&self, name: &str) -> Option<Option<String>> {
         // Phase 1: already-parsed constants.
         let lookup = self
+            .symbols
             .global_defines
             .read()
             .get(name)
@@ -33,13 +34,19 @@ impl Backend {
         }
 
         // Phase 2: autoload constant index — lazily parse the file.
-        let path = self.autoload_constant_index.read().get(name).cloned();
+        let path = self
+            .symbols
+            .autoload_constant_index
+            .read()
+            .get(name)
+            .cloned();
         if let Some(path) = path
             && let Ok(content) = std::fs::read_to_string(&path)
         {
             let file_uri = crate::util::path_to_uri(&path);
             self.update_ast(&file_uri, &content);
             let lookup = self
+                .symbols
                 .global_defines
                 .read()
                 .get(name)
@@ -53,7 +60,7 @@ impl Backend {
         // the byte-level scanner missed (e.g. inside
         // `if (!defined(...))` guards).
         {
-            let paths = self.autoload_file_paths.read().clone();
+            let paths = self.symbols.autoload_file_paths.read().clone();
             for path in &paths {
                 let uri = crate::util::path_to_uri(path);
                 if self.parsed_uris.read().contains(&uri) {
@@ -62,6 +69,7 @@ impl Backend {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     self.update_ast(&uri, &content);
                     let lookup = self
+                        .symbols
                         .global_defines
                         .read()
                         .get(name)
@@ -82,6 +90,7 @@ impl Backend {
             let stub_uri = format!("phpantom-stub://const/{}", name);
             self.update_ast(&stub_uri, stub_source);
             let lookup = self
+                .symbols
                 .global_defines
                 .read()
                 .get(name)

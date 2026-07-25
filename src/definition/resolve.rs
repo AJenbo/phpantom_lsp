@@ -392,7 +392,7 @@ impl Backend {
         // previously navigated-to vendor files) live in
         // fqn_uri_index (FQN → URI) and uri_classes_index (URI → [ClassInfo]).
         for fqn in &candidates {
-            let target_uri = self.fqn_uri_index.read().get(fqn.as_str()).cloned();
+            let target_uri = self.symbols.fqn_uri_index.read().get(fqn.as_str()).cloned();
             if let Some(ref target_uri) = target_uri
                 && let Some(location) =
                     self.find_definition_in_uri_classes_index_cross_file(fqn, target_uri)
@@ -404,10 +404,10 @@ impl Backend {
         // Cross-file via PSR-4: parse on demand and cache.
         // PSR-4 mappings only cover user code (from composer.json).
         // Vendor classes are resolved by the class index above.
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(workspace_root) = workspace_root {
-            let mappings = self.psr4_mappings.read();
+            let mappings = self.workspace.psr4_mappings.read();
             for fqn in &candidates {
                 if let Some(file_path) =
                     composer::resolve_class_path(&mappings, &workspace_root, fqn)
@@ -469,7 +469,7 @@ impl Backend {
     fn resolve_constant_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Phase 1: Look up the constant in global_defines. ──
         let found = {
-            let dmap = self.global_defines.read();
+            let dmap = self.symbols.global_defines.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some(info) = dmap.get(candidate.as_str()) {
@@ -490,7 +490,7 @@ impl Backend {
         let found = if found.is_some() {
             found
         } else {
-            let idx = self.autoload_constant_index.read();
+            let idx = self.symbols.autoload_constant_index.read();
             let mut lazy_result = None;
             for candidate in candidates {
                 if let Some(path) = idx.get(candidate.as_str()) {
@@ -501,7 +501,7 @@ impl Backend {
                         let uri = crate::util::path_to_uri(&path);
                         self.update_ast(&uri, &content);
 
-                        let dmap = self.global_defines.read();
+                        let dmap = self.symbols.global_defines.read();
                         for retry in candidates {
                             if let Some(info) = dmap.get(retry.as_str()) {
                                 lazy_result = Some((info.file_uri.clone(), info.name_offset));
@@ -524,7 +524,7 @@ impl Backend {
         let found = if found.is_some() {
             found
         } else {
-            let paths = self.autoload_file_paths.read().clone();
+            let paths = self.symbols.autoload_file_paths.read().clone();
             let mut lazy_result = None;
             for path in &paths {
                 let uri = crate::util::path_to_uri(path);
@@ -535,7 +535,7 @@ impl Backend {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     self.update_ast(&uri, &content);
 
-                    let dmap = self.global_defines.read();
+                    let dmap = self.symbols.global_defines.read();
                     for candidate in candidates {
                         if let Some(info) = dmap.get(candidate.as_str()) {
                             lazy_result = Some((info.file_uri.clone(), info.name_offset));
@@ -586,7 +586,7 @@ impl Backend {
     fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Step 1: Check global_functions (user code + cached stubs) ──
         let found = {
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some((uri, info)) = fmap.get(candidate.as_str()) {
@@ -607,7 +607,7 @@ impl Backend {
 
             // After find_or_load_function, the function is cached in
             // global_functions.  Look it up to get the URI.
-            let fmap = self.global_functions.read();
+            let fmap = self.symbols.global_functions.read();
             let mut result = None;
             for candidate in candidates {
                 if let Some((uri, info)) = fmap.get(candidate.as_str()) {
@@ -702,9 +702,15 @@ impl Backend {
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).
-        let classes = if let Some(cached) = self.uri_classes_index.read().get(target_uri).cloned() {
+        let classes = if let Some(cached) = self
+            .symbols
+            .uri_classes_index
+            .read()
+            .get(target_uri)
+            .cloned()
+        {
             cached
-        } else if let Some(cls) = self.fqn_class_index.read().get(fqn) {
+        } else if let Some(cls) = self.symbols.fqn_class_index.read().get(fqn) {
             vec![Arc::clone(cls)]
         } else {
             let file_path = Url::parse(target_uri)
@@ -744,7 +750,7 @@ impl Backend {
     ) -> Option<Location> {
         let short_name = short_name(fqn);
 
-        let classes = self.uri_classes_index.read().get(uri).cloned()?;
+        let classes = self.symbols.uri_classes_index.read().get(uri).cloned()?;
 
         let class_info = classes.iter().find(|c| {
             if c.name != short_name {
@@ -800,6 +806,7 @@ impl Backend {
         let cursor_offset = position_to_offset(content, position);
 
         let classes: Vec<std::sync::Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -880,7 +887,7 @@ impl Backend {
         {
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
-                if let Some(file_uri) = self.fqn_uri_index.read().get(candidate).cloned()
+                if let Some(file_uri) = self.symbols.fqn_uri_index.read().get(candidate).cloned()
                     && let Some(file_path) = Url::parse(&file_uri)
                         .ok()
                         .and_then(|u| u.to_file_path().ok())
@@ -894,10 +901,10 @@ impl Backend {
         // Try PSR-4 resolution as a last resort.
         // PSR-4 mappings only cover user code (from composer.json).
         // Vendor classes are resolved by the class index above.
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(workspace_root) = workspace_root {
-            let mappings = self.psr4_mappings.read();
+            let mappings = self.workspace.psr4_mappings.read();
             let candidates = [fqn.as_str(), parent_name.as_str()];
             for candidate in &candidates {
                 if let Some(file_path) =

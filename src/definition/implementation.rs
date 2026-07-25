@@ -685,7 +685,7 @@ impl Backend {
             if !exclude_non_project {
                 return true;
             }
-            match self.fqn_uri_index.read().get(fqn) {
+            match self.symbols.fqn_uri_index.read().get(fqn) {
                 Some(uri) => {
                     !uri.contains("/vendor/")
                         && !uri.starts_with("phpantom-stub://")
@@ -700,7 +700,7 @@ impl Backend {
         // that directly extend/implement/use the target.  Then
         // recursively collect transitive children.
         let gti_candidates: Vec<String> = {
-            let gti = self.gti_index.read();
+            let gti = self.symbols.gti_index.read();
             if direct_only {
                 gti.get(target_fqn).cloned().unwrap_or_default()
             } else {
@@ -758,7 +758,7 @@ impl Backend {
 
         // ── Phase 2: scan fqn_uri_index for classes not yet in uri_classes_index ────
         let index_entries: Vec<(String, String)> = {
-            let idx = self.fqn_uri_index.read();
+            let idx = self.symbols.fqn_uri_index.read();
             idx.iter()
                 .map(|(fqn, uri)| (fqn.to_owned(), uri.clone()))
                 .collect()
@@ -800,6 +800,7 @@ impl Backend {
         // at most once).  Files already present in uri_classes_index were covered by
         // Phase 1 and can be skipped.
         let index_paths: HashSet<PathBuf> = self
+            .symbols
             .fqn_uri_index
             .read()
             .values()
@@ -899,17 +900,17 @@ impl Backend {
         // class index.  Walk user PSR-4 roots only — vendor classes are
         // assumed complete in the class index (Phase 3) and should not
         // require a filesystem walk.
-        let workspace_root = self.workspace_root.read().clone();
+        let workspace_root = self.workspace.workspace_root.read().clone();
         if let Some(workspace_root) = workspace_root {
             // The vendor dir paths are needed by collect_php_files even
             // though we only walk user PSR-4 roots.  A fallback mapping
             // like `"" => "."` resolves to the workspace root, so the
             // walk must still skip vendor directories (and hidden
             // directories like .git).
-            let vendor_dir_paths = self.vendor_dir_paths.lock().clone();
+            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
 
             let psr4_dirs: Vec<PathBuf> = {
-                let mappings = self.psr4_mappings.read();
+                let mappings = self.workspace.psr4_mappings.read();
                 mappings
                     .iter()
                     .map(|m| workspace_root.join(&m.base_path))
@@ -1215,7 +1216,7 @@ impl Backend {
     /// Get the FQN for a class given its short name, by looking it up in
     /// the `fqn_uri_index`.
     fn class_fqn_for_short(&self, target_short: &str) -> Option<String> {
-        let idx = self.fqn_uri_index.read();
+        let idx = self.symbols.fqn_uri_index.read();
         // Look for an entry whose short name matches.
         for fqn in idx.keys() {
             let short = short_name(fqn);
@@ -1297,7 +1298,7 @@ mod tests {
         config.indexing.strategy = Some(IndexingStrategy::Full);
         backend.set_config(config);
 
-        backend.fqn_uri_index.write().insert(
+        backend.symbols.fqn_uri_index.write().insert(
             "Vendor\\Pkg\\VendorService".to_string(),
             Url::from_file_path(&vendor_impl_path)
                 .expect("vendor uri")
@@ -1372,7 +1373,7 @@ mod tests {
             .workspace_indexed
             .store(true, std::sync::atomic::Ordering::Release);
 
-        backend.fqn_uri_index.write().insert(
+        backend.symbols.fqn_uri_index.write().insert(
             "Vendor\\Pkg\\VendorService".to_string(),
             Url::from_file_path(&vendor_impl_path)
                 .expect("vendor uri")

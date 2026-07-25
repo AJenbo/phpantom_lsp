@@ -358,6 +358,7 @@ impl Backend {
 
         // Determine the class body the cursor is in.
         let ctx_classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

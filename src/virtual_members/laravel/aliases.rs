@@ -193,14 +193,14 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
     // `write()` on the same index, which blocks forever waiting for this
     // thread's own outstanding reader (a temporary in a `match` scrutinee
     // lives to the end of the `match`).
-    let indexed = backend.fqn_uri_index.read().get(fqn).cloned();
+    let indexed = backend.symbols.fqn_uri_index.read().get(fqn).cloned();
     let uri = match indexed {
         Some(uri) => uri,
         None => {
             // Not yet in the class index (e.g. a lazily-loaded PSR-4 project).
             // Parsing the class populates its FQN → URI entry.
             backend.find_or_load_class(fqn)?;
-            backend.fqn_uri_index.read().get(fqn).cloned()?
+            backend.symbols.fqn_uri_index.read().get(fqn).cloned()?
         }
     };
     if let Some(content) = backend.get_file_content(&uri) {
@@ -213,7 +213,7 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
 /// Read a `config/*.php` file, preferring an open editor buffer over disk.
 /// Mirrors the auth-config reader so in-editor edits take effect immediately.
 fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
-    let root = backend.workspace_root.read().clone()?;
+    let root = backend.workspace.workspace_root.read().clone()?;
     let path = root.join("config").join(file_name);
     if !path.is_file() {
         return None;

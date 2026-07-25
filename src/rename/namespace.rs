@@ -68,10 +68,10 @@ impl Backend {
             let nmap = self.file_namespaces.read();
             let umap = self.file_imports.read();
             let smap = self.symbol_maps.read();
-            let cmap = self.uri_classes_index.read();
+            let cmap = self.symbols.uri_classes_index.read();
             let ofiles = self.open_files.read();
-            let workspace_root = self.workspace_root.read().clone();
-            let vendor_dir_paths = self.vendor_dir_paths.lock().clone();
+            let workspace_root = self.workspace.workspace_root.read().clone();
+            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
             let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
             for uri in nmap.keys() {
                 uris.insert(uri.clone());
@@ -102,7 +102,7 @@ impl Backend {
         };
 
         // Skip vendor files.
-        let vendor_prefixes = self.vendor_uri_prefixes.lock().clone();
+        let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
         for file_uri in &all_uris {
             if vendor_prefixes
@@ -455,8 +455,8 @@ impl Backend {
         old_prefix: &str,
         new_prefix: &str,
     ) -> Option<Vec<(Url, Url)>> {
-        let psr4 = self.psr4_mappings.read();
-        let workspace_root = self.workspace_root.read().clone()?;
+        let psr4 = self.workspace.psr4_mappings.read();
+        let workspace_root = self.workspace.workspace_root.read().clone()?;
 
         let mut ops: Vec<(Url, Url)> = Vec::new();
 

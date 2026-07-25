@@ -51,6 +51,7 @@ impl Backend {
         };
 
         let local_classes: Vec<crate::types::ClassInfo> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -336,7 +337,7 @@ impl Backend {
 
         // ── 1. fqn_uri_index ──────────────────────────────────────────────
         {
-            let idx = self.fqn_uri_index.read();
+            let idx = self.symbols.fqn_uri_index.read();
             for fqn in idx.keys() {
                 if short_name(fqn).to_lowercase() == name_lower {
                     candidates.push(fqn.to_owned());
@@ -346,7 +347,7 @@ impl Backend {
 
         // ── 2. Class index ──────────────────────────────────────────────
         {
-            let cmap = self.fqn_uri_index.read();
+            let cmap = self.symbols.fqn_uri_index.read();
             for fqn in cmap.keys() {
                 if short_name(fqn).to_lowercase() == name_lower
                     && !candidates
@@ -360,7 +361,7 @@ impl Backend {
 
         // ── 3. uri_classes_index (already-parsed files) ───────────────────────────
         {
-            let amap = self.uri_classes_index.read();
+            let amap = self.symbols.uri_classes_index.read();
             for classes in amap.values() {
                 for cls in classes {
                     if cls.name.to_lowercase() == name_lower {
@@ -554,6 +555,7 @@ impl Backend {
         };
 
         let local_classes: Vec<crate::types::ClassInfo> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -758,6 +760,7 @@ impl Backend {
         };
 
         let local_classes: Vec<crate::types::ClassInfo> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

@@ -36,7 +36,7 @@ impl Backend {
         // For namespace-qualified names the FQN is the normalized name
         // itself.  For bare names (no backslash) the FQN equals the
         // short name, which is also stored in the index.
-        if let Some(cls) = self.fqn_class_index.read().get(class_name) {
+        if let Some(cls) = self.symbols.fqn_class_index.read().get(class_name) {
             return Some(Arc::clone(cls));
         }
 
@@ -108,7 +108,8 @@ impl Backend {
 
     /// Public helper for tests: get the uri_classes_index entry for a given URI.
     pub fn get_classes_for_uri(&self, uri: &str) -> Option<Vec<ClassInfo>> {
-        self.uri_classes_index
+        self.symbols
+            .uri_classes_index
             .read()
             .get(uri)
             .map(|classes| classes.iter().map(|c| ClassInfo::clone(c)).collect())
@@ -124,6 +125,7 @@ impl Backend {
     /// extracting the entry for a given URI.
     pub(crate) fn file_context(&self, uri: &str) -> FileContext {
         let classes = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -170,6 +172,7 @@ impl Backend {
     /// namespace block for the cursor position.
     pub(crate) fn file_context_at(&self, uri: &str, byte_offset: u32) -> FileContext {
         let classes = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)
@@ -266,7 +269,7 @@ impl Backend {
         // open.  uri_classes_index is redundant with fqn_class_index once indexing is
         // complete — GTD falls back to fqn_uri_index + parse_and_cache_file
         // when the uri_classes_index entry is missing.
-        self.uri_classes_index.write().remove(uri);
+        self.symbols.uri_classes_index.write().remove(uri);
         self.symbol_maps.write().remove(uri);
         self.evict_reference_index_uri(uri);
         self.file_imports.write().remove(uri);

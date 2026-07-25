@@ -253,6 +253,7 @@ impl Backend {
     ) -> Option<u8> {
         // Find the enclosing ClassInfo from the uri_classes_index.
         let local_classes: Vec<Arc<ClassInfo>> = self
+            .symbols
             .uri_classes_index
             .read()
             .get(uri)

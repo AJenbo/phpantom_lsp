@@ -91,7 +91,7 @@ impl Backend {
                 None => continue,
             };
 
-            let workspace_root = self.workspace_root.read().clone();
+            let workspace_root = self.workspace.workspace_root.read().clone();
             let workspace_root = match workspace_root {
                 Some(root) => root,
                 None => continue,

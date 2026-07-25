@@ -65,7 +65,7 @@ impl Backend {
 
         // Search the uri_classes_index for the file containing this class.
         let uri = {
-            let map = self.uri_classes_index.read();
+            let map = self.symbols.uri_classes_index.read();
             let nmap = self.file_namespaces.read();
 
             // Check whether a class with the right short name and
@@ -116,7 +116,7 @@ impl Backend {
             // Fallback: the target file may have been closed (didClose
             // clears uri_classes_index) or was never opened.  Check fqn_uri_index
             // which survives close.
-            self.fqn_uri_index.read().get(class_name).cloned()
+            self.symbols.fqn_uri_index.read().get(class_name).cloned()
         })
         .or_else(|| {
             // Last resort: resolve the class via PSR-4 mappings to get
@@ -125,8 +125,8 @@ impl Backend {
             // entry was later cleared by didClose, and whose fqn_uri_index
             // entry was never created (parse_and_cache_content does not
             // populate fqn_uri_index).
-            let workspace_root = self.workspace_root.read().clone()?;
-            let mappings = self.psr4_mappings.read();
+            let workspace_root = self.workspace.workspace_root.read().clone()?;
+            let mappings = self.workspace.psr4_mappings.read();
             let file_path =
                 crate::composer::resolve_class_path(&mappings, &workspace_root, class_name)?;
             Some(crate::util::path_to_uri(&file_path))
