@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784950966469,
+  "lastUpdate": 1784951338888,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20749,6 +20749,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 96.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "adf3751709631030b71ec3d1a3377cdf31739bea",
+          "message": "L33. Artisan command and signature strings (#274)",
+          "timestamp": "2026-07-25T05:32:38+02:00",
+          "tree_id": "c10503798c3e0f95b9d98b3ebfbeb68b08f756ac",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/adf3751709631030b71ec3d1a3377cdf31739bea"
+        },
+        "date": 1784951336615,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 48.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 94.3,
             "unit": "MiB"
           }
         ]
