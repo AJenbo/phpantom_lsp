@@ -1005,10 +1005,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#phase-4d-reduce-string-formatting-overhead" class="md-nav__link">
+  <a href="#phase-4d-cache-the-fqn-on-classinfo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4d: Reduce string formatting overhead
+        Phase 4d: Cache the FQN on ClassInfo ✓
       </span>
     </span>
   </a>
@@ -1021,15 +1021,15 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#profiling-data-current-release-build-examplesdemophp" class="md-nav__link">
+  <a href="#profiling-data-release-build-examplesdemophp" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Profiling data (current, release build, examples/demo.php)
+        Profiling data (release build, examples/demo.php)
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Profiling data (current, release build, examples&#x2f;demo.php)">
+    <nav class="md-nav" aria-label="Profiling data (release build, examples&#x2f;demo.php)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1048,6 +1048,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Phase 4f: Remove inflated stack sizes (absorbs P25)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4g-carry-atom-in-phptypenamed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code>
       </span>
     </span>
   </a>
@@ -1585,10 +1596,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#phase-4d-reduce-string-formatting-overhead" class="md-nav__link">
+  <a href="#phase-4d-cache-the-fqn-on-classinfo" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Phase 4d: Reduce string formatting overhead
+        Phase 4d: Cache the FQN on ClassInfo ✓
       </span>
     </span>
   </a>
@@ -1601,15 +1612,15 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#profiling-data-current-release-build-examplesdemophp" class="md-nav__link">
+  <a href="#profiling-data-release-build-examplesdemophp" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Profiling data (current, release build, examples/demo.php)
+        Profiling data (release build, examples/demo.php)
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Profiling data (current, release build, examples&#x2f;demo.php)">
+    <nav class="md-nav" aria-label="Profiling data (release build, examples&#x2f;demo.php)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1628,6 +1639,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Phase 4f: Remove inflated stack sizes (absorbs P25)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4g-carry-atom-in-phptypenamed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code>
       </span>
     </span>
   </a>
@@ -1932,21 +1954,31 @@ the resolution pipeline.</p>
 <p><strong>Expected impact:</strong> Eliminates ~10-15% of total CPU (clone +
 drop + associated malloc/free). Combined with the double-walk
 fix, should bring examples/demo.php from ~9.5s to ~5-6s.</p>
-<h4 id="phase-4d-reduce-string-formatting-overhead">Phase 4d: Reduce string formatting overhead<a class="headerlink" href="#phase-4d-reduce-string-formatting-overhead" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium. Effort: Low-Medium.</strong></p>
-<p>3% self-time in <code>core::fmt::write</code> + 1.4% in <code>format_inner</code> +
-1.3% in <code>Ustr::from</code> (atom interning). These come from:</p>
-<ul>
-<li><code>format!("{}\\{}", ns, name)</code> in <code>ClassInfo::fqn()</code> — called
-  on every resolution. Already mitigated by returning <code>Atom</code> but
-  the initial intern still allocates.</li>
-<li>Type string construction during template substitution.</li>
-<li><code>name.to_string()</code> calls throughout the resolution pipeline.</li>
-</ul>
-<p>Plan: audit hot-path <code>format!()</code> calls and replace with
-pre-computed or cached values where possible.</p>
-<h3 id="profiling-data-current-release-build-examplesdemophp">Profiling data (current, release build, examples/demo.php)<a class="headerlink" href="#profiling-data-current-release-build-examplesdemophp" title="Permanent link">&para;</a></h3>
-<p>Measured after Phase 4a + double-walk fix:</p>
+<h4 id="phase-4d-cache-the-fqn-on-classinfo">Phase 4d: Cache the FQN on ClassInfo ✓<a class="headerlink" href="#phase-4d-cache-the-fqn-on-classinfo" title="Permanent link">&para;</a></h4>
+<p>Added a cached <code>fqn: Option&lt;Atom&gt;</code> field to <code>ClassInfo</code>. Every
+hot-path <code>.fqn()</code> call previously ran <code>format!("{}\\{}", ns, name)</code>
+plus an <code>Ustr::from</code> intern lookup for namespaced classes; the
+resulting <code>String</code> allocation/free showed up across the
+<code>malloc</code>/<code>memmove</code>/<code>free</code> self-time. <code>name</code> and <code>file_namespace</code> are
+only ever set at the two parse/index-load stamping sites
+(<code>parser/ast_update.rs</code>, <code>resolution.rs</code>) and never mutated
+afterwards, so <code>cache_fqn()</code> is called there once the namespace is
+final and the cache can never go stale. <code>fqn()</code> returns the cached
+value when present and falls back to computing it on demand for the
+handful of synthetic classes that never pass through a stamping site
+(<code>__object_shape</code>, <code>stdClass</code>, etc.), which behave exactly as before.
+Excluded from <code>signature_eq</code> since it is derived from <code>name</code> +
+<code>file_namespace</code>, both already compared there.</p>
+<p>Measured: <code>analyze examples/demo.php</code> dropped from ~1.75s to ~1.59s
+(release build), memory flat.</p>
+<p>The remaining string-formatting costs are structural rather than
+incidental and are split out into Phase 4g below.</p>
+<h3 id="profiling-data-release-build-examplesdemophp">Profiling data (release build, examples/demo.php)<a class="headerlink" href="#profiling-data-release-build-examplesdemophp" title="Permanent link">&para;</a></h3>
+<p><code>analyze examples/demo.php</code> currently completes in <strong>~1.6s</strong> (release
+build) after Phases 4a–4d landed. The historical breakdown below was
+measured after Phase 4a + the double-walk fix, before the Phase 4c
+ClassInfo Arc-ification and the Phase 4d FQN cache eliminated most of
+the allocation churn that dominated it:</p>
 <table>
 <thead>
 <tr>
@@ -1983,13 +2015,13 @@ pre-computed or cached values where possible.</p>
 </tr>
 </tbody>
 </table>
-<p>Instrumentation data from the scope walk:</p>
+<p>Instrumentation data from that scope walk:</p>
 <ul>
 <li>8,726 calls to <code>resolve_rhs_expression</code> (8.3s top-level time)</li>
 <li>5,559 resolved-class cache hits, 396 misses</li>
 <li>Subject pipeline fallback: 1 call (negligible)</li>
 </ul>
-<p>The 8.3s is dominated by allocation churn (ClassInfo cloning)
+<p>The 8.3s was dominated by allocation churn (ClassInfo cloning)
 inside the type resolution pipeline, not by resolution logic.</p>
 <hr />
 <h4 id="phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22">Phase 4e: Eliminate recursion guards in class resolution (absorbs P21, P22)<a class="headerlink" href="#phase-4e-eliminate-recursion-guards-in-class-resolution-absorbs-p21-p22" title="Permanent link">&para;</a></h4>
@@ -2088,6 +2120,25 @@ The problem is needing them for every runtime analysis thread.</p>
 - <code>references/mod.rs</code> <code>PARSE_STACK_SIZE</code> reduced to 8 MB or removed.
 - No stack overflows on the full test suite or the largest available
   project.</p>
+<h4 id="phase-4g-carry-atom-in-phptypenamed">Phase 4g: Carry <code>Atom</code> in <code>PhpType::Named</code><a class="headerlink" href="#phase-4g-carry-atom-in-phptypenamed" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium. Effort: Medium.</strong></p>
+<p>Deferred from Phase 4d. With the FQN now cached, the residual
+per-substitution string cost is <code>PhpType::Named(cls.fqn().to_string())</code>
+(and the equivalent patterns in <code>template_subs.rs</code>, <code>return_types.rs</code>,
+<code>inheritance/mod.rs</code>, <code>forward_walk/scope_state.rs</code>,
+<code>rhs_resolution/mod.rs</code>, and the Laravel builder providers). Each of
+these turns a cached <code>Atom</code> back into an owned <code>String</code> because
+<code>PhpType::Named</code> holds a <code>String</code>.</p>
+<p>Changing <code>PhpType::Named</code> (and the analogous per-member cache keys such
+as <code>format!("{}::{}", class_fqn, method.name)</code> in <code>target_cache.rs</code> /
+<code>property_access.rs</code>) to carry <code>Atom</code> would let the resolution pipeline
+thread interned names end-to-end without re-allocating. This touches a
+core enum used throughout the type engine, so it is a standalone
+refactor rather than part of the 4d fqn-cache change.</p>
+<p><strong>Success criteria:</strong>
+- <code>PhpType::Named</code> carries an interned name (no <code>String</code>
+  reallocation on the substitution hot path).
+- No test regressions.</p>
 <hr />
 <h2 id="success-criteria">Success criteria<a class="headerlink" href="#success-criteria" title="Permanent link">&para;</a></h2>
 <ul>
