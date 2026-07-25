@@ -20,13 +20,14 @@ and pipeline sections of [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 for how the pieces fit together. A few durable landmarks, since the
 module tree moves around:
 
-- **The shared type engine lives under `src/completion/`**, despite the
-  name. `completion/resolver/` resolves a subject expression to a
-  `ClassInfo`, and `completion/variable/forward_walk/` is the forward
+- **The shared type engine lives under `src/type_engine/`.**
+  `type_engine/resolver/` resolves a subject expression to a
+  `ClassInfo`, and `type_engine/variable/forward_walk/` is the forward
   walker that answers "what is the type of this expression here?" — it
   is shared by diagnostics, hover, go-to-definition, and signature help,
-  not just completion. Do not build a second type-resolution path (see
-  the anti-patterns below).
+  not just completion. `completion/` holds completion-specific code only.
+  Do not build a second type-resolution path (see the anti-patterns
+  below).
 - **Parsing** is in `parser/` (PHP source → `ClassInfo`/`FunctionInfo`)
   and `docblock/` (PHPDoc tags, templates, conditional types).
 - **The data model** is in `types/` and `php_type/`.

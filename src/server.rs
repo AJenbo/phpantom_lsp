@@ -1765,7 +1765,7 @@ impl Backend {
         // are resolved once and reused across all LSP handlers, not just
         // diagnostics.  The guard is re-entrant safe: if a diagnostic pass
         // already activated the cache, this is a no-op.
-        let _chain_guard = crate::completion::resolver::with_chain_resolution_cache();
+        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 
@@ -2336,7 +2336,7 @@ impl Backend {
             let Some(target_class) = self.find_or_load_class(&reg.target) else {
                 continue;
             };
-            let rctx = crate::completion::resolver::ResolutionCtx {
+            let rctx = crate::type_engine::resolver::ResolutionCtx {
                 current_class: Some(target_class.as_ref()),
                 all_classes: &file_ctx.classes,
                 content,
@@ -2386,7 +2386,7 @@ impl Backend {
         let file_ctx = self.file_context(def_uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
-        let rctx = crate::completion::resolver::ResolutionCtx {
+        let rctx = crate::type_engine::resolver::ResolutionCtx {
             current_class: Some(target_class.as_ref()),
             all_classes: &file_ctx.classes,
             content: &content,

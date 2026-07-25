@@ -496,7 +496,7 @@ fn resolve_subject_to_class(
 ) -> Option<ClassInfo> {
     let class_loader = backend.class_loader_with(ctx.local_classes, ctx.use_map, ctx.namespace);
     let function_loader = backend.function_loader_with(None, ctx.use_map, ctx.namespace);
-    let res_ctx = crate::subject_resolution::SubjectResolutionCtx {
+    let res_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes: ctx.local_classes,
         use_map: ctx.use_map,
         namespace: ctx.namespace,
@@ -505,7 +505,7 @@ fn resolve_subject_to_class(
         function_loader: &function_loader,
     };
 
-    let php_type = crate::subject_resolution::resolve_subject_type(
+    let php_type = crate::type_engine::subject_resolution::resolve_subject_type(
         subject_text,
         is_static,
         access_offset,

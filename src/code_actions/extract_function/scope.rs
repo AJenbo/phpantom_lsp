@@ -37,7 +37,7 @@ pub(crate) fn resolve_var_type(
 
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
-    crate::completion::variable::resolution::resolve_variable_php_type(
+    crate::type_engine::variable::resolution::resolve_variable_php_type(
         var_name,
         content,
         cursor_offset,

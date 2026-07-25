@@ -35,9 +35,9 @@ use tower_lsp::lsp_types::*;
 use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::completion::resolver::ResolutionCtx;
 use crate::docblock;
 use crate::text_position::position_to_offset;
+use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ResolvedType;
 use crate::types::*;
 use crate::virtual_members::laravel::{
@@ -139,7 +139,7 @@ impl Backend {
             preserve_static: false,
         };
         let candidates = ResolvedType::into_arced_classes(
-            crate::completion::resolver::resolve_target_classes(subject, access_kind, &rctx),
+            crate::type_engine::resolver::resolve_target_classes(subject, access_kind, &rctx),
         );
 
         if candidates.is_empty() {

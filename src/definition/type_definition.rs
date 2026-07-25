@@ -17,9 +17,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::completion::resolver::{Loaders, ResolutionCtx};
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 use crate::types::*;
 
 impl Backend {
@@ -101,7 +101,7 @@ impl Backend {
                 };
 
                 let candidates = ResolvedType::into_arced_classes(
-                    crate::completion::resolver::resolve_target_classes(
+                    crate::type_engine::resolver::resolve_target_classes(
                         subject_text,
                         access_kind,
                         &rctx,
@@ -307,7 +307,7 @@ fn resolve_variable_type_names(
     }
 
     // Delegate to the unified pipeline.
-    let resolved = crate::completion::variable::resolution::resolve_variable_php_type(
+    let resolved = crate::type_engine::variable::resolution::resolve_variable_php_type(
         name,
         content,
         cursor_offset,

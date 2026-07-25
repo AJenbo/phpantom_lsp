@@ -39,10 +39,10 @@ use super::member::MemberKind;
 use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::completion::resolver::ResolutionCtx;
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
+use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, short_name};
 
@@ -489,7 +489,7 @@ impl Backend {
         };
 
         let candidates = ResolvedType::into_arced_classes(
-            crate::completion::resolver::resolve_target_classes(&subject, access_kind, &rctx),
+            crate::type_engine::resolver::resolve_target_classes(&subject, access_kind, &rctx),
         );
 
         if candidates.is_empty() {

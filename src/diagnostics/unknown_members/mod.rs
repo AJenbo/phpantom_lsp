@@ -81,10 +81,10 @@ use crate::parser::with_parse_cache;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::{
+use crate::symbol_map::SymbolKind;
+use crate::type_engine::resolver::{
     ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
-use crate::symbol_map::SymbolKind;
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 

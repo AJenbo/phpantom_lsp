@@ -20,8 +20,8 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::symbol_map::SymbolKind;
+use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
@@ -385,7 +385,7 @@ fn resolve_subject_to_class_name(
     // non-variable subjects) and a dummy class loader.
     let dummy_class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
     let dummy_function_loader = |_: &str, _: u32| -> Option<crate::types::FunctionInfo> { None };
-    let ctx = crate::subject_resolution::SubjectResolutionCtx {
+    let ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes,
         use_map: file_use_map,
         namespace: file_namespace,
@@ -394,8 +394,13 @@ fn resolve_subject_to_class_name(
         function_loader: &dummy_function_loader,
     };
 
-    crate::subject_resolution::resolve_subject_type(subject_text, is_static, access_offset, &ctx)
-        .and_then(|t| t.top_level_class_names().into_iter().next())
+    crate::type_engine::subject_resolution::resolve_subject_type(
+        subject_text,
+        is_static,
+        access_offset,
+        &ctx,
+    )
+    .and_then(|t| t.top_level_class_names().into_iter().next())
 }
 
 /// Resolve a subject expression to a `ClassInfo` using the full resolver

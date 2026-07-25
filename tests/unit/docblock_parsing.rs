@@ -2062,7 +2062,7 @@ fn template_mixed_of_and_as() {
 
 #[test]
 fn conditional_resolves_with_template_default_false() {
-    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use phpantom_lsp::type_engine::conditional_resolution::resolve_conditional_without_args_and_defaults;
     use std::collections::HashMap;
 
     // Simulates: @template TAsync of bool = false
@@ -2084,7 +2084,7 @@ fn conditional_resolves_with_template_default_false() {
 
 #[test]
 fn conditional_resolves_with_template_default_true() {
-    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use phpantom_lsp::type_engine::conditional_resolution::resolve_conditional_without_args_and_defaults;
     use std::collections::HashMap;
 
     // Simulates: @template TAsync of bool = true
@@ -2106,7 +2106,7 @@ fn conditional_resolves_with_template_default_true() {
 
 #[test]
 fn conditional_no_template_default_falls_through() {
-    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use phpantom_lsp::type_engine::conditional_resolution::resolve_conditional_without_args_and_defaults;
     use std::collections::HashMap;
 
     // When template has no default, the function should fall through
@@ -2129,7 +2129,7 @@ fn conditional_no_template_default_falls_through() {
 
 #[test]
 fn conditional_negated_with_template_default() {
-    use phpantom_lsp::completion::conditional_resolution::resolve_conditional_without_args_and_defaults;
+    use phpantom_lsp::type_engine::conditional_resolution::resolve_conditional_without_args_and_defaults;
     use std::collections::HashMap;
 
     // Simulates: @template TAsync of bool = false

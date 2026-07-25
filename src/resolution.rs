@@ -1313,7 +1313,7 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
         use crate::class_lookup::find_class_at_offset;
-        use crate::completion::resolver::ResolutionCtx;
+        use crate::type_engine::resolver::ResolutionCtx;
 
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
@@ -1347,7 +1347,7 @@ impl Backend {
             is_in_static_method: false,
             preserve_static: false,
         };
-        crate::completion::variable::closure_resolution::find_closure_this_override(&rctx)
+        crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 
     /// Return a constant-value-loader closure.

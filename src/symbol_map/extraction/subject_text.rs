@@ -2,7 +2,7 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use super::*;
-use crate::subject_expr::{BracketSegment, SubjectExpr};
+use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};
 
 // ─── Expression to subject text ─────────────────────────────────────────────
 

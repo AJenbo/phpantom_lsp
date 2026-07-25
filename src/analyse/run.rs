@@ -283,9 +283,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         let _cache_guard =
                             with_active_resolved_class_cache(&backend.resolved_class_cache);
                         let _chain_guard =
-                            crate::completion::resolver::with_chain_resolution_cache();
+                            crate::type_engine::resolver::with_chain_resolution_cache();
                         let _callable_guard =
-                            crate::completion::call_resolution::with_callable_target_cache();
+                            crate::type_engine::call_resolution::with_callable_target_cache();
                         let _body_infer_guard = backend.activate_body_return_inferrer();
                         let _auth_user_guard = backend.activate_auth_user_resolver();
 
@@ -297,7 +297,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         // collectors hit the cache (O(log N) lookup)
                         // instead of doing a full backward scan.
                         let _scope_guard =
-                            crate::completion::variable::forward_walk::with_diagnostic_scope_cache(
+                            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache(
                             );
                         let scope_t0 = Instant::now();
                         {
@@ -305,11 +305,11 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                             let class_loader = backend.class_loader(&file_ctx);
                             let function_loader_cl = backend.function_loader(&file_ctx);
                             let constant_loader_cl = backend.constant_loader();
-                            let loaders = crate::completion::resolver::Loaders {
+                            let loaders = crate::type_engine::resolver::Loaders {
                                 function_loader: Some(&function_loader_cl),
                                 constant_loader: Some(&constant_loader_cl),
                             };
-                            crate::completion::variable::forward_walk::build_diagnostic_scopes(
+                            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,
                                 &file_ctx.classes,
                                 &class_loader,

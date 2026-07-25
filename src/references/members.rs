@@ -555,7 +555,7 @@ impl Backend {
         let function_loader = self.function_loader(ctx);
         let use_map = &ctx.use_map;
         let namespace = &ctx.namespace;
-        let resolution_ctx = crate::subject_resolution::SubjectResolutionCtx {
+        let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map,
             namespace,
@@ -564,7 +564,7 @@ impl Backend {
             function_loader: &function_loader,
         };
 
-        match crate::subject_resolution::resolve_subject_type(
+        match crate::type_engine::subject_resolution::resolve_subject_type(
             subject_text,
             is_static,
             access_offset,
@@ -604,7 +604,7 @@ impl Backend {
         namespace: &Option<String>,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<String> {
-        let expr = crate::subject_expr::SubjectExpr::parse(subject_text);
+        let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
         let Some((class_name, method_name)) = static_call_root(&expr) else {
             return Vec::new();
         };

@@ -176,7 +176,7 @@ resolution. This eliminates the secondary resolvers entirely.
 
 - `src/diagnostics/unknown_members.rs` — remove
   `resolve_scalar_subject_type` and `resolve_unresolvable_class_subject`
-- `src/completion/resolver.rs` — enrich the resolution result
+- `src/type_engine/resolver/` — enrich the resolution result
 
 ---
 

@@ -32,9 +32,9 @@ process(class: Product::class, flag: true, function ($p) {
 
 The forward walker's closure-argument inference
 (`walk_closures_in_call_args` and `walk_closure_in_partial_call_args` in
-`src/completion/variable/forward_walk/diagnostic_walk.rs`, and the
+`src/type_engine/variable/forward_walk/diagnostic_walk.rs`, and the
 completion/hover-path counterpart `infer_callable_params_for_call` in
-`src/completion/variable/forward_walk/callable_inference.rs`) computes
+`src/type_engine/variable/forward_walk/callable_inference.rs`) computes
 `arg_idx` from `arguments.iter().enumerate()` — the argument's position
 in the *call*. That index is then used directly as the *declared*
 parameter index, both to decide whether the argument at that slot is a

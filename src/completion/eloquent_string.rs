@@ -397,14 +397,14 @@ impl Backend {
             let current_class =
                 crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset)
                     .unwrap_or(&default_class);
-            let results = crate::completion::variable::resolution::resolve_variable_types(
+            let results = crate::type_engine::variable::resolution::resolve_variable_types(
                 subject,
                 current_class,
                 &ctx.classes,
                 content,
                 cursor_offset,
                 class_loader,
-                crate::completion::resolver::Loaders::default(),
+                crate::type_engine::resolver::Loaders::default(),
             );
             for rt in &results {
                 if let Some(model_fqn) = extract_model_from_builder_type(&rt.type_string)

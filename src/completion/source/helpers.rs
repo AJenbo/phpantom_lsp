@@ -25,11 +25,11 @@ use std::sync::Arc;
 use crate::php_type::PhpType;
 use crate::types::{BracketSegment, ClassInfo};
 
-use crate::completion::resolver::ResolutionCtx;
+use crate::type_engine::resolver::ResolutionCtx;
 
 // ─── Source-text helpers ────────────────────────────────────────────────────
 
-pub(in crate::completion) use crate::subject_expr::parse_new_expression_class as extract_new_expression_class;
+pub(crate) use crate::type_engine::subject_expr::parse_new_expression_class as extract_new_expression_class;
 
 /// Extract the return type annotation from a closure or arrow-function
 /// literal, given its own source text (e.g. the closure's span text, or
@@ -45,7 +45,7 @@ pub(in crate::completion) use crate::subject_expr::parse_new_expression_class as
 /// Check whether text is a closure or arrow-function literal, optionally
 /// prefixed with `static` — e.g. `fn($x) => …`, `function ($x) use (…) { … }`,
 /// `static fn($x) => …`.
-pub(in crate::completion) fn is_closure_like_text(text: &str) -> bool {
+pub(crate) fn is_closure_like_text(text: &str) -> bool {
     let trimmed = text.trim();
     let trimmed = trimmed
         .strip_prefix("static")
@@ -62,7 +62,7 @@ pub(in crate::completion) fn is_closure_like_text(text: &str) -> bool {
     is_arrow || is_closure
 }
 
-pub(in crate::completion) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
+pub(crate) fn extract_closure_return_type_from_text(text: &str) -> Option<PhpType> {
     let trimmed = text.trim();
 
     let is_arrow = trimmed.starts_with("fn")
@@ -153,9 +153,7 @@ pub(in crate::completion) fn extract_closure_return_type_from_text(text: &str) -
 ///   `yield $key => $value`.
 ///
 /// Returns `None` if the text doesn't contain `yield`.
-pub(in crate::completion) fn infer_generator_type_from_closure_yields(
-    text: &str,
-) -> Option<PhpType> {
+pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<PhpType> {
     let trimmed = text.trim();
 
     // Must be a closure or function literal.
@@ -340,7 +338,7 @@ pub(in crate::completion) fn infer_generator_type_from_closure_yields(
 /// [`infer_generator_type_from_closure_yields`]).  Returns `None` when the
 /// text is not a closure/arrow function or no returnable expression is
 /// found.
-pub(in crate::completion) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
+pub(crate) fn extract_closure_body_expr_text(text: &str) -> Option<&str> {
     let trimmed = text.trim();
 
     let is_arrow = trimmed.starts_with("fn")
@@ -555,10 +553,7 @@ fn infer_type_from_simple_expr(expr: &str) -> Option<PhpType> {
 /// Returns `None` if the text is not a closure/arrow-function, the
 /// parameter at `position` does not exist, or the parameter has no type
 /// hint.
-pub(in crate::completion) fn extract_closure_param_type_from_text(
-    text: &str,
-    position: usize,
-) -> Option<PhpType> {
+pub(crate) fn extract_closure_param_type_from_text(text: &str, position: usize) -> Option<PhpType> {
     extract_closure_params_from_text(text)?
         .into_iter()
         .nth(position)?
@@ -574,7 +569,7 @@ pub(in crate::completion) fn extract_closure_param_type_from_text(
 /// directly.  Untyped parameters carry `None` as their type.
 ///
 /// Returns `None` when the text is not a closure/arrow-function literal.
-pub(in crate::completion) fn extract_closure_params_from_text(
+pub(crate) fn extract_closure_params_from_text(
     text: &str,
 ) -> Option<Vec<(String, Option<PhpType>)>> {
     let trimmed = text.trim();
@@ -698,21 +693,21 @@ fn split_params_at_depth_zero(text: &str) -> Vec<&str> {
 ///
 /// Returns `None` if the text is not a recognised callable form or the
 /// return type cannot be determined.
-pub(in crate::completion) fn resolve_first_class_callable_return_type(
+pub(crate) fn resolve_first_class_callable_return_type(
     callable_text: &str,
     rctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     // `SubjectExpr::parse_callee` strips the trailing `(...)` marker
     // itself, so the full callable text (including it) can be passed
     // straight through.
-    let callee_expr = crate::subject_expr::SubjectExpr::parse_callee(callable_text);
+    let callee_expr = crate::type_engine::subject_expr::SubjectExpr::parse_callee(callable_text);
 
     // For method calls (instance and static), use the main pipeline
     // with a return type hint capture.
     match &callee_expr {
-        crate::subject_expr::SubjectExpr::MethodCall { .. }
-        | crate::subject_expr::SubjectExpr::StaticMethodCall { .. }
-        | crate::subject_expr::SubjectExpr::NewExpr { .. } => {
+        crate::type_engine::subject_expr::SubjectExpr::MethodCall { .. }
+        | crate::type_engine::subject_expr::SubjectExpr::StaticMethodCall { .. }
+        | crate::type_engine::subject_expr::SubjectExpr::NewExpr { .. } => {
             let mut return_type: Option<PhpType> = None;
             let classes = crate::Backend::resolve_call_return_types_expr_with_hint(
                 &callee_expr,
@@ -738,7 +733,7 @@ pub(in crate::completion) fn resolve_first_class_callable_return_type(
                 }
             })
         }
-        crate::subject_expr::SubjectExpr::FunctionCall(func_name) => {
+        crate::type_engine::subject_expr::SubjectExpr::FunctionCall(func_name) => {
             let function_loader = rctx.function_loader?;
             let func_info = function_loader(func_name, 0)?;
             func_info.return_type.clone()
@@ -758,7 +753,7 @@ pub(in crate::completion) fn resolve_first_class_callable_return_type(
 /// through the segment walk and, if it produces a non-empty
 /// `ClassInfo` set, returned immediately.  Returns `None` when no
 /// candidate succeeds.
-pub(in crate::completion) fn try_chained_array_access_with_candidates<'a>(
+pub(crate) fn try_chained_array_access_with_candidates<'a>(
     candidates: impl Iterator<Item = PhpType> + 'a,
     segments: &[BracketSegment],
     current_class: Option<&ClassInfo>,
@@ -800,7 +795,7 @@ fn walk_array_segments_and_resolve(
     // `array{name: string, pen: Pen}`.  Without expansion the
     // segment walk would fail to extract shape values.
     let mut current = if let PhpType::Named(_) = base_type {
-        if let Some(expanded) = crate::completion::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
             base_type,
             current_class_name,
             all_classes,
@@ -839,7 +834,7 @@ fn walk_array_segments_and_resolve(
             // its iterable generics (`@extends`, `@implements`) for the
             // element type.  This handles bracket access on classes that
             // implement `ArrayAccess` with generic type parameters.
-            let class_element = crate::completion::type_resolution::type_hint_to_classes_typed(
+            let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &current,
                 current_class_name,
                 all_classes,
@@ -850,7 +845,7 @@ fn walk_array_segments_and_resolve(
                 let cache = crate::virtual_members::active_resolved_class_cache();
                 let merged =
                     crate::virtual_members::resolve_class_fully_maybe_cached(&cls, class_loader, cache);
-                crate::completion::variable::foreach_resolution::extract_iterable_element_type_from_class(
+                crate::type_engine::variable::foreach_resolution::extract_iterable_element_type_from_class(
                     &merged,
                     class_loader,
                 )
@@ -862,7 +857,7 @@ fn walk_array_segments_and_resolve(
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
         // Convert to string only for alias resolution.
-        if let Some(expanded) = crate::completion::type_resolution::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &current,
             current_class_name,
             all_classes,
@@ -878,7 +873,7 @@ fn walk_array_segments_and_resolve(
         return None;
     }
 
-    let classes = crate::completion::type_resolution::type_hint_to_classes_typed(
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &current,
         current_class_name,
         all_classes,

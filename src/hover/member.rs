@@ -471,13 +471,15 @@ impl Backend {
         // docblock, try to infer the return type from the method body.
         // This mirrors what completion/hover resolution does, so the
         // hover display matches the resolved type the user sees.
-        let inferred_return_type: Option<crate::php_type::PhpType> =
-            if method.return_type.is_none() && method.name_offset != 0 && !method.is_virtual {
-                crate::completion::call_resolution::try_infer_body_return_type(&owner.fqn(), method)
-                    .filter(|t| !t.is_mixed() && !t.is_void())
-            } else {
-                None
-            };
+        let inferred_return_type: Option<crate::php_type::PhpType> = if method.return_type.is_none()
+            && method.name_offset != 0
+            && !method.is_virtual
+        {
+            crate::type_engine::call_resolution::try_infer_body_return_type(&owner.fqn(), method)
+                .filter(|t| !t.is_mixed() && !t.is_void())
+        } else {
+            None
+        };
 
         // Use the inferred type as the effective return type when
         // the method has no declared one.

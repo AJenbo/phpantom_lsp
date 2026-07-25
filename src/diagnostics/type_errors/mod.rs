@@ -27,10 +27,10 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::completion::resolver::{Loaders, VarResolutionCtx};
-use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, is_array_like_name};
+use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::{ClassInfo, ResolvedCallableTarget};
 
 use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
@@ -419,7 +419,7 @@ impl Backend {
                         // Expand @phpstan-type / @psalm-type aliases so
                         // that e.g. `Payload` becomes `array{name: string,
                         // phone: string}` before the compatibility check.
-                        let ty = crate::completion::types::resolution::resolve_type_alias_typed(
+                        let ty = crate::type_engine::types::resolution::resolve_type_alias_typed(
                             &ty,
                             &current_class_info.fqn(),
                             &file_ctx.classes,

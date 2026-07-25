@@ -344,7 +344,7 @@ emits the concrete callable signature in the `@param` tag.
 ## T20. Type narrowing reconciliation engine
 **Impact: Medium-High · Effort: High**
 
-PHPantom's type narrowing in `completion/types/narrowing.rs` handles
+PHPantom's type narrowing in `type_engine/types/narrowing/` handles
 basic patterns (instanceof, is_* calls, null checks) but lacks the
 algebraic framework that PHPStan and Psalm use. Key gaps:
 

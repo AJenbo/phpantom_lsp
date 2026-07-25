@@ -263,7 +263,7 @@ removes those guards and the depth caps they protect:
    consumer queries them, so re-entry cannot happen.
 
 2. **`RESOLVE_DEPTH` and `MAX_RESOLVE_TARGET_DEPTH` (60) in
-   `completion/resolver.rs`.** Thread-local depth counter for
+   `type_engine/resolver/`.** Thread-local depth counter for
    `resolve_target_classes_expr_inner`. Guards against mutual
    recursion between subject resolution, call-return resolution,
    and variable resolution. The limit of 60 (vs typical chain

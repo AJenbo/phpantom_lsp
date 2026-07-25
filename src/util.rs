@@ -15,7 +15,7 @@
 ///
 /// Subject-extraction helpers (walking backwards through characters to
 /// find variables, call expressions, balanced parentheses, `new`
-/// expressions, etc.) live in [`crate::subject_extraction`].
+/// expressions, etc.) live in [`crate::type_engine::subject_extraction`].
 use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};

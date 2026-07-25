@@ -6,13 +6,13 @@
 ///
 /// The low-level subject extraction helpers (walking backwards through
 /// characters to find variables, call expressions, `::` subjects, etc.)
-/// live in the shared [`crate::subject_extraction`] module so they can be
+/// live in the shared [`crate::type_engine::subject_extraction`] module so they can be
 /// reused by the definition resolver and future features (hover,
 /// references).
 use tower_lsp::lsp_types::*;
 
-use crate::subject_extraction::detect_access_operator;
 use crate::text_scan::collapse_continuation_lines;
+use crate::type_engine::subject_extraction::detect_access_operator;
 use crate::types::*;
 
 /// Detect the access operator before the cursor position and extract

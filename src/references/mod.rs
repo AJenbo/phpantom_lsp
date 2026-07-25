@@ -138,11 +138,17 @@ pub(super) fn normalize_fqn(fqn: &str) -> String {
     strip_fqn_prefix(fqn).to_string()
 }
 
-pub(super) fn static_call_root(expr: &crate::subject_expr::SubjectExpr) -> Option<(&str, &str)> {
+pub(super) fn static_call_root(
+    expr: &crate::type_engine::subject_expr::SubjectExpr,
+) -> Option<(&str, &str)> {
     match expr {
-        crate::subject_expr::SubjectExpr::CallExpr { callee, .. } => static_call_root(callee),
-        crate::subject_expr::SubjectExpr::MethodCall { base, .. } => static_call_root(base),
-        crate::subject_expr::SubjectExpr::StaticMethodCall { class, method } => {
+        crate::type_engine::subject_expr::SubjectExpr::CallExpr { callee, .. } => {
+            static_call_root(callee)
+        }
+        crate::type_engine::subject_expr::SubjectExpr::MethodCall { base, .. } => {
+            static_call_root(base)
+        }
+        crate::type_engine::subject_expr::SubjectExpr::StaticMethodCall { class, method } => {
             Some((class.as_str(), method.as_str()))
         }
         _ => None,
@@ -169,11 +175,13 @@ pub(super) fn unresolved_member_subject_matches_scope(
 }
 
 fn unresolved_member_subject_name(subject_text: &str) -> Option<String> {
-    match crate::subject_expr::SubjectExpr::parse(subject_text) {
-        crate::subject_expr::SubjectExpr::Variable(name) => {
+    match crate::type_engine::subject_expr::SubjectExpr::parse(subject_text) {
+        crate::type_engine::subject_expr::SubjectExpr::Variable(name) => {
             Some(name.trim_start_matches('$').to_string())
         }
-        crate::subject_expr::SubjectExpr::PropertyChain { property, .. } => Some(property),
+        crate::type_engine::subject_expr::SubjectExpr::PropertyChain { property, .. } => {
+            Some(property)
+        }
         _ => None,
     }
 }

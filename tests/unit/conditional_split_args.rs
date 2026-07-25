@@ -1,6 +1,6 @@
 //! Unit tests for split_text_args in conditional.rs, focusing on quoted strings and escapes.
 
-use phpantom_lsp::completion::types::conditional::split_text_args;
+use phpantom_lsp::type_engine::types::conditional::split_text_args;
 
 #[test]
 fn test_split_text_args_basic() {

@@ -14,12 +14,12 @@ use tower_lsp::lsp_types::Position;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::completion::resolver::{Loaders, VarResolutionCtx};
-use crate::completion::variable::foreach_resolution::resolve_expression_type;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::return_collection::collect_returns;
 use crate::text_position::line_start_byte_offset;
+use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::{ClassInfo, FunctionLoader};
 
 use super::edits::find_open_brace_from_declaration;

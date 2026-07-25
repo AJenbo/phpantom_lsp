@@ -27,8 +27,10 @@
 //!   `@mixin` classes, and framework-specific patterns (e.g. Laravel)
 //! - `resolution` — Class and function lookup / name resolution (multi-phase:
 //!   fqn_uri_index → PSR-4 → stubs)
-//! - `subject_extraction` — Shared helpers for extracting the left-hand side of
-//!   `->`, `?->`, and `::` access operators (used by both completion and definition)
+//! - `type_engine` — The shared type-resolution engine: subject extraction,
+//!   subject-to-`ClassInfo` resolution, call/return-type resolution, and
+//!   variable type inference, consumed by completion, diagnostics, hover,
+//!   definition, and signature help
 //! - `highlight` — Document highlighting (`textDocument/documentHighlight`).
 //!   When the cursor lands on a symbol, returns all other occurrences in the
 //!   current file so the editor can highlight them.  Uses the precomputed
@@ -256,14 +258,12 @@ mod server;
 mod signature_help;
 pub mod stub_patches;
 pub mod stubs;
-pub mod subject_expr;
-pub(crate) mod subject_extraction;
-pub(crate) mod subject_resolution;
 mod symbol_index;
 pub(crate) mod symbol_map;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
+pub mod type_engine;
 mod type_hierarchy;
 pub mod types;
 mod util;
@@ -291,7 +291,7 @@ pub use virtual_members::resolve_class_fully;
 ///   (`extract_hint_type`, `extract_parameters`, `extract_visibility`, `extract_property_info`)
 /// - `completion::handler` — Top-level completion request orchestration
 /// - `completion::target` — module-level `extract_completion_target`
-/// - `completion::resolver` — `resolve_target_classes` and type-resolution helpers
+/// - `type_engine::resolver` — `resolve_target_classes` and type-resolution helpers
 /// - `completion::builder` — module-level `build_completion_items`, `build_method_label`
 /// - [`composer`] — PSR-4 autoload mapping and class file resolution
 /// - `server` — `impl LanguageServer` (initialize, completion, did_open, …)
@@ -300,7 +300,7 @@ pub use virtual_members::resolve_class_fully;
 /// - `inheritance` — `resolve_class_with_inheritance` (base resolution), trait/parent merging
 /// - `virtual_members` — `resolve_class_fully` (base resolution + virtual member providers),
 ///   `VirtualMemberProvider` trait, merge logic, provider registry
-/// - `subject_extraction` — Shared subject extraction helpers for `->`, `?->`, `::` operators
+/// - `type_engine::subject_extraction` — Shared subject extraction helpers for `->`, `?->`, `::` operators
 /// - `util` — module-level `position_to_offset`, `find_class_at_offset`,
 ///   `find_class_by_name`, plus `log`, `get_classes_for_uri`
 /// - `definition` — `resolve_definition`, member resolution, function resolution

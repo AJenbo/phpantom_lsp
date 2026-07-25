@@ -251,7 +251,7 @@ impl Backend {
         // This eliminates O(depth²) re-resolution of shared chain
         // prefixes across unknown_member, argument_count, type_error,
         // and deprecated collectors.
-        let _chain_guard = crate::completion::resolver::with_chain_resolution_cache();
+        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
 
         // Activate the callable target cache so that the same method
         // on the same class is resolved at most once across all
@@ -259,7 +259,7 @@ impl Backend {
         // looked up once and reused for every `$q->where(...)`,
         // `$query->where(...)`, and `Product::query()->where(...)`
         // call site in the file.
-        let _callable_guard = crate::completion::call_resolution::with_callable_target_cache();
+        let _callable_guard = crate::type_engine::call_resolution::with_callable_target_cache();
         let _body_infer_guard = self.activate_body_return_inferrer();
         let _auth_user_guard = self.activate_auth_user_resolver();
 
@@ -271,7 +271,8 @@ impl Backend {
         // instead of doing a full backward scan per member-access
         // span.  This eliminates the O(N × depth × file_size) cost
         // that caused multi-minute analysis times on large files.
-        let _scope_guard = crate::completion::variable::forward_walk::with_diagnostic_scope_cache();
+        let _scope_guard =
+            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
 
         // ── Shared per-file snapshot for the symbol-span collectors ────
         // Built once and reused by the forward-walker warm-up below and
@@ -288,11 +289,11 @@ impl Backend {
             let class_loader = self.class_loader(&ctx.file);
             let function_loader_cl = self.function_loader(&ctx.file);
             let constant_loader_cl = self.constant_loader();
-            let loaders = crate::completion::resolver::Loaders {
+            let loaders = crate::type_engine::resolver::Loaders {
                 function_loader: Some(&function_loader_cl),
                 constant_loader: Some(&constant_loader_cl),
             };
-            crate::completion::variable::forward_walk::build_diagnostic_scopes(
+            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,
                 &ctx.file.classes,
                 &class_loader,

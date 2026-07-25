@@ -10,7 +10,7 @@
 // Re-export SubjectExpr and BracketSegment from their canonical module
 // so that existing `use crate::types::{SubjectExpr, BracketSegment, …}`
 // paths continue to work.
-pub use crate::subject_expr::{BracketSegment, SubjectExpr};
+pub use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};
 
 use std::collections::HashMap;
 use std::fmt;

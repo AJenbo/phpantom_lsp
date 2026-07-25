@@ -53,8 +53,6 @@ src/
 │   # Data model
 ├── types/                  # Core structures (ClassInfo, MethodInfo, ResolvedType, SubjectExpr, …)
 ├── php_type/               # PHP type representation: parse, display, normalize, subtype, transform
-├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
-│                           # Extracting and resolving the subject before ->, ?->, ::
 │
 │   # Parsing & indexing
 ├── parser/                 # mago-syntax AST → ClassInfo/FunctionInfo (classes, functions, use statements, attributes, incremental update_ast)
@@ -74,20 +72,25 @@ src/
 ├── stubs.rs, stub_patches.rs  # Embedded phpstorm-stubs index + hand patches
 ├── phar.rs                 # Class discovery inside PHAR archives
 │
-│   # The shared type engine (lives under completion/, see note below)
-├── completion/
+│   # The shared type engine ("what is the type of this expression here?")
+├── type_engine/
+│   ├── subject_expr.rs, subject_extraction.rs, subject_resolution.rs
+│   │                       # Extracting and resolving the subject before ->, ?->, ::
 │   ├── resolver/           # Subject expression → ClassInfo (type engine entry point) + chain cache, property narrowing
 │   ├── variable/           # Variable type resolution via assignment scanning
 │   │   ├── forward_walk/   #   the forward walker (shared by diagnostics, hover, go-to-def, sig help)
 │   │   ├── rhs_resolution/ #   right-hand-side expression resolution
 │   │   └── …               #   closure/foreach/class-string/raw-type resolution
 │   ├── call_resolution/    # Call expression + callable target resolution, return types, arg types
-│   ├── types/              # Type-hint → ClassInfo, narrowing/, conditional return types
-│   │                       # ---- completion-specific below ----
+│   └── types/              # Type-hint → ClassInfo, narrowing/, conditional return types
+│
+│   # Completion (uses the type engine above)
+├── completion/
 │   ├── handler/            # Completion request orchestration (member access, class constants, named args, phpdoc)
 │   ├── context/            # Context-specific completion (catch, class, keyword, namespace, override, type-hint, …)
 │   ├── phpdoc/             # PHPDoc tag completion + docblock generation/
 │   ├── source/             # Source-text scanning (comment position, throws analysis)
+│   ├── variable/           # Variable-name completion + scope collection
 │   ├── builder.rs          # Build LSP CompletionItems from resolved ClassInfo
 │   └── …                   # target.rs, array_shape.rs, named_args.rs, use_edit.rs, eloquent_string.rs, laravel_route_controller.rs, …
 │
@@ -127,16 +130,15 @@ tests/
 └── assert_type_runner.rs, fixture_runner.rs
 ```
 
-**The shared type engine lives under `completion/`, despite the name.**
-`completion/resolver/`, `completion/variable/` (including the
-`forward_walk/` forward walker), `completion/call_resolution/`, and
-`completion/types/` are the project's single type-resolution engine —
-they answer "what is the type of this expression here?" and are consumed
-by diagnostics, hover, go-to-definition, and signature help, not just
-completion (see [Forward Walker](#forward-walker) and
-[Name Resolution](#name-resolution) below). This naming is a known wart;
-extracting the engine into its own top-level module is tracked in
-[`docs/todo/refactor.md`](todo/refactor.md).
+**The shared type engine lives under `type_engine/`.** `type_engine/resolver/`,
+`type_engine/variable/` (including the `forward_walk/` forward walker),
+`type_engine/call_resolution/`, `type_engine/types/`, and the subject
+extraction/resolution files are the project's single type-resolution engine —
+they answer "what is the type of this expression here?" and are consumed by
+diagnostics, hover, go-to-definition, and signature help, not just completion
+(see [Forward Walker](#forward-walker) and [Name Resolution](#name-resolution)
+below). Do not build a second type-resolution path: extend the engine here so
+every consumer benefits.
 
 ## External Crates
 
@@ -514,7 +516,7 @@ Current patches:
 
 This is analogous to the [Laravel Class Patches](#laravel-class-patches) system but for built-in PHP functions rather than framework classes. When phpstorm-stubs gains proper annotations for a patched function, the corresponding patch can be deleted.
 
-**When to add a patch here vs. hardcoded logic in `rhs_resolution.rs`:** if the correct behaviour can be expressed with `@template` / `@return` annotations (i.e. PHPStan's own stubs already have the fix), it belongs in `stub_patches.rs`. If the behaviour requires inspecting call-site argument *values* at resolution time (e.g. `array_map`'s callback return type, or `array_filter` preserving the input array's element type), it must stay as hardcoded logic in `rhs_resolution.rs` / `raw_type_inference.rs`. Those functions are tracked in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS` in `completion/variable/mod.rs`, with the full inventory in `docs/todo/completion.md` C1.
+**When to add a patch here vs. hardcoded logic in `rhs_resolution.rs`:** if the correct behaviour can be expressed with `@template` / `@return` annotations (i.e. PHPStan's own stubs already have the fix), it belongs in `stub_patches.rs`. If the behaviour requires inspecting call-site argument *values* at resolution time (e.g. `array_map`'s callback return type, or `array_filter` preserving the input array's element type), it must stay as hardcoded logic in `rhs_resolution.rs` / `raw_type_inference.rs`. Those functions are tracked in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS` in `type_engine/variable/mod.rs`, with the full inventory in `docs/todo/completion.md` C1.
 
 #### Class patches
 
@@ -636,9 +638,9 @@ Scope methods (both `scopeX` convention and `#[Scope]` attribute) are synthesize
 
 Instead, scope injection happens in three places:
 
-1. **Post-generic-substitution hook** (`completion/resolver.rs`, inside `type_hint_to_classes_depth`): after `resolve_class_fully` + `apply_generic_args` produces a `Builder<User>` class, the resolver detects that the result is an Eloquent Builder with a concrete model generic argument. It calls `build_scope_methods_for_builder(model_name, class_loader)` which loads the model, fully resolves it, extracts scope methods, and returns them as instance methods with `static` in return types substituted to the concrete model name. These are merged onto the Builder's method list, giving `$q->active()` after `$q = User::where(...)`.
+1. **Post-generic-substitution hook** (`type_engine/resolver/`, inside `type_hint_to_classes_depth`): after `resolve_class_fully` + `apply_generic_args` produces a `Builder<User>` class, the resolver detects that the result is an Eloquent Builder with a concrete model generic argument. It calls `build_scope_methods_for_builder(model_name, class_loader)` which loads the model, fully resolves it, extracts scope methods, and returns them as instance methods with `static` in return types substituted to the concrete model name. These are merged onto the Builder's method list, giving `$q->active()` after `$q = User::where(...)`.
 
-2. **Scope body Builder enrichment** (`completion/variable_resolution.rs`, `enrich_builder_type_in_scope`): inside a scope method body, the `$query` parameter is typically typed as `Builder` without generic arguments. The enrichment function detects when the enclosing method is a scope (either the `scopeX` naming convention or the `#[Scope]` attribute) on a class that extends Eloquent Model, and the parameter type is `Builder` without generics. It rewrites the type to `Builder<EnclosingModel>`, which then flows through the generic-args path and triggers the post-substitution hook above. This makes `$query->otherScope()` resolve inside scope bodies.
+2. **Scope body Builder enrichment** (`type_engine/variable/resolution.rs`, `enrich_builder_type_in_scope`): inside a scope method body, the `$query` parameter is typically typed as `Builder` without generic arguments. The enrichment function detects when the enclosing method is a scope (either the `scopeX` naming convention or the `#[Scope]` attribute) on a class that extends Eloquent Model, and the parameter type is `Builder` without generics. It rewrites the type to `Builder<EnclosingModel>`, which then flows through the generic-args path and triggers the post-substitution hook above. This makes `$query->otherScope()` resolve inside scope bodies.
 
 3. **Go-to-definition fallback** (`definition/member.rs`, `find_scope_on_builder_model`): when go-to-definition resolves a member on a Builder class and the normal lookup chain (own members, traits, parents, mixins, builder forwarding) fails, this fallback checks whether the member is a scope method injected from the model. It confirms the resolved candidate (with injected scopes) has the method, extracts the model name from the scope method's return type generic argument, loads the model, and finds the declaration through the model's inheritance chain. For `scopeX`-style scopes it looks for `scopeXxx`; for `#[Scope]`-attributed methods it falls back to the original method name. This bridges the gap between completion (which works on the merged ClassInfo) and GTD (which traces back to the declaring source file).
 
@@ -1112,7 +1114,7 @@ Everything above diagnoses files the user has opened. `src/diagnostics/workspace
 
 ## Forward Walker
 
-The forward walker (`src/completion/variable/forward_walk.rs`) walks
+The forward walker (`src/type_engine/variable/forward_walk/`) walks
 method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.

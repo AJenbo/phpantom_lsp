@@ -8,10 +8,10 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Position;
 
 use crate::completion::phpdoc::context::{DocblockContext, SymbolInfo};
-use crate::completion::resolver::FunctionLoaderFn;
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::php_type::PhpType;
+use crate::type_engine::resolver::FunctionLoaderFn;
 use crate::types::{ClassInfo, FunctionLoader};
 
 // ─── Type Enrichment Helpers ────────────────────────────────────────────────
@@ -767,14 +767,14 @@ pub(crate) fn infer_inline_variable_type(
 
     let current_class = crate::class_lookup::find_class_at_offset(all_classes, cursor_offset);
 
-    crate::completion::variable::resolution::resolve_variable_php_type(
+    crate::type_engine::variable::resolution::resolve_variable_php_type(
         var_name,
         effective_content,
         cursor_offset,
         current_class,
         all_classes,
         class_loader,
-        crate::completion::resolver::Loaders::with_function(function_loader),
+        crate::type_engine::resolver::Loaders::with_function(function_loader),
     )
 }
 

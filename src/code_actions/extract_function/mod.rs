@@ -27,10 +27,10 @@ pub(crate) use crate::code_actions::{
     CodeActionData, indent_of_line_at, indent_unit, make_code_action_data,
 };
 pub(crate) use crate::completion::phpdoc::generation::enrichment_plain;
-pub(crate) use crate::completion::resolver::Loaders;
 pub(crate) use crate::php_type::PhpType;
 pub(crate) use crate::scope_collector::ScopeMap;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
+pub(crate) use crate::type_engine::resolver::Loaders;
 pub(crate) use crate::types::ClassInfo;
 
 mod codegen;
