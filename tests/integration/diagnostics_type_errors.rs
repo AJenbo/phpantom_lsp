@@ -1918,6 +1918,68 @@ final class SClass3 extends AClass {}
     );
 }
 
+#[test]
+fn diagnose_unrelated_class_string_passed_to_static_bound() {
+    let php = r#"<?php
+abstract class Base273 {
+    /** @param class-string<static> $class */
+    private static function make(string $class): void {}
+
+    public static function run(): void {
+        static::make(Unrelated273::class);
+    }
+}
+
+final class Child273 extends Base273 {}
+final class Unrelated273 {}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Should flag unrelated class-string passed to class-string<static>"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_child_class_string_via_explicit_call() {
+    let php = r#"<?php
+abstract class Base273b {
+    /** @param class-string<static> $class */
+    public static function make(string $class): void {}
+}
+
+final class Child273b extends Base273b {}
+
+function test273b(): void {
+    Base273b::make(Child273b::class);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag child class-string passed to class-string<static> via explicit call, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_self_class_string_to_static_bound() {
+    let php = r#"<?php
+abstract class Base273c {
+    /** @param class-string<static> $class */
+    private static function make(string $class): void {}
+
+    public static function run(): void {
+        self::make(static::class);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag static::class passed to class-string<static> via self:: call, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // New rules: iterable<...> accepts arrays
 // ═══════════════════════════════════════════════════════════════════════════
