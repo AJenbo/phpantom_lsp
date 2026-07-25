@@ -586,6 +586,7 @@ impl Backend {
                 .map(|(c, ns)| {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
+                    cls.cache_fqn();
                     cls
                 })
                 .collect();

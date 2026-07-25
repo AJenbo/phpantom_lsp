@@ -695,6 +695,7 @@ mod tests {
             backed_type: None,
             attribute_targets: 0,
             laravel: None,
+            fqn: None,
         };
         let detail = build_class_detail(&class);
         assert_eq!(detail, Some("extends Bar implements Baz, Qux".to_string()));
@@ -741,6 +742,7 @@ mod tests {
             backed_type: None,
             attribute_targets: 0,
             laravel: None,
+            fqn: None,
         };
         let detail = build_class_detail(&class);
         assert_eq!(detail, Some("extends Bar".to_string()));

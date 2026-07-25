@@ -297,6 +297,7 @@ impl Backend {
                         method_index: Default::default(),
                         indexed_method_count: 0,
                         laravel: Some(Box::new(laravel_metadata)),
+                        fqn: None,
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -404,6 +405,7 @@ impl Backend {
                         method_index: Default::default(),
                         indexed_method_count: 0,
                         laravel: None,
+                        fqn: None,
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -489,6 +491,7 @@ impl Backend {
                         method_index: Default::default(),
                         indexed_method_count: 0,
                         laravel: None,
+                        fqn: None,
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -636,6 +639,7 @@ impl Backend {
                         method_index: Default::default(),
                         indexed_method_count: 0,
                         laravel: None,
+                        fqn: None,
                     });
 
                     // Walk method bodies for anonymous classes.

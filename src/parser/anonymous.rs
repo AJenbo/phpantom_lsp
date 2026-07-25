@@ -112,6 +112,7 @@ impl Backend {
             method_index: Default::default(),
             indexed_method_count: 0,
             laravel: None,
+            fqn: None,
         }
     }
 

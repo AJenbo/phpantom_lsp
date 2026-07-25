@@ -659,6 +659,7 @@ impl Backend {
                     .or(file_namespace.as_deref())
                     .map(crate::atom::atom);
             }
+            cls.cache_fqn();
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies

@@ -885,6 +885,7 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
         backed_type: None,
         attribute_targets: 0,
         laravel: None,
+        fqn: None,
     })
 }
 

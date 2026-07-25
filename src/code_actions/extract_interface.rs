@@ -584,6 +584,7 @@ mod tests {
             backed_type: None,
             attribute_targets: 0,
             laravel: Default::default(),
+            fqn: None,
         };
 
         let src = generate_interface_source(&InterfaceGenParams {
@@ -644,6 +645,7 @@ mod tests {
             backed_type: None,
             attribute_targets: 0,
             laravel: Default::default(),
+            fqn: None,
         };
 
         let edit = build_implements_edit(content, &class, "UserInterface").unwrap();
@@ -692,6 +694,7 @@ mod tests {
             backed_type: None,
             attribute_targets: 0,
             laravel: Default::default(),
+            fqn: None,
         };
 
         let edit = build_implements_edit(content, &class, "UserInterface").unwrap();

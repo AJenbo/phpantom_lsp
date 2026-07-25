@@ -68,6 +68,7 @@ pub fn make_class(name: &str) -> ClassInfo {
         backed_type: None,
         attribute_targets: 0,
         laravel: None,
+        fqn: None,
     }
 }
 
