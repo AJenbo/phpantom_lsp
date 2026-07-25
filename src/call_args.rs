@@ -67,6 +67,50 @@ pub(crate) fn bind_args_to_params<'b>(
     bound
 }
 
+/// For each argument in `argument_list` (by call position), resolve the
+/// declared parameter index in `params` that it binds to under PHP's
+/// binding rules.
+///
+/// This is the call-position-to-declared-index counterpart of
+/// [`bind_args_to_params`] (which goes the other way: declared index to
+/// bound expression). Consumers that key off "the Nth argument in the
+/// call" — e.g. closure-argument inference matching a `callable(...)`
+/// type hint to the closure's own declared parameter — must translate
+/// through this first, since a named argument can appear anywhere in the
+/// call and reorder or skip parameters ahead of it.
+///
+/// Returns a vector parallel to `argument_list.arguments`: entry `i` holds
+/// the declared parameter index bound to call-position `i`, or `None` when
+/// the argument matches no declared parameter (an unknown named argument,
+/// or a positional overflow with no variadic parameter).
+pub(crate) fn resolve_declared_arg_indices(
+    params: &[ParameterInfo],
+    argument_list: &ArgumentList<'_>,
+) -> Vec<Option<usize>> {
+    let variadic_idx = params.iter().position(|p| p.is_variadic);
+    let mut next_positional = 0usize;
+
+    argument_list
+        .arguments
+        .iter()
+        .map(|arg| match arg {
+            Argument::Positional(_) => {
+                let target = if next_positional < params.len() {
+                    Some(next_positional)
+                } else {
+                    variadic_idx
+                };
+                next_positional += 1;
+                target
+            }
+            Argument::Named(named) => {
+                let name = bytes_to_str(named.name.value);
+                params.iter().position(|p| param_name_bare(p) == name)
+            }
+        })
+        .collect()
+}
+
 /// Split a textual argument into an optional parameter name and its value.
 ///
 /// `"signature: Foo::class"` → `(Some("signature"), "Foo::class")`.

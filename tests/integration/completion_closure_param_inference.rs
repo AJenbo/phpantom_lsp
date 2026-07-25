@@ -2765,13 +2765,14 @@ async fn test_multiple_static_returns_preserve_generic_type_string() {
 // ─── Standalone function template binding via named arguments ──────────────
 
 /// A standalone function's `@template T` bound from a `class-string<T>`
-/// argument must resolve correctly when an earlier named argument is
-/// passed out of declaration order.  The `class` and `flag` arguments
-/// are named and swapped relative to their declared order; the
-/// argument text passed to template-binding resolution must carry the
-/// `name:` prefix so `T` binds from the `class` argument's value
-/// (`Product::class`) rather than from whichever argument happens to
-/// share its declared position.
+/// argument must resolve correctly when arguments are all passed by name
+/// out of declaration order.  `class`, `cb`, and `flag` are named and
+/// reordered relative to their declared positions (`flag`, `class`,
+/// `cb`), so the closure's call-position (1) does not match its declared
+/// parameter index (2). Both the callable-parameter lookup (which finds
+/// the `callable(T): void` hint on `cb`) and the `T` template binding
+/// (from the `class` argument's value) must resolve by declared
+/// parameter name rather than by call position.
 #[tokio::test]
 async fn test_function_template_binding_via_named_args_out_of_order() {
     let backend = create_test_backend();
@@ -2790,9 +2791,9 @@ async fn test_function_template_binding_via_named_args_out_of_order() {
         " */\n",                                                                // 9
         "function process(bool $flag, string $class, callable $cb): void {}\n", // 10
         "\n",                                                                   // 11
-        "process(class: Product::class, flag: true, function ($p) {\n",         // 12
+        "process(class: Product::class, cb: function ($p) {\n",                 // 12
         "    $p->\n",                                                           // 13
-        "});\n",                                                                // 14
+        "}, flag: true);\n",                                                    // 14
     );
 
     // Line 13: `    $p->` — cursor right after `->`.
@@ -2801,8 +2802,51 @@ async fn test_function_template_binding_via_named_args_out_of_order() {
     assert!(
         names.contains(&"getSku"),
         "Expected 'getSku' from Product bound to T via the 'class' named \
-         argument, even though 'class' and 'flag' are passed out of \
+         argument, even though 'class', 'cb', and 'flag' are passed out of \
          declaration order, got: {:?}",
+        names,
+    );
+}
+
+/// Same reordering scenario as
+/// `test_function_template_binding_via_named_args_out_of_order` but for an
+/// instance method call rather than a standalone function.  Exercises
+/// `infer_callable_params_from_receiver_fw`'s declared-index resolution.
+#[tokio::test]
+async fn test_method_callable_param_inference_via_named_args_out_of_order() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/method_named_args_reordered.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Order {\n",
+        "    public function getTotal(): float { return 0.0; }\n",
+        "}\n",
+        "class Processor {\n",
+        "    /**\n",
+        "     * @param callable(Order): void $handler\n",
+        "     * @return void\n",
+        "     */\n",
+        "    public function handle(int $retries, bool $async, callable $handler): void {}\n",
+        "}\n",
+        "class Runner {\n",
+        "    public function run(): void {\n",
+        "        $processor = new Processor();\n",
+        "        $processor->handle(async: true, handler: function ($order) {\n",
+        "            $order->\n",
+        "        }, retries: 3);\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 15: `            $order->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 15, 20).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getTotal"),
+        "Expected getTotal from inferred Order type via the 'handler' named \
+         argument, even though 'async', 'handler', and 'retries' are passed \
+         out of declaration order, got: {:?}",
         names,
     );
 }

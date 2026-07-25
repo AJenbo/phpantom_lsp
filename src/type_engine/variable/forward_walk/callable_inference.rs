@@ -46,7 +46,7 @@ pub(crate) fn infer_callable_params_from_function_fw(
         None
     };
     if let Some(fi) = func_info {
-        let mut params = extract_callable_params_at_fw(&fi.parameters, arg_idx);
+        let mut params = extract_callable_params_at_fw(&fi.parameters, argument_list, arg_idx);
 
         if !params.is_empty() && !fi.template_params.is_empty() && !fi.template_bindings.is_empty()
         {
@@ -70,14 +70,15 @@ pub(crate) fn infer_callable_params_from_function_fw(
 /// Infer callable parameter types for a closure passed at position
 /// `arg_idx` to an instance method call.
 pub(crate) fn infer_callable_params_from_receiver_fw(
-    obj_start: u32,
-    obj_end: u32,
+    obj_span: (u32, u32),
     method_name: &str,
     arg_idx: usize,
+    argument_list: &ArgumentList<'_>,
     first_arg_text: Option<&str>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
+    let (obj_start, obj_end) = obj_span;
     let scope_locals = &scope.locals;
     let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
         scope_locals
@@ -105,7 +106,13 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
         return override_params;
     }
 
-    let params = find_callable_params_on_classes_fw(&receiver_classes, method_name, arg_idx, ctx);
+    let params = find_callable_params_on_classes_fw(
+        &receiver_classes,
+        method_name,
+        arg_idx,
+        argument_list,
+        ctx,
+    );
 
     // Build a template substitution map from the receiver's generic
     // args.  When the receiver resolves to e.g. `Builder<Product>`,
@@ -299,6 +306,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     class_expr: &Expression<'_>,
     method_name: &str,
     arg_idx: usize,
+    argument_list: &ArgumentList<'_>,
     first_arg_text: Option<&str>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -334,7 +342,8 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
             ctx.class_loader,
             ctx.resolved_class_cache,
         );
-        let params = find_callable_params_on_method_fw(&resolved, method_name, arg_idx);
+        let params =
+            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list);
 
         // Build a template substitution map from the owner class.
         // When the owner is a generic class (e.g. `Builder<Customer>`
@@ -388,6 +397,7 @@ pub(crate) fn find_callable_params_on_classes_fw(
     classes: &[Arc<ClassInfo>],
     method_name: &str,
     arg_idx: usize,
+    argument_list: &ArgumentList<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
     for cls in classes {
@@ -397,7 +407,7 @@ pub(crate) fn find_callable_params_on_classes_fw(
         // `resolve_class_fully_maybe_cached` would load the base
         // class definition (keyed by FQN with empty generic args),
         // discarding those substitutions.
-        let result = find_callable_params_on_method_fw(cls, method_name, arg_idx);
+        let result = find_callable_params_on_method_fw(cls, method_name, arg_idx, argument_list);
         if !result.is_empty() {
             return result;
         }
@@ -412,7 +422,8 @@ pub(crate) fn find_callable_params_on_classes_fw(
             ctx.class_loader,
             ctx.resolved_class_cache,
         );
-        let result = find_callable_params_on_method_fw(&resolved, method_name, arg_idx);
+        let result =
+            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list);
         if !result.is_empty() {
             return result;
         }
@@ -421,27 +432,39 @@ pub(crate) fn find_callable_params_on_classes_fw(
 }
 
 /// Look up method `method_name` on `class` and extract callable
-/// parameter types from the parameter at position `arg_idx`.
+/// parameter types from the parameter bound to call-position `arg_idx`.
 pub(crate) fn find_callable_params_on_method_fw(
     class: &ClassInfo,
     method_name: &str,
     arg_idx: usize,
+    argument_list: &ArgumentList<'_>,
 ) -> Vec<PhpType> {
     let method = class.get_method(method_name);
     if let Some(m) = method {
-        extract_callable_params_at_fw(&m.parameters, arg_idx)
+        extract_callable_params_at_fw(&m.parameters, argument_list, arg_idx)
     } else {
         vec![]
     }
 }
 
-/// Given a list of parameters, look at `arg_idx` and extract callable
-/// parameter types if the type hint is `callable(...)` or `Closure(...)`.
+/// Given a list of parameters and the call's argument list, resolve the
+/// call-position `arg_idx` to its *declared* parameter index (accounting
+/// for named arguments, which can reorder or skip parameters) and extract
+/// callable parameter types if that parameter's type hint is
+/// `callable(...)` or `Closure(...)`.
 pub(crate) fn extract_callable_params_at_fw(
     params: &[crate::types::ParameterInfo],
+    argument_list: &ArgumentList<'_>,
     arg_idx: usize,
 ) -> Vec<PhpType> {
-    let param = params.get(arg_idx);
+    let Some(declared_idx) = crate::call_args::resolve_declared_arg_indices(params, argument_list)
+        .get(arg_idx)
+        .copied()
+        .flatten()
+    else {
+        return vec![];
+    };
+    let param = params.get(declared_idx);
     if let Some(p) = param
         && let Some(ref hint) = p.type_hint
         && let Some(callable_params) = hint.callable_param_types()
@@ -533,10 +556,10 @@ pub(crate) fn infer_callable_params_for_call(
                 let first_arg =
                     extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
                 infer_callable_params_from_receiver_fw(
-                    obj_span.start.offset,
-                    obj_span.end.offset,
+                    (obj_span.start.offset, obj_span.end.offset),
                     name,
                     arg_idx,
+                    &mc.argument_list,
                     first_arg.as_deref(),
                     scope,
                     ctx,
@@ -556,10 +579,10 @@ pub(crate) fn infer_callable_params_for_call(
                 let first_arg =
                     extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
                 infer_callable_params_from_receiver_fw(
-                    obj_span.start.offset,
-                    obj_span.end.offset,
+                    (obj_span.start.offset, obj_span.end.offset),
                     name,
                     arg_idx,
+                    &mc.argument_list,
                     first_arg.as_deref(),
                     scope,
                     ctx,
@@ -581,6 +604,7 @@ pub(crate) fn infer_callable_params_for_call(
                     sc.class,
                     name,
                     arg_idx,
+                    &sc.argument_list,
                     first_arg.as_deref(),
                     scope,
                     ctx,

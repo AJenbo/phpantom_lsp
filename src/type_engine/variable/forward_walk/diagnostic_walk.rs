@@ -434,10 +434,10 @@ pub(crate) fn walk_closures_in_call<'b>(
             walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
                 if let Some(ref name) = method_name {
                     infer_callable_params_from_receiver_fw(
-                        obj_span.start.offset,
-                        obj_span.end.offset,
+                        (obj_span.start.offset, obj_span.end.offset),
                         name,
                         arg_idx,
+                        &mc.argument_list,
                         first_arg.as_deref(),
                         outer_scope,
                         ctx,
@@ -460,10 +460,10 @@ pub(crate) fn walk_closures_in_call<'b>(
             walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
                 if let Some(ref name) = method_name {
                     infer_callable_params_from_receiver_fw(
-                        obj_span.start.offset,
-                        obj_span.end.offset,
+                        (obj_span.start.offset, obj_span.end.offset),
                         name,
                         arg_idx,
+                        &mc.argument_list,
                         first_arg.as_deref(),
                         outer_scope,
                         ctx,
@@ -488,6 +488,7 @@ pub(crate) fn walk_closures_in_call<'b>(
                         sc.class,
                         name,
                         arg_idx,
+                        &sc.argument_list,
                         first_arg.as_deref(),
                         outer_scope,
                         ctx,
