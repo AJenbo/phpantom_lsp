@@ -94,6 +94,41 @@ pub(super) fn try_emit_laravel_string_span(
     });
 }
 
+/// If the first argument of `argument_list` is a plain, non-empty string
+/// literal, push a [`SymbolKind::CommandOwnParam`] span covering the string
+/// content.  Used for `$this->argument('user')` / `$this->option('queue')`
+/// inside a console command.
+pub(super) fn try_emit_command_own_param_span(
+    is_option: bool,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let Expression::Literal(literal::Literal::String(s)) = first_arg.value() else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let name = &content[inner_start as usize..inner_end as usize];
+    if name.is_empty() {
+        return;
+    }
+    spans.push(SymbolSpan {
+        start: inner_start,
+        end: inner_end,
+        kind: SymbolKind::CommandOwnParam {
+            name: name.to_string(),
+            is_option,
+        },
+    });
+}
+
 /// If the first argument of `argument_list` is a non-empty, non-interpolated
 /// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
 /// string content (inside the quotes) onto `spans`.
@@ -356,6 +391,20 @@ pub(super) fn is_config_repository_method(name: &str) -> bool {
             | "prepend"
             | "push"
     )
+}
+
+/// Returns `true` for a static call whose first argument is an Artisan
+/// command name: `Artisan::call(...)`, `Artisan::queue(...)`, or
+/// `Schedule::command(...)`.  Recognises both the short facade name and its
+/// `Illuminate\Support\Facades\` FQN.
+pub(super) fn is_artisan_command_static_call(clean_subject: &str, member_name: &str) -> bool {
+    let is_artisan = clean_subject.eq_ignore_ascii_case("Artisan")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Artisan");
+    let is_schedule = clean_subject.eq_ignore_ascii_case("Schedule")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Schedule");
+    let member = member_name.to_ascii_lowercase();
+    (is_artisan && matches!(member.as_str(), "call" | "queue"))
+        || (is_schedule && member == "command")
 }
 
 /// Returns `true` if `object` is a `config()` (or `\config()`) helper call and

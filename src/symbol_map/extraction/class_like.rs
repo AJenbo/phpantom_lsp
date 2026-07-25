@@ -61,10 +61,57 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
         }
     }
 
+    // Whether this class is (syntactically) an Artisan console command, so
+    // `$this->call(...)` / `$this->callSilently(...)` inside its members can
+    // be recognised as command-name references without false-positives in
+    // ordinary classes (where `->call()` is a very common method name).
+    // Detection is deliberately conservative: the direct `extends` clause
+    // must name a `Command`-suffixed class, or the class must carry an
+    // `#[AsCommand]` attribute.
+    let prev_in_console_command = ctx.in_console_command;
+    ctx.in_console_command = class_is_console_command(class);
+
     // Members.
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
+
+    ctx.in_console_command = prev_in_console_command;
+}
+
+/// Whether `class` is (syntactically) an Artisan console command: it
+/// `extends` a `Command`-suffixed class or carries an `#[AsCommand]`
+/// attribute.
+fn class_is_console_command(class: &Class<'_>) -> bool {
+    let has_as_command = class
+        .attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .any(|attr| {
+            let name = attr.name.value();
+            let short = match name.iter().rposition(|&b| b == b'\\') {
+                Some(idx) => &name[idx + 1..],
+                None => name,
+            };
+            short == b"AsCommand"
+        });
+    if has_as_command {
+        return true;
+    }
+    class
+        .extends
+        .as_ref()
+        .map(|ext| {
+            ext.types.iter().any(|ty| {
+                let v = ty.value();
+                let short = match v.iter().rposition(|&b| b == b'\\') {
+                    Some(idx) => &v[idx + 1..],
+                    None => v,
+                };
+                short.ends_with(b"Command")
+            })
+        })
+        .unwrap_or(false)
 }
 
 pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut ExtractionCtx<'a>) {

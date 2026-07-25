@@ -373,7 +373,10 @@ impl Backend {
                 crate::text_position::offset_to_position(content, cursor_offset as usize),
             )]),
 
-            SymbolKind::Keyword | SymbolKind::CastType | SymbolKind::Comment => None,
+            SymbolKind::CommandOwnParam { .. }
+            | SymbolKind::Keyword
+            | SymbolKind::CastType
+            | SymbolKind::Comment => None,
         }
     }
 

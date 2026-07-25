@@ -158,6 +158,42 @@ pub(super) fn extract_call_expr<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `$this->call('app:sync')` / `$this->callSilently('app:sync')`
+                // inside a console command runs another Artisan command.
+                // Gated on `in_console_command` because `->call()` is an
+                // extremely common method name elsewhere (e.g.
+                // `$this->call('GET', '/uri')` in HTTP tests).
+                if ctx.in_console_command
+                    && matches!(method_call.object, Expression::Variable(Variable::Direct(v)) if v.name == b"$this")
+                {
+                    match member_name.to_ascii_lowercase().as_str() {
+                        "call" | "callsilently" => {
+                            try_emit_laravel_string_span(
+                                crate::symbol_map::LaravelStringKind::Command,
+                                &method_call.argument_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                        "argument" | "hasargument" | "getargument" => {
+                            try_emit_command_own_param_span(
+                                false,
+                                &method_call.argument_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                        "option" | "hasoption" | "getoption" => {
+                            try_emit_command_own_param_span(
+                                true,
+                                &method_call.argument_list,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                        _ => {}
+                    }
+                }
                 // Emit call site for method call: `$subject->method(...)`
                 emit_call_site(
                     format!("{}->{}", subject_text, member_name),
@@ -298,6 +334,16 @@ pub(super) fn extract_call_expr<'a>(
                 {
                     try_emit_laravel_string_span(
                         crate::symbol_map::LaravelStringKind::Trans,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // Artisan command names: `Artisan::call('app:sync')`,
+                // `Artisan::queue('app:sync')`, `Schedule::command('app:sync')`.
+                if is_artisan_command_static_call(clean_subject, &member_name) {
+                    try_emit_laravel_string_span(
+                        crate::symbol_map::LaravelStringKind::Command,
                         &static_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,

@@ -81,6 +81,11 @@ struct ExtractionCtx<'a> {
     /// Whether the file imports from `Illuminate\Container\Attributes\`
     /// (checked once lazily, cached for all attribute inspections).
     has_laravel_container_attrs: Option<bool>,
+    /// Whether the members currently being extracted belong to a class that
+    /// syntactically extends an Artisan console command (or is `#[AsCommand]`
+    /// decorated).  Gates recognition of `$this->call('cmd')` /
+    /// `$this->callSilently('cmd')` as command-name references.
+    in_console_command: bool,
 }
 
 mod class_like;
@@ -142,6 +147,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
+        in_console_command: false,
     };
 
     for stmt in program.statements.iter() {
