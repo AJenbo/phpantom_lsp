@@ -51,36 +51,6 @@ threshold (e.g. 8 files).
 
 ---
 
-## P9. `resolved_class_cache` generic-arg specialisation
-
-**Impact: Medium · Effort: Medium**
-
-The resolved-class cache is keyed by `(FQN, Vec<String>)`. Every
-distinct generic instantiation of the same class (e.g.
-`Builder<User>`, `Builder<Order>`, `Builder<Product>`) triggers a
-full `resolve_class_fully` call, even though the base resolution
-(inheritance merging, trait merging, virtual member injection) is
-identical. Only the final generic substitution differs.
-
-In a Laravel codebase with hundreds of Eloquent models, this means
-`Builder` is fully resolved hundreds of times, once per model.
-
-### Fix
-
-Cache the base-resolved class (before generic substitution)
-separately, keyed by FQN alone. When a generic instantiation is
-requested, look up the base-resolved class and apply
-`apply_substitution` on top. The substitution step is cheap
-(tree walk) compared to the full resolution (inheritance walking,
-trait merging, virtual member providers).
-
-This requires splitting `resolve_class_fully` into two stages:
-base resolution (cached by FQN) and generic specialisation (cached
-by `(FQN, Vec<String>)` as today, but with a much cheaper miss
-path).
-
----
-
 ## P11. Uncached base-resolution in `build_scope_methods_for_builder`
 
 **Impact: Low-Medium · Effort: Low**

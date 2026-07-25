@@ -1066,6 +1066,81 @@ fn resolve_class_fully_with_type_args_caches_specialisation() {
 }
 
 #[test]
+fn base_resolution_shared_across_distinct_specialisations() {
+    // The point of the two-stage split: the expensive base resolution
+    // (inheritance/trait/virtual-member merge) runs once per class, no
+    // matter how many distinct generic instantiations are requested. A
+    // parent that the inheritance walk must load lets us count whether
+    // the base merge re-ran: on a cached base hit the parent is not
+    // loaded again.
+    let mut base = make_class("Base");
+    base.methods
+        .push(Arc::new(make_method("save", Some("bool"))));
+
+    let mut collection = make_class("Collection");
+    collection.template_params.push(atom("TValue"));
+    collection.parent_class = Some(atom("Base"));
+    collection
+        .methods
+        .push(Arc::new(make_method("first", Some("TValue"))));
+
+    let base_arc = Arc::new(base);
+    let collection_arc = Arc::new(collection);
+    let base_loads = std::cell::Cell::new(0u32);
+    let class_loader = |name: &str| -> Option<Arc<crate::types::ClassInfo>> {
+        match name {
+            "Base" => {
+                base_loads.set(base_loads.get() + 1);
+                Some(Arc::clone(&base_arc))
+            }
+            "Collection" => Some(Arc::clone(&collection_arc)),
+            _ => None,
+        }
+    };
+
+    let cache = new_resolved_class_cache();
+
+    // First specialisation triggers the one-and-only base resolution.
+    let user = resolve_class_fully_with_type_args(
+        &collection_arc,
+        &class_loader,
+        Some(&cache),
+        &[PhpType::parse("User")],
+    );
+    let after_first = base_loads.get();
+    assert!(after_first > 0, "base resolution must load the parent");
+
+    // A different specialisation must reuse the cached base, loading the
+    // parent zero additional times.
+    let order = resolve_class_fully_with_type_args(
+        &collection_arc,
+        &class_loader,
+        Some(&cache),
+        &[PhpType::parse("Order")],
+    );
+    assert_eq!(
+        base_loads.get(),
+        after_first,
+        "distinct generic specialisation must not re-run base resolution"
+    );
+
+    // Each specialisation still substitutes its own type argument.
+    assert_eq!(
+        user.get_method("first").and_then(|m| m.return_type_str()),
+        Some("User".to_string())
+    );
+    assert_eq!(
+        order.get_method("first").and_then(|m| m.return_type_str()),
+        Some("Order".to_string())
+    );
+
+    let map = cache.read();
+    assert!(map.contains_key(&(atom("Collection"), Vec::new())));
+    assert!(map.contains_key(&(atom("Collection"), vec!["User".to_string()])));
+    assert!(map.contains_key(&(atom("Collection"), vec!["Order".to_string()])));
+}
+
+#[test]
 fn evict_removes_direct_match() {
     let mut cache = make_cache();
     let cls = make_class("App\\Models\\User");

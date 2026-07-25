@@ -115,7 +115,7 @@ pub fn populate_from_sorted(
         //    for related classes, which hit the cache (already populated)
         // 4. Merge interfaces — also hit cache for resolved interfaces
         // 5. Store result in cache
-        resolve_class_fully_inner(&raw_class, class_loader, Some(cache), &[]);
+        resolve_class_fully_inner(&raw_class, class_loader, Some(cache));
     }
 }
 
@@ -146,7 +146,7 @@ pub fn resolve_class_fully(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Arc<ClassInfo> {
-    resolve_class_fully_inner(class, class_loader, None, &[])
+    resolve_class_fully_inner(class, class_loader, None)
 }
 
 /// Cached variant of [`resolve_class_fully`].
@@ -166,7 +166,7 @@ pub fn resolve_class_fully_cached(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: &ResolvedClassCache,
 ) -> Arc<ClassInfo> {
-    resolve_class_fully_inner(class, class_loader, Some(cache), &[])
+    resolve_class_fully_inner(class, class_loader, Some(cache))
 }
 
 /// Resolve a class fully, using the cache when available.
@@ -182,7 +182,7 @@ pub fn resolve_class_fully_maybe_cached(
     cache: Option<&ResolvedClassCache>,
 ) -> Arc<ClassInfo> {
     let started = std::time::Instant::now();
-    let result = resolve_class_fully_inner(class, class_loader, cache, &[]);
+    let result = resolve_class_fully_inner(class, class_loader, cache);
     let elapsed = started.elapsed();
     if elapsed >= std::time::Duration::from_millis(50) {
         tracing::info!(
@@ -220,7 +220,7 @@ pub fn resolve_class_fully_with_generics(
 ) -> Arc<ClassInfo> {
     // Fast path: no generics — just do the base resolution.
     if generic_args.is_empty() {
-        return resolve_class_fully_inner(class, class_loader, cache, &[]);
+        return resolve_class_fully_inner(class, class_loader, cache);
     }
 
     // Check the cache for (FQN, generic_args).
@@ -236,7 +236,7 @@ pub fn resolve_class_fully_with_generics(
 
     let started = std::time::Instant::now();
     // Resolve the base class (cached at (FQN, [])).
-    let base = resolve_class_fully_inner(class, class_loader, cache, &[]);
+    let base = resolve_class_fully_inner(class, class_loader, cache);
 
     // Apply generic substitution.
     let result = if !base.template_params.is_empty() {
@@ -278,7 +278,7 @@ pub fn resolve_class_fully_with_type_args(
     generic_args: &[crate::php_type::PhpType],
 ) -> Arc<ClassInfo> {
     if generic_args.is_empty() {
-        return resolve_class_fully_inner(class, class_loader, cache, &[]);
+        return resolve_class_fully_inner(class, class_loader, cache);
     }
 
     let generic_arg_strings: Vec<String> = generic_args.iter().map(|arg| arg.to_string()).collect();
@@ -293,14 +293,23 @@ pub fn resolve_class_fully_with_type_args(
 
 /// Shared implementation behind [`resolve_class_fully`] and
 /// [`resolve_class_fully_cached`].
+///
+/// This always produces the *base* resolution, cached under the bare
+/// FQN key `(FQN, [])`. Generic specialisation is a separate, much
+/// cheaper stage layered on top by
+/// [`resolve_class_fully_with_generics`]: it looks up this base result
+/// and applies [`apply_generic_args`](crate::inheritance::apply_generic_args),
+/// caching the substituted class under `(FQN, generic_args)`. Keeping the
+/// two stages distinct means the expensive inheritance/trait/virtual-member
+/// merge runs once per class, no matter how many generic instantiations
+/// (`Builder<User>`, `Builder<Order>`, …) are requested.
 fn resolve_class_fully_inner(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
-    generic_args: &[String],
 ) -> Arc<ClassInfo> {
     let fqn = class.fqn();
-    let cache_key: ResolvedClassCacheKey = (fqn, generic_args.to_vec());
+    let cache_key: ResolvedClassCacheKey = (fqn, Vec::new());
 
     // ── Reload raw class from class_loader ──────────────────────────
     // Callers sometimes pass a ClassInfo that has already been through
