@@ -6393,3 +6393,71 @@ async fn test_array_shape_attribute_union_with_false() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn test_array_shape_key_completion_from_config_return_type() {
+    let (backend, _dir) = crate::common::create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "config/database.php",
+            "<?php\nreturn [\n    'default' => env('DB_CONNECTION', 'mysql'),\n    'connections' => [\n        'mysql' => [\n            'host' => env('DB_HOST', '127.0.0.1'),\n            'port' => env('DB_PORT', 3306),\n        ],\n    ],\n];\n",
+        )],
+    );
+
+    let uri = Url::parse("file:///test_config_shape.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function test(): void {\n",
+        "    $mysql = config('database.connections.mysql');\n",
+        "    $mysql['\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 3,
+                    character: 12,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return completions for config array shape keys"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            assert!(
+                labels.contains(&"host"),
+                "Should suggest 'host' from config shape, got {:?}",
+                labels
+            );
+            assert!(
+                labels.contains(&"port"),
+                "Should suggest 'port' from config shape, got {:?}",
+                labels
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
