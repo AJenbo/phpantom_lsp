@@ -1507,13 +1507,12 @@
 <h2 id="before-submitting-a-pr">Before Submitting a PR<a class="headerlink" href="#before-submitting-a-pr" title="Permanent link">&para;</a></h2>
 <p>All six CI checks must pass with zero warnings and zero failures:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span><span class="nb">test</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--tests<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--check
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/demo.php
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>php<span class="w"> </span>-d<span class="w"> </span>zend.assertions<span class="o">=</span><span class="m">1</span><span class="w"> </span>examples/demo.php
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--all-targets<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--check
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/demo.php
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>php<span class="w"> </span>-d<span class="w"> </span>zend.assertions<span class="o">=</span><span class="m">1</span><span class="w"> </span>examples/demo.php
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
 </code></pre></div>
 <p>Note that clippy runs twice, once for library code and once including test code. The <code>php -l</code> check ensures <code>examples/demo.php</code> remains valid PHP. The <code>php -d zend.assertions=1</code> run executes <code>runDemoAssertions()</code> to verify that scaffolding stubs actually return what their docblocks claim. The final <code>php -l</code> and <code>phpantom_lsp analyze</code> runs check <code>examples/laravel/</code> for syntax errors and diagnostic regressions. The analyze run must report <code>[OK] No errors</code>.</p>
 <h2 id="code-style">Code Style<a class="headerlink" href="#code-style" title="Permanent link">&para;</a></h2>
