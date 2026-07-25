@@ -1023,10 +1023,10 @@ fn resolve_class_fully_returns_same_as_base_when_no_providers() {
 // ── evict_fqn / depends_on_any tests ────────────────────────────────
 
 /// Helper: create a bare cache store for eviction tests.
-/// `evict_fqn` operates on the inner [`ResolvedCacheInner`], not the
-/// `Arc<Mutex<…>>` wrapper used at runtime.
-fn make_cache() -> ResolvedCacheInner {
-    ResolvedCacheInner::default()
+/// `evict_fqn` operates on the inner [`cache::ResolvedCacheInner`], not
+/// the `Arc<Mutex<…>>` wrapper used at runtime.
+fn make_cache() -> cache::ResolvedCacheInner {
+    cache::ResolvedCacheInner::default()
 }
 
 #[test]

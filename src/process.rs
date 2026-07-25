@@ -1,5 +1,7 @@
-//! Spawning external tool processes (PHPStan, PHPCS, Mago) with a
-//! timeout and deadlock-safe stdout/stderr draining.
+//! Shared infrastructure for external tool proxies (PHPStan, PHPCS,
+//! Mago): process spawning with a timeout and deadlock-safe
+//! stdout/stderr draining, binary auto-detection, and tool-reported
+//! path matching.
 
 /// Result of running an external command via [`run_command_with_timeout`].
 #[derive(Debug)]
@@ -122,9 +124,130 @@ pub fn run_command_with_timeout(
     })
 }
 
+// ── Binary location ─────────────────────────────────────────────────
+
+/// Auto-detect an external tool binary: `<bin_dir>/<binary_name>` under
+/// the workspace root (Composer's bin-dir, default `vendor/bin`), then
+/// `$PATH`.
+pub fn auto_detect_binary(
+    workspace_root: Option<&std::path::Path>,
+    bin_dir: Option<&str>,
+    binary_name: &str,
+) -> Option<std::path::PathBuf> {
+    // Check the Composer bin directory first.
+    if let Some(root) = workspace_root {
+        let bin = bin_dir.unwrap_or("vendor/bin");
+        let candidate = root.join(bin).join(binary_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    // Fall back to $PATH.
+    which(binary_name).ok()
+}
+
+/// Simple `which`-like lookup: search `$PATH` for an executable with
+/// the given name.
+pub fn which(binary_name: &str) -> Result<std::path::PathBuf, String> {
+    let path_var = std::env::var("PATH").map_err(|_| "PATH not set".to_string())?;
+
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(binary_name);
+        if candidate.is_file() && is_executable(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!("{} not found on PATH", binary_name))
+}
+
+/// Check whether a file is executable.
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &std::path::Path) -> bool {
+    true
+}
+
+// ── Path matching ───────────────────────────────────────────────────
+
+/// Check whether two file paths refer to the same file.
+///
+/// External tools normalize paths to absolute form. We compare by
+/// checking suffix matches (one path ends with the other) to handle
+/// cases where one path is relative and the other is absolute, or
+/// where symlinks produce different prefixes.
+pub fn paths_match(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    // Normalize separators for comparison.
+    let a_norm = a.replace('\\', "/");
+    let b_norm = b.replace('\\', "/");
+    if a_norm == b_norm {
+        return true;
+    }
+    // Check suffix match (one is a suffix of the other), requiring a
+    // path separator boundary so that e.g. "AFoo.php" does not match "Foo.php".
+    a_norm.ends_with(&format!("/{}", b_norm)) || b_norm.ends_with(&format!("/{}", a_norm))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── paths_match ─────────────────────────────────────────────────
+
+    #[test]
+    fn paths_match_identical() {
+        assert!(paths_match(
+            "/home/user/project/src/Foo.php",
+            "/home/user/project/src/Foo.php"
+        ));
+    }
+
+    #[test]
+    fn paths_match_suffix() {
+        assert!(paths_match("/home/user/project/src/Foo.php", "src/Foo.php"));
+    }
+
+    #[test]
+    fn paths_match_reverse_suffix() {
+        assert!(paths_match("src/Foo.php", "/home/user/project/src/Foo.php"));
+    }
+
+    #[test]
+    fn paths_match_different_files() {
+        assert!(!paths_match(
+            "/home/user/project/src/Foo.php",
+            "src/Bar.php"
+        ));
+    }
+
+    #[test]
+    fn paths_match_windows_separators() {
+        assert!(paths_match(
+            "C:\\Users\\project\\src\\Foo.php",
+            "src/Foo.php",
+        ));
+    }
+
+    #[test]
+    fn paths_match_rejects_partial_filename_suffix() {
+        assert!(!paths_match("/project/src/AFoo.php", "Foo.php",));
+    }
+
+    #[test]
+    fn paths_match_rejects_partial_dirname_suffix() {
+        assert!(!paths_match("/project/src/Foo.php", "rc/Foo.php",));
+    }
 
     /// A child that writes far more than the OS pipe buffer (~64 KB)
     /// must not deadlock: the reader threads keep the pipe drained while
