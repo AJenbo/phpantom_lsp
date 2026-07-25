@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784957071188,
+  "lastUpdate": 1784957310775,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -119039,6 +119039,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.215,
             "range": "± 0.031",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "8ed83dcc30f21ec3a8f74aa75841cb82276bdc31",
+          "message": "fix: wire config resolver into array shape key completion\n\nThe array shape completion path constructed its Loaders without the\nconfig_resolver closure, so variables assigned from config() calls\ndid not offer array key completions even though hover showed the\ncorrect array shape type. Pass the config resolver through so\n$mysql['...'] offers the expected keys.",
+          "timestamp": "2026-07-25T00:17:26-05:00",
+          "tree_id": "150b92ffccd0c816c300932a4205aaffc2800d28",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8ed83dcc30f21ec3a8f74aa75841cb82276bdc31"
+        },
+        "date": 1784957307320,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 5.395,
+            "range": "± 0.182",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.051,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.123,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.171,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.252,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.319,
+            "range": "± 0.023",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.167,
+            "range": "± 0.042",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.222,
+            "range": "± 0.118",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.137,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.059,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.056,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.081,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.406,
+            "range": "± 0.069",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.168,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.319,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.08,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.054,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.127,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.131,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.103,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.207,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.108,
+            "range": "± 0.024",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 6.158,
+            "range": "± 0.398",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.113,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.047,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.045,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 77.059,
+            "range": "± 2.055",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.739,
+            "range": "± 0.046",
             "unit": "ms"
           }
         ]
