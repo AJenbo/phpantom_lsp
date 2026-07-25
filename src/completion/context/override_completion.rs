@@ -722,24 +722,50 @@ fn preceded_by_use_keyword_bytes(bytes: &[u8], keyword_start: usize) -> bool {
     check_keyword_ending_at_bytes(bytes, before, b"use")
 }
 
-fn has_const_keyword_before_name(bytes: &[u8], pos: usize) -> bool {
+pub(super) fn has_const_keyword_before_name(bytes: &[u8], pos: usize) -> bool {
     let mut line_start = pos;
     while line_start > 0 && bytes[line_start - 1] != b'\n' {
         line_start -= 1;
     }
-    bytes[line_start..pos]
+    // Find the standalone `const` keyword governing this line (skipping
+    // `use const` imports).
+    let Some(const_end) = bytes[line_start..pos]
         .windows(b"const".len())
         .enumerate()
-        .any(|(idx, window)| {
+        .find_map(|(idx, window)| {
             if window != b"const" {
-                return false;
+                return None;
             }
             let start = line_start + idx;
             let end = start + b"const".len();
-            (start == 0 || !is_ident_byte(bytes[start - 1]))
-                && (end >= bytes.len() || !is_ident_byte(bytes[end]))
-                && !preceded_by_use_keyword_bytes(bytes, start)
+            let is_word = (start == 0 || !is_ident_byte(bytes[start - 1]))
+                && (end >= bytes.len() || !is_ident_byte(bytes[end]));
+            (is_word && !preceded_by_use_keyword_bytes(bytes, start)).then_some(end)
         })
+    else {
+        return false;
+    };
+    // A declarator *name* follows `const` or a top-level `,`; the cursor is
+    // in the initializer once a top-level `=` is seen (until the next
+    // comma). `const MAX = PHP_INT_M|` is a value position, not a name.
+    !in_const_initializer(bytes, const_end, pos)
+}
+
+/// Whether the byte range `from..pos` (starting just after a `const`
+/// keyword) ends inside a declarator initializer rather than a name slot.
+fn in_const_initializer(bytes: &[u8], from: usize, pos: usize) -> bool {
+    let mut depth = 0i32;
+    let mut in_value = false;
+    for &b in &bytes[from..pos] {
+        match b {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => in_value = false,
+            b'=' if depth == 0 => in_value = true,
+            _ => {}
+        }
+    }
+    in_value
 }
 
 /// Property name after `$` on a property declaration line (not a parameter).
@@ -773,10 +799,13 @@ fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> 
         return false;
     }
 
-    if check_keyword_ending_at_bytes(bytes, i, b"fn")
-        || check_keyword_ending_at_bytes(bytes, i, b"case")
-    {
+    if check_keyword_ending_at_bytes(bytes, i, b"fn") {
         return true;
+    }
+    // `case` names an enum case (a member) but also labels a `switch`
+    // branch, where a class/const/enum name completion is wanted.
+    if check_keyword_ending_at_bytes(bytes, i, b"case") {
+        return case_is_enum_declaration(bytes, i);
     }
     if check_keyword_ending_at_bytes(bytes, i, b"function") {
         return !preceded_by_use_keyword_bytes(bytes, i - "function".len());
@@ -785,6 +814,40 @@ fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> 
         return !preceded_by_use_keyword_bytes(bytes, i - "const".len());
     }
     has_const_keyword_before_name(bytes, i)
+}
+
+/// Whether the `case` keyword ending at `keyword_end` declares an enum case
+/// (directly inside an `enum` body) rather than a `switch` branch label.
+/// Scans back to the nearest enclosing unmatched `{` and checks whether it
+/// opens an enum.
+pub(super) fn case_is_enum_declaration(bytes: &[u8], keyword_end: usize) -> bool {
+    let mut depth = 0i32;
+    let mut k = keyword_end - "case".len();
+    while k > 0 {
+        k -= 1;
+        match bytes[k] {
+            b'}' => depth += 1,
+            b'{' => {
+                if depth == 0 {
+                    return brace_opens_enum(bytes, k);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Whether the block opened by the `{` at `brace_pos` is an `enum` body,
+/// determined from the block header (the text back to the previous
+/// statement boundary).
+fn brace_opens_enum(bytes: &[u8], brace_pos: usize) -> bool {
+    let mut start = brace_pos;
+    while start > 0 && !matches!(bytes[start - 1], b';' | b'{' | b'}') {
+        start -= 1;
+    }
+    contains_ascii_word(&bytes[start..brace_pos], b"enum")
 }
 
 fn is_property_declaration_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {

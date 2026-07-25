@@ -340,6 +340,48 @@ pub(crate) fn parse_facade_accessor(content: &str) -> Option<FacadeAccessor> {
     })
 }
 
+/// Like [`parse_facade_accessor`] but scoped to the class named
+/// `class_name` within `content`.
+///
+/// A single file may declare several facades (or a facade alongside
+/// unrelated classes), so resolving the accessor for a specific facade
+/// must not pick up the first `getFacadeAccessor()` in the file. Returns
+/// `None` when no class of that name is present (e.g. the facade lives in
+/// another file).
+pub(crate) fn parse_facade_accessor_for_class(
+    content: &str,
+    class_name: &str,
+) -> Option<FacadeAccessor> {
+    with_parsed(content, |program, resolved| {
+        let return_value =
+            find_facade_accessor_return_in_class(Node::Program(program), class_name)?;
+        if let Some((text, _, _)) = super::helpers::extract_string_literal(return_value, content) {
+            return Some(FacadeAccessor::Alias(text.to_string()));
+        }
+        class_const_fqn(return_value, resolved).map(FacadeAccessor::Class)
+    })
+}
+
+/// Find the `getFacadeAccessor()` return value inside the class named
+/// `class_name` reachable from `node`.
+fn find_facade_accessor_return_in_class<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    class_name: &str,
+) -> Option<&'ast Expression<'arena>> {
+    if let Node::Class(class) = node
+        && bytes_to_str(class.name.value).eq_ignore_ascii_case(class_name)
+    {
+        return find_facade_accessor_return(node);
+    }
+    let mut found = None;
+    node.visit_children(|child| {
+        if found.is_none() {
+            found = find_facade_accessor_return_in_class(child, class_name);
+        }
+    });
+    found
+}
+
 /// Find the first return-statement value inside a `getFacadeAccessor()` method
 /// reachable from `node`.
 fn find_facade_accessor_return<'ast, 'arena>(

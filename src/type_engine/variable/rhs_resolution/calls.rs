@@ -1998,10 +1998,18 @@ fn facade_accessor_concrete_owner(
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(facade, class_loader, cache);
 
-    if let Some(concrete) = crate::virtual_members::laravel::parse_facade_accessor(content)
-        .and_then(facade_accessor_to_class_name)
-        .and_then(|name| class_loader(&name))
-        .filter(|class| class_has_method(class, method_name, class_loader, cache))
+    // When the facade is declared in the current file, read its
+    // `getFacadeAccessor()` return directly from source: the body walker
+    // that `try_infer_body_return_type` relies on is not always active in
+    // the hover/completion paths, and it honours the declared `: string`
+    // return type rather than the `::class` value we need. Scope the parse
+    // to the facade's own class so a file declaring several facades does
+    // not cross-resolve.
+    if let Some(concrete) =
+        crate::virtual_members::laravel::parse_facade_accessor_for_class(content, &facade.name)
+            .and_then(facade_accessor_to_class_name)
+            .and_then(|name| class_loader(&name))
+            .filter(|class| class_has_method(class, method_name, class_loader, cache))
     {
         return Some(Arc::unwrap_or_clone(concrete));
     }

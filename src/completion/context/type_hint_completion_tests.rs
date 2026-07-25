@@ -342,6 +342,51 @@ fn case_name_position_in_enum() {
 }
 
 #[test]
+fn switch_case_label_is_not_name_position() {
+    use super::is_function_or_const_name_position;
+    // A `case` inside a `switch` wants class/const/enum completion, unlike
+    // an enum-case declaration.
+    let src = "<?php\nfunction f($x) {\n    switch ($x) {\n        case Sta\n    }\n}";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 3,
+            character: 16
+        }
+    ));
+}
+
+#[test]
+fn const_initializer_is_not_name_position() {
+    use super::is_function_or_const_name_position;
+    // The right-hand side of a constant initializer is a value expression,
+    // so class/const completion (e.g. `PHP_INT_MAX`) must not be suppressed.
+    let src = "<?php\nclass Foo {\n    const MAX = PHP_INT_M\n}";
+    assert!(!is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 25
+        }
+    ));
+}
+
+#[test]
+fn second_const_declarator_is_name_position() {
+    use super::is_function_or_const_name_position;
+    // A subsequent declarator name in a `const A = 1, B` list is still a
+    // name position even though a `const` value precedes it on the line.
+    let src = "<?php\nclass Foo {\n    const A = 1, B\n}";
+    assert!(is_function_or_const_name_position(
+        src,
+        Position {
+            line: 2,
+            character: 18
+        }
+    ));
+}
+
+#[test]
 fn property_name_after_dollar_is_not_function_name_position() {
     use super::is_function_or_const_name_position;
     // Property names use `$`; class completion already suppresses on `$`.
