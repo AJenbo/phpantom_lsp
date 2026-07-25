@@ -271,10 +271,11 @@ pub(crate) fn find_matching_backward(
 /// Collapse multi-line method chains around the cursor into a single line.
 ///
 /// When the cursor line (after trimming leading whitespace) begins with
-/// `->` or `?->`, this function walks backwards through preceding lines
-/// that are also continuations, plus the base expression line, and joins
-/// them into one flattened string.  The returned column is the cursor's
-/// position within that flattened string.
+/// `->` or `?->`, or closes a multi-line argument immediately before one
+/// of those operators, this function walks backwards through preceding
+/// lines that are also continuations, plus the base expression line, and
+/// joins them into one flattened string.  The returned column is the
+/// cursor's position within that flattened string.
 ///
 /// If the cursor line is not a continuation, the original line and column
 /// are returned unchanged.
@@ -290,10 +291,15 @@ pub(crate) fn collapse_continuation_lines(
 ) -> (String, usize) {
     let line = lines[cursor_line];
     let trimmed = line.trim_start();
+    let same_line_continuation_prefix = same_line_continuation_prefix(trimmed);
 
-    // Only collapse when the cursor line is a continuation (starts with
-    // `->` or `?->` after optional whitespace).
-    if !trimmed.starts_with("->") && !trimmed.starts_with("?->") {
+    // Only collapse when the cursor line is a continuation. Besides the
+    // direct form (`->foo`), this includes lines like `})->foo` where the
+    // cursor is continuing a call whose closure argument ended on this line.
+    if !trimmed.starts_with("->")
+        && !trimmed.starts_with("?->")
+        && same_line_continuation_prefix.is_none()
+    {
         return (line.to_string(), cursor_col);
     }
 
@@ -336,11 +342,23 @@ pub(crate) fn collapse_continuation_lines(
             start -= 1;
 
             // Count paren/brace balance from `start` up to (but not
-            // including) the cursor line.
+            // including) the cursor line. For same-line continuations
+            // like `})->foo`, include the closers before the operator.
             let mut paren_depth: i32 = 0;
             let mut brace_depth: i32 = 0;
             for line in lines.iter().take(cursor_line).skip(start) {
                 for ch in line.chars() {
+                    match ch {
+                        '(' => paren_depth += 1,
+                        ')' => paren_depth -= 1,
+                        '{' => brace_depth += 1,
+                        '}' => brace_depth -= 1,
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(prefix) = same_line_continuation_prefix {
+                for ch in prefix.chars() {
                     match ch {
                         '(' => paren_depth += 1,
                         ')' => paren_depth -= 1,
@@ -407,4 +425,29 @@ pub(crate) fn collapse_continuation_lines(
     prefix.push_str(trimmed);
 
     (prefix, new_col)
+}
+
+fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
+    let mut end = 0;
+    let mut saw_closer = false;
+    for (idx, ch) in trimmed.char_indices() {
+        match ch {
+            ')' | '}' | ']' => {
+                saw_closer = true;
+                end = idx + ch.len_utf8();
+            }
+            ' ' | '\t' if saw_closer => {
+                end = idx + ch.len_utf8();
+            }
+            '-' | '?' if saw_closer => {
+                let rest = &trimmed[idx..];
+                if rest.starts_with("->") || rest.starts_with("?->") {
+                    return Some(&trimmed[..end]);
+                }
+                return None;
+            }
+            _ => return None,
+        }
+    }
+    None
 }

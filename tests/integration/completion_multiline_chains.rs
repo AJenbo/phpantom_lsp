@@ -531,3 +531,31 @@ async fn test_multiline_chain_with_closure_arg() {
         "Should offer Collection::filter() after chain with closure args, got: {names:?}"
     );
 }
+
+#[tokio::test]
+async fn test_multiline_chain_same_line_after_closure_arg_close() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///multiline_closure_same_line.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Collection {\n",
+        "    public function map(callable $fn): static { return $this; }\n",
+        "    public function all(): array { return []; }\n",
+        "}\n",
+        "class Processor {\n",
+        "    public function items(): Collection { return new Collection(); }\n",
+        "    public function run(): void {\n",
+        "        $this->items()\n",
+        "            ->map(function ($x) {\n",
+        "                return $x;\n",
+        "            })->a\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let names = complete_at(&backend, &uri, text, 11, 17).await;
+    assert!(
+        names.iter().any(|n| n.starts_with("all(")),
+        "Should offer Collection::all() after same-line closure close, got: {names:?}"
+    );
+}

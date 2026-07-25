@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Completion works after closing a multi-line closure argument on the same line as the next chain operator.** Typing `->` immediately after a call like `->map(function (...) { ... })->` now resolves the full receiver instead of returning no member suggestions until the operator is moved to a new line. Contributed by @calebdw.
 - **Deprecated enum cases are recognized.** Enum cases annotated with `@deprecated` or `#[Deprecated]` now carry deprecation metadata, so usages like `self::Low` can be highlighted as deprecated in contextual semantic-token mode. Contributed by @calebdw.
 - **Class constant accesses use constant semantic highlighting.** `self::CONSTANT`, `static::CONSTANT`, `parent::CONSTANT`, and `ClassName::CONSTANT` now emit the `enumMember` semantic token instead of being colored as properties, while `ClassName::$property` still emits `property`. Contributed by @calebdw.
 - **PHP attributes use decorator semantic highlighting.** Attribute class names in `#[...]` now emit the `decorator` semantic token instead of `class`, so editor themes can color attributes differently from normal class references. Contributed by @calebdw.
