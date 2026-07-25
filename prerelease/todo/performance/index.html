@@ -3235,18 +3235,20 @@ holds ~247 KB per resolved class.</p>
 <p>Two compounding causes:</p>
 <ol>
 <li>
-<p><strong>Inheritance flattening stores a full member copy per class.</strong> Each
+<p><strong>Inheritance flattening stores a member slot per class.</strong> Each
    fully-resolved class stores the complete flattened member set (own +
-   trait + parent + interface + mixin). On the measured project that is
-   648 K method slots across 3 K classes (~214 methods/class), even
-   though only ~20 K unique <code>MethodInfo</code> values exist in <code>method_store</code>.
-   <code>resolve_class_with_inheritance</code> (<code>inheritance.rs</code>) shares the
-   <code>Arc&lt;MethodInfo&gt;</code> for any inherited method that does not mention a
-   substituted template parameter, so most slots point back at the base
-   class, but every method that does reference a template param (and
-   every class that overrides or enriches one) still holds a distinct
-   allocation. The flattening itself is what the separated-metadata fix
-   below would eliminate.</p>
+   trait + parent + interface + mixin), so a project with ~3 K classes
+   at ~214 members each holds ~648 K method slots. The distinct
+   <em>allocations</em> behind those slots are now heavily shared for methods,
+   properties, and constants alike: a slot the merge does not rewrite
+   points back at its source <code>Arc&lt;MethodInfo&gt;</code>/<code>Arc&lt;PropertyInfo&gt;</code>/
+   <code>Arc&lt;ConstantInfo&gt;</code>, and the copies a merge does produce (template
+   substitution, trait / interface / enrichment merges, Eloquent Builder
+   and scope forwarding) are interned so value-identical results
+   collapse to one allocation with a shared parameter list. What remains
+   per class is the flattened <code>Vec&lt;Arc&lt;_&gt;&gt;</code> itself — one pointer slot
+   per visible member — which the separated-metadata fix below would
+   eliminate.</p>
 </li>
 <li>
 <p><strong>The cache is retained for the whole session, unbounded.</strong> Eager
@@ -3267,14 +3269,19 @@ holds ~247 KB per resolved class.</p>
    cycles are broken by the cache's in-flight set, which <code>clear()</code>
    deliberately leaves untouched, so clearing mid-resolution cannot
    resurrect unbounded recursion. <strong>Low-Medium.</strong></li>
-<li><strong>Separated metadata.</strong> The structural fix: store method
-   identifier <code>Atom</code>s per class and keep a single global <code>MethodInfo</code>
-   store, resolving members on demand instead of flattening a cloned copy
-   into every class (Mago's model). Eliminates the flattening entirely.
-   This was the endgame of the (now-completed) eager-resolution track;
-   profiling closed it as not worth the rewrite for analysis <em>speed</em>,
-   but it remains a valid direction for <em>memory</em> if the cache bound above
-   proves insufficient. <strong>High.</strong></li>
+<li><strong>Separated metadata.</strong> The structural fix for the remaining
+   per-class pointer vectors: store member identifier <code>Atom</code>s per class
+   and keep a single global member store, resolving members on demand
+   instead of flattening a per-class <code>Vec</code> of pointers (Mago's model).
+   With member <em>allocations</em> already shared and interned across methods,
+   properties, and constants, the win left here is the pointer slots
+   themselves. This needs substitution moved to query time to fit
+   PHPantom's transform-on-inherit model (an inherited member is not
+   byte-identical to the declaring class's once template substitution or
+   bare-<code>self</code> rewriting applies, so a pure <code>(fqn, name)</code> redirect would
+   lose the transform). Profiling closed this as not worth the rewrite
+   for analysis <em>speed</em>; it remains a valid direction for <em>memory</em> if the
+   cache bound above proves insufficient. <strong>High.</strong></li>
 </ol>
 <hr />
 <h2 id="p34-eager-class-population-is-single-threaded">P34. Eager class population is single-threaded<a class="headerlink" href="#p34-eager-class-population-is-single-threaded" title="Permanent link">&para;</a></h2>
