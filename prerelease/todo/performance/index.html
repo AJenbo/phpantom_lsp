@@ -850,7 +850,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../eager-resolution/" class="md-nav__link">
+      <a href="../eager-resolution.md" class="md-nav__link">
         
   
   
@@ -1619,6 +1619,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2365,6 +2376,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2440,6 +2462,10 @@ so the vast majority of reads are wasted.</p>
 <p>The same pattern applies to Phase 5 (PSR-4 directory walk for files
 not in the classmap). The pre-filter I/O is the bottleneck; the
 parse step processes very few files and is fast.</p>
+<p>Note that once the full workspace index is ready,
+<code>find_implementors</code> answers from Phase 1 alone — Phases 3 and 5
+only run during the startup window before indexing completes, which
+narrows how often this cost is paid.</p>
 <h3 id="trade-off">Trade-off<a class="headerlink" href="#trade-off" title="Permanent link">&para;</a></h3>
 <p>Thread spawning overhead is only worthwhile when the candidate set
 is large. Skip parallelism when the candidate count is below a
@@ -2459,7 +2485,10 @@ Builder instantiations in a single file this adds up.</p>
 <p>Either introduce a separate base-resolution cache (keyed by FQN),
 or restructure so <code>build_scope_methods_for_builder</code> accepts the
 already-resolved model class from the caller (which may already
-have it from the resolved-class cache).</p>
+have it from the resolved-class cache). The caller
+(<code>inject_scopes_and_model_methods</code>) already has the resolved-class
+cache in scope — it passes it to <code>inject_model_virtual_methods</code>
+but not to this function.</p>
 <hr />
 <h2 id="p14-eager-docblock-parsing-into-structured-fields">P14. Eager docblock parsing into structured fields<a class="headerlink" href="#p14-eager-docblock-parsing-into-structured-fields" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
@@ -2468,10 +2497,13 @@ have it from the resolved-class cache).</p>
 codebase and feature set may change significantly before then.</p>
 </blockquote>
 <p>Currently <code>ClassInfo::class_docblock</code> stores the raw docblock
-string. Every consumer that needs virtual members (<code>@method</code>,
-<code>@property</code>, <code>@property-read</code>, <code>@property-write</code>) re-parses the
-raw text via <code>PHPDocProvider</code>. Hover, completion, and diagnostics
-all trigger this independently.</p>
+string. Consumers that need virtual members (<code>@method</code>,
+<code>@property</code>, <code>@property-read</code>, <code>@property-write</code>) re-parse the
+raw text via <code>PHPDocProvider</code>, and the inheritance merge re-parses
+it again (<code>reserve_method_tag_names</code>). Since the resolved-class
+cache landed, this fires only when a class is (re-)resolved after
+a cache miss or eviction rather than on every request, so the win
+is smaller than when this item was filed.</p>
 <p>Parse the class-level docblock once during extraction and store the
 structured results directly on ClassInfo:</p>
 <ul>
@@ -2490,9 +2522,10 @@ structured results directly on ClassInfo:</p>
 </li>
 <li>
 <p><strong>Eliminate repeated parsing.</strong> Virtual member resolution
-   currently re-parses the same docblock text on every completion,
-   hover, and diagnostic pass. Parsing once during extraction
-   removes this redundant work.</p>
+   re-parses the same docblock text every time the class is
+   resolved into the resolved-class cache (and again in the
+   inheritance merge). Parsing once during extraction removes
+   this redundant work.</p>
 </li>
 <li>
 <p><strong>Simpler consumer code.</strong> Consumers iterate structured fields
@@ -2515,9 +2548,11 @@ that single mutation they are never written again.</p>
 <p>Because the PHP version is not known at construction time (it comes
 from <code>composer.json</code> / <code>.phpantom.toml</code>, read during <code>initialized</code>),
 the maps are currently wrapped in <code>parking_lot::RwLock</code> so that
-<code>set_php_version</code> can call <code>.write().retain(…)</code>. Every subsequent
-read — ~24 call sites across completion, resolution, diagnostics,
-hover, and definition — acquires a shared read lock. On the
+<code>set_php_version</code> can call <code>.write().retain(…)</code>. The maps are now
+<code>Arc&lt;RwLock&lt;…&gt;&gt;</code>, shared across worker and request clones instead
+of deep-copied per thread, so only the read-lock cost remains.
+Every read — ~24 call sites across completion, resolution,
+diagnostics, hover, and definition — acquires a shared read lock. On the
 uncontended path this is a single atomic CAS (~1-5 ns), so the
 cost is negligible in practice, but it is architecturally wasteful
 for data that never changes after startup.</p>
@@ -2558,7 +2593,7 @@ is restructured for other reasons.</p>
 <hr />
 <h2 id="p16-pre-parsed-stub-format-eliminate-raw-php-embedding">P16. Pre-parsed stub format (eliminate raw PHP embedding)<a class="headerlink" href="#p16-pre-parsed-stub-format-eliminate-raw-php-embedding" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Effort: Medium-High</strong></p>
-<p>The 630 phpstorm-stubs PHP files are embedded as raw source via
+<p>The ~530 phpstorm-stubs PHP files are embedded as raw source via
 <code>include_str!</code> (~9.8 MB in <code>.rodata</code>). This has three costs:</p>
 <ol>
 <li>
@@ -2726,9 +2761,14 @@ copy on every <code>didChange</code> event. Measured regression from <code>6a073
 </tr>
 </tbody>
 </table>
-<p>The resolved names are currently consumed only by diagnostics (which
-run asynchronously) and <code>FileContext::resolve_name_at()</code>. Nothing on
-the completion hot path requires this data to be computed eagerly.</p>
+<p>The resolved names are now consumed by many features through
+<code>resolve_name_at()</code> (rename, references, semantic tokens,
+go-to-definition, type hierarchy, highlight) and directly by
+function resolution and deprecated diagnostics — but all of those
+are on-demand request handlers. Nothing on the didChange or
+completion hot path requires this data to be computed eagerly, so
+lazy per-file-version resolution remains viable; it just has more
+consumers to invalidate correctly than when this was filed.</p>
 <h3 id="fix_2">Fix<a class="headerlink" href="#fix_2" title="Permanent link">&para;</a></h3>
 <p>Defer name resolution out of <code>update_ast_inner</code>. Options:</p>
 <ul>
@@ -2767,29 +2807,21 @@ so this fast-path would apply to the majority of checks.</p>
 <ol>
 <li>
 <p>Add a thread-local or per-request
-   <code>HashMap&lt;(String, String), bool&gt;</code> that caches the result of
+   <code>HashMap&lt;(Atom, Atom), bool&gt;</code> that caches the result of
    "is type A a subtype of type B?" lookups. Clear the map at the
-   start of each completion/hover/diagnostic request.</p>
+   start of each completion/hover/diagnostic request. Class names
+   are interned now (<code>PhpType::Named</code> carries an <code>Atom</code>, <code>ClassInfo</code>
+   caches its FQN as an <code>Atom</code>), so the keys are <code>Copy</code> and
+   identity-hashed.</p>
 </li>
 <li>
 <p>Add a <code>has_template_params: bool</code> flag (or equivalent) to
    <code>ClassInfo</code> or type representations. Set it during parsing when
    <code>@template</code> tags or generic syntax are present. Before running
    <code>apply_substitution</code>, check the flag and skip the substitution
-   walk entirely when it is <code>false</code>.</p>
-</li>
-<li>
-<p>Intern class name strings. PHPantom creates many copies of the
-   same class name (e.g. <code>"Illuminate\\Database\\Eloquent\\Builder"</code>)
-   across <code>ClassInfo</code>, type strings, and lookup keys. Mago already
-   uses <code>Atom</code> (an interned string type) in its crates, and names
-   flowing through <code>mago-names</code> / <code>mago-syntax</code> are already atoms.
-   Using <code>Atom</code> or <code>Arc&lt;str&gt;</code> for class names in PHPantom's own
-   data structures would reduce memory and make the subtype cache
-   keys cheaper to hash and compare. Now that <code>PhpType</code> is the
-   structured type representation throughout the codebase, interning
-   the name strings inside each <code>PhpType</code> node (replacing owned
-   <code>String</code> with <code>Atom</code> or <code>Arc&lt;str&gt;</code>) is a natural next step.</p>
+   walk entirely when it is <code>false</code>. (Today the equivalent guarding
+   is ad hoc emptiness checks on <code>template_params</code> and on the
+   substitution map.)</p>
 </li>
 </ol>
 <hr />
@@ -2920,19 +2952,18 @@ diagnostic layer.</p>
 <hr />
 <h2 id="p22-signature-change-re-queues-slow-diagnostics-for-every-open-file">P22. Signature change re-queues slow diagnostics for every open file<a class="headerlink" href="#p22-signature-change-re-queues-slow-diagnostics-for-every-open-file" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p>When <code>update_ast</code> detects that a class signature changed,
-<code>schedule_diagnostics_for_open_files</code> (<code>src/diagnostics/mod.rs:935</code>,
-called from <code>src/server.rs:589</code> and <code>:626</code>) queues <strong>all</strong> open
-files (minus the edited one) for a full slow-diagnostic pass —
-unknown classes, unknown members, argument checks. The per-file
-cost of that pass is the most expensive thing the server does (see
-the Appendix: tens of seconds on pathological files, hundreds of
-ms on ordinary ones).</p>
-<p>A user with 20 tabs open who adds a method to a class therefore
-pays 20 full-file analysis passes per signature-changing edit
-burst. Debouncing coalesces keystrokes, but the work is still
-O(open files) regardless of whether those files reference the
-edited class at all. During the burst the diagnostic worker
+<p>When a file is saved, <code>schedule_diagnostics_for_open_files</code>
+(<code>src/diagnostics/mod.rs</code>, called from <code>did_save</code> in
+<code>src/server.rs</code>) queues <strong>all</strong> open files (minus the saved one)
+for a full slow-diagnostic pass — unknown classes, unknown
+members, argument checks. The per-file cost of that pass is the
+most expensive thing the server does (see the Appendix: tens of
+seconds on pathological files, hundreds of ms on ordinary ones).</p>
+<p>A user with 20 tabs open therefore pays 20 full-file analysis
+passes per save, regardless of whether those files reference the
+edited class at all. (This used to fire on every signature-changing
+edit; it is now save-gated, which caps the frequency but not the
+O(open files) fan-out.) During the burst the diagnostic worker
 saturates blocking threads that completion/hover also need.</p>
 <h3 id="fix_4">Fix<a class="headerlink" href="#fix_4" title="Permanent link">&para;</a></h3>
 <p>Queue only files that can observe the change. The resolved-class
@@ -2996,6 +3027,10 @@ call sites re-resolves the receiver type once per site. Look at
 memoizing receiver-type resolution per (expression, offset) within
 a file, or sharing the forward-walk scope snapshot across both
 passes so the receiver type is computed once.</p>
+<p>A per-request callable-target cache now memoizes the
+class::method → target lookup, but it sits downstream of
+receiver-type resolution — the per-site receiver re-resolution
+this item describes is still unaddressed.</p>
 <hr />
 <h2 id="p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time">P27. <code>object</code>/<code>?object</code> call-return check re-resolves the subject a second time<a class="headerlink" href="#p27-objectobject-call-return-check-re-resolves-the-subject-a-second-time" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Low</strong></p>
@@ -3133,10 +3168,12 @@ waiting on the triggers above.</p>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
 <p>The cross-file reference candidate index (<code>reference_index</code>) stores
 one entry per matching span, each with its own cloned URI <code>String</code>
-plus <code>start</code>/<code>end</code> offsets and an <code>is_declaration</code> flag. The only
-consumer (<code>reference_candidate_uris_for_keys</code>) reads nothing but the
-distinct URIs per key; the offsets and the declaration flag are never
-read anywhere. Class and function spans additionally fan out into up
+plus <code>start</code>/<code>end</code> offsets and an <code>is_declaration</code> flag. It has two
+consumers: <code>reference_candidate_uris_for_keys</code> reads only the
+distinct URIs per key, and the inlay-hint reference counts
+(<code>ref_count</code> in <code>src/inlay_hints.rs</code>) count the non-declaration
+entries per key. The <code>start</code>/<code>end</code> offsets are never read
+anywhere. Class and function spans additionally fan out into up
 to three name keys each (FQN, source spelling, short name), each with
 its own entry copy. On a large project this multiplies out to
 millions of heap-allocated URI strings held for the whole session —
@@ -3145,10 +3182,12 @@ against the full-index memory aim — and the index is built on every
 <code>analyze</code> pipeline, where it is never queried.</p>
 <p>Two directions, pick one:</p>
 <ol>
-<li><strong>Shrink to what is consumed.</strong> Store deduplicated URIs per key
-   (e.g. <code>HashMap&lt;Key, HashSet&lt;Arc&lt;str&gt;&gt;&gt;</code> with per-file URI interning
-   so each file's URI is allocated once). Drop the unused fields.
-   Smallest change, keeps the current candidate-pruning design.</li>
+<li><strong>Shrink to what is consumed.</strong> Store per key the deduplicated
+   URIs plus a non-declaration span count (what the inlay-hint
+   consumer needs), e.g. <code>HashMap&lt;Key, HashMap&lt;Arc&lt;str&gt;, u32&gt;&gt;</code>
+   with per-file URI interning so each file's URI is allocated
+   once. Drop the unused offsets. Smallest change, keeps the
+   current candidate-pruning design.</li>
 <li><strong>Make the spans pay for themselves.</strong> Keep the per-span entries
    but have find-references consume them directly (the original
    O(k)-lookup goal), skipping the per-file symbol-map re-scan for
@@ -3157,8 +3196,10 @@ against the full-index memory aim — and the index is built on every
 </ol>
 <p>Also worth fixing while in there: building entries calls
 <code>file_context_at</code> (which clones the file's full use map) once per
-<code>self</code>/<code>static</code>/<code>parent</code> span; only the enclosing class and namespace
-are needed.</p>
+<code>self</code>/<code>static</code>/<code>parent</code> span (and in fallback paths for class and
+function spans); only the enclosing class and namespace are needed.
+Skipping the index build entirely in the <code>analyze</code> pipeline is a
+free win under either direction.</p>
 <hr />
 <h2 id="p32-vendor-package-scan-reads-every-file-twice-for-origin-classification">P32. Vendor package scan reads every file twice for origin classification<a class="headerlink" href="#p32-vendor-package-scan-reads-every-file-twice-for-origin-classification" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
@@ -3193,20 +3234,19 @@ when dropped: resolved-class cache ~748 MB, class indexes
 holds ~247 KB per resolved class.</p>
 <p>Two compounding causes:</p>
 <ol>
-<li><strong>Inheritance flattening deep-clones methods.</strong> Each fully-resolved
-   class stores the complete flattened member set (own + trait + parent</li>
 <li>
-<p>interface + mixin). On the measured project that is 648 K method
-   slots across 3 K classes (~214 methods/class), and <strong>82% of them are
-   distinct <code>MethodInfo</code> allocations</strong> even though only ~20 K unique
-   methods exist in <code>method_store</code>. The driver is
-   <code>resolve_class_with_inheritance</code> (<code>inheritance.rs</code>): when a class has
-   generic parameters (<code>level_subs</code> non-empty, i.e. nearly every
-   Eloquent subclass) it deep-clones <strong>every</strong> inherited parent method
-   and runs <code>apply_substitution_to_method</code> on it, regardless of whether
-   the method body actually references the substituted template
-   parameter. A method that never mentions the template param is cloned
-   for no reason.</p>
+<p><strong>Inheritance flattening stores a full member copy per class.</strong> Each
+   fully-resolved class stores the complete flattened member set (own +
+   trait + parent + interface + mixin). On the measured project that is
+   648 K method slots across 3 K classes (~214 methods/class), even
+   though only ~20 K unique <code>MethodInfo</code> values exist in <code>method_store</code>.
+   <code>resolve_class_with_inheritance</code> (<code>inheritance.rs</code>) shares the
+   <code>Arc&lt;MethodInfo&gt;</code> for any inherited method that does not mention a
+   substituted template parameter, so most slots point back at the base
+   class, but every method that does reference a template param (and
+   every class that overrides or enriches one) still holds a distinct
+   allocation. The flattening itself is what the separated-metadata fix
+   below would eliminate.</p>
 </li>
 <li>
 <p><strong>The cache is retained for the whole session, unbounded.</strong> Eager
@@ -3219,26 +3259,22 @@ holds ~247 KB per resolved class.</p>
 </ol>
 <p>Fixes, cheapest first (each stands alone):</p>
 <ol>
-<li><strong>Copy-on-write substitution.</strong> In the generic-substitution branch of
-   the inheritance merge, keep the original <code>Arc&lt;MethodInfo&gt;</code>
-   (<code>Arc::clone</code>) when the method references no key in <code>level_subs</code>;
-   only deep-clone + substitute the methods that actually mention a
-   template param. This collapses most of the 530 K distinct clones back
-   to shared <code>Arc</code>s and cuts both memory and merge CPU. Property and
-   constant merges have the same shape. <strong>Medium.</strong></li>
 <li><strong>Bound the resolved-class cache.</strong> After the workspace pass, the
    fully-flattened metadata for every project class does not need to stay
    resident. Either drop the cache when the pass finishes (interactive
-   requests re-resolve lazily) or make it an LRU with a size cap. Care is
-   needed not to reintroduce the re-entrant class-resolution recursion
-   that eager population (ER5) exists to prevent: a wholesale clear is
-   safe only once resolution can no longer recurse unboundedly, so an LRU
-   with a generous cap is the safer interim. <strong>Low-Medium.</strong></li>
-<li><strong>Separated metadata (ER5 Phase 4).</strong> The structural fix: store method
+   requests re-resolve lazily) or make it an LRU with a size cap. The
+   recursion-guard elimination made a wholesale clear safe: resolution
+   cycles are broken by the cache's in-flight set, which <code>clear()</code>
+   deliberately leaves untouched, so clearing mid-resolution cannot
+   resurrect unbounded recursion. <strong>Low-Medium.</strong></li>
+<li><strong>Separated metadata.</strong> The structural fix: store method
    identifier <code>Atom</code>s per class and keep a single global <code>MethodInfo</code>
    store, resolving members on demand instead of flattening a cloned copy
    into every class (Mago's model). Eliminates the flattening entirely.
-   Tracked in <code>eager-resolution.md</code>. <strong>High.</strong></li>
+   This was the endgame of the (now-completed) eager-resolution track;
+   profiling closed it as not worth the rewrite for analysis <em>speed</em>,
+   but it remains a valid direction for <em>memory</em> if the cache bound above
+   proves insufficient. <strong>High.</strong></li>
 </ol>
 <hr />
 <h2 id="p34-eager-class-population-is-single-threaded">P34. Eager class population is single-threaded<a class="headerlink" href="#p34-eager-class-population-is-single-threaded" title="Permanent link">&para;</a></h2>
@@ -3290,7 +3326,13 @@ diag workers after that fix:</p>
   in a shared vendor package) pay extra: eager population only walks
   classes from the indexed user files, so every vendor class is parsed
   lazily on first touch during the diagnostic pass, serialising workers
-  on the load path early in the run.</li>
+  on the load path early in the run. Measured on a large Laravel
+  project (release build, 32 threads): eager population covers only
+  ~1,300 user classes, and the diagnostic pass then resolves ~17,400
+  vendor classes lazily (~19 s of thread-CPU, roughly 30% of the
+  run's total CPU) with
+  6,425 cycle-break re-merges that eager dependency-first ordering
+  would have avoided (eager population itself hit only 3).</li>
 </ul>
 <p>Likely next steps, in rough value order: reduce clone traffic in the
 hot type-engine paths (share via <code>Arc</code>/<code>Cow</code> instead of cloning
@@ -3300,11 +3342,45 @@ LSP workspace diagnostics pass uses the same collectors and has the
 same ceiling. Re-measure with <code>perf</code> (frame-pointer build) or the
 CPU-sampling loop in the Appendix after any change.</p>
 <hr />
+<h2 id="p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache">P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache<a class="headerlink" href="#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Low</strong></p>
+<p>Six call sites on the diagnostic path call
+<code>resolve_class_with_inheritance</code> directly, re-running the full
+inheritance merge (traits, parent chain, generic substitution) on every
+call and discarding the result after reading a single member:</p>
+<ul>
+<li><code>src/diagnostics/undefined_variables/mod.rs</code> — by-reference parameter
+  positions for static, constructor, and instance calls (3 sites).</li>
+<li><code>src/diagnostics/type_errors/compatibility.rs</code> — the
+  Stringable/<code>__toString</code> acceptance check and the
+  <code>model-property&lt;Model&gt;</code> literal check (2 sites).</li>
+<li><code>src/class_lookup.rs</code> — the <code>model-property&lt;Model&gt;</code> literal subtype
+  check (1 site).</li>
+</ul>
+<p>Measured on a large Laravel project (release build, 32 threads): 25,676
+direct merge calls costing ~7 s of thread-CPU during the diagnostic
+pass, roughly 11% of the run's total CPU — while a resolved-class cache
+hit serves the same class in ~3 µs. The Stringable check is the likely
+hot one (it fires for every object-argument-to-string-parameter
+comparison).</p>
+<p>Route these through <code>resolve_class_fully_maybe_cached</code>; the
+resolved-class cache is active during diagnostic passes
+(<code>with_active_resolved_class_cache</code>), and <code>undefined_variables</code> has
+<code>self</code> (the <code>Backend</code>) in scope already. Note the cached result
+additionally includes interface members and virtual members. For these
+member-existence and parameter lookups that is a strict improvement
+(e.g. a <code>__toString</code> declared on an interface is currently missed), but
+verify the affected diagnostics against the fixture suites for
+unexpected acceptance changes.</p>
+<p>The provider-internal callers in <code>src/virtual_members/</code> and the
+interface merge inside <code>resolve_class_fully_inner</code> are intentional
+(they run <em>while</em> the cache entry is being built) and are out of scope.</p>
+<hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
-<p>Most remaining depth-cap issues are addressed by ER5 (class
-resolution). The forward walker loop iteration was addressed by the
-assignment-depth-bounded strategy. The items below are independent
-fixes that do not depend on either.</p>
+<p>Most remaining depth-cap issues were addressed by eager class
+population and the iterative resolution pipeline. The forward walker
+loop iteration was addressed by the assignment-depth-bounded strategy.
+The items below are independent fixes that do not depend on either.</p>
 
 
 
