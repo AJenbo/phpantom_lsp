@@ -719,22 +719,15 @@ fn offset_in_range(offset: u32, range: (u32, u32)) -> bool {
 }
 
 fn line_end_position(content: &str, byte_offset: usize) -> Position {
-    let line_start = content[..byte_offset]
-        .rfind('\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
     let line_end = content[byte_offset..]
         .find('\n')
         .map(|i| byte_offset + i)
         .unwrap_or(content.len());
 
-    Position {
-        line: content[..line_start]
-            .bytes()
-            .filter(|b| *b == b'\n')
-            .count() as u32,
-        character: content[line_start..line_end].chars().count() as u32,
-    }
+    // Delegate to the canonical converter so the `character` column is
+    // counted in UTF-16 code units (per the LSP spec), consistent with
+    // every other position the server emits.
+    offset_to_position(content, line_end)
 }
 
 /// Check whether the argument at `arg_offset` is a simple variable whose
@@ -1028,6 +1021,43 @@ class User {
         assert!(hints.iter().any(|hint| hint.position.line == 1));
         assert!(hints.iter().any(|hint| hint.position.line == 3));
         assert!(!hints.iter().any(|hint| hint.position.line == 2));
+    }
+
+    #[test]
+    fn declaration_count_hint_column_uses_utf16_units() {
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        // The declaration line ends with a non-BMP character (2 UTF-16
+        // code units, 1 Unicode scalar), so a chars-based column would be
+        // one short of the LSP-mandated UTF-16 column.
+        let content = "<?php\nclass User {} // \u{1F600}\n";
+
+        backend.update_ast(uri, content);
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        let hints = backend
+            .handle_inlay_hints(
+                uri,
+                content,
+                Range {
+                    start: Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 0,
+                    },
+                },
+            )
+            .unwrap_or_default();
+
+        let class_hint = hints
+            .iter()
+            .find(|hint| hint.position.line == 1)
+            .expect("expected a reference-count hint on the class declaration line");
+        // "class User {} // " is 17 UTF-16 units; the emoji adds 2 → 19.
+        assert_eq!(class_hint.position.character, 19);
     }
 
     #[test]
