@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784977554458,
+  "lastUpdate": 1785023815600,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21327,6 +21327,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "138bcf329dffd4517af68f95aae8a16cfa02a67c",
+          "message": "fix: add context-aware diagnostics for class-string<static>\n\nResolve self/static/$this/parent in parameter types to concrete\nclass names before the type compatibility check, so that\nclass-string<static> is properly validated instead of blanket-\nsuppressed.\n\nThe call-site context class is extracted from the call expression:\nClassName::method uses the named class, static::/self::/$this->\nuses the enclosing class, and parent:: uses its parent.  This\nturns class-string<static> into class-string<DeclaringClass>,\nletting the existing class-string covariance check flag provably\ninvalid arguments (unrelated classes) while still accepting child\nclasses and siblings.\n\nCloses #273",
+          "timestamp": "2026-07-25T18:41:03-05:00",
+          "tree_id": "826e07521076e84775ef56ad731206ce904c4416",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/138bcf329dffd4517af68f95aae8a16cfa02a67c"
+        },
+        "date": 1785023813251,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.9,
             "unit": "MiB"
           }
         ]
