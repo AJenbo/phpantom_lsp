@@ -421,6 +421,16 @@ perf report --stdio --no-children | head -80
 
 # Flamegraph (requires the `flamegraph` crate or perf-tools):
 perf script | flamegraph > /tmp/phpantom.svg
+
+# Instantaneous CPU utilisation over a run (% of one core, sampled
+# every 0.5 s), for machines where perf is unavailable
+# (kernel.perf_event_paranoid > 2):
+./target/release/phpantom_lsp analyze --project-root <dir> --no-colour \
+  >/dev/null 2>&1 & PID=$!; prev=0
+while kill -0 $PID 2>/dev/null; do
+  cur=$(awk '{print $14+$15}' /proc/$PID/stat 2>/dev/null) || break
+  [ -n "$cur" ] && echo $(( (cur - prev) * 2 )); prev=$cur; sleep 0.5
+done
 ```
 
 ### Pathological test file
@@ -964,27 +974,34 @@ current single populate thread.
 
 **Impact: Medium-High · Effort: Medium**
 
-Measured on a 32-core machine against a large Laravel project (release
-build): the `analyze` Phase 2 diagnostic pass runs at ~2 to ~13 cores,
-averaging roughly 4, despite spawning one worker per core with atomic
-work-stealing. Utilisation is lowest at the start of the pass and
-climbs as it progresses, which points at lock contention that eases as
-shared caches warm, rather than at work starvation. Likely suspects:
-`find_or_load_class` taking write locks while lazily parsing vendor
-files early in the pass, and write contention on the resolved-class
-cache and chain-resolution caches. The LSP workspace diagnostics pass
-uses the same collectors and likely has the same ceiling. Needs
-profiling to attribute the blocked time before picking a fix;
-re-measure after any change with the CPU-sampling loop in the Appendix.
+Measured on a 32-core machine against large Laravel projects (release
+build): the `analyze` Phase 2 diagnostic pass peaks around 14 cores and
+averages fewer, despite spawning one worker per core with atomic
+work-stealing. The original worst offender (every worker deep-cloning
+the embedded stub class/function/constant indexes twice per file via
+`clone_for_diagnostic_worker`) is fixed; the indexes are Arc-shared
+now. The remaining ceiling, per a frame-pointer `perf` profile of the
+diag workers after that fix:
 
-Projects that keep substantial code in `vendor/` (e.g. models shipped
-in a shared vendor package that the application depends on) hit this
-harder: eager population only walks classes from the indexed user
-files, so every vendor class is parsed lazily on first touch during
-the diagnostic pass. The observed CPU shape on such a project is
-bursty (alternating stalls and full-core bursts) consistent with one
-worker holding the load lock while the rest wait, then all proceeding
-until the next unparsed vendor class.
+- ~18% of worker on-CPU time is still malloc/free/memmove, now diffuse:
+  `PhpType`, `MethodInfo`, and `ParameterInfo` clones throughout the
+  type engine, plus glibc malloc arena contention (visible as
+  `arena_get2`/futex kernel time) when 32 workers allocate heavily.
+- Read-lock contention on `fqn_class_index` and `class_not_found_cache`
+  is measurable but small (~1.5% on-CPU in the rwlock slow paths).
+- Projects that keep substantial code in `vendor/` (e.g. models shipped
+  in a shared vendor package) pay extra: eager population only walks
+  classes from the indexed user files, so every vendor class is parsed
+  lazily on first touch during the diagnostic pass, serialising workers
+  on the load path early in the run.
+
+Likely next steps, in rough value order: reduce clone traffic in the
+hot type-engine paths (share via `Arc`/`Cow` instead of cloning
+`PhpType`/member vectors), include depended-upon vendor classes in
+eager population, and only then consider allocator-level fixes. The
+LSP workspace diagnostics pass uses the same collectors and has the
+same ceiling. Re-measure with `perf` (frame-pointer build) or the
+CPU-sampling loop in the Appendix after any change.
 
 ---
 

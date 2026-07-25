@@ -491,7 +491,7 @@ pub struct Backend {
     /// Consulted by `find_or_load_class` as a final fallback after the
     /// `uri_classes_index` and PSR-4 resolution.  Stub files are parsed lazily on
     /// first access and cached in `uri_classes_index` under `phpantom-stub://` URIs.
-    pub(crate) stub_index: RwLock<CiMap<&'static str>>,
+    pub(crate) stub_index: Arc<RwLock<CiMap<&'static str>>>,
     /// Cache of fully-resolved classes (inheritance + virtual members).
     ///
     /// Keyed by fully-qualified class name.  Populated lazily by
@@ -601,7 +601,7 @@ pub struct Backend {
     /// Filtered at startup via [`set_php_version`](Self::set_php_version) to
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted to resolve return types of built-in function calls.
-    pub(crate) stub_function_index: RwLock<CiMap<&'static str>>,
+    pub(crate) stub_function_index: Arc<RwLock<CiMap<&'static str>>>,
     /// Embedded PHP stubs for built-in constants (e.g. `PHP_EOL`,
     /// `SORT_ASC`, …).  Maps constant name → raw PHP source code.
     ///
@@ -609,7 +609,7 @@ pub struct Backend {
     /// Filtered at startup via [`set_php_version`](Self::set_php_version) to
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted when resolving standalone constant references.
-    pub(crate) stub_constant_index: RwLock<HashMap<&'static str, &'static str>>,
+    pub(crate) stub_constant_index: Arc<RwLock<HashMap<&'static str, &'static str>>>,
     /// Diagnostic debouncing state and the pull-model diagnostic caches.
     pub(crate) diag: crate::diagnostics::state::DiagnosticState,
     /// PHPStan's dedicated background worker state (extremely slow and
@@ -815,9 +815,11 @@ impl Backend {
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
-            stub_index: RwLock::new(CiMap::from(stubs::build_stub_class_index())),
-            stub_function_index: RwLock::new(CiMap::from(stubs::build_stub_function_index())),
-            stub_constant_index: RwLock::new(stubs::build_stub_constant_index()),
+            stub_index: Arc::new(RwLock::new(CiMap::from(stubs::build_stub_class_index()))),
+            stub_function_index: Arc::new(RwLock::new(CiMap::from(
+                stubs::build_stub_function_index(),
+            ))),
+            stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             laravel_aliases: Arc::new(RwLock::new(None)),
@@ -898,9 +900,9 @@ impl Backend {
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
-            stub_index: RwLock::new(CiMap::new()),
-            stub_function_index: RwLock::new(CiMap::new()),
-            stub_constant_index: RwLock::new(HashMap::new()),
+            stub_index: Arc::new(RwLock::new(CiMap::new())),
+            stub_function_index: Arc::new(RwLock::new(CiMap::new())),
+            stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
             resolved_class_cache: virtual_members::new_resolved_class_cache(),
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             laravel_aliases: Arc::new(RwLock::new(None)),
@@ -1004,7 +1006,7 @@ impl Backend {
     pub fn new_test_with_stubs(stub_index: HashMap<&'static str, &'static str>) -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
-            stub_index: RwLock::new(CiMap::from(stub_index)),
+            stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
             ..Self::test_defaults()
         };
         backend.set_php_version(backend.php_version());
@@ -1023,9 +1025,9 @@ impl Backend {
     ) -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
-            stub_index: RwLock::new(CiMap::from(stub_index)),
-            stub_function_index: RwLock::new(CiMap::from(stub_function_index)),
-            stub_constant_index: RwLock::new(stub_constant_index),
+            stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
+            stub_function_index: Arc::new(RwLock::new(CiMap::from(stub_function_index))),
+            stub_constant_index: Arc::new(RwLock::new(stub_constant_index)),
             ..Self::test_defaults()
         };
         backend.set_php_version(backend.php_version());
@@ -1515,7 +1517,7 @@ impl Backend {
             phar_archives: Arc::clone(&self.phar_archives),
             parsed_uris: Arc::clone(&self.parsed_uris),
             parse_inflight: Arc::clone(&self.parse_inflight),
-            stub_index: RwLock::new(self.stub_index.read().clone()),
+            stub_index: Arc::clone(&self.stub_index),
             resolved_class_cache: Arc::clone(&self.resolved_class_cache),
             auth_user_type_cache: Arc::clone(&self.auth_user_type_cache),
             laravel_aliases: Arc::clone(&self.laravel_aliases),
@@ -1534,8 +1536,8 @@ impl Backend {
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             schema_index: Arc::clone(&self.schema_index),
             member_completion_cache: Arc::clone(&self.member_completion_cache),
-            stub_function_index: RwLock::new(self.stub_function_index.read().clone()),
-            stub_constant_index: RwLock::new(self.stub_constant_index.read().clone()),
+            stub_function_index: Arc::clone(&self.stub_function_index),
+            stub_constant_index: Arc::clone(&self.stub_constant_index),
             diag: self.diag.clone(),
             workspace: self.workspace.clone(),
             phpstan_tool: self.phpstan_tool.clone(),
