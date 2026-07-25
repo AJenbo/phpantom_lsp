@@ -477,9 +477,11 @@ fn process_top_level_statement(
             let enclosing = find_innermost_enclosing_class(&file_ctx.classes, func_offset);
             let current_class = enclosing.unwrap_or(default_class);
 
+            let config_resolver = |key: &str| backend.resolve_config_type(key);
             let loaders = Loaders {
                 function_loader: Some(function_loader),
                 constant_loader: Some(constant_loader),
+                config_resolver: Some(&config_resolver),
             };
 
             for (maybe_expr, start, end) in returns {
@@ -613,9 +615,11 @@ fn process_class_member(
             }
         });
 
+    let config_resolver = |key: &str| backend.resolve_config_type(key);
     let loaders = Loaders {
         function_loader: Some(function_loader),
         constant_loader: Some(constant_loader),
+        config_resolver: Some(&config_resolver),
     };
 
     for (maybe_expr, start, end) in returns {

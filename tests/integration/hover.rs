@@ -186,6 +186,69 @@ function test(string $cache): void {
 }
 
 #[test]
+fn hover_config_return_type_inferred_from_config_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "config/database.php",
+            "<?php\nreturn [\n    'default' => env('DB_CONNECTION', 'mysql'),\n    'connections' => [\n        'mysql' => [\n            'host' => env('DB_HOST', '127.0.0.1'),\n            'port' => env('DB_PORT', 3306),\n            'strict' => true,\n        ],\n    ],\n];\n",
+        )],
+    );
+
+    let uri = "file:///test_config.php";
+    let content = r#"<?php
+function test(): void {
+    $default = config('database.default');
+    $default;
+    $host = config('database.connections.mysql.host');
+    $host;
+    $port = config('database.connections.mysql.port');
+    $port;
+    $strict = config('database.connections.mysql.strict');
+    $strict;
+    $conns = config('database.connections.mysql');
+    $conns;
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let h = hover_at(&backend, uri, content, 3, 6).expect("hover on $default");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string"),
+        "config('database.default') should infer string from env default: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 5, 6).expect("hover on $host");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("string"),
+        "config('database.connections.mysql.host') should infer string: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 7, 6).expect("hover on $port");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("int"),
+        "config('database.connections.mysql.port') should infer int: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 9, 6).expect("hover on $strict");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("bool"),
+        "config('database.connections.mysql.strict') should infer bool: {text}"
+    );
+
+    let h = hover_at(&backend, uri, content, 11, 6).expect("hover on $conns");
+    let text = hover_text(&h);
+    assert!(
+        text.contains("array{"),
+        "config('database.connections.mysql') should infer array shape: {text}"
+    );
+}
+
+#[test]
 fn hover_variable_without_type() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

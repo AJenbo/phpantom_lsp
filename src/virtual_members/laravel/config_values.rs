@@ -27,6 +27,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::php_type::{PhpType, ShapeEntry};
 
 /// A statically-classified Laravel config value.
 ///
@@ -37,6 +38,14 @@ use crate::atom::bytes_to_str;
 pub(crate) enum ConfigValue {
     /// A string literal, e.g. `'web'` or `'users'`.
     Str(String),
+    /// An integer literal, e.g. `3306`.
+    Int,
+    /// A float literal, e.g. `0.5`.
+    Float,
+    /// A boolean literal (`true` or `false`).
+    Bool,
+    /// A `null` literal.
+    Null,
     /// A `::class` constant, e.g. `App\Models\User::class`.  The stored name
     /// is resolved against the config file's `use` statements at parse time,
     /// so an imported short name (`use App\Models\User; User::class`) is kept
@@ -83,7 +92,11 @@ impl ConfigValue {
     fn collect_strings(&self, out: &mut Vec<String>, dynamic: &mut bool) {
         match self {
             ConfigValue::Str(s) => push_unique(out, s),
-            ConfigValue::ClassString(_) => *dynamic = true,
+            ConfigValue::ClassString(_)
+            | ConfigValue::Int
+            | ConfigValue::Float
+            | ConfigValue::Bool
+            | ConfigValue::Null => *dynamic = true,
             ConfigValue::OneOf(arms) => {
                 for arm in arms {
                     arm.collect_strings(out, dynamic);
@@ -101,7 +114,11 @@ impl ConfigValue {
         match self {
             ConfigValue::ClassString(name) => push_unique(out, name),
             ConfigValue::Str(s) if s.contains('\\') => push_unique(out, s),
-            ConfigValue::Str(_) => *dynamic = true,
+            ConfigValue::Str(_)
+            | ConfigValue::Int
+            | ConfigValue::Float
+            | ConfigValue::Bool
+            | ConfigValue::Null => *dynamic = true,
             ConfigValue::OneOf(arms) => {
                 for arm in arms {
                     arm.collect_classes(out, dynamic);
@@ -112,6 +129,56 @@ impl ConfigValue {
                 *dynamic = true;
             }
             ConfigValue::Dynamic => *dynamic = true,
+        }
+    }
+}
+
+impl ConfigValue {
+    pub(crate) fn to_php_type(&self) -> PhpType {
+        match self {
+            ConfigValue::Str(_) => PhpType::string(),
+            ConfigValue::Int => PhpType::int(),
+            ConfigValue::Float => PhpType::float(),
+            ConfigValue::Bool => PhpType::bool(),
+            ConfigValue::Null => PhpType::null(),
+            ConfigValue::ClassString(name) => {
+                PhpType::ClassString(Some(Box::new(PhpType::Named(name.clone()))))
+            }
+            ConfigValue::OneOf(arms) => {
+                let mut members: Vec<PhpType> = Vec::new();
+                for arm in arms {
+                    let ty = arm.to_php_type();
+                    if !members.iter().any(|m| m == &ty) {
+                        members.push(ty);
+                    }
+                }
+                match members.len() {
+                    0 => PhpType::mixed(),
+                    1 => members.into_iter().next().unwrap(),
+                    _ => PhpType::Union(members),
+                }
+            }
+            ConfigValue::EnvDefault(inner) => inner.to_php_type(),
+            ConfigValue::Dynamic => PhpType::mixed(),
+        }
+    }
+}
+
+impl ConfigNode {
+    pub(crate) fn to_php_type(&self) -> PhpType {
+        match self {
+            ConfigNode::Leaf(value) => value.to_php_type(),
+            ConfigNode::Array(entries) => {
+                let shape_entries: Vec<ShapeEntry> = entries
+                    .iter()
+                    .map(|(key, node)| ShapeEntry {
+                        key: Some(key.clone()),
+                        value_type: node.to_php_type(),
+                        optional: false,
+                    })
+                    .collect();
+                PhpType::ArrayShape(shape_entries)
+            }
         }
     }
 }
@@ -296,6 +363,12 @@ fn classify_value(
                 None => ConfigValue::Dynamic,
             }
         }
+        Expression::Literal(literal::Literal::Integer(_)) => ConfigValue::Int,
+        Expression::Literal(literal::Literal::Float(_)) => ConfigValue::Float,
+        Expression::Literal(literal::Literal::True(_) | literal::Literal::False(_)) => {
+            ConfigValue::Bool
+        }
+        Expression::Literal(literal::Literal::Null(_)) => ConfigValue::Null,
         Expression::Access(Access::ClassConstant(cca)) => classify_class_constant(cca, use_map),
         Expression::Conditional(cond) => {
             // `a ? b : c` and short `a ?: c`.  We never evaluate the
@@ -362,6 +435,73 @@ fn flatten_one_of(value: ConfigValue, out: &mut Vec<ConfigValue>) {
             }
         }
         other => out.push(other),
+    }
+}
+
+impl Backend {
+    pub(crate) fn resolve_config_type(&self, dotted_key: &str) -> Option<PhpType> {
+        let parts: Vec<&str> = dotted_key.split('.').collect();
+        if parts.is_empty() {
+            return None;
+        }
+        let trees = self.cached_config_trees();
+        for (prefix, tree) in &trees {
+            let prefix_parts: Vec<&str> = prefix.split('.').collect();
+            if parts.len() < prefix_parts.len() {
+                continue;
+            }
+            if parts[..prefix_parts.len()] != prefix_parts[..] {
+                continue;
+            }
+            let remaining = &parts[prefix_parts.len()..];
+            if remaining.is_empty() {
+                return Some(tree.to_php_type());
+            }
+            let node = tree.get(remaining)?;
+            return Some(node.to_php_type());
+        }
+        None
+    }
+
+    pub(crate) fn cached_config_trees(&self) -> Vec<(String, ConfigNode)> {
+        {
+            let cache = self.laravel_string_key_cache.read();
+            if let Some(ref trees) = cache.config_trees {
+                return trees.clone();
+            }
+        }
+        let trees = self.enumerate_config_trees();
+        self.laravel_string_key_cache.write().config_trees = Some(trees.clone());
+        trees
+    }
+
+    fn enumerate_config_trees(&self) -> Vec<(String, ConfigNode)> {
+        use crate::virtual_members::laravel::laravel_config_prefix_from_uri;
+
+        let snapshot = self.user_file_symbol_maps();
+        let mut trees = Vec::new();
+
+        for (file_uri, _) in &snapshot {
+            let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content(file_uri) else {
+                continue;
+            };
+            if let Some(tree) = parse_config_tree(&content) {
+                trees.push((prefix, tree));
+            }
+        }
+
+        for res in &self.laravel_provider_resources.read().config_files {
+            if let Ok(content) = std::fs::read_to_string(&res.path)
+                && let Some(tree) = parse_config_tree(&content)
+            {
+                trees.push((res.namespace.clone(), tree));
+            }
+        }
+
+        trees
     }
 }
 

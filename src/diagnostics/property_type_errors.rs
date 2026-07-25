@@ -344,9 +344,11 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
+    let config_resolver = |key: &str| ctx.backend.resolve_config_type(key);
     let loaders = Loaders {
         function_loader: Some(ctx.function_loader),
         constant_loader: Some(ctx.constant_loader),
+        config_resolver: Some(&config_resolver),
     };
 
     let var_ctx = VarResolutionCtx {

@@ -80,6 +80,11 @@ pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str, u32) -> Option<Fu
 /// when the constant was not found.
 pub(crate) type ConstantLoaderFn<'a> = Option<&'a dyn Fn(&str) -> Option<Option<String>>>;
 
+/// Type alias for the optional config-value resolver closure.  Given a
+/// dotted Laravel config key (e.g. `"database.default"`), returns the
+/// inferred [`PhpType`] of the config value.
+pub(crate) type ConfigResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::php_type::PhpType>>;
+
 /// Type alias for the optional scope-based variable resolver from the
 /// forward walker.  When set on a [`VarResolutionCtx`], variable
 /// lookups read from the forward walker's in-progress `ScopeState`
@@ -103,6 +108,10 @@ pub(crate) struct Loaders<'a> {
     /// constant's value string so that the type can be inferred from
     /// the literal value.
     pub constant_loader: ConstantLoaderFn<'a>,
+    /// Resolve a dotted Laravel config key (e.g. `"database.default"`)
+    /// to the inferred type of its static value.  Used by the
+    /// `config()` return-type interception in function call resolution.
+    pub config_resolver: ConfigResolverFn<'a>,
 }
 
 impl<'a> Loaders<'a> {
@@ -111,6 +120,7 @@ impl<'a> Loaders<'a> {
         Self {
             function_loader: fl,
             constant_loader: None,
+            config_resolver: None,
         }
     }
 }

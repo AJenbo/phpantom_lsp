@@ -2414,6 +2414,7 @@ impl Backend {
         if config_count + view_count + trans_count + route_count > 0 {
             let mut cache = self.laravel_string_key_cache.write();
             cache.config_keys = None;
+            cache.config_trees = None;
             cache.view_names = None;
             cache.trans_keys = None;
             cache.route_names = None;

@@ -800,6 +800,27 @@ pub(super) fn resolve_rhs_function_call<'b>(
         }
     }
 
+    // ── Laravel config() return type inference ───────
+    if let Some(ref name) = func_name {
+        let normalized_func = name.trim_start_matches('\\');
+        if matches!(normalized_func, "config" | "Illuminate\\Support\\config") {
+            let arg_texts =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    &func_call.argument_list,
+                    content,
+                );
+            if let Some(first_arg) = arg_texts.first()
+                && let Some(key) = crate::util::unescape_php_string_literal(first_arg.trim())
+                && !key.is_empty()
+                && !key.contains('$')
+                && let Some(resolver) = ctx.loaders.config_resolver
+                && let Some(ty) = resolver(&key)
+            {
+                return vec![ResolvedType::from_type_string(ty)];
+            }
+        }
+    }
+
     // ── Known array functions ────────────────────────
     // For element-extracting functions (array_pop, etc.)
     // resolve to the element ClassInfo directly.
@@ -1184,6 +1205,14 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
     // generic substitutions applied.
     let (owner_classes, receiver_resolved) =
         expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
+
+    for owner in &owner_classes {
+        if let Some(result) =
+            try_resolve_config_method_type(&owner.fqn(), &method_name, argument_list, ctx)
+        {
+            return result;
+        }
+    }
 
     let is_union = owner_classes.len() > 1;
     let mut union_results: Vec<ResolvedType> = Vec::new();
@@ -1948,6 +1977,15 @@ pub(super) fn resolve_rhs_static_call(
             };
             let owner = concrete_owner.as_ref().unwrap_or(owner);
 
+            if let Some(result) = try_resolve_config_method_type(
+                &owner.fqn(),
+                &method_name,
+                &static_call.argument_list,
+                ctx,
+            ) {
+                return result;
+            }
+
             let arg_texts =
                 crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                     &static_call.argument_list,
@@ -2035,6 +2073,47 @@ fn facade_accessor_concrete_owner(
             class_has_method(&class, method_name, class_loader, cache)
                 .then(|| Arc::unwrap_or_clone(class))
         })
+}
+
+fn try_resolve_config_method_type(
+    owner_fqn: &str,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    const CONFIG_FQNS: &[&str] = &[
+        "Illuminate\\Config\\Repository",
+        "Illuminate\\Support\\Facades\\Config",
+        "Config",
+    ];
+    if !matches!(method_name, "get" | "array") {
+        return None;
+    }
+    let normalized = owner_fqn.strip_prefix('\\').unwrap_or(owner_fqn);
+    if !CONFIG_FQNS
+        .iter()
+        .any(|fqn| normalized.eq_ignore_ascii_case(fqn))
+    {
+        return None;
+    }
+    let resolver = ctx.loaders.config_resolver?;
+    let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        ctx.content,
+    );
+    let first_arg = arg_texts.first()?;
+    let key = crate::util::unescape_php_string_literal(first_arg.trim())?;
+    if key.is_empty() || key.contains('$') {
+        return None;
+    }
+    let ty = resolver(&key)?;
+    if method_name == "array" {
+        if ty.is_array_like() {
+            return Some(vec![ResolvedType::from_type_string(ty)]);
+        }
+        return None;
+    }
+    Some(vec![ResolvedType::from_type_string(ty)])
 }
 
 fn facade_accessor_class_name(ty: &PhpType) -> Option<String> {

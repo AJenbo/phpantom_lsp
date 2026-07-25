@@ -311,9 +311,11 @@ impl Backend {
                     let enclosing = find_innermost_enclosing_class(&file_ctx.classes, *args_start);
                     let current_class_info = enclosing.unwrap_or(&default_class);
 
+                    let config_resolver = |key: &str| self.resolve_config_type(key);
                     let loaders = Loaders {
                         function_loader: Some(&function_loader_cl),
                         constant_loader: Some(&constant_loader_cl),
+                        config_resolver: Some(&config_resolver),
                     };
 
                     let var_ctx = VarResolutionCtx {

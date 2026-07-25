@@ -314,6 +314,12 @@ pub(crate) struct LaravelStringKeyCache {
     pub config_keys: Option<Vec<String>>,
     pub view_names: Option<Vec<String>>,
     pub trans_keys: Option<Vec<String>>,
+    pub config_trees: Option<
+        Vec<(
+            String,
+            crate::virtual_members::laravel::config_values::ConfigNode,
+        )>,
+    >,
 }
 
 impl LaravelStringKeyCache {
@@ -323,6 +329,7 @@ impl LaravelStringKeyCache {
         }
         if uri.contains("/config/") {
             self.config_keys = None;
+            self.config_trees = None;
         }
         // View roots are configurable via `config/view.php`, so a Blade
         // file may live outside `resources/views/`. Invalidate on any
