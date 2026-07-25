@@ -549,6 +549,33 @@ impl Backend {
             // mapping positional args to parameter indices.
             let mut positional_idx: usize = 0;
 
+            let call_context_class: Option<String> = {
+                let class_part = if let Some(pos) = expr.find("::") {
+                    Some(&expr[..pos])
+                } else if expr.starts_with("$this->") {
+                    Some("$this" as &str)
+                } else {
+                    None
+                };
+                class_part.and_then(|cp| {
+                    let low = cp.to_ascii_lowercase();
+                    match low.as_str() {
+                        "self" | "static" | "$this" => {
+                            find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
+                                .map(|c| c.fqn().to_string())
+                        }
+                        "parent" => {
+                            find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
+                                .and_then(|c| c.parent_class.as_ref().map(|p| p.to_string()))
+                        }
+                        _ => class_loader(cp).map(|cls| cls.fqn().to_string()),
+                    }
+                })
+            };
+            let ctx_parent_fqn: Option<String> = call_context_class.as_ref().and_then(|fqn| {
+                class_loader(fqn).and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
+            });
+
             // Check each argument against its parameter.
             for (arg_idx, resolved_arg) in resolved_args.args.iter().enumerate() {
                 // Skip spread arguments.
@@ -606,8 +633,21 @@ impl Backend {
                     continue;
                 }
 
+                let resolved_param;
+                let effective_param_type = if param_type.contains_self_ref() {
+                    if let Some(ref fqn) = call_context_class {
+                        resolved_param =
+                            param_type.resolve_self_refs(fqn, ctx_parent_fqn.as_deref());
+                        &resolved_param
+                    } else {
+                        param_type
+                    }
+                } else {
+                    param_type
+                };
+
                 // Check compatibility.
-                if is_type_compatible(arg_type, param_type, &class_loader, strict_types) {
+                if is_type_compatible(arg_type, effective_param_type, &class_loader, strict_types) {
                     // Even when the array types are compatible, validate
                     // string literals against model-property<Model> when
                     // the param type is an array with model-property in
@@ -659,9 +699,21 @@ impl Backend {
                                 && !alt_type.is_untyped()
                                 && !alt_type.is_mixed()
                             {
+                                let resolved_alt;
+                                let effective_alt = if alt_type.contains_self_ref() {
+                                    if let Some(ref fqn) = call_context_class {
+                                        resolved_alt = alt_type
+                                            .resolve_self_refs(fqn, ctx_parent_fqn.as_deref());
+                                        &resolved_alt
+                                    } else {
+                                        alt_type
+                                    }
+                                } else {
+                                    alt_type
+                                };
                                 return is_type_compatible(
                                     arg_type,
-                                    alt_type,
+                                    effective_alt,
                                     &class_loader,
                                     strict_types,
                                 );
