@@ -2805,6 +2805,16 @@ so this fast-path would apply to the majority of checks.</p>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Flamegraph (requires the `flamegraph` crate or perf-tools):</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>perf<span class="w"> </span>script<span class="w"> </span><span class="p">|</span><span class="w"> </span>flamegraph<span class="w"> </span>&gt;<span class="w"> </span>/tmp/phpantom.svg
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Instantaneous CPU utilisation over a run (% of one core, sampled</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># every 0.5 s), for machines where perf is unavailable</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># (kernel.perf_event_paranoid &gt; 2):</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">  </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span><span class="w"> </span><span class="nv">PID</span><span class="o">=</span><span class="nv">$!</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="k">while</span><span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-0<span class="w"> </span><span class="nv">$PID</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="nv">cur</span><span class="o">=</span><span class="k">$(</span>awk<span class="w"> </span><span class="s1">&#39;{print $14+$15}&#39;</span><span class="w"> </span>/proc/<span class="nv">$PID</span>/stat<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$cur</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">cur</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">prev</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="nv">$cur</span><span class="p">;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">0</span>.5
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="k">done</span>
 </code></pre></div>
 <h3 id="pathological-test-file">Pathological test file<a class="headerlink" href="#pathological-test-file" title="Permanent link">&para;</a></h3>
 <p><code>PurchaseFileService.php</code> (~700-line Eloquent-heavy service with
@@ -3261,26 +3271,34 @@ current single populate thread.</p>
 <hr />
 <h2 id="p35-diagnostic-passes-reach-only-a-fraction-of-available-cores">P35. Diagnostic passes reach only a fraction of available cores<a class="headerlink" href="#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: Medium</strong></p>
-<p>Measured on a 32-core machine against a large Laravel project (release
-build): the <code>analyze</code> Phase 2 diagnostic pass runs at ~2 to ~13 cores,
-averaging roughly 4, despite spawning one worker per core with atomic
-work-stealing. Utilisation is lowest at the start of the pass and
-climbs as it progresses, which points at lock contention that eases as
-shared caches warm, rather than at work starvation. Likely suspects:
-<code>find_or_load_class</code> taking write locks while lazily parsing vendor
-files early in the pass, and write contention on the resolved-class
-cache and chain-resolution caches. The LSP workspace diagnostics pass
-uses the same collectors and likely has the same ceiling. Needs
-profiling to attribute the blocked time before picking a fix;
-re-measure after any change with the CPU-sampling loop in the Appendix.</p>
-<p>Projects that keep substantial code in <code>vendor/</code> (e.g. models shipped
-in a shared vendor package that the application depends on) hit this
-harder: eager population only walks classes from the indexed user
-files, so every vendor class is parsed lazily on first touch during
-the diagnostic pass. The observed CPU shape on such a project is
-bursty (alternating stalls and full-core bursts) consistent with one
-worker holding the load lock while the rest wait, then all proceeding
-until the next unparsed vendor class.</p>
+<p>Measured on a 32-core machine against large Laravel projects (release
+build): the <code>analyze</code> Phase 2 diagnostic pass peaks around 14 cores and
+averages fewer, despite spawning one worker per core with atomic
+work-stealing. The original worst offender (every worker deep-cloning
+the embedded stub class/function/constant indexes twice per file via
+<code>clone_for_diagnostic_worker</code>) is fixed; the indexes are Arc-shared
+now. The remaining ceiling, per a frame-pointer <code>perf</code> profile of the
+diag workers after that fix:</p>
+<ul>
+<li>~18% of worker on-CPU time is still malloc/free/memmove, now diffuse:
+  <code>PhpType</code>, <code>MethodInfo</code>, and <code>ParameterInfo</code> clones throughout the
+  type engine, plus glibc malloc arena contention (visible as
+  <code>arena_get2</code>/futex kernel time) when 32 workers allocate heavily.</li>
+<li>Read-lock contention on <code>fqn_class_index</code> and <code>class_not_found_cache</code>
+  is measurable but small (~1.5% on-CPU in the rwlock slow paths).</li>
+<li>Projects that keep substantial code in <code>vendor/</code> (e.g. models shipped
+  in a shared vendor package) pay extra: eager population only walks
+  classes from the indexed user files, so every vendor class is parsed
+  lazily on first touch during the diagnostic pass, serialising workers
+  on the load path early in the run.</li>
+</ul>
+<p>Likely next steps, in rough value order: reduce clone traffic in the
+hot type-engine paths (share via <code>Arc</code>/<code>Cow</code> instead of cloning
+<code>PhpType</code>/member vectors), include depended-upon vendor classes in
+eager population, and only then consider allocator-level fixes. The
+LSP workspace diagnostics pass uses the same collectors and has the
+same ceiling. Re-measure with <code>perf</code> (frame-pointer build) or the
+CPU-sampling loop in the Appendix after any change.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues are addressed by ER5 (class
