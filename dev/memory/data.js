@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784947124135,
+  "lastUpdate": 1784949168806,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20613,6 +20613,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 95.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dc4f1b15f0060a2a87b9cff8f9b4d17295ee1124",
+          "message": "Fix cross resolve for facades, consistency for model-properties, a\ncouple of compleation issue",
+          "timestamp": "2026-07-25T04:56:53+02:00",
+          "tree_id": "1c82a0d57030d95019e6502736c3dde382eb5fe2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/dc4f1b15f0060a2a87b9cff8f9b4d17295ee1124"
+        },
+        "date": 1784949165913,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 47.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 97,
             "unit": "MiB"
           }
         ]
