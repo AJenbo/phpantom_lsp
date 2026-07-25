@@ -1,7 +1,7 @@
 //! Integration tests for `textDocument/hover`.
 
 use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
+    create_psr4_workspace create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
     create_test_backend_with_stdclass_stub,
 };
