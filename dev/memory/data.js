@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784953419575,
+  "lastUpdate": 1784955244853,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -20851,6 +20851,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 93.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "852aa6b28a2d7ee9553a98310cb67c358bd03902",
+          "message": "fix: resolve conditional return string branch for interpolated strings\n\nThe AST-based conditional return resolver only matched\nExpression::Literal(Literal::String) when checking `$key is string`,\nso interpolated strings like `\"{$prefix}.host\"` (parsed as\nExpression::CompositeString) fell through to the else branch and\nresolved as null. Add CompositeString to the string match so the\ncorrect branch is taken.\n\nCloses #269",
+          "timestamp": "2026-07-24T23:37:35-05:00",
+          "tree_id": "2cf263003616b24a2f1901a511cd41945f5d33db",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/852aa6b28a2d7ee9553a98310cb67c358bd03902"
+        },
+        "date": 1784955242031,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 48.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 92.7,
             "unit": "MiB"
           }
         ]
