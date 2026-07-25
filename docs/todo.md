@@ -25,7 +25,7 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| ER5 | [Mago-style separated metadata](todo/eager-resolution.md#er5-mago-style-separated-metadata)                                                                                | High        | High        |
+| P36 | [Diagnostic-path call sites re-merge inheritance per call](todo/performance.md#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache)          | Medium      | Low         |
 | P31 | [Reference index stores per-span entries when consumers only read distinct URIs](todo/performance.md#p31-reference-index-stores-per-span-entries-when-consumers-only-read-distinct-uris)          | Medium      | Low-Medium  |
 | P33 | [Workspace diagnostics leaves the whole project fully resolved in memory](todo/performance.md#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory) | High        | Medium-High |
 | X10 | [Interactive requests block on the workspace index lock during initial indexing](todo/indexing.md#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing) | Medium      | Medium      |
@@ -174,7 +174,6 @@ unlikely to move the needle for most users.
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Low-Medium  |
 | L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names)                                                                                  | Low-Medium  | Medium      |
-| L33 | [Artisan command and signature strings](todo/laravel.md#l33-artisan-command-and-signature-strings)                                                                          | Low-Medium  | Medium      |
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Low         |
 | L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Low         |
 | L6  | Factory `has*`/`for*` relationship methods                                                                                                                                  | Low-Medium  | Medium      |
@@ -195,7 +194,7 @@ unlikely to move the needle for most users.
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
-|     | **[Performance](todo/performance.md) / [Eager Resolution](todo/eager-resolution.md)**                                                                                       |             |             |
+|     | **[Performance](todo/performance.md)**                                                                                       |             |             |
 | P29 | [Migrate to `mago-phpdoc-syntax`](todo/performance.md#p29-migrate-to-mago-phpdoc-syntax) (drop deprecated `mago-docblock` / `mago-type-syntax`)                             | Medium      | Medium      |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (blocked on upstream API stabilizing — see triggers) | Medium-High | High        |
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Medium-High |

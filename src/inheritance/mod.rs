@@ -37,6 +37,7 @@ pub(crate) use generics::apply_substitution;
 pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
     apply_substitution_to_property, build_generic_subs, build_substitution_map, default_type_args,
+    method_references_params, property_references_params,
 };
 
 /// A borrow-or-owned handle to a `ClassInfo`, used to walk the parent
@@ -313,6 +314,17 @@ pub(crate) fn resolve_class_with_inheritance(
             &parent.fqn(),
         );
 
+        // Template parameter names substituted at this level, used to
+        // decide per member whether substitution would change anything.
+        // Empty when the parent is non-generic, in which case every
+        // member below keeps its shared `Arc` / avoids the substitution
+        // walk (copy-on-write).
+        let sub_keys: Vec<String> = if level_subs.is_empty() {
+            Vec::new()
+        } else {
+            level_subs.keys().cloned().collect()
+        };
+
         // Merge parent methods — skip private.
         // When the child already has a method with the same name,
         // enrich it with the parent's richer docblock types instead
@@ -321,53 +333,54 @@ pub(crate) fn resolve_class_with_inheritance(
             if method.visibility == Visibility::Private {
                 continue;
             }
+            let needs_sub = method_references_params(method, &sub_keys);
             if !dedup
                 .methods
                 .insert(crate::atom::ascii_lowercase_atom(&method.name))
             {
                 // Child already has this method — enrich it from parent.
-                let mut ancestor_method = (**method).clone();
-                if !level_subs.is_empty() {
-                    apply_substitution_to_method(&mut ancestor_method, &level_subs);
-                }
+                // Only clone + substitute when the parent's signature
+                // actually references a substituted template param;
+                // otherwise enrich directly from the shared method.
                 if let Some(existing) = merged
                     .methods
                     .make_mut()
                     .iter_mut()
                     .find(|m| m.name.eq_ignore_ascii_case(&method.name))
                 {
-                    enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
+                    if needs_sub {
+                        let mut ancestor_method = (**method).clone();
+                        apply_substitution_to_method(&mut ancestor_method, &level_subs);
+                        enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
+                    } else {
+                        enrich_method_from_ancestor(Arc::make_mut(existing), method);
+                    }
                 }
                 continue;
             }
-            if level_subs.is_empty() {
-                // Replace bare `self` in return type with the declaring
-                // (parent) class name so that `self` resolves to the class
-                // that defines the method, not the inheriting child.
-                if method
-                    .return_type
-                    .as_ref()
-                    .is_some_and(|r| r.contains_bare_self())
-                {
-                    let mut m = (**method).clone();
-                    if let Some(ref mut rt) = m.return_type {
-                        *rt = rt.replace_bare_self(&parent.fqn());
-                    }
-                    merged.methods.push(Arc::new(m));
-                } else {
-                    merged.methods.push(Arc::clone(method));
-                }
-            } else {
-                let mut ancestor_method = (**method).clone();
-                apply_substitution_to_method(&mut ancestor_method, &level_subs);
-                // Replace bare `self` after substitution.
-                if let Some(ref mut rt) = ancestor_method.return_type
-                    && rt.contains_bare_self()
-                {
-                    *rt = rt.replace_bare_self(&parent.fqn());
-                }
-                merged.methods.push(Arc::new(ancestor_method));
+            // Replace bare `self` in the return type with the declaring
+            // (parent) class name so that `self` resolves to the class
+            // that defines the method, not the inheriting child.
+            let needs_bare_self = method
+                .return_type
+                .as_ref()
+                .is_some_and(|r| r.contains_bare_self());
+            if !needs_sub && !needs_bare_self {
+                // Substitution is a no-op and there is no bare `self`:
+                // keep the shared `Arc` instead of deep-cloning.
+                merged.methods.push(Arc::clone(method));
+                continue;
             }
+            let mut ancestor_method = (**method).clone();
+            if needs_sub {
+                apply_substitution_to_method(&mut ancestor_method, &level_subs);
+            }
+            if let Some(ref mut rt) = ancestor_method.return_type
+                && rt.contains_bare_self()
+            {
+                *rt = rt.replace_bare_self(&parent.fqn());
+            }
+            merged.methods.push(Arc::new(ancestor_method));
         }
 
         // Merge parent properties — same enrichment logic.
@@ -376,7 +389,7 @@ pub(crate) fn resolve_class_with_inheritance(
                 continue;
             }
             let mut ancestor_property = property.clone();
-            if !level_subs.is_empty() {
+            if property_references_params(property, &sub_keys) {
                 apply_substitution_to_property(&mut ancestor_property, &level_subs);
             }
             if !dedup.properties.insert(property.name) {
@@ -425,6 +438,7 @@ pub(crate) fn resolve_class_with_inheritance(
         // Build substitution map from @implements/@template-implements generics.
         let iface_subs =
             build_substitution_map(&ClassRef::Borrowed(class), &iface, &HashMap::new());
+        let iface_sub_keys: Vec<String> = iface_subs.keys().cloned().collect();
 
         for method in &iface.methods {
             // Only enrich methods that the class already has (i.e. overrides).
@@ -434,11 +448,13 @@ pub(crate) fn resolve_class_with_inheritance(
                 .iter_mut()
                 .find(|m| m.name.eq_ignore_ascii_case(&method.name))
             {
-                let mut ancestor_method = (**method).clone();
-                if !iface_subs.is_empty() {
+                if method_references_params(method, &iface_sub_keys) {
+                    let mut ancestor_method = (**method).clone();
                     apply_substitution_to_method(&mut ancestor_method, &iface_subs);
+                    enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
+                } else {
+                    enrich_method_from_ancestor(Arc::make_mut(existing), method);
                 }
-                enrich_method_from_ancestor(Arc::make_mut(existing), &ancestor_method);
             }
         }
     }

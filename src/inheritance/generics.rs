@@ -54,6 +54,51 @@ pub(crate) fn apply_substitution_to_property(
     }
 }
 
+/// Whether [`apply_substitution_to_method`] would rewrite anything in
+/// `method` given a substitution keyed by `template_params`.
+///
+/// When this returns `false` the substitution is a guaranteed no-op, so
+/// callers can keep the shared `Arc<MethodInfo>` (copy-on-write) instead
+/// of deep-cloning and re-substituting. This is the dominant memory
+/// saving in the inheritance merge: an Eloquent subclass inherits
+/// hundreds of parent methods, but only the handful that actually mention
+/// a template parameter need a distinct, substituted copy. The checked
+/// fields mirror [`apply_substitution_to_method`] exactly (return type,
+/// conditional return, parameter hints).
+pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[String]) -> bool {
+    if template_params.is_empty() {
+        return false;
+    }
+    method
+        .return_type
+        .as_ref()
+        .is_some_and(|r| r.references_any_template_param(template_params))
+        || method
+            .conditional_return
+            .as_ref()
+            .is_some_and(|c| c.references_any_template_param(template_params))
+        || method.parameters.iter().any(|p| {
+            p.type_hint
+                .as_ref()
+                .is_some_and(|h| h.references_any_template_param(template_params))
+        })
+}
+
+/// Whether [`apply_substitution_to_property`] would rewrite `property`'s
+/// type hint given a substitution keyed by `template_params`.
+pub(crate) fn property_references_params(
+    property: &PropertyInfo,
+    template_params: &[String],
+) -> bool {
+    if template_params.is_empty() {
+        return false;
+    }
+    property
+        .type_hint
+        .as_ref()
+        .is_some_and(|h| h.references_any_template_param(template_params))
+}
+
 /// Build a substitution map for a parent class based on the child's
 /// `@extends` generics and the parent's `@template` parameters.
 ///
