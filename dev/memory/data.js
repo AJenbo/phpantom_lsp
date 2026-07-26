@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785098374661,
+  "lastUpdate": 1785106190067,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21531,6 +21531,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1f102e3aa9bdecb5a9daaf8dd1bcbd4a33010254",
+          "message": "Fix linked editing sometimes working of a stale cache",
+          "timestamp": "2026-07-27T00:33:13+02:00",
+          "tree_id": "6670495619258e6946a791897bff1020bfd889f5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1f102e3aa9bdecb5a9daaf8dd1bcbd4a33010254"
+        },
+        "date": 1785106186388,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.2,
             "unit": "MiB"
           }
         ]
