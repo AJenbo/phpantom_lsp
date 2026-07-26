@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785036344979,
+  "lastUpdate": 1785036725220,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21429,6 +21429,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b10603ea22fa2b04172a49083b18740bf808e75a",
+          "message": "Switch all linux release builds to musl + mimalloc, add memory profiling\nfeatures, plan memory optimizations",
+          "timestamp": "2026-07-26T05:17:44+02:00",
+          "tree_id": "91d1f3303b0c2295947eeb95439dcb8bf9ca66d6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b10603ea22fa2b04172a49083b18740bf808e75a"
+        },
+        "date": 1785036722193,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.9,
             "unit": "MiB"
           }
         ]
