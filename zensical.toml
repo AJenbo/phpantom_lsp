@@ -27,7 +27,6 @@ nav = [
       { "Bugs" = "todo/bugs.md" },
       { "Completion" = "todo/completion.md" },
       { "Diagnostics" = "todo/diagnostics.md" },
-      { "Eager Resolution" = "todo/eager-resolution.md" },
       { "External Stubs" = "todo/external-stubs.md" },
       { "Fix CLI" = "todo/fix-cli.md" },
       { "Indexing" = "todo/indexing.md" },
