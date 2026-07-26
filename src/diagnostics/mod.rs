@@ -216,6 +216,7 @@ pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
+mod match_type_errors;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
@@ -438,6 +439,10 @@ impl Backend {
         step!(
             "unknown_variable",
             self.collect_undefined_variable_diagnostics(uri_str, content, out)
+        );
+        step!(
+            "match_type_mismatch",
+            self.collect_match_type_diagnostics(uri_str, content, out)
         );
         if let Some(ctx) = &file_ctx {
             step!(
