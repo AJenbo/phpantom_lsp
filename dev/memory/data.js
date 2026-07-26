@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785023815600,
+  "lastUpdate": 1785032740388,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21361,6 +21361,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "03ceb68e61b9ebc9cc60f614764ff24212deaf98",
+          "message": "refactor: model static and $this as bounded types in the type system\n\nAdd PhpType::StaticType(Atom) and PhpType::ThisType(Atom) variants\nthat preserve late-static-binding semantics instead of flattening\nstatic/$this to a bare class name.  StaticType carries the bound\nclass (\"at least this class or a subclass\"), ThisType is more\nspecific (\"the exact runtime instance type\").\n\nThe subtype chain is ThisType(A) <: StaticType(A) <: Named(A).\nDisplay: static(Foo), $this(Foo) -- shows the bound class.\n\nProduction sites updated:\n- replace_self(fqn) now delegates to resolve_self_refs_bounded()\n  so static -> StaticType(fqn) and $this -> ThisType(fqn);\n  replace_self_with_type(&receiver) is unchanged (preserves full\n  generic receiver types for accurate chain resolution)\n- Subject resolution: $this -> ThisType, static -> StaticType\n- First-class callable partial application: preserves static/this\n- Template substitution: preserve_static path uses bounded types\n- new static() -> StaticType instead of Named\n- Diagnostic param checking: resolve_self_refs_bounded() produces\n  bounded types so class-string<static> is properly validated\n\nSubtype checking updated:\n- StaticType(A) <: Named(A) and ThisType(A) <: Named(A)\n- ThisType(A) <: StaticType(A)\n- base_name(), top_level_class_names(), collect_class_names() all\n  handle the new variants\n\nPeripheral sites updated:\n- return_type_is_mixin_self handles StaticType/ThisType\n- is_simple_php_type handles StaticType/ThisType\n- Union member deduplication handles StaticType/ThisType",
+          "timestamp": "2026-07-25T21:09:17-05:00",
+          "tree_id": "9d2c1c931241cf5609782998f965c4ea42b2c187",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/03ceb68e61b9ebc9cc60f614764ff24212deaf98"
+        },
+        "date": 1785032737557,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.3,
             "unit": "MiB"
           }
         ]
