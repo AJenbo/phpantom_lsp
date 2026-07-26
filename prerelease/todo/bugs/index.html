@@ -778,6 +778,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -793,6 +810,37 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b1-rename-can-build-edits-from-a-symbol-map-that-predates-the-buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1 Rename can build edits from a symbol map that predates the buffer
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1234,6 +1282,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1245,6 +1298,25 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#b1-rename-can-build-edits-from-a-symbol-map-that-predates-the-buffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1 Rename can build edits from a symbol map that predates the buffer
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1274,7 +1346,36 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<p>No outstanding items.</p>
+<h2 id="b1-rename-can-build-edits-from-a-symbol-map-that-predates-the-buffer">B1 Rename can build edits from a symbol map that predates the buffer<a class="headerlink" href="#b1-rename-can-build-edits-from-a-symbol-map-that-predates-the-buffer" title="Permanent link">&para;</a></h2>
+<p><code>symbol_maps</code> is refreshed on a background task after each <code>didChange</code>,
+and is left untouched entirely when a parse panics. Until that lands, a
+request reads a map whose byte offsets index the <em>previous</em> version of
+the file. Converting those offsets against the newer buffer yields
+ranges over unrelated code.</p>
+<p>Linked editing hit this in practice (inserting a line above a variable
+and typing mirrored the keystrokes into the middle of a method name
+further down the file). It was fixed by checking
+<code>SymbolMap::matches_source</code> and verifying that every range it reports
+still spells the variable, dropping the whole response otherwise.</p>
+<p><code>rename</code> and <code>prepareRename</code> read the same map and turn the same offsets
+into <code>TextEdit</code>s, so the same corruption is reachable there:</p>
+<ul>
+<li><code>rename/prepare.rs</code> builds the prepare-rename range straight from
+  <code>span.start</code>/<code>span.end</code> via <code>offset_to_position</code> against <code>content</code>.</li>
+<li><code>rename/namespace.rs</code> and <code>rename/class.rs</code> read <code>symbol_maps</code> per
+  file and emit edits from the span offsets they find.</li>
+</ul>
+<p>It is much harder to trigger than linked editing was, because rename is
+an explicit user action taken after a pause rather than something the
+editor fires on every cursor move, and because the rename box shows the
+range so a wrong one is visible before the user confirms. It is the same
+defect class, though, and the fix is the same: gate the edit-producing
+paths on <code>matches_source</code> and verify each emitted range against the
+buffer text before returning it.</p>
+<p>Note that the cross-file paths need slightly more than linked editing
+did: they read maps for files other than the request URI, so each one
+must be checked against <em>that</em> file's content, not the buffer the
+request arrived on.</p>
 
 
 
