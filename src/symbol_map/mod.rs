@@ -596,9 +596,38 @@ pub(crate) struct SymbolMap {
     /// parameters.  Used by inlay hints to show inferred parameter types
     /// and return types from the enclosing callable signature.
     pub untyped_closure_sites: Vec<UntypedClosureSite>,
+    /// Byte length of the source text this map was extracted from, or
+    /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
+    /// in the `u32` fields above anyway).
+    ///
+    /// Every offset in this map indexes the exact text it was built from.
+    /// The map is refreshed on a background task after each keystroke and
+    /// is left untouched when a parse panics, so a request that reads
+    /// `symbol_maps` may get a map built from *older* text than the buffer
+    /// it was handed.  See [`Self::matches_source`].
+    pub source_len: u32,
 }
 
 impl SymbolMap {
+    /// Whether this map's offsets are valid indices into `content`.
+    ///
+    /// A length match means no text was inserted or removed since the map
+    /// was built, so every offset still points at the same token.  Callers
+    /// that turn map offsets into edits the editor will apply (linked
+    /// editing, rename) **must** check this: converting stale offsets
+    /// against a newer buffer yields ranges over unrelated code, and the
+    /// editor has no way to tell that they are nonsense.
+    ///
+    /// Length alone is the right signal because only insertion and removal
+    /// shift offsets.  A same-length replacement leaves every offset
+    /// outside the replaced span correct, and callers validate the token
+    /// text at each offset they use.  Hashing the content instead would
+    /// mean an extra full pass over every file at index time for a
+    /// vanishingly small gain.
+    pub fn matches_source(&self, content: &str) -> bool {
+        u32::try_from(content.len()).is_ok_and(|len| len == self.source_len)
+    }
+
     /// Indices into [`Self::spans`] for member accesses named `name`.
     pub fn member_access_indices(&self, name: &str) -> &[usize] {
         self.member_access_indices

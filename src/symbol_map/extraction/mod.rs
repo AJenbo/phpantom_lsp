@@ -269,5 +269,6 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         static_method_scopes: ctx.static_method_scopes,
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
+        source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
     }
 }

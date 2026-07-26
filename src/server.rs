@@ -1229,19 +1229,11 @@ impl LanguageServer for Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
+        // Blade coordinate translation happens inside the handler, which has
+        // the variable name needed to verify the translated ranges still
+        // point at it in the template source.
         self.handle_with_position("linked_editing_range", &uri, position, |content, pos| {
             self.handle_linked_editing_range(&uri, content, pos)
-                .map(|mut ler| {
-                    ler.ranges = ler
-                        .ranges
-                        .into_iter()
-                        .map(|r| Range {
-                            start: self.translate_php_to_blade(&uri, r.start),
-                            end: self.translate_php_to_blade(&uri, r.end),
-                        })
-                        .collect();
-                    ler
-                })
         })
     }
 

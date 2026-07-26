@@ -681,3 +681,336 @@ function demo(): void {
         ranges
     );
 }
+
+// ─── Range integrity guards ─────────────────────────────────────────────────
+//
+// Linked editing hands the editor ranges it will mirror every keystroke
+// into, so a range that does not point at the variable corrupts the buffer
+// silently.  These tests cover the three invariants the handler enforces.
+
+/// Assert that every returned range delimits `$name`'s name in `php` and
+/// that the range containing the cursor is among them.
+fn assert_ranges_are_the_variable(php: &str, name: &str, ranges: &[Range]) {
+    let lines: Vec<&str> = php.lines().collect();
+    for r in ranges {
+        assert_eq!(
+            r.start.line, r.end.line,
+            "a variable token cannot span lines: {r:?}"
+        );
+        assert!(
+            r.start.character < r.end.character,
+            "range must be non-empty and not inverted: {r:?}"
+        );
+        let line = lines
+            .get(r.start.line as usize)
+            .unwrap_or_else(|| panic!("range past end of file: {r:?}"));
+        let text: String = line
+            .chars()
+            .skip(r.start.character as usize)
+            .take((r.end.character - r.start.character) as usize)
+            .collect();
+        assert_eq!(
+            text, name,
+            "range {r:?} does not cover `{name}` in `{line}`"
+        );
+        assert_eq!(
+            line.chars().nth(r.start.character as usize - 1),
+            Some('$'),
+            "range {r:?} is not preceded by the `$` sigil in `{line}`"
+        );
+    }
+}
+
+/// A symbol map built from older text must never be used to build ranges.
+///
+/// `symbol_maps` is refreshed on a background task after each keystroke, so
+/// a request can arrive while the map still describes the previous buffer.
+/// Converting its byte offsets against the newer text produced ranges over
+/// unrelated code — including an inverted one that made the editor enter
+/// linked editing with the cursor in a comment and mirror the typing into
+/// two arbitrary spots further down the file.
+#[test]
+fn linked_editing_returns_none_for_stale_symbol_map() {
+    let backend = create_test_backend();
+    let before = r#"<?php
+class Cache {
+    function refresh($store, $key, $staleSeconds) {
+        $createdKey = self::PREFIX . $key;
+        $created = $store->get($createdKey); // Peak at the create time
+        if (is_numeric($created) && (int)$created < self::epoch($store)) {
+            $store->put($createdKey, 1, $staleSeconds);
+        }
+    }
+}
+"#;
+    // The user inserts a docblock above the `$created` assignment.  Every
+    // offset from `before` now points one line too early.
+    let after = before.replace(
+        "        $created = $store->get",
+        "        /** */\n        $created = $store->get",
+    );
+
+    backend.update_ast("file:///cache.php", before);
+
+    // Cursor inside the freshly typed `/** */`, and on either side of it.
+    for (line, character) in [(4u32, 16u32), (4, 15), (4, 11), (3, 12), (5, 10)] {
+        let result = backend.handle_linked_editing_range(
+            "file:///cache.php",
+            &after,
+            Position { line, character },
+        );
+        assert!(
+            result.is_none(),
+            "stale map must not produce ranges at {line}:{character}, got {:?}",
+            result.map(|r| r.ranges)
+        );
+    }
+
+    // Once the map catches up, linked editing works again.
+    backend.update_ast("file:///cache.php", &after);
+    let ranges = backend
+        .handle_linked_editing_range(
+            "file:///cache.php",
+            &after,
+            Position {
+                line: 5,
+                character: 10,
+            },
+        )
+        .expect("fresh map should link $created")
+        .ranges;
+    assert_eq!(ranges.len(), 3, "got {ranges:?}");
+    assert_ranges_are_the_variable(&after, "created", &ranges);
+}
+
+/// A same-length edit does not shift offsets, so the length check cannot
+/// catch it.  The per-range byte check must: once `$created` is overtyped
+/// with a different name, no range spells `$created` any more.
+#[test]
+fn linked_editing_returns_none_when_token_text_changed_in_place() {
+    let backend = create_test_backend();
+    let before = r#"<?php
+function demo($store) {
+    $created = $store->get('k');
+    return is_numeric($created) ? $created : null;
+}
+"#;
+    // Same byte count, so `matches_source` still agrees.
+    let after = before.replace("$created", "$updated");
+    assert_eq!(before.len(), after.len());
+
+    backend.update_ast("file:///demo.php", before);
+    let result = backend.handle_linked_editing_range(
+        "file:///demo.php",
+        &after,
+        Position {
+            line: 2,
+            character: 5,
+        },
+    );
+    assert!(
+        result.is_none(),
+        "renamed-in-place token must not produce ranges, got {:?}",
+        result.map(|r| r.ranges)
+    );
+}
+
+/// Whatever cursor position the editor asks about, the response must be
+/// well-formed: real `$name` tokens, no overlaps, and the occurrence under
+/// the cursor among them.  Sweeping every position of each snippet exercises
+/// region selection and closure bridging across variable shapes far more
+/// widely than the hand-written cases above.
+#[test]
+fn linked_editing_ranges_are_well_formed_at_every_position() {
+    let backend = create_test_backend();
+    let snippets = [
+        // Parameters, foreach bindings, reassignment, closure capture.
+        r#"<?php
+function demo(string $name, array $rows) {
+    $out = [];
+    foreach ($rows as $row) {
+        $out[] = $row . $name;
+    }
+    $out = array_filter($out);
+    $join = function (string $sep) use ($out, $name) {
+        return $name . implode($sep, $out);
+    };
+    $name .= '!';
+    return $join(',') . $name;
+}
+"#,
+        // Static and global declarations, every loop form, if/elseif/else.
+        r#"<?php
+function counters($a) {
+    static $seen = 0;
+    global $conf;
+    $out = $conf;
+    if ($a) { $out = 1; } elseif (!$a) { $out = 2; } else { $out = 3; }
+    while ($a) { $out .= $a; }
+    do { $seen++; } while ($seen < 5);
+    for ($k = 0; $k < 3; $k++) { $out += $k; }
+    return $out . $seen;
+}
+"#,
+        // List destructuring, by-reference parameters, variadics.
+        r#"<?php
+function spread(&$ref, ...$rest) {
+    [$x, $y] = $rest;
+    $ref = $x + $y + $x;
+    foreach ($rest as $r) { $ref .= $r; }
+    return $ref;
+}
+"#,
+        // Interpolation and heredoc bodies.
+        r#"<?php
+function interpolate($x) {
+    $msg = "val $x and {$x} end";
+    return $msg . <<<EOT
+        $x here $msg
+        EOT;
+}
+"#,
+        // switch/match arms and try/catch/finally branches.
+        r#"<?php
+function branches($v) {
+    switch ($v) { case 1: $r = 'a'; break; default: $r = 'b'; }
+    try { $c = conn(); } catch (\Throwable $e) { $c = null; } finally { log($c . $r); }
+    return match ($v) { 1 => $c, default => $r . $v };
+}
+"#,
+        // Promoted constructor property alongside a same-named local, and a
+        // docblock `@var` mention.
+        r#"<?php
+class Ids {
+    public function __construct(private int $id) {}
+    function bump(int $id) {
+        /** @var int $id */
+        $id = $id + 1;
+        return $id;
+    }
+}
+"#,
+        // Nested closures shadowing the captured name.
+        r#"<?php
+function nested($n) {
+    $cb = function ($n) use ($n) {
+        return function () use ($n) { return $n; };
+    };
+    return $cb($n)();
+}
+"#,
+    ];
+
+    let mut linked_positions = 0;
+    for (idx, php) in snippets.iter().enumerate() {
+        let uri = format!("file:///sweep{idx}.php");
+        backend.update_ast(&uri, php);
+
+        for (line_no, line) in php.lines().enumerate() {
+            for character in 0..=line.chars().count() {
+                let pos = Position {
+                    line: line_no as u32,
+                    character: character as u32,
+                };
+                let Some(result) = backend.handle_linked_editing_range(&uri, php, pos) else {
+                    continue;
+                };
+                linked_positions += 1;
+                assert!(
+                    result.ranges.len() >= 2,
+                    "a linked response needs at least 2 ranges in {uri} at {pos:?}: {:?}",
+                    result.ranges
+                );
+
+                // Every range must cover the same variable name...
+                let first = &result.ranges[0];
+                let name: String = php
+                    .lines()
+                    .nth(first.start.line as usize)
+                    .unwrap()
+                    .chars()
+                    .skip(first.start.character as usize)
+                    .take((first.end.character - first.start.character) as usize)
+                    .collect();
+                assert_ranges_are_the_variable(php, &name, &result.ranges);
+
+                // ...the ranges must be sorted, and must not overlap or repeat...
+                let mut sorted = result.ranges.clone();
+                sorted.sort_by_key(|r| (r.start.line, r.start.character));
+                assert_eq!(
+                    sorted, result.ranges,
+                    "ranges must be sorted in {uri} at {pos:?}"
+                );
+                for pair in sorted.windows(2) {
+                    assert!(
+                        (pair[0].end.line, pair[0].end.character)
+                            < (pair[1].start.line, pair[1].start.character),
+                        "ranges overlap in {uri} at {pos:?}: {:?}",
+                        result.ranges
+                    );
+                }
+
+                // ...and one of them must be where the user is typing.
+                assert!(
+                    result.ranges.iter().any(|r| r.start.line == pos.line
+                        // The cursor may sit on the `$` (one before the range)
+                        // or just past the last character.
+                        && pos.character + 1 >= r.start.character
+                        && pos.character <= r.end.character),
+                    "no returned range contains the cursor in {uri} at {pos:?}: {:?}",
+                    result.ranges
+                );
+            }
+        }
+    }
+
+    assert!(
+        linked_positions > 100,
+        "expected the sweep to find plenty of linkable positions, got {linked_positions}"
+    );
+}
+
+/// A Blade template is analysed as generated PHP, so the ranges start life in
+/// coordinates the user cannot see.  They must come back as positions in the
+/// template itself, verified against the template text.
+#[tokio::test]
+async fn linked_editing_blade_ranges_land_in_template_source() {
+    use tower_lsp::LanguageServer;
+
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///view.blade.php").unwrap();
+    let text = "<div>\n@foreach ($rows as $row)\n  <p>{{ $row }}</p>\n  <p>{{ $row->id }}</p>\n@endforeach\n</div>\n";
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "blade".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // The foreach binding and both `{{ $row }}` reads.
+    for (line, character) in [(1u32, 22u32), (2, 10), (3, 10)] {
+        let result = backend
+            .linked_editing_range(LinkedEditingRangeParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position { line, character },
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("expected $row to be linked at {line}:{character}"));
+
+        assert_eq!(
+            result.ranges.len(),
+            3,
+            "expected the binding plus both reads at {line}:{character}: {:?}",
+            result.ranges
+        );
+        assert_ranges_are_the_variable(text, "row", &result.ranges);
+    }
+}

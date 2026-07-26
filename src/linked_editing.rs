@@ -30,12 +30,40 @@
 //! Only variables are supported. Class names, members, functions, and
 //! constants span multiple files and are better served by the full
 //! `textDocument/rename` flow.
+//!
+//! ## Why this feature validates so aggressively
+//!
+//! Every other read-only feature that mis-reads the symbol map produces a
+//! wrong hover or a missing completion. Linked editing produces *edits*:
+//! the editor takes the ranges on trust and mirrors every keystroke into
+//! them for as long as the mode stays active. A range that points at the
+//! wrong text therefore corrupts the buffer silently, and the user's undo
+//! history is the only way back.
+//!
+//! So the response is all-or-nothing, and three invariants are checked
+//! before returning anything. If any of them fails we return `None`; the
+//! editor simply does not offer linked editing, and re-asks on the next
+//! cursor move.
+//!
+//! 1. **The symbol map must match the buffer.** `symbol_maps` is refreshed
+//!    on a background task after each keystroke and is left untouched when
+//!    a parse panics, so the map handed to us can predate the buffer.
+//!    Converting its byte offsets against newer text yields ranges over
+//!    unrelated code (see [`SymbolMap::matches_source`]).
+//! 2. **Every range must actually spell `$name`.** Checked against the
+//!    buffer bytes, which also guarantees the ranges are single-line and
+//!    non-overlapping (a variable token contains no newline, and two
+//!    equal-length `$name` tokens at different offsets cannot overlap).
+//! 3. **The occurrence under the cursor must be one of the ranges.**
+//!    Linked editing only means anything if the place the user is typing is
+//!    itself linked; if region selection ever dropped it, mirroring would
+//!    edit occurrences the user is not looking at.
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{SymbolKind, SymbolMap, VarDefKind, VarDefSite};
-use crate::text_position::byte_range_to_lsp_range;
+use crate::text_position::LineIndex;
 
 impl Backend {
     /// Compute linked editing ranges for the symbol under the cursor.
@@ -54,6 +82,11 @@ impl Backend {
         let maps = self.symbol_maps.read();
         let symbol_map = maps.get(uri)?;
 
+        // Invariant 1: the map must describe the text we were handed.
+        if !symbol_map.matches_source(content) {
+            return None;
+        }
+
         match &span.kind {
             SymbolKind::Variable { name } => {
                 // Property declarations should not trigger linked editing —
@@ -69,13 +102,22 @@ impl Backend {
                     return None;
                 }
 
-                let ranges =
-                    collect_variable_ranges_in_region(symbol_map, content, name, span.start);
+                let offsets = collect_variable_offsets_in_region(symbol_map, name, span.start);
 
-                // Linked editing with fewer than 2 ranges is pointless.
-                if ranges.len() < 2 {
+                // Linked editing with fewer than 2 occurrences is pointless.
+                if offsets.len() < 2 {
                     return None;
                 }
+
+                // Invariant 3: the occurrence the user is typing in must be
+                // one of the linked ranges.
+                if !offsets.contains(&span.start) {
+                    return None;
+                }
+
+                // Invariant 2: every offset must still spell `$name`.
+                let ranges = variable_ranges_at(content, name, &offsets)?;
+                let ranges = self.map_linked_ranges_to_blade(uri, name, ranges)?;
 
                 Some(LinkedEditingRanges {
                     ranges,
@@ -84,6 +126,49 @@ impl Backend {
             }
             _ => None,
         }
+    }
+
+    /// Map ranges from virtual-PHP coordinates back to Blade source
+    /// coordinates, or pass them through unchanged for a plain PHP file.
+    ///
+    /// A Blade template is analysed as generated PHP, so the ranges computed
+    /// above are positions in text the user cannot see. The source map that
+    /// translates them back is a per-line column approximation: it clamps
+    /// prologue lines to `0:0`, and directives that expand to more PHP than
+    /// they occupy in the template can map several generated occurrences
+    /// onto the same template position. Either would make the editor mirror
+    /// keystrokes into arbitrary parts of the template.
+    ///
+    /// So the translated ranges are re-checked against the *Blade* text with
+    /// the same rule invariant 2 applies to PHP, and the response is dropped
+    /// if the round trip no longer lands on `$name` at two distinct places.
+    fn map_linked_ranges_to_blade(
+        &self,
+        uri: &str,
+        var_name: &str,
+        ranges: Vec<Range>,
+    ) -> Option<Vec<Range>> {
+        if !self.is_blade_file(uri) {
+            return Some(ranges);
+        }
+
+        let blade = self.get_file_content(uri)?;
+
+        // `ranges` cover the name only, so the `$` sits one byte earlier.
+        let mut sigil_offsets: Vec<u32> = ranges
+            .into_iter()
+            .map(|r| {
+                let start = self.translate_php_to_blade(uri, r.start);
+                crate::text_position::position_to_offset(&blade, start).checked_sub(1)
+            })
+            .collect::<Option<Vec<u32>>>()?;
+        sigil_offsets.sort_unstable();
+        sigil_offsets.dedup();
+        if sigil_offsets.len() < 2 {
+            return None;
+        }
+
+        variable_ranges_at(&blade, var_name, &sigil_offsets)
     }
 }
 
@@ -260,34 +345,61 @@ fn span_in_region(
     false
 }
 
-/// Convert a byte range for a `$varName` token into an LSP [`Range`]
-/// that excludes the leading `$` sigil.
+/// Turn `$name` token offsets into LSP [`Range`]s covering just the name,
+/// verifying against `content` that each offset really is such a token.
 ///
-/// The `$` is skipped by advancing `start` by one byte. This is safe
-/// because `$` is a single-byte ASCII character and all PHP source
-/// files are UTF-8 (or ASCII-compatible).
-fn variable_range_without_sigil(content: &str, start: usize, end: usize) -> Range {
-    // Skip the `$` at the start of the token.
-    let name_start = start + 1;
-    debug_assert!(
-        name_start <= end,
-        "variable token too short to have a name after $"
-    );
-    byte_range_to_lsp_range(content, name_start, end)
+/// Returns `None` if *any* offset fails to check out. Skipping the bad one
+/// instead would hand the editor a partial set: the dropped occurrence
+/// would keep its old name while the rest were renamed, which is worse
+/// than not offering linked editing at all.
+///
+/// The returned ranges exclude the leading `$` sigil so that typing before
+/// the `$` (e.g. wrapping a variable in a function call) does not propagate
+/// to other occurrences. Skipping it by one byte is safe because `$` is
+/// single-byte ASCII and PHP source is read as UTF-8.
+fn variable_ranges_at(content: &str, var_name: &str, offsets: &[u32]) -> Option<Vec<Range>> {
+    // Validate every offset before building the line table, so a stale map
+    // costs a handful of byte comparisons rather than a pass over the file.
+    for &offset in offsets {
+        let start = offset as usize;
+        if content.as_bytes().get(start) != Some(&b'$') {
+            return None;
+        }
+        let name_start = start + 1;
+        if content.get(name_start..name_start + var_name.len()) != Some(var_name) {
+            return None;
+        }
+    }
+
+    // One line table for all the offsets: converting each one by rescanning
+    // from the start of the file would be O(occurrences × file size) on a
+    // request the editor makes on every cursor move.
+    let index = LineIndex::new(content);
+    Some(
+        offsets
+            .iter()
+            .map(|&offset| {
+                let name_start = offset as usize + 1;
+                Range {
+                    start: index.position(name_start),
+                    end: index.position(name_start + var_name.len()),
+                }
+            })
+            .collect(),
+    )
 }
 
-/// Collect all LSP [`Range`]s for a variable within the definition
-/// region that contains `cursor_offset`.
+/// Collect the byte offsets of every `$var` token (including its `$`)
+/// within the definition region that contains `cursor_offset`.
 ///
-/// Ranges exclude the leading `$` sigil so that typing before the `$`
-/// (e.g. wrapping a variable in a function call) does not propagate to
-/// other occurrences.
-fn collect_variable_ranges_in_region(
+/// Offsets rather than ranges: an occurrence is always the token
+/// `$` + `var_name`, so the offset determines the range, and the caller
+/// can validate all of them against the buffer in one place.
+fn collect_variable_offsets_in_region(
     symbol_map: &SymbolMap,
-    content: &str,
     var_name: &str,
     cursor_offset: u32,
-) -> Vec<Range> {
+) -> Vec<u32> {
     let scope_start = symbol_map.find_variable_scope(var_name, cursor_offset);
     let regions = build_regions(symbol_map, var_name, scope_start);
 
@@ -298,8 +410,10 @@ fn collect_variable_ranges_in_region(
         None => return Vec::new(),
     };
 
-    let mut ranges = Vec::new();
-    let mut seen_offsets = std::collections::HashSet::new();
+    // Offsets may be pushed more than once (a def site that also has a
+    // Variable span, an occurrence reached by both the region scan and the
+    // closure bridging below); duplicates are removed in one pass at the end.
+    let mut offsets = Vec::new();
 
     // Gather variable spans within the region.
     for span in &symbol_map.spans {
@@ -314,14 +428,7 @@ fn collect_variable_ranges_in_region(
             if !span_in_region(region, span.start, symbol_map, var_name, &regions) {
                 continue;
             }
-            if !seen_offsets.insert(span.start) {
-                continue;
-            }
-            ranges.push(variable_range_without_sigil(
-                content,
-                span.start as usize,
-                span.end as usize,
-            ));
+            offsets.push(span.start);
         }
     }
 
@@ -332,14 +439,8 @@ fn collect_variable_ranges_in_region(
             && def.scope_start == scope_start
             && def.kind != VarDefKind::DocblockParam
             && def.offset == region.def_offset
-            && seen_offsets.insert(def.offset)
         {
-            let end_offset = def.offset + 1 + def.name.len() as u32;
-            ranges.push(variable_range_without_sigil(
-                content,
-                def.offset as usize,
-                end_offset as usize,
-            ));
+            offsets.push(def.offset);
         }
     }
 
@@ -377,14 +478,7 @@ fn collect_variable_ranges_in_region(
                     if ss != closure_scope {
                         continue;
                     }
-                    if !seen_offsets.insert(span.start) {
-                        continue;
-                    }
-                    ranges.push(variable_range_without_sigil(
-                        content,
-                        span.start as usize,
-                        span.end as usize,
-                    ));
+                    offsets.push(span.start);
                 }
             }
         }
@@ -424,35 +518,18 @@ fn collect_variable_ranges_in_region(
                     ) {
                         continue;
                     }
-                    if !seen_offsets.insert(span.start) {
-                        continue;
-                    }
-                    ranges.push(variable_range_without_sigil(
-                        content,
-                        span.start as usize,
-                        span.end as usize,
-                    ));
+                    offsets.push(span.start);
                 }
             }
-            // Also include the outer region's def site if not yet seen.
-            if seen_offsets.insert(outer_region.def_offset) {
-                let end_offset = outer_region.def_offset + 1 + var_name.len() as u32;
-                ranges.push(variable_range_without_sigil(
-                    content,
-                    outer_region.def_offset as usize,
-                    end_offset as usize,
-                ));
-            }
+            // Also include the outer region's def site.
+            offsets.push(outer_region.def_offset);
         }
     }
 
-    // Sort by position for a deterministic response.
-    ranges.sort_by(|a, b| {
-        a.start
-            .line
-            .cmp(&b.start.line)
-            .then(a.start.character.cmp(&b.start.character))
-    });
+    // Sort for a deterministic response (offset order is document order)
+    // and drop the duplicates noted above.
+    offsets.sort_unstable();
+    offsets.dedup();
 
-    ranges
+    offsets
 }
