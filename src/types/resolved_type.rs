@@ -345,7 +345,7 @@ impl ResolvedType {
                 }
                 let members: Vec<PhpType> =
                     resolved.iter().map(|rt| rt.type_string.clone()).collect();
-                PhpType::Union(members)
+                PhpType::union(members)
             }
         }
     }

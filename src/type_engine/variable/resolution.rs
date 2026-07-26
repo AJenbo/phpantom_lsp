@@ -95,8 +95,8 @@ pub(super) fn enrich_builder_type_in_scope(
     }
 
     // Build the enriched type with the enclosing model as the generic arg.
-    Some(PhpType::Generic(
-        type_name.to_string(),
+    Some(PhpType::generic(
+        type_name,
         vec![PhpType::Named(atom(current_class.name.as_ref()))],
     ))
 }
@@ -1266,9 +1266,9 @@ fn type_may_contain_template_param(ty: &PhpType) -> bool {
             members.iter().any(type_may_contain_template_param)
         }
         PhpType::Nullable(inner) => type_may_contain_template_param(inner),
-        PhpType::Generic(base, args) => {
-            !crate::php_type::is_keyword_type(base)
-                || args.iter().any(type_may_contain_template_param)
+        PhpType::Generic(g) => {
+            !crate::php_type::is_keyword_type(&g.name)
+                || g.args.iter().any(type_may_contain_template_param)
         }
         _ => false,
     }
@@ -1614,7 +1614,7 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
         optional: false,
     });
 
-    PhpType::ArrayShape(entries)
+    PhpType::array_shape(entries)
 }
 
 /// Merge a push element type into an existing `PhpType` to produce
@@ -1652,7 +1652,7 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
     let elem_type = if elem_types.len() == 1 {
         elem_types.into_iter().next().unwrap()
     } else {
-        PhpType::Union(elem_types)
+        PhpType::union(elem_types)
     };
 
     PhpType::list(elem_type)
@@ -1714,7 +1714,7 @@ pub(super) fn merge_keyed_type(
     let val_type = if elem_types.len() == 1 {
         elem_types.into_iter().next().unwrap()
     } else {
-        PhpType::Union(elem_types)
+        PhpType::union(elem_types)
     };
 
     if key_types.is_empty() {
@@ -1724,7 +1724,7 @@ pub(super) fn merge_keyed_type(
         let k_type = if key_types.len() == 1 {
             key_types.into_iter().next().unwrap()
         } else {
-            PhpType::Union(key_types)
+            PhpType::union(key_types)
         };
         PhpType::generic_array(k_type, val_type)
     }
@@ -1758,7 +1758,7 @@ pub(super) fn infer_array_key_type(index: &Expression<'_>, ctx: &VarResolutionCt
             return PhpType::string();
         }
         if joined.is_mixed() || is_array_key_type(&joined) {
-            return PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            return PhpType::union(vec![PhpType::int(), PhpType::string()]);
         }
         // For anything else (e.g. a class-string<T>, or a union),
         // return as-is if it is composed entirely of int/string
@@ -1766,7 +1766,7 @@ pub(super) fn infer_array_key_type(index: &Expression<'_>, ctx: &VarResolutionCt
         return joined;
     }
 
-    PhpType::Union(vec![PhpType::int(), PhpType::string()])
+    PhpType::union(vec![PhpType::int(), PhpType::string()])
 }
 
 /// Returns `true` when the [`PhpType`] represents a PHP type that

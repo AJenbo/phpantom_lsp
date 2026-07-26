@@ -538,7 +538,7 @@ pub(crate) fn resolve_class_with_inheritance(
     // the element resolves regardless of the call site's namespace).
     if merged.kind == crate::types::ClassLikeKind::Enum {
         let element = PhpType::Named(merged.fqn());
-        let list_type = PhpType::Generic("list".to_string(), vec![element]);
+        let list_type = PhpType::list(element);
         if let Some(cases) = merged
             .methods
             .make_mut()

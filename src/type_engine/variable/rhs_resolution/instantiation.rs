@@ -137,14 +137,14 @@ pub(super) fn resolve_rhs_instantiation(
                         for (bound_param, bound_type) in cls.template_param_bounds.iter() {
                             let bound_param_str: &str = bound_param.as_ref();
                             if let Some(concrete) = subs.get(bound_param_str).cloned()
-                                && let PhpType::Generic(_, bound_args) = bound_type
+                                && let PhpType::Generic(bound) = bound_type
                             {
                                 let concrete_args = match &concrete {
-                                    PhpType::Generic(_, args) => Some(args.as_slice()),
+                                    PhpType::Generic(g) => Some(g.args.as_slice()),
                                     _ => None,
                                 };
                                 if let Some(concrete_args) = concrete_args {
-                                    for (i, bound_arg) in bound_args.iter().enumerate() {
+                                    for (i, bound_arg) in bound.args.iter().enumerate() {
                                         if let PhpType::Named(tpl_name) = bound_arg
                                             && cls
                                                 .template_params
@@ -215,7 +215,7 @@ pub(super) fn resolve_rhs_instantiation(
                         }
 
                         let generic_type =
-                            PhpType::Generic(substituted.name.to_string(), type_args.clone());
+                            PhpType::generic_atom(substituted.name, type_args.clone());
                         return vec![ResolvedType::from_both(generic_type, substituted)];
                     }
                 }
@@ -236,7 +236,7 @@ pub(super) fn resolve_rhs_instantiation(
                 ctx.resolved_class_cache,
                 &type_args,
             );
-            let generic_type = PhpType::Generic(substituted.name.to_string(), type_args.clone());
+            let generic_type = PhpType::generic_atom(substituted.name, type_args.clone());
             return vec![ResolvedType::from_both_arc(generic_type, substituted)];
         }
 
@@ -319,17 +319,17 @@ pub(super) fn extract_generic_arg_from_ancestor(
     // Get the class name from the argument type.
     let class_name = match arg_type {
         PhpType::Named(n) => n.as_str(),
-        PhpType::Generic(n, _) => n.as_str(),
+        PhpType::Generic(g) => g.name.as_str(),
         _ => return None,
     };
 
     // If the arg type itself is already generic with the wrapper name,
     // extract directly.  E.g. argument type is `Container<Foo>`.
-    if let PhpType::Generic(n, args) = arg_type {
-        let n_short = crate::util::short_name(n);
+    if let PhpType::Generic(g) = arg_type {
+        let n_short = crate::util::short_name(&g.name);
         let wrapper_short = crate::util::short_name(wrapper_name);
         if n_short.eq_ignore_ascii_case(wrapper_short) {
-            return args.get(tpl_position).cloned();
+            return g.args.get(tpl_position).cloned();
         }
     }
 
@@ -790,7 +790,8 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             TemplateBindingMode::Direct
         }
         PhpType::Named(n) if n == tpl_name => TemplateBindingMode::Direct,
-        PhpType::Generic(wrapper_name, args) => {
+        PhpType::Generic(g) => {
+            let (wrapper_name, args) = (&g.name, &g.args);
             // `array<T>` (single arg) should be treated as ArrayElement,
             // not GenericWrapper — "array" is not a real class that can
             // be resolved for constructor inference.  Multi-arg forms
@@ -820,22 +821,18 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             }
             for (i, arg) in args.iter().enumerate() {
                 if arg.is_named(tpl_name) {
-                    return TemplateBindingMode::GenericWrapper(wrapper_name.clone(), i);
+                    return TemplateBindingMode::GenericWrapper(wrapper_name.to_string(), i);
                 }
             }
             TemplateBindingMode::Direct
         }
-        PhpType::Callable {
-            params,
-            return_type,
-            ..
-        } => {
-            if let Some(rt) = return_type
+        PhpType::Callable(c) => {
+            if let Some(rt) = &c.return_type
                 && type_contains_name(rt, tpl_name)
             {
                 return TemplateBindingMode::CallableReturnType;
             }
-            for (i, p) in params.iter().enumerate() {
+            for (i, p) in c.params.iter().enumerate() {
                 if type_contains_name(&p.type_hint, tpl_name) {
                     return TemplateBindingMode::CallableParamType(i);
                 }
@@ -861,16 +858,12 @@ pub(crate) fn type_contains_name(ty: &PhpType, name: &str) -> bool {
         PhpType::Union(members) | PhpType::Intersection(members) => {
             members.iter().any(|m| type_contains_name(m, name))
         }
-        PhpType::Generic(_, args) => args.iter().any(|a| type_contains_name(a, name)),
-        PhpType::Callable {
-            params,
-            return_type,
-            ..
-        } => {
-            params
+        PhpType::Generic(g) => g.args.iter().any(|a| type_contains_name(a, name)),
+        PhpType::Callable(c) => {
+            c.params
                 .iter()
                 .any(|p| type_contains_name(&p.type_hint, name))
-                || return_type
+                || c.return_type
                     .as_ref()
                     .is_some_and(|rt| type_contains_name(rt, name))
         }
@@ -1023,23 +1016,23 @@ pub(super) fn resolve_array_literal_generic(
 /// Also handles `PhpType::Array(inner)` as a single-arg generic.
 pub(super) fn extract_generic_arg_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
     match ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
             // `list<T>` has a single arg (the value type).  When the
             // binding expects position 1 (value position of `array<K, V>`),
             // map it to position 0 of the list.  Position 0 of a list
             // is implicitly `int` (sequential keys).
             let is_list_like = matches!(
-                name.to_ascii_lowercase().as_str(),
+                g.name.to_ascii_lowercase().as_str(),
                 "list" | "non-empty-list"
             );
-            if is_list_like && args.len() == 1 {
+            if is_list_like && g.args.len() == 1 {
                 return match position {
                     0 => Some(PhpType::int()),
-                    1 => args.first().cloned(),
+                    1 => g.args.first().cloned(),
                     _ => None,
                 };
             }
-            args.get(position).cloned()
+            g.args.get(position).cloned()
         }
         PhpType::Array(inner) if position == 0 => Some(inner.as_ref().clone()),
         _ => None,

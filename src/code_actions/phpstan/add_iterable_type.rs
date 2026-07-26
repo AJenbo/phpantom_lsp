@@ -80,7 +80,7 @@ fn extract_iterable_return_type(message: &str) -> Option<PhpType> {
 /// Uses PHPStan's generic syntax: `array<string>`, `iterable<User>`,
 /// `Traversable<mixed>`, `array<int, string>`, etc.
 fn build_return_type(iterable_type: &str, args: Vec<PhpType>) -> PhpType {
-    PhpType::Generic(iterable_type.to_owned(), args)
+    PhpType::generic(iterable_type, args)
 }
 
 // ── Docblock helpers ────────────────────────────────────────────────────────
@@ -548,9 +548,9 @@ impl Backend {
 
         // Try to extract the generic parameter(s) from the inferred type.
         // e.g. `list<string>` → [string], `array<int, User>` → [int, User]
-        if let PhpType::Generic(_, args) = &parsed {
-            if !args.is_empty() && args.iter().all(|a| !a.is_mixed()) {
-                return Some(args.clone());
+        if let PhpType::Generic(g) = &parsed {
+            if !g.args.is_empty() && g.args.iter().all(|a| !a.is_mixed()) {
+                return Some(g.args.clone());
             }
             return None;
         }

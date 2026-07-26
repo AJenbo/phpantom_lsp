@@ -211,7 +211,7 @@ impl Backend {
                         if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
                             let generic_arg_count = param_hint
                                 .and_then(|h| match h {
-                                    crate::php_type::PhpType::Generic(_, args) => Some(args.len()),
+                                    crate::php_type::PhpType::Generic(g) => Some(g.args.len()),
                                     _ => None,
                                 })
                                 .unwrap_or(1);
@@ -273,8 +273,9 @@ impl Backend {
                         let extracted = (|| -> Option<PhpType> {
                             // Direct match: resolved type is already
                             // `Wrapper<..., ConcreteArg, ...>`.
-                            if let PhpType::Generic(name, args) = &resolved_type {
-                                let short = crate::util::short_name(name);
+                            if let PhpType::Generic(g) = &resolved_type {
+                                let args = &g.args;
+                                let short = crate::util::short_name(&g.name);
                                 let wrapper_short = crate::util::short_name(wrapper_name);
                                 if short == wrapper_short {
                                     // When the param hint has fewer
@@ -285,7 +286,7 @@ impl Backend {
                                     // the value/last type.
                                     let param_generic_count = param_hint
                                         .and_then(|h| match h {
-                                            PhpType::Generic(_, a) => Some(a.len()),
+                                            PhpType::Generic(g) => Some(g.args.len()),
                                             _ => None,
                                         })
                                         .unwrap_or(1);
@@ -319,11 +320,11 @@ impl Backend {
                             // would return the raw `T` instead of the
                             // concrete `ASTClass`.
                             let class_tpl_subs: HashMap<String, PhpType> =
-                                if let PhpType::Generic(_, concrete_args) = &resolved_type {
+                                if let PhpType::Generic(g) = &resolved_type {
                                     merged
                                         .template_params
                                         .iter()
-                                        .zip(concrete_args.iter())
+                                        .zip(g.args.iter())
                                         .map(|(name, ty)| (name.to_string(), ty.clone()))
                                         .collect()
                                 } else {
@@ -356,7 +357,7 @@ impl Backend {
 
                                 let param_generic_count = param_hint
                                     .and_then(|h| match h {
-                                        PhpType::Generic(_, a) => Some(a.len()),
+                                        PhpType::Generic(g) => Some(g.args.len()),
                                         _ => None,
                                     })
                                     .unwrap_or(1);
@@ -541,15 +542,13 @@ impl Backend {
         // shape.  E.g., if callable returns `Generator<TKey, TValue, ...>`
         // and we inferred `Generator<int, string, mixed, mixed>`, extract
         // the arg at tpl_position.
-        if let (
-            PhpType::Generic(expected_name, _),
-            PhpType::Generic(inferred_name, inferred_args),
-        ) = (&callable_return_type, &closure_ret)
+        if let (PhpType::Generic(expected), PhpType::Generic(inferred)) =
+            (&callable_return_type, &closure_ret)
         {
-            let exp_short = crate::util::short_name(expected_name);
-            let inf_short = crate::util::short_name(inferred_name);
+            let exp_short = crate::util::short_name(&expected.name);
+            let inf_short = crate::util::short_name(&inferred.name);
             if exp_short.eq_ignore_ascii_case(inf_short) {
-                return inferred_args.get(tpl_position).cloned();
+                return inferred.args.get(tpl_position).cloned();
             }
         }
 
@@ -576,13 +575,13 @@ impl Backend {
                 None
             }
             PhpType::Nullable(inner) => Self::find_callable_return_generic_in_hint(inner, tpl_name),
-            PhpType::Callable { return_type, .. } => {
-                if let Some(rt) = return_type
+            PhpType::Callable(c) => {
+                if let Some(rt) = &c.return_type
                     && crate::type_engine::variable::rhs_resolution::type_contains_name(
                         rt, tpl_name,
                     )
                 {
-                    return Some(rt.as_ref().clone());
+                    return Some(rt.clone());
                 }
                 None
             }

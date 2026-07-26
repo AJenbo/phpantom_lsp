@@ -185,9 +185,9 @@ fn type_hint_to_classes_typed_depth(
         ),
 
         // ── Generic type ───────────────────────────────────────────
-        PhpType::Generic(name, args) => resolve_named_type(
-            name,
-            args,
+        PhpType::Generic(g) => resolve_named_type(
+            &g.name,
+            &g.args,
             owning_class_name,
             all_classes,
             class_loader,
@@ -198,7 +198,7 @@ fn type_hint_to_classes_typed_depth(
         // Not a class type itself; skip.
         PhpType::Array(_)
         | PhpType::ArrayShape(_)
-        | PhpType::Callable { .. }
+        | PhpType::Callable(_)
         | PhpType::ClassString(_)
         | PhpType::InterfaceString(_)
         | PhpType::KeyOf(_)
@@ -255,7 +255,7 @@ fn resolve_named_type(
     ) {
         if !generic_args.is_empty() {
             // `self<RuleError>` → rewrite to `OwningClass<RuleError>`.
-            let rewritten = PhpType::Generic(owning_class_name.to_string(), generic_args.to_vec());
+            let rewritten = PhpType::generic(owning_class_name, generic_args.to_vec());
             return type_hint_to_classes_typed_depth(
                 &rewritten,
                 owning_class_name,

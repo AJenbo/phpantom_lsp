@@ -169,8 +169,8 @@ pub(crate) fn classify_relationship_typed(return_type: &PhpType) -> Option<Relat
 ///
 /// Returns `None` if no generic parameters are present.
 pub(super) fn extract_related_type_typed(return_type: &PhpType) -> Option<&PhpType> {
-    if let PhpType::Generic(_, args) = return_type {
-        let first = args.first()?;
+    if let PhpType::Generic(g) = return_type {
+        let first = g.args.first()?;
         if first.is_empty() {
             return None;
         }
@@ -220,8 +220,8 @@ pub(crate) fn class_declares_pivot_relationship(class: &ClassInfo) -> bool {
 /// Returns `None` when there is no third argument, it is empty, or it is a
 /// `$this`/`static`/`self` self-reference (the default `Pivot`).
 pub(crate) fn extract_pivot_type_typed(return_type: &PhpType) -> Option<&PhpType> {
-    if let PhpType::Generic(_, args) = return_type {
-        let pivot = args.get(2)?;
+    if let PhpType::Generic(g) = return_type {
+        let pivot = g.args.get(2)?;
         if pivot.is_empty() || pivot.is_self_ref() {
             return None;
         }
@@ -251,7 +251,7 @@ pub(super) fn build_property_type(
         RelationshipKind::Collection => {
             let inner = related_type.cloned().unwrap_or_else(eloquent_model_type);
             let collection_class = custom_collection.unwrap_or(ELOQUENT_COLLECTION_FQN);
-            Some(PhpType::Generic(collection_class.to_string(), vec![inner]))
+            Some(PhpType::generic(collection_class, vec![inner]))
         }
         RelationshipKind::MorphTo => Some(eloquent_model_type()),
     }
@@ -339,7 +339,7 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         let after_paren = &body_text[args_start..];
 
         if let Some(class_arg) = extract_class_argument(after_paren) {
-            return Some(PhpType::Generic(
+            return Some(PhpType::generic(
                 format!("\\{fqn}"),
                 vec![PhpType::Named(atom(&class_arg))],
             ));
@@ -526,8 +526,8 @@ fn extract_related_type_for_chain(
     // Check the first generic arg directly as a PhpType before
     // stringifying, so we can use the `is_self_ref()` predicate
     // instead of comparing raw strings.
-    if let PhpType::Generic(_, args) = return_type {
-        let first = args.first()?;
+    if let PhpType::Generic(g) = return_type {
+        let first = g.args.first()?;
         if first.is_self_ref() {
             return Some(declaring_class.fqn().to_string());
         }

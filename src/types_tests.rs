@@ -902,7 +902,7 @@ fn from_classes_with_hint_single_class_uses_hint() {
 
 #[test]
 fn from_classes_with_hint_intersection_preserves_type() {
-    let hint = PhpType::Intersection(vec![
+    let hint = PhpType::intersection(vec![
         PhpType::Named(atom("Countable")),
         PhpType::Named(atom("Serializable")),
     ]);
@@ -921,7 +921,7 @@ fn from_classes_with_hint_intersection_preserves_type() {
 
 #[test]
 fn from_classes_with_hint_union_uses_class_names() {
-    let hint = PhpType::Union(vec![
+    let hint = PhpType::union(vec![
         PhpType::Named(atom("Foo")),
         PhpType::Named(atom("Bar")),
     ]);
@@ -946,7 +946,7 @@ fn types_joined_single_entry() {
 
 #[test]
 fn types_joined_intersection_entries_return_intersection() {
-    let intersection = PhpType::Intersection(vec![
+    let intersection = PhpType::intersection(vec![
         PhpType::Named(atom("Countable")),
         PhpType::Named(atom("Serializable")),
     ]);
@@ -967,7 +967,7 @@ fn types_joined_mixed_entries_return_union() {
     let joined = ResolvedType::types_joined(&entries);
     assert_eq!(
         joined,
-        PhpType::Union(vec![
+        PhpType::union(vec![
             PhpType::Named(atom("Foo")),
             PhpType::Named(atom("Bar")),
         ])

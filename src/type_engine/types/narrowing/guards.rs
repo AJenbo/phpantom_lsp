@@ -496,7 +496,7 @@ fn guard_kind_to_narrowed_type(kind: TypeGuardKind) -> PhpType {
         TypeGuardKind::Numeric => PhpType::numeric(),
         TypeGuardKind::Callable => PhpType::callable(),
         TypeGuardKind::Null => PhpType::null(),
-        TypeGuardKind::Scalar => PhpType::Union(vec![
+        TypeGuardKind::Scalar => PhpType::union(vec![
             PhpType::int(),
             PhpType::float(),
             PhpType::string(),
@@ -675,7 +675,7 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
             } else if filtered.len() == 1 {
                 Some(filtered.into_iter().next().unwrap())
             } else {
-                Some(PhpType::Union(filtered))
+                Some(PhpType::union(filtered))
             }
         }
         PhpType::Nullable(inner) => {
@@ -730,14 +730,14 @@ fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
         _ => return None,
     };
     match name.as_str() {
-        "array-key" => Some(PhpType::Union(vec![PhpType::int(), PhpType::string()])),
-        "scalar" => Some(PhpType::Union(vec![
+        "array-key" => Some(PhpType::union(vec![PhpType::int(), PhpType::string()])),
+        "scalar" => Some(PhpType::union(vec![
             PhpType::int(),
             PhpType::float(),
             PhpType::string(),
             PhpType::bool(),
         ])),
-        "numeric" | "number" => Some(PhpType::Union(vec![PhpType::int(), PhpType::float()])),
+        "numeric" | "number" => Some(PhpType::union(vec![PhpType::int(), PhpType::float()])),
         _ => None,
     }
 }
@@ -755,7 +755,7 @@ fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
             match narrowed.len() {
                 0 => PhpType::empty_sentinel(),
                 1 => narrowed.into_iter().next().unwrap(),
-                _ => PhpType::Union(narrowed),
+                _ => PhpType::union(narrowed),
             }
         }
         // `null` never satisfies `is_numeric()`; narrow the inner type only.
@@ -770,7 +770,7 @@ fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
 /// Returns `None` when the type can never be numeric (e.g. an object).
 fn narrow_single_type_to_numeric(ty: &PhpType) -> Option<PhpType> {
     if ty.is_mixed() {
-        return Some(PhpType::Union(vec![
+        return Some(PhpType::union(vec![
             PhpType::int(),
             PhpType::float(),
             PhpType::parse("numeric-string"),

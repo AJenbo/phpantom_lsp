@@ -88,8 +88,8 @@ pub(super) fn is_modern_accessor(method: &MethodInfo) -> bool {
 /// no generic parameter is present.
 pub(super) fn extract_modern_accessor_type(method: &MethodInfo) -> PhpType {
     if let Some(rt) = method.return_type.as_ref()
-        && let PhpType::Generic(_, args) = rt
-        && let Some(first) = args.first()
+        && let PhpType::Generic(g) = rt
+        && let Some(first) = g.args.first()
         && !matches!(first, PhpType::Named(s) if s.is_empty())
         && !matches!(first, PhpType::Raw(s) if s.is_empty())
     {

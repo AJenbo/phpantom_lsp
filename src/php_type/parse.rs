@@ -15,7 +15,7 @@ impl PhpType {
     /// of falling back to `Raw(…)`.
     pub fn parse(input: &str) -> PhpType {
         if input.is_empty() {
-            return PhpType::Raw(String::new());
+            return PhpType::untyped();
         }
 
         // Strip variance annotations that mago_type_syntax cannot parse.
@@ -42,8 +42,7 @@ impl PhpType {
         let parsed = mago_type_syntax::parse_str(&arena, span, effective);
         match parsed {
             Ok(ty) => restore_hyphenated_keywords(convert(&ty)),
-            Err(_) => try_parse_hyphenated_generic(input)
-                .unwrap_or_else(|| PhpType::Raw(input.to_owned())),
+            Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
         }
     }
 }
@@ -185,7 +184,7 @@ fn try_parse_hyphenated_generic(input: &str) -> Option<PhpType> {
         return None;
     }
     let args: Vec<PhpType> = inner.split(',').map(|s| PhpType::parse(s.trim())).collect();
-    Some(PhpType::Generic(base.to_string(), args))
+    Some(PhpType::generic(base, args))
 }
 
 pub(crate) fn replace_star_wildcards(s: &str) -> std::borrow::Cow<'_, str> {
@@ -316,20 +315,14 @@ pub(crate) fn strip_variance_annotations_from_type(s: &str) -> std::borrow::Cow<
 pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
     match ty {
         // -- Composite types --------------------------------------------------
-        cst::Type::Union(_) => {
-            let members = flatten_union(ty);
-            PhpType::Union(members)
-        }
-        cst::Type::Intersection(_) => {
-            let members = flatten_intersection(ty);
-            PhpType::Intersection(members)
-        }
+        cst::Type::Union(_) => PhpType::union(flatten_union(ty)),
+        cst::Type::Intersection(_) => PhpType::intersection(flatten_intersection(ty)),
         cst::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
         cst::Type::Parenthesized(p) => convert(p.inner),
 
         // -- Named / Reference types ------------------------------------------
         cst::Type::Reference(r) => {
-            let name = bytes_to_str(r.identifier.value).to_string();
+            let name = bytes_to_str(r.identifier.value);
             match &r.parameters {
                 Some(params) => {
                     let mut args: Vec<PhpType> =
@@ -340,9 +333,9 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                     if args.len() == 1 && name == "__benevolent" {
                         return args.pop().unwrap();
                     }
-                    PhpType::Generic(name, args)
+                    PhpType::generic(name, args)
                 }
-                None => PhpType::Named(atom(&name)),
+                None => PhpType::Named(atom(name)),
             }
         }
 
@@ -391,7 +384,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                 | cst::ShapeTypeKind::NonEmptyArray
                 | cst::ShapeTypeKind::AssociativeArray
                 | cst::ShapeTypeKind::List
-                | cst::ShapeTypeKind::NonEmptyList => PhpType::ArrayShape(entries),
+                | cst::ShapeTypeKind::NonEmptyList => PhpType::array_shape(entries),
             }
         }
 
@@ -412,14 +405,14 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                         }
                     })
                     .collect();
-                PhpType::ObjectShape(entries)
+                PhpType::object_shape(entries)
             }
             None => PhpType::object(),
         },
 
         // -- Callable types ---------------------------------------------------
         cst::Type::Callable(c) => {
-            let kind = bytes_to_str(c.keyword.value).to_string();
+            let kind = bytes_to_str(c.keyword.value);
             match &c.specification {
                 Some(spec) => {
                     let params: Vec<CallableParam> = spec
@@ -438,28 +431,21 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                             }
                         })
                         .collect();
-                    let return_type = spec
-                        .return_type
-                        .as_ref()
-                        .map(|rt| Box::new(convert(rt.return_type)));
-                    PhpType::Callable {
-                        kind,
-                        params,
-                        return_type,
-                    }
+                    let return_type = spec.return_type.as_ref().map(|rt| convert(rt.return_type));
+                    PhpType::callable_spec(kind, params, return_type)
                 }
-                None => PhpType::Named(atom(&kind)),
+                None => PhpType::Named(atom(kind)),
             }
         }
 
         // -- Conditional types ------------------------------------------------
-        cst::Type::Conditional(c) => PhpType::Conditional {
-            param: c.subject.to_string(),
-            negated: c.is_negated(),
-            condition: Box::new(convert(c.target)),
-            then_type: Box::new(convert(c.then)),
-            else_type: Box::new(convert(c.otherwise)),
-        },
+        cst::Type::Conditional(c) => PhpType::conditional(
+            c.subject.to_string(),
+            c.is_negated(),
+            convert(c.target),
+            convert(c.then),
+            convert(c.otherwise),
+        ),
 
         // -- class-string / interface-string ----------------------------------
         cst::Type::ClassString(c) => {
@@ -482,7 +468,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         cst::Type::ValueOf(v) => PhpType::ValueOf(Box::new(convert(&v.parameter.entry.inner))),
 
         // -- int range --------------------------------------------------------
-        cst::Type::IntRange(r) => PhpType::IntRange(r.min.to_string(), r.max.to_string()),
+        cst::Type::IntRange(r) => PhpType::int_range(r.min.to_string(), r.max.to_string()),
 
         // -- Index access: T[K] -----------------------------------------------
         cst::Type::IndexAccess(i) => {
@@ -493,9 +479,9 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         cst::Type::Variable(v) => PhpType::Named(atom(bytes_to_str(v.value))),
 
         // -- Literal types ----------------------------------------------------
-        cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw).to_string()),
-        cst::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw).to_string()),
-        cst::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw).to_string()),
+        cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw)),
+        cst::Type::LiteralFloat(l) => PhpType::literal_float(bytes_to_str(l.raw)),
+        cst::Type::LiteralString(l) => PhpType::literal_string_raw(bytes_to_str(l.raw)),
 
         // -- Negated / Posited literals (e.g. -42, +42) -----------------------
         cst::Type::Negated(n) => literal_number_type(format!("-{}", n.number)),
@@ -544,7 +530,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------
-        other => PhpType::Raw(other.to_string()),
+        other => PhpType::raw(other.to_string()),
     }
 }
 
@@ -559,7 +545,7 @@ pub(crate) fn convert_keyword_with_optional_generics(
     match parameters {
         Some(params) => {
             let args: Vec<PhpType> = params.entries.iter().map(|e| convert(&e.inner)).collect();
-            PhpType::Generic(canonical, args)
+            PhpType::generic(&canonical, args)
         }
         None => PhpType::Named(atom(&canonical)),
     }
@@ -610,14 +596,14 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
             match keys.len() {
                 0 => PhpType::Named(atom("never")),
                 1 => keys.into_iter().next().unwrap(),
-                _ => PhpType::Union(keys),
+                _ => PhpType::union(keys),
             }
         }
-        PhpType::Generic(name, args) => {
-            let n = name.to_ascii_lowercase();
+        PhpType::Generic(g) => {
+            let n = g.name.to_ascii_lowercase();
             match n.as_str() {
-                "array" | "non-empty-array" if args.len() == 2 => args[0].clone(),
-                "array" | "non-empty-array" if args.len() == 1 => PhpType::Named(atom("int")),
+                "array" | "non-empty-array" if g.args.len() == 2 => g.args[0].clone(),
+                "array" | "non-empty-array" if g.args.len() == 1 => PhpType::Named(atom("int")),
                 "list" | "non-empty-list" => PhpType::Named(atom("int")),
                 _ => PhpType::KeyOf(Box::new(resolved.clone())),
             }
@@ -642,15 +628,15 @@ pub(crate) fn evaluate_value_of(resolved: &PhpType) -> PhpType {
             match values.len() {
                 0 => PhpType::Named(atom("never")),
                 1 => values.into_iter().next().unwrap(),
-                _ => PhpType::Union(values),
+                _ => PhpType::union(values),
             }
         }
-        PhpType::Generic(name, args) => {
-            let n = name.to_ascii_lowercase();
+        PhpType::Generic(g) => {
+            let n = g.name.to_ascii_lowercase();
             match n.as_str() {
-                "array" | "non-empty-array" if args.len() == 2 => args[1].clone(),
-                "array" | "non-empty-array" | "list" | "non-empty-list" if args.len() == 1 => {
-                    args[0].clone()
+                "array" | "non-empty-array" if g.args.len() == 2 => g.args[1].clone(),
+                "array" | "non-empty-array" | "list" | "non-empty-list" if g.args.len() == 1 => {
+                    g.args[0].clone()
                 }
                 _ => PhpType::ValueOf(Box::new(resolved.clone())),
             }
@@ -692,18 +678,18 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
             if !values.is_empty() {
                 return match values.len() {
                     1 => values.into_iter().next().unwrap(),
-                    _ => PhpType::Union(values),
+                    _ => PhpType::union(values),
                 };
             }
         }
     }
     // Generic array: T[K] where T is array<K2, V> → V
-    if let PhpType::Generic(name, args) = base {
-        let n = name.to_ascii_lowercase();
+    if let PhpType::Generic(g) = base {
+        let n = g.name.to_ascii_lowercase();
         match n.as_str() {
-            "array" | "non-empty-array" if args.len() == 2 => return args[1].clone(),
-            "array" | "non-empty-array" | "list" | "non-empty-list" if args.len() == 1 => {
-                return args[0].clone();
+            "array" | "non-empty-array" if g.args.len() == 2 => return g.args[1].clone(),
+            "array" | "non-empty-array" | "list" | "non-empty-list" if g.args.len() == 1 => {
+                return g.args[0].clone();
             }
             _ => {}
         }

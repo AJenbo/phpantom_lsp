@@ -27,11 +27,10 @@ within the same impact tier.
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | P36 | [Diagnostic-path call sites re-merge inheritance per call](todo/performance.md#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache)          | Medium      | Low         |
 | P31 | [Reference index stores per-span entries when consumers only read distinct URIs](todo/performance.md#p31-reference-index-stores-per-span-entries-when-consumers-only-read-distinct-uris)          | Medium      | Low-Medium  |
-| P37 | [`PhpType` is 64 bytes and is embedded ~3 M times](todo/performance.md#p37-phptype-is-64-bytes-and-is-embedded-3-m-times)                                            | High        | Medium      |
-| P38 | [Resolved type values are duplicated ~33x](todo/performance.md#p38-resolved-type-values-are-duplicated-33x)                                                          | High        | High        |
+| P38 | [Resolved type values are duplicated ~34x](todo/performance.md#p38-resolved-type-values-are-duplicated-34x)                                                          | High        | High        |
 | P39 | [`SymbolKind` stores owned strings per span](todo/performance.md#p39-symbolkind-stores-owned-strings-per-span)                                                       | Medium      | Low-Medium  |
 | P40 | [`method_index` is a per-class `HashMap` even when the member vec is shared](todo/performance.md#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared) | Low-Medium  | Low         |
-| P41 | [3.8 M live allocations cost ~130 MB in allocator overhead](todo/performance.md#p41-38-m-live-allocations-cost-130-mb-in-allocator-overhead)                          | Medium      | Medium      |
+| P41 | [3.8 M live allocations cost ~170 MB in allocator overhead](todo/performance.md#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead)                          | Medium      | Medium      |
 | P33 | [Workspace diagnostics leaves the whole project fully resolved in memory](todo/performance.md#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory) | High        | Medium-High |
 | X10 | [Interactive requests block on the workspace index lock during initial indexing](todo/indexing.md#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing) | Medium      | Medium      |
 | L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |

@@ -249,7 +249,7 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
                 return;
             }
             let mut parts = match existing {
-                PhpType::Union(parts) => parts,
+                PhpType::Union(parts) => parts.into_vec(),
                 other => vec![other],
             };
             match value {
@@ -269,7 +269,7 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
             e.insert(if parts.len() == 1 {
                 parts.into_iter().next().unwrap()
             } else {
-                PhpType::Union(parts)
+                PhpType::union(parts)
             });
         }
     }
@@ -362,7 +362,7 @@ pub(super) fn class_string_inner_from_type(ty: &PhpType) -> Option<PhpType> {
             match parts.len() {
                 0 => None,
                 1 => Some(parts.into_iter().next().unwrap()),
-                _ => Some(PhpType::Union(parts)),
+                _ => Some(PhpType::union(parts)),
             }
         }
         _ => None,

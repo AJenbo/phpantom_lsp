@@ -948,7 +948,7 @@ function test() {
         if name.eq_ignore_ascii_case("array_sum") || name.eq_ignore_ascii_case("array_product") {
             Some(stub_function_info(
                 name,
-                Some(PhpType::Union(vec![PhpType::int(), PhpType::float()])),
+                Some(PhpType::union(vec![PhpType::int(), PhpType::float()])),
             ))
         } else {
             None
@@ -991,7 +991,7 @@ function test() {
         if name.eq_ignore_ascii_case("array_sum") || name.eq_ignore_ascii_case("array_product") {
             Some(stub_function_info(
                 name,
-                Some(PhpType::Union(vec![PhpType::int(), PhpType::float()])),
+                Some(PhpType::union(vec![PhpType::int(), PhpType::float()])),
             ))
         } else {
             None

@@ -279,7 +279,7 @@ pub(crate) fn resolve_auth_user_model(
         Some(second) => {
             let mut all = vec![first, second];
             all.extend(members);
-            Some(PhpType::Union(all))
+            Some(PhpType::union(all))
         }
     }
 }

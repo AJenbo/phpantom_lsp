@@ -1644,7 +1644,7 @@ pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
                     match non_false.len() {
                         0 => return None,
                         1 => non_false.into_iter().next().unwrap(),
-                        _ => PhpType::Union(non_false),
+                        _ => PhpType::union(non_false),
                     }
                 }
                 _ => ty,
@@ -1730,7 +1730,7 @@ pub(crate) fn strip_null_from_shape_key(
                     }
                 })
                 .collect();
-            PhpType::ArrayShape(new_entries)
+            PhpType::array_shape(new_entries)
         }
         PhpType::Nullable(inner) => {
             // `?array{test: ?int}` → `?array{test: int}`
@@ -1741,7 +1741,7 @@ pub(crate) fn strip_null_from_shape_key(
                 .iter()
                 .map(|m| strip_null_from_shape_key(m, key))
                 .collect();
-            PhpType::Union(new_members)
+            PhpType::union(new_members)
         }
         other => other.clone(),
     }

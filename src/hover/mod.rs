@@ -761,21 +761,21 @@ fn hover_command_own_param(
 /// Extract a model name from a `model-property<Model>` type, including
 /// when nested inside array/list generic arguments.
 pub(crate) fn extract_model_name_from_model_property_type(ty: &PhpType) -> Option<String> {
-    if let PhpType::Generic(name, args) = ty
-        && name.eq_ignore_ascii_case("model-property")
-        && args.len() == 1
+    if let PhpType::Generic(g) = ty
+        && g.name.eq_ignore_ascii_case("model-property")
+        && g.args.len() == 1
     {
-        return args[0].base_name().map(|s| s.to_string());
+        return g.args[0].base_name().map(|s| s.to_string());
     }
-    if let PhpType::Generic(name, args) = ty
-        && (crate::php_type::is_array_like_name(name) || name.eq_ignore_ascii_case("list"))
+    if let PhpType::Generic(g) = ty
+        && (crate::php_type::is_array_like_name(&g.name) || g.name.eq_ignore_ascii_case("list"))
     {
-        for arg in args {
-            if let PhpType::Generic(n, inner) = arg
-                && n.eq_ignore_ascii_case("model-property")
-                && inner.len() == 1
+        for arg in &g.args {
+            if let PhpType::Generic(inner) = arg
+                && inner.name.eq_ignore_ascii_case("model-property")
+                && inner.args.len() == 1
             {
-                return inner[0].base_name().map(|s| s.to_string());
+                return inner.args[0].base_name().map(|s| s.to_string());
             }
         }
     }

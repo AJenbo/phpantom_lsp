@@ -572,11 +572,7 @@ pub(crate) fn infer_closure_literal_type(
     });
 
     if let Some(ret) = inferred_return {
-        PhpType::Callable {
-            kind: "Closure".to_string(),
-            params: Vec::new(),
-            return_type: Some(Box::new(ret)),
-        }
+        PhpType::callable_spec("Closure", Vec::new(), Some(ret))
     } else {
         PhpType::closure()
     }
@@ -1231,16 +1227,16 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
             .get(idx)
             .or_else(|| receiver_resolved.first())
             .and_then(|rt| match &rt.type_string {
-                PhpType::Generic(_, args)
-                    if !args.is_empty()
+                PhpType::Generic(g)
+                    if !g.args.is_empty()
                         && !owner.template_params.is_empty()
-                        && !args.iter().any(|a| a.is_self_like()) =>
+                        && !g.args.iter().any(|a| a.is_self_like()) =>
                 {
                     Some(
                         owner
                             .template_params
                             .iter()
-                            .zip(args.iter())
+                            .zip(g.args.iter())
                             .map(|(name, ty)| (name.to_string(), ty.clone()))
                             .collect(),
                     )
@@ -1369,7 +1365,7 @@ pub(super) fn expand_union_generic_owners(
     };
     let generic_branches: Vec<&PhpType> = union_members
         .iter()
-        .filter(|m| matches!(m, PhpType::Generic(name, _) if is_same_base(name)))
+        .filter(|m| matches!(m, PhpType::Generic(g) if is_same_base(&g.name)))
         .collect();
     if generic_branches.len() < 2 {
         return (owner_classes, receiver_resolved);
@@ -1382,12 +1378,12 @@ pub(super) fn expand_union_generic_owners(
 
     for member in union_members {
         match member {
-            PhpType::Generic(name, args) if is_same_base(name) => {
+            PhpType::Generic(g) if is_same_base(&g.name) => {
                 let arc = crate::virtual_members::resolve_class_fully_with_type_args(
                     base_cls,
                     ctx.class_loader,
                     ctx.resolved_class_cache,
-                    args,
+                    &g.args,
                 );
                 expanded_resolved.push(ResolvedType::from_both_arc(
                     member.clone(),
@@ -1430,7 +1426,7 @@ pub(super) fn receiver_type_for_owner(
         let Some(ci) = rt.class_info.as_ref() else {
             continue;
         };
-        if !matches!(rt.type_string, PhpType::Generic(_, _)) {
+        if !matches!(rt.type_string, PhpType::Generic(_)) {
             continue;
         }
         if ci.fqn().as_str() == owner_name || ci.name.as_str() == owner_name {
@@ -1883,7 +1879,7 @@ pub(super) fn resolve_rhs_static_call(
                         } else if union_types.is_empty() && !union_classes.is_empty() {
                             return union_classes;
                         } else {
-                            PhpType::Union(union_types)
+                            PhpType::union(union_types)
                         };
                         let resolved_classes =
                             crate::type_engine::type_resolution::type_hint_to_classes_typed(

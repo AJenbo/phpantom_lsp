@@ -173,25 +173,21 @@ pub(crate) fn filter_resolvable_inferred_params(
 pub(crate) fn has_unresolvable_base(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> bool {
     match ty {
         PhpType::Named(name) => is_unresolvable_class_name(name, ctx),
-        PhpType::Generic(base, args) => {
-            is_unresolvable_class_name(base, ctx)
-                || args.iter().any(|a| has_unresolvable_base(a, ctx))
+        PhpType::Generic(g) => {
+            is_unresolvable_class_name(&g.name, ctx)
+                || g.args.iter().any(|a| has_unresolvable_base(a, ctx))
         }
         PhpType::Union(parts) | PhpType::Intersection(parts) => {
             parts.iter().any(|p| has_unresolvable_base(p, ctx))
         }
         PhpType::Nullable(inner) => has_unresolvable_base(inner, ctx),
-        PhpType::Callable {
-            params,
-            return_type,
-            ..
-        } => {
-            if let Some(ret) = return_type
+        PhpType::Callable(c) => {
+            if let Some(ret) = &c.return_type
                 && has_unresolvable_base(ret, ctx)
             {
                 return true;
             }
-            params
+            c.params
                 .iter()
                 .any(|p| has_unresolvable_base(&p.type_hint, ctx))
         }
@@ -259,7 +255,7 @@ pub(crate) fn build_receiver_template_subs(
     // class with template params.
     for rt in resolved_types {
         let generic_args = match &rt.type_string {
-            PhpType::Generic(_, args) if !args.is_empty() => args,
+            PhpType::Generic(g) if !g.args.is_empty() => &g.args,
             _ => continue,
         };
         // Find the matching class info (by FQN or short name).
@@ -290,10 +286,10 @@ pub(crate) fn build_receiver_template_subs(
         };
         let reconstructed =
             super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
-        if let PhpType::Generic(_, ref args) = reconstructed
-            && !args.is_empty()
+        if let PhpType::Generic(ref g) = reconstructed
+            && !g.args.is_empty()
         {
-            return crate::inheritance::build_generic_subs(cls, args);
+            return crate::inheritance::build_generic_subs(cls, &g.args);
         }
     }
 
@@ -353,11 +349,11 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         // `Closure(Collection<int, Customer>)`.
         let receiver_type =
             super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
-        let template_subs = if let PhpType::Generic(_, ref args) = receiver_type
-            && !args.is_empty()
+        let template_subs = if let PhpType::Generic(ref g) = receiver_type
+            && !g.args.is_empty()
             && !cls.template_params.is_empty()
         {
-            crate::inheritance::build_generic_subs(cls, args)
+            crate::inheritance::build_generic_subs(cls, &g.args)
         } else {
             HashMap::new()
         };

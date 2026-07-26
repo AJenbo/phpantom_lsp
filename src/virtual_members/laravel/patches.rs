@@ -448,7 +448,7 @@ fn patch_eloquent_builder_paginate_element_type(class: &mut ClassInfo) {
             Some(PhpType::Named(name)) if name.contains("Paginator") => name.to_string(),
             _ => continue,
         };
-        let element_type = PhpType::Generic(
+        let element_type = PhpType::generic(
             paginator_name,
             vec![PhpType::int(), PhpType::Named(atom("TModel"))],
         );
@@ -521,7 +521,7 @@ fn patch_testcase_mock_return_types(class: &mut ClassInfo) {
     const TEMPLATE: &str = "TMock";
 
     let abstract_hint = PhpType::parse("class-string<TMock>|TMock");
-    let mock_return = PhpType::Intersection(vec![
+    let mock_return = PhpType::intersection(vec![
         PhpType::Named(atom(MOCK_INTERFACE_FQN)),
         PhpType::Named(atom(TEMPLATE)),
     ]);
@@ -602,7 +602,7 @@ fn patch_mockery_verification_return_types(class: &mut ClassInfo) {
     for method in class.methods.make_mut().iter_mut() {
         let new_return = match method.name.as_str() {
             "shouldHaveReceived" => {
-                PhpType::Union(vec![director.clone(), higher_order_message.clone()])
+                PhpType::union(vec![director.clone(), higher_order_message.clone()])
             }
             "shouldHaveBeenCalled" => director.clone(),
             _ => continue,

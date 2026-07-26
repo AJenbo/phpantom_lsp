@@ -390,7 +390,7 @@ pub(crate) fn extract_array_shape_type(
             }
 
             if !entries.is_empty() {
-                return Some(PhpType::ArrayShape(entries));
+                return Some(PhpType::array_shape(entries));
             }
         }
     }
@@ -433,7 +433,7 @@ pub(crate) fn apply_array_shape_override(
                     }
                 })
                 .collect();
-            PhpType::Union(new_members)
+            PhpType::union(new_members)
         }
         _ => ty,
     }
@@ -969,13 +969,13 @@ pub(crate) fn extract_hint_type(hint: &Hint) -> PhpType {
             let mut members = Vec::new();
             collect_union_members(union.left, &mut members);
             collect_union_members(union.right, &mut members);
-            PhpType::Union(members)
+            PhpType::union(members)
         }
         Hint::Intersection(intersection) => {
             let mut members = Vec::new();
             collect_intersection_members(intersection.left, &mut members);
             collect_intersection_members(intersection.right, &mut members);
-            PhpType::Intersection(members)
+            PhpType::intersection(members)
         }
         Hint::Null(_) => PhpType::null(),
         Hint::True(_) => PhpType::true_(),

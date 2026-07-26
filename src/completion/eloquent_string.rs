@@ -589,11 +589,11 @@ impl Backend {
         let param_type = param.type_hint.as_ref()?;
 
         let model_name_owned: String;
-        let model_name: &str = if let PhpType::Generic(name, args) = param_type
-            && name.eq_ignore_ascii_case("model-property")
-            && args.len() == 1
+        let model_name: &str = if let PhpType::Generic(g) = param_type
+            && g.name.eq_ignore_ascii_case("model-property")
+            && g.args.len() == 1
         {
-            args[0].base_name()?
+            g.args[0].base_name()?
         } else {
             let name = extract_model_property_from_generic_args(param_type)?;
             model_name_owned = name;
@@ -639,18 +639,18 @@ impl Backend {
 /// Extract the model name from a `model-property<Model>` type nested
 /// inside an array or list generic argument.
 fn extract_model_property_from_generic_args(ty: &PhpType) -> Option<String> {
-    let PhpType::Generic(name, args) = ty else {
+    let PhpType::Generic(g) = ty else {
         return None;
     };
-    if !crate::php_type::is_array_like_name(name) && !name.eq_ignore_ascii_case("list") {
+    if !crate::php_type::is_array_like_name(&g.name) && !g.name.eq_ignore_ascii_case("list") {
         return None;
     }
-    for arg in args {
-        if let PhpType::Generic(n, inner) = arg
-            && n.eq_ignore_ascii_case("model-property")
-            && inner.len() == 1
+    for arg in &g.args {
+        if let PhpType::Generic(inner) = arg
+            && inner.name.eq_ignore_ascii_case("model-property")
+            && inner.args.len() == 1
         {
-            return inner[0].base_name().map(|s| s.to_string());
+            return inner.args[0].base_name().map(|s| s.to_string());
         }
     }
     None
@@ -694,9 +694,9 @@ fn count_top_level_commas(text: &str) -> usize {
 
 /// Extract the model FQN from a `Builder<Model>` type.
 fn extract_model_from_builder_type(ty: &PhpType) -> Option<String> {
-    if let PhpType::Generic(base, args) = ty
-        && (base.ends_with("Builder") || base == ELOQUENT_BUILDER_FQN)
-        && let Some(first) = args.first()
+    if let PhpType::Generic(g) = ty
+        && (g.name.ends_with("Builder") || g.name == ELOQUENT_BUILDER_FQN)
+        && let Some(first) = g.args.first()
     {
         return first.base_name().map(|s| s.to_string());
     }

@@ -130,18 +130,18 @@ fn extract_array_string_literals(expr: &Expression<'_>) -> Vec<(String, usize, u
 /// Extract the model name from a `model-property<Model>` type that
 /// appears as a generic argument of an array/list type.
 fn extract_model_property_from_array_type(ty: &PhpType) -> Option<String> {
-    let PhpType::Generic(name, args) = ty else {
+    let PhpType::Generic(g) = ty else {
         return None;
     };
-    if !is_array_like_name(name) && !name.eq_ignore_ascii_case("list") {
+    if !is_array_like_name(&g.name) && !g.name.eq_ignore_ascii_case("list") {
         return None;
     }
-    for arg in args {
-        if let PhpType::Generic(n, inner) = arg
-            && n.eq_ignore_ascii_case("model-property")
-            && inner.len() == 1
+    for arg in &g.args {
+        if let PhpType::Generic(inner) = arg
+            && inner.name.eq_ignore_ascii_case("model-property")
+            && inner.args.len() == 1
         {
-            return inner[0].base_name().map(|s| s.to_string());
+            return inner.args[0].base_name().map(|s| s.to_string());
         }
     }
     None

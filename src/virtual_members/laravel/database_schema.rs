@@ -955,7 +955,7 @@ pub fn database_type_to_php_type(database_type: &str, nullable: bool) -> PhpType
         PhpType::string()
     };
     if nullable {
-        PhpType::Union(vec![ty, PhpType::null()]).simplified()
+        PhpType::union(vec![ty, PhpType::null()]).simplified()
     } else {
         ty
     }
@@ -1804,7 +1804,7 @@ mod tests {
         assert!(!tables[0].columns[1].nullable);
         assert_eq!(
             tables[0].columns[2].php_type,
-            PhpType::Union(vec![PhpType::array(), PhpType::null()]).simplified()
+            PhpType::union(vec![PhpType::array(), PhpType::null()]).simplified()
         );
     }
 

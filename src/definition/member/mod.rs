@@ -948,12 +948,12 @@ impl Backend {
         // the model name.
         let extract_model_from_builder_ret = |ret: &crate::php_type::PhpType| -> Option<String> {
             match ret {
-                crate::php_type::PhpType::Generic(base, args) if !args.is_empty() => {
+                crate::php_type::PhpType::Generic(g) if !g.args.is_empty() => {
                     // Check that the base type is the Eloquent Builder.
-                    if base != ELOQUENT_BUILDER_FQN && base != "Builder" {
+                    if g.name != ELOQUENT_BUILDER_FQN && g.name != "Builder" {
                         return None;
                     }
-                    args[0].base_name().map(|s| s.to_string())
+                    g.args[0].base_name().map(|s| s.to_string())
                 }
                 _ => None,
             }

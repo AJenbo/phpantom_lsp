@@ -155,7 +155,7 @@ impl ConfigValue {
                 match members.len() {
                     0 => PhpType::mixed(),
                     1 => members.into_iter().next().unwrap(),
-                    _ => PhpType::Union(members),
+                    _ => PhpType::union(members),
                 }
             }
             ConfigValue::EnvDefault(inner) => inner.to_php_type(),
@@ -177,7 +177,7 @@ impl ConfigNode {
                         optional: false,
                     })
                     .collect();
-                PhpType::ArrayShape(shape_entries)
+                PhpType::array_shape(shape_entries)
             }
         }
     }

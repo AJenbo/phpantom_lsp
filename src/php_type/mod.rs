@@ -41,6 +41,18 @@ pub(crate) use subtype::*;
 // ---------------------------------------------------------------------------
 
 /// A structured, owned representation of a PHP type expression.
+///
+/// # Size
+///
+/// This enum is embedded millions of times over a large project — once per
+/// parameter type, return type, property type, and every nested position
+/// inside those. Its size is therefore kept to 24 bytes (two pointers plus a
+/// discriminant) by giving every variant a payload of at most 16 bytes: the
+/// rare shapes that would otherwise dominate (`Generic`, `Callable`,
+/// `Conditional`, `Literal`) hold a single `Box` to an out-of-line payload
+/// struct, and the collection variants hold `Box<[T]>` rather than `Vec<T>`.
+/// The common `Named` case stays inline, so the hot path gains no
+/// indirection. See the `php_type_size_is_bounded` test.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhpType {
     /// A named type: keywords (`int`, `string`, `mixed`, `void`, …),
@@ -83,49 +95,31 @@ pub enum PhpType {
     Nullable(Box<PhpType>),
 
     /// Union type: `T|U|V`. Always contains two or more members.
-    Union(Vec<PhpType>),
+    Union(Box<[PhpType]>),
 
     /// Intersection type: `T&U`. Always contains two or more members.
-    Intersection(Vec<PhpType>),
+    Intersection(Box<[PhpType]>),
 
     /// Generic (parameterised) type: `Collection<int, User>`, `array<string>`,
     /// `list<int>`, `non-empty-array<string>`, `iterable<K, V>`, etc.
-    Generic(String, Vec<PhpType>),
+    Generic(Box<GenericType>),
 
     /// The `T[]` slice syntax (sugar for `array<int, T>`).
     Array(Box<PhpType>),
 
     /// Array shape: `array{key: string, age?: int}`.
-    ArrayShape(Vec<ShapeEntry>),
+    ArrayShape(Box<[ShapeEntry]>),
 
     /// Object shape: `object{name: string}`.
-    ObjectShape(Vec<ShapeEntry>),
+    ObjectShape(Box<[ShapeEntry]>),
 
     /// Callable or Closure type with optional specification.
     /// `callable(int, string): bool`, `Closure(int): void`,
     /// `pure-callable(T): U`, `pure-Closure(T): U`.
-    Callable {
-        /// One of `"callable"`, `"Closure"`, `"pure-callable"`, `"pure-Closure"`.
-        kind: String,
-        /// Parameter types.
-        params: Vec<CallableParam>,
-        /// Optional return type.
-        return_type: Option<Box<PhpType>>,
-    },
+    Callable(Box<CallableType>),
 
     /// Conditional return type: `$x is T ? U : V`.
-    Conditional {
-        /// The subject (typically a variable like `$this`).
-        param: String,
-        /// Whether the condition is negated (`is not`).
-        negated: bool,
-        /// The condition type.
-        condition: Box<PhpType>,
-        /// The type when the condition is true.
-        then_type: Box<PhpType>,
-        /// The type when the condition is false.
-        else_type: Box<PhpType>,
-    },
+    Conditional(Box<ConditionalType>),
 
     /// `class-string<T>` or bare `class-string`.
     ClassString(Option<Box<PhpType>>),
@@ -140,49 +134,92 @@ pub enum PhpType {
     ValueOf(Box<PhpType>),
 
     /// `int<min, max>` range type.
-    IntRange(String, String),
+    ///
+    /// The bounds are the literal source text of the range (`"min"`,
+    /// `"max"`, or an integer), interned because they are drawn from a
+    /// small set in practice.
+    IntRange(Atom, Atom),
 
     /// Index access type: `T[K]`.
     IndexAccess(Box<PhpType>, Box<PhpType>),
 
     /// A literal scalar type with preserved kind and source text.
-    Literal(LiteralValue),
+    Literal(Box<LiteralValue>),
 
     /// Fallback for anything we cannot parse or do not yet map.
-    Raw(String),
+    Raw(Box<str>),
+}
+
+/// Payload of [`PhpType::Generic`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericType {
+    /// The base name: a class reference (`Collection`) or a parameterisable
+    /// keyword (`array`, `list`, `iterable`, `class-string`).
+    pub name: Atom,
+    /// The type arguments between `<` and `>`.
+    pub args: Vec<PhpType>,
+}
+
+/// Payload of [`PhpType::Callable`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallableType {
+    /// One of `callable`, `Closure`, `pure-callable`, `pure-Closure`.
+    pub kind: Atom,
+    /// Parameter types.
+    pub params: Vec<CallableParam>,
+    /// Optional return type.
+    pub return_type: Option<PhpType>,
+}
+
+/// Payload of [`PhpType::Conditional`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConditionalType {
+    /// The subject (typically a variable like `$this`).
+    pub param: Atom,
+    /// Whether the condition is negated (`is not`).
+    pub negated: bool,
+    /// The condition type.
+    pub condition: PhpType,
+    /// The type when the condition is true.
+    pub then_type: PhpType,
+    /// The type when the condition is false.
+    pub else_type: PhpType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
-    Int(String),
-    Float(String),
-    String(String),
+    Int(Box<str>),
+    Float(Box<str>),
+    String(Box<str>),
 }
 
 impl LiteralValue {
-    pub fn int(raw: impl Into<String>) -> Self {
+    pub fn int(raw: impl Into<Box<str>>) -> Self {
         Self::Int(raw.into())
     }
 
-    pub fn float(raw: impl Into<String>) -> Self {
+    pub fn float(raw: impl Into<Box<str>>) -> Self {
         Self::Float(raw.into())
     }
 
-    pub fn string_raw(raw: impl Into<String>) -> Self {
+    pub fn string_raw(raw: impl Into<Box<str>>) -> Self {
         Self::String(raw.into())
     }
 
     pub fn string_value(value: impl AsRef<str>) -> Self {
-        Self::String(format!(
-            "'{}'",
-            value.as_ref().replace('\\', "\\\\").replace('\'', "\\'")
-        ))
+        Self::String(
+            format!(
+                "'{}'",
+                value.as_ref().replace('\\', "\\\\").replace('\'', "\\'")
+            )
+            .into(),
+        )
     }
 
     pub fn as_raw(&self) -> String {
         match self {
             LiteralValue::Int(raw) | LiteralValue::Float(raw) | LiteralValue::String(raw) => {
-                raw.clone()
+                raw.to_string()
             }
         }
     }
@@ -191,7 +228,7 @@ impl LiteralValue {
         let LiteralValue::String(raw) = self else {
             return None;
         };
-        crate::text_scan::unquote_php_string(raw).or(Some(raw.as_str()))
+        crate::text_scan::unquote_php_string(raw).or(Some(raw))
     }
 
     pub fn parse_i64(&self) -> Option<i64> {
@@ -276,20 +313,24 @@ impl PhpType {
         PhpType::Named(atom("bool"))
     }
 
-    pub fn literal_int(raw: impl Into<String>) -> PhpType {
-        PhpType::Literal(LiteralValue::int(raw))
+    pub fn literal(value: LiteralValue) -> PhpType {
+        PhpType::Literal(Box::new(value))
     }
 
-    pub fn literal_float(raw: impl Into<String>) -> PhpType {
-        PhpType::Literal(LiteralValue::float(raw))
+    pub fn literal_int(raw: impl Into<Box<str>>) -> PhpType {
+        PhpType::literal(LiteralValue::int(raw))
     }
 
-    pub fn literal_string_raw(raw: impl Into<String>) -> PhpType {
-        PhpType::Literal(LiteralValue::string_raw(raw))
+    pub fn literal_float(raw: impl Into<Box<str>>) -> PhpType {
+        PhpType::literal(LiteralValue::float(raw))
+    }
+
+    pub fn literal_string_raw(raw: impl Into<Box<str>>) -> PhpType {
+        PhpType::literal(LiteralValue::string_raw(raw))
     }
 
     pub fn literal_string_value(value: impl AsRef<str>) -> PhpType {
-        PhpType::Literal(LiteralValue::string_value(value))
+        PhpType::literal(LiteralValue::string_value(value))
     }
 
     /// `true` type.
@@ -380,11 +421,83 @@ impl PhpType {
 
     /// Convenience constructor for the "no type information" sentinel.
     ///
-    /// Uses `Raw(String::new())` under the hood.  Prefer this over a bare
-    /// `PhpType::Raw(String::new())` so the intent ("absence of type") is
+    /// Uses an empty `Raw` under the hood.  Prefer this over a bare
+    /// `PhpType::raw("")` so the intent ("absence of type") is
     /// distinguishable from "unparseable input" at a glance.
     pub fn untyped() -> PhpType {
-        PhpType::Raw(String::new())
+        PhpType::Raw(Box::default())
+    }
+
+    /// Fallback constructor for text we could not parse into a structured
+    /// type.  Use [`untyped`](PhpType::untyped) for "no type given".
+    pub fn raw(text: impl Into<Box<str>>) -> PhpType {
+        PhpType::Raw(text.into())
+    }
+
+    /// Union of two or more members.  Does not normalise — see
+    /// [`simplified`](PhpType::simplified).
+    pub fn union(members: Vec<PhpType>) -> PhpType {
+        PhpType::Union(members.into())
+    }
+
+    /// Intersection of two or more members.
+    pub fn intersection(members: Vec<PhpType>) -> PhpType {
+        PhpType::Intersection(members.into())
+    }
+
+    /// Array shape (`array{…}`).
+    pub fn array_shape(entries: Vec<ShapeEntry>) -> PhpType {
+        PhpType::ArrayShape(entries.into())
+    }
+
+    /// Object shape (`object{…}`).
+    pub fn object_shape(entries: Vec<ShapeEntry>) -> PhpType {
+        PhpType::ObjectShape(entries.into())
+    }
+
+    /// Parameterised type (`Collection<int, User>`).
+    pub fn generic(name: impl AsRef<str>, args: Vec<PhpType>) -> PhpType {
+        PhpType::generic_atom(atom(name.as_ref()), args)
+    }
+
+    /// Parameterised type from an already-interned base name.
+    pub fn generic_atom(name: Atom, args: Vec<PhpType>) -> PhpType {
+        PhpType::Generic(Box::new(GenericType { name, args }))
+    }
+
+    /// Callable specification (`callable(int): string`).
+    pub fn callable_spec(
+        kind: impl AsRef<str>,
+        params: Vec<CallableParam>,
+        return_type: Option<PhpType>,
+    ) -> PhpType {
+        PhpType::Callable(Box::new(CallableType {
+            kind: atom(kind.as_ref()),
+            params,
+            return_type,
+        }))
+    }
+
+    /// Conditional type (`$x is T ? U : V`).
+    pub fn conditional(
+        param: impl AsRef<str>,
+        negated: bool,
+        condition: PhpType,
+        then_type: PhpType,
+        else_type: PhpType,
+    ) -> PhpType {
+        PhpType::Conditional(Box::new(ConditionalType {
+            param: atom(param.as_ref()),
+            negated,
+            condition,
+            then_type,
+            else_type,
+        }))
+    }
+
+    /// Integer range (`int<0, max>`).
+    pub fn int_range(min: impl AsRef<str>, max: impl AsRef<str>) -> PhpType {
+        PhpType::IntRange(atom(min.as_ref()), atom(max.as_ref()))
     }
 
     /// Returns `true` when this value represents the "no type" sentinel
@@ -395,17 +508,17 @@ impl PhpType {
 
     /// `list<T>` generic type.
     pub fn list(elem: PhpType) -> PhpType {
-        PhpType::Generic("list".to_owned(), vec![elem])
+        PhpType::generic("list", vec![elem])
     }
 
     /// `array<K, V>` generic type with explicit key and value types.
     pub fn generic_array(key: PhpType, val: PhpType) -> PhpType {
-        PhpType::Generic("array".to_owned(), vec![key, val])
+        PhpType::generic("array", vec![key, val])
     }
 
     /// `array<V>` generic type with only a value type (implicit integer key).
     pub fn generic_array_val(val: PhpType) -> PhpType {
-        PhpType::Generic("array".to_owned(), vec![val])
+        PhpType::generic("array", vec![val])
     }
 }
 
@@ -441,10 +554,10 @@ impl PhpType {
         match self {
             PhpType::Named(s) => is_primitive_scalar_name(s),
             PhpType::Nullable(inner) => inner.is_primitive_scalar(),
-            PhpType::Generic(name, _) => is_primitive_scalar_name(name),
+            PhpType::Generic(g) => is_primitive_scalar_name(&g.name),
             PhpType::Array(_) => true,
             PhpType::ArrayShape(_) => true,
-            PhpType::Callable { .. } => true,
+            PhpType::Callable(_) => true,
             PhpType::IntRange(_, _) => true,
             PhpType::Literal(_) => true,
             PhpType::Raw(_) => false,
@@ -497,9 +610,10 @@ impl PhpType {
             return self;
         }
         match self {
-            PhpType::Union(mut members) => {
+            PhpType::Union(members) => {
+                let mut members = members.into_vec();
                 members.push(PhpType::null());
-                PhpType::Union(members)
+                PhpType::union(members)
             }
             other => PhpType::Nullable(Box::new(other)),
         }
@@ -522,26 +636,23 @@ impl PhpType {
     /// of return types contain no conditional and can be left untouched.
     pub fn contains_conditional(&self) -> bool {
         match self {
-            PhpType::Conditional { .. } => true,
+            PhpType::Conditional(_) => true,
             PhpType::Nullable(inner)
             | PhpType::Array(inner)
             | PhpType::ClassString(Some(inner))
             | PhpType::InterfaceString(Some(inner))
             | PhpType::KeyOf(inner)
             | PhpType::ValueOf(inner) => inner.contains_conditional(),
-            PhpType::Union(members)
-            | PhpType::Intersection(members)
-            | PhpType::Generic(_, members) => members.iter().any(|m| m.contains_conditional()),
+            PhpType::Union(members) | PhpType::Intersection(members) => {
+                members.iter().any(|m| m.contains_conditional())
+            }
+            PhpType::Generic(g) => g.args.iter().any(|m| m.contains_conditional()),
             PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
                 entries.iter().any(|e| e.value_type.contains_conditional())
             }
-            PhpType::Callable {
-                params,
-                return_type,
-                ..
-            } => {
-                params.iter().any(|p| p.type_hint.contains_conditional())
-                    || return_type
+            PhpType::Callable(c) => {
+                c.params.iter().any(|p| p.type_hint.contains_conditional())
+                    || c.return_type
                         .as_ref()
                         .is_some_and(|r| r.contains_conditional())
             }
@@ -618,14 +729,22 @@ impl PhpType {
         }
     }
 
+    /// The literal payload, if this is a [`PhpType::Literal`].
+    pub fn as_literal(&self) -> Option<&LiteralValue> {
+        match self {
+            PhpType::Literal(value) => Some(value),
+            _ => None,
+        }
+    }
+
     /// Whether this type is a literal string value (e.g. `'hello'`, `"world"`).
     pub fn is_string_literal(&self) -> bool {
-        matches!(self, PhpType::Literal(LiteralValue::String(_)))
+        matches!(self.as_literal(), Some(LiteralValue::String(_)))
     }
 
     /// Whether this type is a literal integer value (e.g. `42`, `-1`).
     pub fn is_int_literal(&self) -> bool {
-        matches!(self, PhpType::Literal(LiteralValue::Int(_)))
+        matches!(self.as_literal(), Some(LiteralValue::Int(_)))
     }
 
     /// Whether this type is `string` or any PHPDoc string refinement (case-insensitive).
@@ -650,10 +769,10 @@ impl PhpType {
                     | "non-falsy-string"
             ),
             PhpType::ClassString(_) | PhpType::InterfaceString(_) => true,
-            PhpType::Literal(LiteralValue::String(_)) => true,
+            PhpType::Literal(l) => matches!(**l, LiteralValue::String(_)),
             PhpType::Nullable(inner) => inner.is_string_subtype(),
-            PhpType::Generic(name, _) => matches!(
-                name.to_ascii_lowercase().as_str(),
+            PhpType::Generic(g) => matches!(
+                g.name.to_ascii_lowercase().as_str(),
                 "class-string" | "interface-string" | "model-property"
             ),
             PhpType::Union(members) => {
@@ -681,7 +800,7 @@ impl PhpType {
                     | "non-zero-int"
             ),
             PhpType::IntRange(_, _) => true,
-            PhpType::Literal(LiteralValue::Int(_)) => true,
+            PhpType::Literal(l) => matches!(**l, LiteralValue::Int(_)),
             PhpType::Nullable(inner) => inner.is_int_subtype(),
             PhpType::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_int_subtype())
@@ -697,7 +816,7 @@ impl PhpType {
     /// symmetry with [`is_string_subtype`] and [`is_int_subtype`].
     pub fn is_float_subtype(&self) -> bool {
         match self {
-            PhpType::Literal(LiteralValue::Float(_)) => true,
+            PhpType::Literal(l) => matches!(**l, LiteralValue::Float(_)),
             PhpType::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_float_subtype())
             }
@@ -738,7 +857,7 @@ impl PhpType {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("callable") || trimmed.eq_ignore_ascii_case("Closure")
             }
-            PhpType::Callable { .. } => true,
+            PhpType::Callable(_) => true,
             PhpType::Nullable(inner) => inner.is_callable(),
             _ => false,
         }
@@ -769,7 +888,7 @@ impl PhpType {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("Closure")
             }
-            PhpType::Callable { kind, .. } => kind.eq_ignore_ascii_case("Closure"),
+            PhpType::Callable(c) => c.kind.eq_ignore_ascii_case("Closure"),
             PhpType::Nullable(inner) => inner.is_closure(),
             _ => false,
         }
@@ -865,7 +984,7 @@ impl PhpType {
     pub fn is_parent_ref(&self) -> bool {
         match self {
             PhpType::Named(s) => s.eq_ignore_ascii_case("parent"),
-            PhpType::Generic(name, _) => name.eq_ignore_ascii_case("parent"),
+            PhpType::Generic(g) => g.name.eq_ignore_ascii_case("parent"),
             PhpType::Nullable(inner) => inner.is_parent_ref(),
             PhpType::Union(members) => {
                 let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
@@ -878,11 +997,11 @@ impl PhpType {
     pub fn is_self_like(&self) -> bool {
         match self {
             PhpType::Named(s) => self.is_self_ref() || s.eq_ignore_ascii_case("parent"),
-            PhpType::Generic(name, _) => {
+            PhpType::Generic(g) => {
                 // e.g. `self<RuleError>`, `static<T>` — check the generic base name directly.
                 // Cannot use `base_name()` here because it filters out self-like
                 // names via `is_scalar_name`.
-                is_self_ref_name(name) || name.eq_ignore_ascii_case("parent")
+                is_self_ref_name(&g.name) || g.name.eq_ignore_ascii_case("parent")
             }
             PhpType::Nullable(inner) => inner.is_self_like(),
             PhpType::Union(members) => {
@@ -918,7 +1037,7 @@ impl PhpType {
     pub fn is_array_like(&self) -> bool {
         match self {
             PhpType::Named(s) => is_array_like_name(s),
-            PhpType::Generic(name, _) => is_array_like_name(name),
+            PhpType::Generic(g) => is_array_like_name(&g.name),
             PhpType::Array(_) => true,
             PhpType::ArrayShape(_) => true,
             PhpType::Nullable(inner) => inner.is_array_like(),
@@ -930,7 +1049,7 @@ impl PhpType {
     pub fn is_object_like(&self) -> bool {
         match self {
             PhpType::Named(s) => s.eq_ignore_ascii_case("object") || !is_scalar_name(s),
-            PhpType::Generic(name, _) => !is_scalar_name(name),
+            PhpType::Generic(g) => !is_scalar_name(&g.name),
             PhpType::ObjectShape(_) => true,
             PhpType::Nullable(inner) => inner.is_object_like(),
             _ => false,
@@ -943,11 +1062,11 @@ impl PhpType {
         match self {
             PhpType::Named(s) => is_scalar_name(s),
             PhpType::Nullable(inner) => inner.is_scalar(),
-            PhpType::Generic(name, _) => is_scalar_name(name),
+            PhpType::Generic(g) => is_scalar_name(&g.name),
             PhpType::Array(_) => true,
             PhpType::ArrayShape(_) => true,
             PhpType::ObjectShape(_) => true,
-            PhpType::Callable { .. } => true,
+            PhpType::Callable(_) => true,
             PhpType::ClassString(_) => true,
             PhpType::InterfaceString(_) => true,
             PhpType::KeyOf(_) => true,
@@ -969,8 +1088,8 @@ impl PhpType {
     /// `list<Rule>` even with `skip_scalar=true`.
     pub fn is_scalar_leaf(&self) -> bool {
         match self {
-            PhpType::Generic(name, args) => {
-                is_scalar_name(name) && args.iter().all(|a| a.is_scalar_leaf())
+            PhpType::Generic(g) => {
+                is_scalar_name(&g.name) && g.args.iter().all(|a| a.is_scalar_leaf())
             }
             PhpType::Array(inner) => inner.is_scalar_leaf(),
             PhpType::Nullable(inner) => inner.is_scalar_leaf(),
@@ -998,8 +1117,8 @@ impl PhpType {
             PhpType::StaticType(s) | PhpType::ThisType(s) => {
                 Some(s.strip_prefix('\\').unwrap_or(s.as_str()))
             }
-            PhpType::Generic(name, _) if !is_scalar_name(name) => {
-                Some(name.strip_prefix('\\').unwrap_or(name.as_str()))
+            PhpType::Generic(g) if !is_scalar_name(&g.name) => {
+                Some(g.name.strip_prefix('\\').unwrap_or(g.name.as_str()))
             }
             PhpType::Nullable(inner) => inner.base_name(),
             _ => None,
@@ -1028,12 +1147,12 @@ impl PhpType {
             PhpType::Named(s) | PhpType::StaticType(s) | PhpType::ThisType(s) => {
                 native_scalar_name(s).map(|n| n.to_string())
             }
-            PhpType::Generic(name, _) => {
+            PhpType::Generic(g) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
-                native_scalar_name(name)
+                native_scalar_name(&g.name)
                     .map(|n| n.to_string())
-                    .or_else(|| Some(name.clone()))
+                    .or_else(|| Some(g.name.to_string()))
             }
             PhpType::Nullable(inner) => inner.to_native_hint().map(|n| format!("?{}", n)),
             PhpType::Union(members) => {
@@ -1057,18 +1176,21 @@ impl PhpType {
                 Some(native.join("&"))
             }
             PhpType::Array(_) | PhpType::ArrayShape(_) => Some("array".to_string()),
-            PhpType::ClassString(_)
-            | PhpType::InterfaceString(_)
-            | PhpType::Literal(LiteralValue::String(_)) => Some("string".to_string()),
-            PhpType::IntRange(_, _) | PhpType::Literal(LiteralValue::Int(_)) => {
-                Some("int".to_string())
-            }
-            PhpType::Literal(LiteralValue::Float(_)) => Some("float".to_string()),
+            PhpType::ClassString(_) | PhpType::InterfaceString(_) => Some("string".to_string()),
+            PhpType::IntRange(_, _) => Some("int".to_string()),
+            PhpType::Literal(l) => Some(
+                match **l {
+                    LiteralValue::String(_) => "string",
+                    LiteralValue::Int(_) => "int",
+                    LiteralValue::Float(_) => "float",
+                }
+                .to_string(),
+            ),
             PhpType::ObjectShape(_) => Some("object".to_string()),
-            PhpType::Callable { kind, .. } => Some(kind.clone()),
+            PhpType::Callable(c) => Some(c.kind.to_string()),
             // Conditionals, key-of, value-of, index-access, and raw
             // types have no native form.
-            PhpType::Conditional { .. }
+            PhpType::Conditional(_)
             | PhpType::KeyOf(_)
             | PhpType::ValueOf(_)
             | PhpType::IndexAccess(_, _)
@@ -1083,12 +1205,12 @@ impl PhpType {
             PhpType::Named(s) | PhpType::StaticType(s) | PhpType::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::Named(atom(n)))
             }
-            PhpType::Generic(name, _) => {
+            PhpType::Generic(g) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
-                native_scalar_name(name)
+                native_scalar_name(&g.name)
                     .map(|n| PhpType::Named(atom(n)))
-                    .or_else(|| Some(PhpType::Named(atom(name))))
+                    .or(Some(PhpType::Named(g.name)))
             }
             PhpType::Nullable(inner) => inner
                 .to_native_hint_typed()
@@ -1114,7 +1236,7 @@ impl PhpType {
                 if deduped.len() == 1 {
                     Some(deduped.into_iter().next().unwrap())
                 } else {
-                    Some(PhpType::Union(deduped))
+                    Some(PhpType::union(deduped))
                 }
             }
             PhpType::Intersection(members) => {
@@ -1138,20 +1260,20 @@ impl PhpType {
                 if deduped.len() == 1 {
                     Some(deduped.into_iter().next().unwrap())
                 } else {
-                    Some(PhpType::Intersection(deduped))
+                    Some(PhpType::intersection(deduped))
                 }
             }
             PhpType::Array(_) | PhpType::ArrayShape(_) => Some(PhpType::array()),
-            PhpType::ClassString(_)
-            | PhpType::InterfaceString(_)
-            | PhpType::Literal(LiteralValue::String(_)) => Some(PhpType::string()),
-            PhpType::IntRange(_, _) | PhpType::Literal(LiteralValue::Int(_)) => {
-                Some(PhpType::int())
-            }
-            PhpType::Literal(LiteralValue::Float(_)) => Some(PhpType::float()),
+            PhpType::ClassString(_) | PhpType::InterfaceString(_) => Some(PhpType::string()),
+            PhpType::IntRange(_, _) => Some(PhpType::int()),
+            PhpType::Literal(l) => Some(match **l {
+                LiteralValue::String(_) => PhpType::string(),
+                LiteralValue::Int(_) => PhpType::int(),
+                LiteralValue::Float(_) => PhpType::float(),
+            }),
             PhpType::ObjectShape(_) => Some(PhpType::object()),
-            PhpType::Callable { kind, .. } => Some(PhpType::Named(atom(kind))),
-            PhpType::Conditional { .. }
+            PhpType::Callable(c) => Some(PhpType::Named(c.kind)),
+            PhpType::Conditional(_)
             | PhpType::KeyOf(_)
             | PhpType::ValueOf(_)
             | PhpType::IndexAccess(_, _)
@@ -1202,7 +1324,8 @@ impl PhpType {
                     Some(inner.as_ref())
                 }
             }
-            PhpType::Generic(_, args) if !args.is_empty() => {
+            PhpType::Generic(g) if !g.args.is_empty() => {
+                let args = &g.args;
                 // Iterables follow the `<TKey, TValue>` convention: the value
                 // is the *second* generic argument whenever two or more are
                 // present. This covers `array<K, V>`, `Collection<K, V>`,
@@ -1242,8 +1365,8 @@ impl PhpType {
     /// scalar.
     pub fn extract_key_type(&self, skip_scalar: bool) -> Option<&PhpType> {
         match self {
-            PhpType::Generic(_, args) if args.len() >= 2 => {
-                let key = &args[0];
+            PhpType::Generic(g) if g.args.len() >= 2 => {
+                let key = &g.args[0];
                 if skip_scalar && key.is_scalar() {
                     None
                 } else {
@@ -1285,7 +1408,7 @@ impl PhpType {
                 match values.len() {
                     0 => None,
                     1 => Some(values.into_iter().next().unwrap()),
-                    _ => Some(PhpType::Union(values)),
+                    _ => Some(PhpType::union(values)),
                 }
             }
             PhpType::Nullable(inner) => inner.iterable_element_type(),
@@ -1449,7 +1572,7 @@ impl PhpType {
     pub fn join_shapes(&self, other: &PhpType) -> Option<PhpType> {
         match (self, other) {
             (PhpType::ArrayShape(a), PhpType::ArrayShape(b)) => {
-                Some(PhpType::ArrayShape(Self::join_shape_entries(a, b)?))
+                Some(PhpType::array_shape(Self::join_shape_entries(a, b)?))
             }
             (PhpType::Nullable(a), PhpType::Nullable(b)) => {
                 Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
@@ -1527,7 +1650,7 @@ impl PhpType {
         if members.len() == 1 {
             members.into_iter().next().unwrap()
         } else {
-            PhpType::Union(members)
+            PhpType::union(members)
         }
     }
 
@@ -1562,7 +1685,7 @@ impl PhpType {
     ///   - `int`                         → `None`
     pub fn callable_param_types(&self) -> Option<&[CallableParam]> {
         match self {
-            PhpType::Callable { params, .. } => Some(params.as_slice()),
+            PhpType::Callable(c) => Some(c.params.as_slice()),
             PhpType::Nullable(inner) => inner.callable_param_types(),
             PhpType::Union(members) => {
                 for member in members {
@@ -1588,7 +1711,7 @@ impl PhpType {
     ///   - `int`                  → `None`
     pub fn callable_return_type(&self) -> Option<&PhpType> {
         match self {
-            PhpType::Callable { return_type, .. } => return_type.as_deref(),
+            PhpType::Callable(c) => c.return_type.as_ref(),
             PhpType::Nullable(inner) => inner.callable_return_type(),
             PhpType::Union(members) => {
                 for member in members {
@@ -1616,8 +1739,8 @@ impl PhpType {
     /// scalar (matching the pattern used by `extract_value_type`).
     pub fn generator_send_type(&self, skip_scalar: bool) -> Option<&PhpType> {
         match self {
-            PhpType::Generic(name, args) if Self::short_name_of(name) == "Generator" => {
-                match args.get(2) {
+            PhpType::Generic(g) if Self::short_name_of(&g.name) == "Generator" => {
+                match g.args.get(2) {
                     Some(send) if skip_scalar && send.is_scalar() => None,
                     Some(send) => Some(send),
                     None => None,
@@ -1644,7 +1767,7 @@ impl PhpType {
                 match non_null.len() {
                     0 => None,
                     1 => Some(non_null[0].clone()),
-                    _ => Some(PhpType::Union(non_null.into_iter().cloned().collect())),
+                    _ => Some(PhpType::union(non_null.into_iter().cloned().collect())),
                 }
             }
             // Not a union or nullable — no null to strip.
@@ -1691,7 +1814,7 @@ impl PhpType {
     /// `Foo` → `[Foo]`.
     fn atomic_members(&self) -> Vec<PhpType> {
         match self {
-            PhpType::Union(members) => members.clone(),
+            PhpType::Union(members) => members.to_vec(),
             PhpType::Nullable(inner) => {
                 vec![inner.as_ref().clone(), PhpType::null()]
             }
@@ -1805,11 +1928,11 @@ impl PhpType {
                     || self.is_null()
                     || self.is_self_like())
             }
-            PhpType::Callable { .. } => true,
+            PhpType::Callable(..) => true,
             PhpType::ClassString(..) | PhpType::InterfaceString(..) => true,
             PhpType::KeyOf(..) | PhpType::ValueOf(..) => true,
             PhpType::IndexAccess(..) => true,
-            PhpType::Conditional { .. } => true,
+            PhpType::Conditional(..) => true,
             PhpType::IntRange(..) => true,
             PhpType::Literal(..) => true,
             PhpType::StaticType(_) | PhpType::ThisType(_) => true,
@@ -1855,9 +1978,11 @@ impl PhpType {
             PhpType::Union(members) | PhpType::Intersection(members) => members
                 .iter()
                 .any(|m| m.references_any_template_param(template_params)),
-            PhpType::Generic(name, args) => {
-                template_params.iter().any(|p| p == name)
-                    || args
+            PhpType::Generic(g) => {
+                template_params
+                    .iter()
+                    .any(|p| p.as_str() == g.name.as_str())
+                    || g.args
                         .iter()
                         .any(|a| a.references_any_template_param(template_params))
             }
@@ -1868,25 +1993,16 @@ impl PhpType {
             PhpType::KeyOf(inner) | PhpType::ValueOf(inner) => {
                 inner.references_any_template_param(template_params)
             }
-            PhpType::Conditional {
-                condition,
-                then_type,
-                else_type,
-                ..
-            } => {
-                condition.references_any_template_param(template_params)
-                    || then_type.references_any_template_param(template_params)
-                    || else_type.references_any_template_param(template_params)
+            PhpType::Conditional(c) => {
+                c.condition.references_any_template_param(template_params)
+                    || c.then_type.references_any_template_param(template_params)
+                    || c.else_type.references_any_template_param(template_params)
             }
-            PhpType::Callable {
-                params,
-                return_type,
-                ..
-            } => {
-                params
+            PhpType::Callable(c) => {
+                c.params
                     .iter()
                     .any(|p| p.type_hint.references_any_template_param(template_params))
-                    || return_type
+                    || c.return_type
                         .as_ref()
                         .is_some_and(|r| r.references_any_template_param(template_params))
             }

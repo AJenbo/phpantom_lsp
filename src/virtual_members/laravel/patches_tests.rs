@@ -87,7 +87,7 @@ fn builder_call_no_return_type_is_not_patched() {
 #[test]
 fn conditionable_when_union_with_template_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("TWhenReturnType")),
     ]);
@@ -112,7 +112,7 @@ fn conditionable_when_union_with_template_becomes_this() {
 #[test]
 fn conditionable_unless_union_with_template_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("TUnlessReturnType")),
     ]);
@@ -159,7 +159,7 @@ fn conditionable_bare_template_return_becomes_this() {
 #[test]
 fn conditionable_static_union_with_template_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::static_(),
         PhpType::Named(atom("TWhenReturnType")),
     ]);
@@ -243,7 +243,7 @@ fn conditionable_no_return_type_is_not_patched() {
 #[test]
 fn conditionable_other_method_is_not_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("TWhenReturnType")),
     ]);
@@ -276,7 +276,7 @@ fn conditionable_other_method_is_not_patched() {
 fn class_using_conditionable_trait_gets_when_patched() {
     let mut class = make_class("App\\Services\\Pipeline");
     class.used_traits = vec![atom(CONDITIONABLE_FQN)];
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("TWhenReturnType")),
     ]);
@@ -302,7 +302,7 @@ fn class_using_conditionable_trait_gets_when_patched() {
 fn class_using_conditionable_short_name_gets_patched() {
     let mut class = make_class("App\\Services\\Pipeline");
     class.used_traits = vec![atom("Conditionable")];
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("TWhenReturnType")),
     ]);
@@ -328,7 +328,7 @@ fn class_using_conditionable_short_name_gets_patched() {
 fn class_without_conditionable_is_not_patched() {
     let mut class = make_class("App\\Services\\Pipeline");
     class.used_traits = vec![atom("SomeTrait")];
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("TWhenReturnType")),
     ]);
@@ -364,14 +364,14 @@ fn builder_gets_both_call_and_when_patches() {
         Arc::new(make_method_typed("__call", Some(PhpType::mixed()))),
         Arc::new(make_method_typed(
             "when",
-            Some(PhpType::Union(vec![
+            Some(PhpType::union(vec![
                 PhpType::Named(atom("$this")),
                 PhpType::Named(atom("TWhenReturnType")),
             ])),
         )),
         Arc::new(make_method_typed(
             "unless",
-            Some(PhpType::Union(vec![
+            Some(PhpType::union(vec![
                 PhpType::Named(atom("$this")),
                 PhpType::Named(atom("TUnlessReturnType")),
             ])),
@@ -401,7 +401,7 @@ fn builder_gets_both_call_and_when_patches() {
 #[test]
 fn union_with_null_and_template_is_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::null(),
         PhpType::Named(atom("TWhenReturnType")),
@@ -427,7 +427,7 @@ fn union_with_null_and_template_is_patched() {
 #[test]
 fn union_of_only_self_types_is_not_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![PhpType::Named(atom("$this")), PhpType::static_()]);
+    let return_type = PhpType::union(vec![PhpType::Named(atom("$this")), PhpType::static_()]);
     class.methods = vec![Arc::new(make_method_typed(
         "when",
         Some(return_type.clone()),
@@ -584,10 +584,7 @@ fn db_connection_select_bare_array_becomes_typed() {
 #[test]
 fn db_select_non_array_return_is_not_patched() {
     let mut class = make_class(DB_FACADE_FQN);
-    let original = PhpType::Generic(
-        "array".to_string(),
-        vec![PhpType::string(), PhpType::mixed()],
-    );
+    let original = PhpType::generic("array", vec![PhpType::string(), PhpType::mixed()]);
     class.methods = vec![Arc::new(make_method_typed(
         "select",
         Some(original.clone()),
@@ -668,7 +665,7 @@ fn db_other_method_is_not_patched() {
 #[test]
 fn fqn_in_return_type_is_not_treated_as_template() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Union(vec![
+    let return_type = PhpType::union(vec![
         PhpType::Named(atom("$this")),
         PhpType::Named(atom("App\\Models\\User")),
     ]);
@@ -800,8 +797,8 @@ fn builder_paginate_gets_parameterised() {
 #[test]
 fn builder_paginate_already_generic_is_not_patched() {
     let mut class = make_class(ELOQUENT_BUILDER_FQN);
-    let original = PhpType::Generic(
-        "Illuminate\\Pagination\\LengthAwarePaginator".to_string(),
+    let original = PhpType::generic(
+        "Illuminate\\Pagination\\LengthAwarePaginator",
         vec![PhpType::int(), PhpType::Named(atom("App\\Models\\User"))],
     );
     class.methods = vec![Arc::new(make_method_typed(
@@ -1007,7 +1004,7 @@ fn testing_mock_helpers_become_generic() {
 fn testing_mock_helper_with_concrete_return_is_untouched() {
     // A hand-written override that already carries the mocked class must
     // not be rewritten.
-    let concrete = PhpType::Intersection(vec![
+    let concrete = PhpType::intersection(vec![
         PhpType::Named(atom("App\\Contracts\\Storage")),
         PhpType::Named(atom("Mockery\\MockInterface")),
     ]);

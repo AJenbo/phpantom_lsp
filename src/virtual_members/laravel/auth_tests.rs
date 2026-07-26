@@ -45,7 +45,7 @@ fn single_guard_env_model_widens_to_contract() {
     ];"#;
     assert_eq!(
         resolve(config, None),
-        Some(PhpType::Union(vec![named("App\\Models\\User"), contract()]))
+        Some(PhpType::union(vec![named("App\\Models\\User"), contract()]))
     );
 }
 
@@ -78,7 +78,7 @@ fn env_default_guard_fans_out_all_guards() {
     ];"#;
     assert_eq!(
         resolve(config, None),
-        Some(PhpType::Union(vec![
+        Some(PhpType::union(vec![
             named("App\\Models\\User"),
             named("App\\Models\\Admin"),
             contract(),
@@ -116,7 +116,7 @@ fn explicit_guard_with_env_model_widens() {
     ];"#;
     assert_eq!(
         resolve(config, Some("web")),
-        Some(PhpType::Union(vec![named("App\\Models\\User"), contract()]))
+        Some(PhpType::union(vec![named("App\\Models\\User"), contract()]))
     );
 }
 
@@ -131,7 +131,7 @@ fn ternary_model_is_exhaustive() {
     ];"#;
     assert_eq!(
         resolve(config, None),
-        Some(PhpType::Union(vec![
+        Some(PhpType::union(vec![
             named("App\\Models\\User"),
             named("App\\Models\\Admin"),
         ]))
@@ -199,7 +199,7 @@ fn floor_raises_to_all_implementors() {
     ];"#;
     assert_eq!(
         resolve_with_impls(config, None, &["App\\Models\\User", "App\\Models\\Admin"]),
-        Some(PhpType::Union(vec![
+        Some(PhpType::union(vec![
             named("App\\Models\\User"),
             named("App\\Models\\Admin"),
         ]))
@@ -217,7 +217,7 @@ fn unresolvable_config_falls_back_to_implementors() {
     ];"#;
     assert_eq!(
         resolve_with_impls(config, None, &["App\\Models\\User", "App\\Models\\Admin"]),
-        Some(PhpType::Union(vec![
+        Some(PhpType::union(vec![
             named("App\\Models\\User"),
             named("App\\Models\\Admin"),
         ]))

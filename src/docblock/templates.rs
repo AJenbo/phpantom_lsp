@@ -300,8 +300,8 @@ pub(crate) fn collect_template_bindings(
         PhpType::Array(inner) => {
             collect_template_bindings(inner, template_params, param_name, results);
         }
-        PhpType::Generic(_, args) => {
-            for arg in args {
+        PhpType::Generic(g) => {
+            for arg in &g.args {
                 collect_template_bindings(arg, template_params, param_name, results);
             }
         }
@@ -311,15 +311,11 @@ pub(crate) fn collect_template_bindings(
         | PhpType::ValueOf(inner) => {
             collect_template_bindings(inner, template_params, param_name, results);
         }
-        PhpType::Callable {
-            params,
-            return_type,
-            ..
-        } => {
-            for p in params {
+        PhpType::Callable(c) => {
+            for p in &c.params {
                 collect_template_bindings(&p.type_hint, template_params, param_name, results);
             }
-            if let Some(rt) = return_type {
+            if let Some(rt) = &c.return_type {
                 collect_template_bindings(rt, template_params, param_name, results);
             }
         }
@@ -332,15 +328,10 @@ pub(crate) fn collect_template_bindings(
             collect_template_bindings(target, template_params, param_name, results);
             collect_template_bindings(index, template_params, param_name, results);
         }
-        PhpType::Conditional {
-            condition,
-            then_type,
-            else_type,
-            ..
-        } => {
-            collect_template_bindings(condition, template_params, param_name, results);
-            collect_template_bindings(then_type, template_params, param_name, results);
-            collect_template_bindings(else_type, template_params, param_name, results);
+        PhpType::Conditional(c) => {
+            collect_template_bindings(&c.condition, template_params, param_name, results);
+            collect_template_bindings(&c.then_type, template_params, param_name, results);
+            collect_template_bindings(&c.else_type, template_params, param_name, results);
         }
         _ => {}
     }
@@ -414,12 +405,12 @@ fn parse_generics_from_description(desc: &str) -> Option<(String, Vec<PhpType>)>
     // Parse the type token and extract base name + generic arguments.
     let parsed = PhpType::parse(type_token);
     match parsed {
-        PhpType::Generic(name, args) if !args.is_empty() => {
-            let base_name = strip_fqn_prefix(&name).to_string();
+        PhpType::Generic(g) if !g.args.is_empty() => {
+            let base_name = strip_fqn_prefix(&g.name).to_string();
             if base_name.is_empty() {
                 return None;
             }
-            Some((base_name, args))
+            Some((base_name, g.args))
         }
         _ => None,
     }
@@ -637,13 +628,13 @@ pub fn synthesize_template_conditional_from_info(
     }
     let param_name = param_names.into_iter().next()?;
 
-    Some(PhpType::Conditional {
-        param: format!("${param_name}"),
-        negated: false,
-        condition: Box::new(PhpType::ClassString(None)),
-        then_type: Box::new(PhpType::mixed()),
-        else_type: Box::new(PhpType::mixed()),
-    })
+    Some(PhpType::conditional(
+        format!("${param_name}"),
+        false,
+        PhpType::ClassString(None),
+        PhpType::mixed(),
+        PhpType::mixed(),
+    ))
 }
 
 /// Search a parsed docblock for all `@param class-string<T> $paramName`

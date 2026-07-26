@@ -312,15 +312,15 @@ impl Backend {
                     // they refer to the caller's class context which is
                     // not available here.
                     let class_level_subs: HashMap<String, PhpType> = match &rt.type_string {
-                        PhpType::Generic(_, args)
-                            if !args.is_empty()
+                        PhpType::Generic(g)
+                            if !g.args.is_empty()
                                 && !owner.template_params.is_empty()
-                                && !args.iter().any(|a| a.is_self_like()) =>
+                                && !g.args.iter().any(|a| a.is_self_like()) =>
                         {
                             owner
                                 .template_params
                                 .iter()
-                                .zip(args.iter())
+                                .zip(g.args.iter())
                                 .map(|(name, ty)| (name.to_string(), ty.clone()))
                                 .collect()
                         }
@@ -374,7 +374,7 @@ impl Backend {
                                         .unwrap_or(substituted)
                                 } else if substituted.contains_self_ref() {
                                     match &rt.type_string {
-                                        PhpType::Generic(_, _) => {
+                                        PhpType::Generic(_) => {
                                             substituted.replace_self_with_type(&rt.type_string)
                                         }
                                         _ => substituted.replace_self(&owner.fqn()),
@@ -989,7 +989,7 @@ impl Backend {
                                 );
                             if let Some(ref mut hint_out) = return_type_hint_out {
                                 **hint_out =
-                                    Some(PhpType::Generic(substituted.name.to_string(), type_args));
+                                    Some(PhpType::generic_atom(substituted.name, type_args));
                             }
                             return vec![substituted];
                         }
@@ -1005,7 +1005,7 @@ impl Backend {
                     &type_args,
                 );
                 if let Some(ref mut hint_out) = return_type_hint_out {
-                    **hint_out = Some(PhpType::Generic(substituted.name.to_string(), type_args));
+                    **hint_out = Some(PhpType::generic_atom(substituted.name, type_args));
                 }
                 vec![substituted]
             }

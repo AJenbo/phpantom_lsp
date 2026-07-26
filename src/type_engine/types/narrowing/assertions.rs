@@ -268,10 +268,10 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
 fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
     match ty {
         PhpType::Array(_) | PhpType::ArrayShape(_) => Some(TypeGuardKind::Array),
-        PhpType::Generic(name, _) if crate::php_type::is_array_like_name(name) => {
+        PhpType::Generic(g) if crate::php_type::is_array_like_name(&g.name) => {
             // `iterable` is array-like by name but has no `is_iterable` guard
             // kind, so it must not map to the array guard.
-            (!name.eq_ignore_ascii_case("iterable")).then_some(TypeGuardKind::Array)
+            (!g.name.eq_ignore_ascii_case("iterable")).then_some(TypeGuardKind::Array)
         }
         PhpType::Named(n) => match n.to_ascii_lowercase().as_str() {
             "array" | "list" | "non-empty-array" | "non-empty-list" => Some(TypeGuardKind::Array),

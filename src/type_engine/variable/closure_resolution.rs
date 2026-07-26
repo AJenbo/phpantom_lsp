@@ -686,7 +686,7 @@ fn inferred_type_is_more_specific(explicit_hint: &PhpType, inferred: &PhpType) -
 
     // The inferred type must be a generic type (carries generic args).
     let inferred_base = match inferred {
-        PhpType::Generic(name, _) => name.as_str(),
+        PhpType::Generic(g) => g.name.as_str(),
         _ => return false,
     };
 
@@ -735,8 +735,8 @@ fn try_relation_query_override(
     let related_fqn = resolve_relation_chain(&model, relation_name, class_loader, None)?;
 
     // Return `Builder<RelatedModel>` as the closure parameter type.
-    let builder_type = PhpType::Generic(
-        ELOQUENT_BUILDER_FQN.to_string(),
+    let builder_type = PhpType::generic(
+        ELOQUENT_BUILDER_FQN,
         vec![PhpType::Named(atom(&related_fqn))],
     );
 
@@ -780,7 +780,7 @@ fn build_receiver_self_type(
     if (receiver.name == "Builder" || fqn == ELOQUENT_BUILDER_FQN)
         && let Some(model_type) = extract_model_from_builder(receiver)
     {
-        return PhpType::Generic(ELOQUENT_BUILDER_FQN.to_string(), vec![model_type]);
+        return PhpType::generic(ELOQUENT_BUILDER_FQN, vec![model_type]);
     }
 
     // General case: try to recover concrete generic args from method
@@ -789,7 +789,7 @@ fn build_receiver_self_type(
     // `Collection<int, User>`, we can extract `[int, User]` as the
     // concrete args.
     if let Some(args) = extract_generic_args_from_methods(receiver, &fqn) {
-        return PhpType::Generic(fqn.to_string(), args);
+        return PhpType::generic_atom(fqn, args);
     }
 
     // Fallback: if we have a parent class with @extends generics and
@@ -805,7 +805,7 @@ fn build_receiver_self_type(
                     false
                 };
                 if !is_unsubstituted {
-                    return PhpType::Generic(fqn.to_string(), vec![first_arg.clone()]);
+                    return PhpType::generic_atom(fqn, vec![first_arg.clone()]);
                 }
             }
         }
@@ -822,7 +822,8 @@ fn build_receiver_self_type(
 fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Option<Vec<PhpType>> {
     let class_short = crate::util::short_name(class_fqn);
     for method in &class.methods {
-        if let Some(PhpType::Generic(base, args)) = &method.return_type {
+        if let Some(PhpType::Generic(g)) = &method.return_type {
+            let (base, args) = (&g.name, &g.args);
             let base_short = crate::util::short_name(base);
             if (base == class_fqn || base_short.eq_ignore_ascii_case(class_short))
                 && !args.is_empty()
@@ -872,13 +873,13 @@ fn find_model_from_receivers(
 fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
     for method in &builder.methods {
         if let Some(ref ret) = method.return_type
-            && let PhpType::Generic(base, args) = ret
-            && !args.is_empty()
-            && (base == ELOQUENT_BUILDER_FQN || base == "Builder")
+            && let PhpType::Generic(g) = ret
+            && !g.args.is_empty()
+            && (g.name == ELOQUENT_BUILDER_FQN || g.name == "Builder")
         {
             // Skip unsubstituted template params like "TModel".
-            if !args[0].is_empty() && !args[0].is_named("TModel") {
-                return Some(args[0].clone());
+            if !g.args[0].is_empty() && !g.args[0].is_named("TModel") {
+                return Some(g.args[0].clone());
             }
         }
     }

@@ -32,7 +32,7 @@ impl PhpType {
                     let s = m.simplified();
                     // Flatten nested unions.
                     if let PhpType::Union(inner) = s {
-                        simplified.extend(inner);
+                        simplified.extend(inner.into_vec());
                     } else {
                         simplified.push(s);
                     }
@@ -60,7 +60,7 @@ impl PhpType {
                     return PhpType::never();
                 }
 
-                PhpType::Union(simplified)
+                PhpType::union(simplified)
             }
             PhpType::Intersection(members) => {
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
@@ -68,7 +68,7 @@ impl PhpType {
                     let s = m.simplified();
                     // Flatten nested intersections.
                     if let PhpType::Intersection(inner) = s {
-                        simplified.extend(inner);
+                        simplified.extend(inner.into_vec());
                     } else {
                         simplified.push(s);
                     }
@@ -88,7 +88,7 @@ impl PhpType {
                     return PhpType::mixed();
                 }
 
-                PhpType::Intersection(simplified)
+                PhpType::intersection(simplified)
             }
             PhpType::Nullable(inner) => {
                 let s = inner.simplified();
@@ -100,9 +100,9 @@ impl PhpType {
                     PhpType::Nullable(Box::new(s))
                 }
             }
-            PhpType::Generic(name, args) => {
-                let simplified_args: Vec<PhpType> = args.iter().map(|a| a.simplified()).collect();
-                PhpType::Generic(name.clone(), simplified_args)
+            PhpType::Generic(g) => {
+                let simplified_args: Vec<PhpType> = g.args.iter().map(|a| a.simplified()).collect();
+                PhpType::generic_atom(g.name, simplified_args)
             }
             PhpType::Array(inner) => PhpType::Array(Box::new(inner.simplified())),
             PhpType::ClassString(inner) => {
@@ -147,7 +147,7 @@ impl PhpType {
                 let alternatives: Vec<Vec<PhpType>> = members
                     .iter()
                     .map(|m| match m {
-                        PhpType::Union(u) => u.clone(),
+                        PhpType::Union(u) => u.to_vec(),
                         other => vec![other.clone()],
                     })
                     .collect();
@@ -173,7 +173,7 @@ impl PhpType {
                         if combo.len() == 1 {
                             combo.into_iter().next().unwrap()
                         } else {
-                            PhpType::Intersection(combo)
+                            PhpType::intersection(combo)
                         }
                     })
                     .collect();
@@ -181,7 +181,7 @@ impl PhpType {
                 if union_members.len() == 1 {
                     union_members.into_iter().next().unwrap().simplified()
                 } else {
-                    PhpType::Union(union_members).simplified()
+                    PhpType::union(union_members).simplified()
                 }
             }
             _ => self.clone(),

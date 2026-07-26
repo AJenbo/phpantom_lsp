@@ -25,7 +25,7 @@ fn assert_round_trip(input: &str) {
             let php_type = PhpType::parse(input);
             assert_eq!(
                 php_type,
-                PhpType::Raw(input.to_owned()),
+                PhpType::raw(input),
                 "Unparseable input should become Raw"
             );
             return;
@@ -142,7 +142,8 @@ fn parse_generic_with_covariant_preserves_structure() {
     // The full Generic structure should be preserved after stripping.
     let ty = PhpType::parse("HasMany<Post, covariant $this>");
     match &ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "HasMany");
             assert_eq!(args.len(), 2);
             assert_eq!(args[0].to_string(), "Post");
@@ -161,7 +162,8 @@ fn parse_generic_with_contravariant() {
         "base_name should work with contravariant annotation",
     );
     match &ty {
-        PhpType::Generic(_, args) => {
+        PhpType::Generic(g) => {
+            let args = &g.args;
             assert_eq!(args.len(), 1);
             assert_eq!(args[0].to_string(), "T");
         }
@@ -185,7 +187,8 @@ fn parse_generic_with_covariant_fqn() {
 fn parse_generic_with_multiple_covariant_args() {
     let ty = PhpType::parse("Map<covariant TKey, covariant TValue>");
     match &ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "Map");
             assert_eq!(args.len(), 2);
             assert_eq!(args[0].to_string(), "TKey");
@@ -211,7 +214,8 @@ fn parse_generic_without_covariant_unchanged() {
     // Normal generics without variance annotations should be unaffected.
     let ty = PhpType::parse("Collection<int, User>");
     match &ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "Collection");
             assert_eq!(args.len(), 2);
         }
@@ -228,7 +232,8 @@ fn parse_covariant_array_shape_in_generic() {
     );
     assert_eq!(ty.base_name(), Some("Collection"));
     match &ty {
-        PhpType::Generic(_, args) => {
+        PhpType::Generic(g) => {
+            let args = &g.args;
             assert_eq!(args.len(), 2);
             // The second arg should be an array shape, not Raw.
             assert!(
@@ -317,7 +322,8 @@ fn round_trip_member_reference() {
 fn parse_generic_with_star_wildcard() {
     let ty = PhpType::parse("Relation<TRelatedModel, *, *>");
     match &ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "Relation");
             assert_eq!(args.len(), 3);
             assert_eq!(args[0], PhpType::Named(atom("TRelatedModel")));
@@ -336,7 +342,8 @@ fn parse_generic_with_star_wildcard_union() {
         PhpType::Union(members) => {
             assert_eq!(members.len(), 2);
             match &members[0] {
-                PhpType::Generic(name, args) => {
+                PhpType::Generic(g) => {
+                    let (name, args) = (&g.name, &g.args);
                     assert_eq!(name, "Relation");
                     assert_eq!(args.len(), 3);
                 }
@@ -372,7 +379,8 @@ fn parse_benevolent_unwraps_single_class() {
 fn parse_benevolent_nested_in_generic() {
     let ty = PhpType::parse("array<int, __benevolent<string|false>>");
     match &ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "array");
             assert_eq!(args.len(), 2);
             match &args[1] {
@@ -411,7 +419,8 @@ fn parse_generic_star_with_spaces() {
     // Spaces around the `*` wildcard
     let ty = PhpType::parse("BelongsTo< * , * >");
     match &ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "BelongsTo");
             assert_eq!(args.len(), 2);
             assert_eq!(args[0], PhpType::mixed());
@@ -481,7 +490,7 @@ fn replace_star_wildcards_single_star() {
 
 #[test]
 fn parse_empty_returns_raw() {
-    assert_eq!(PhpType::parse(""), PhpType::Raw(String::new()));
+    assert_eq!(PhpType::parse(""), PhpType::untyped());
 }
 
 #[test]
@@ -522,7 +531,8 @@ fn intersection_is_flattened() {
 fn generic_with_params() {
     let ty = PhpType::parse("array<int, string>");
     match ty {
-        PhpType::Generic(name, args) => {
+        PhpType::Generic(g) => {
+            let (name, args) = (&g.name, &g.args);
             assert_eq!(name, "array");
             assert_eq!(args.len(), 2);
             assert_eq!(args[0], PhpType::int());
@@ -584,16 +594,12 @@ fn nullable_structure() {
 fn callable_structure() {
     let ty = PhpType::parse("callable(int, string): bool");
     match ty {
-        PhpType::Callable {
-            kind,
-            params,
-            return_type,
-        } => {
-            assert_eq!(kind, "callable");
-            assert_eq!(params.len(), 2);
-            assert_eq!(params[0].type_hint, PhpType::int());
-            assert_eq!(params[1].type_hint, PhpType::string());
-            assert_eq!(return_type, Some(Box::new(PhpType::bool())));
+        PhpType::Callable(c) => {
+            assert_eq!(c.kind, "callable");
+            assert_eq!(c.params.len(), 2);
+            assert_eq!(c.params[0].type_hint, PhpType::int());
+            assert_eq!(c.params[1].type_hint, PhpType::string());
+            assert_eq!(c.return_type, Some(PhpType::bool()));
         }
         other => panic!("Expected Callable, got {other:?}"),
     }
@@ -861,18 +867,12 @@ fn slice_structure() {
 fn conditional_structure() {
     let ty = PhpType::parse("$this is string ? int : float");
     match ty {
-        PhpType::Conditional {
-            param,
-            negated,
-            condition,
-            then_type,
-            else_type,
-        } => {
-            assert_eq!(param, "$this");
-            assert!(!negated);
-            assert_eq!(*condition, PhpType::string());
-            assert_eq!(*then_type, PhpType::int());
-            assert_eq!(*else_type, PhpType::float());
+        PhpType::Conditional(c) => {
+            assert_eq!(c.param, "$this");
+            assert!(!c.negated);
+            assert_eq!(c.condition, PhpType::string());
+            assert_eq!(c.then_type, PhpType::int());
+            assert_eq!(c.else_type, PhpType::float());
         }
         other => panic!("Expected Conditional, got {other:?}"),
     }
@@ -950,10 +950,7 @@ fn parse_model_property_generic() {
     let ty = PhpType::parse("model-property<Process>");
     assert_eq!(
         ty,
-        PhpType::Generic(
-            "model-property".to_string(),
-            vec![PhpType::Named(atom("Process"))]
-        )
+        PhpType::generic("model-property", vec![PhpType::Named(atom("Process"))])
     );
 }
 
@@ -962,13 +959,10 @@ fn parse_model_property_nested_in_array() {
     let ty = PhpType::parse("array<model-property<Process>, mixed>");
     assert_eq!(
         ty,
-        PhpType::Generic(
-            "array".to_string(),
+        PhpType::generic(
+            "array",
             vec![
-                PhpType::Generic(
-                    "model-property".to_string(),
-                    vec![PhpType::Named(atom("Process"))]
-                ),
+                PhpType::generic("model-property", vec![PhpType::Named(atom("Process"))]),
                 PhpType::mixed(),
             ]
         )
@@ -1012,7 +1006,7 @@ fn iterable_element_type_positional_shape_unions_values() {
     let elem = ty.iterable_element_type().unwrap();
     assert_eq!(
         elem,
-        PhpType::Union(vec![PhpType::int(), PhpType::string()])
+        PhpType::union(vec![PhpType::int(), PhpType::string()])
     );
 }
 
@@ -1539,11 +1533,7 @@ fn base_name_strips_leading_backslash() {
 #[test]
 fn base_name_generic_strips_leading_backslash() {
     assert_eq!(
-        PhpType::Generic(
-            "\\Collection".to_owned(),
-            vec![PhpType::Named(atom("User"))]
-        )
-        .base_name(),
+        PhpType::generic("\\Collection", vec![PhpType::Named(atom("User"))]).base_name(),
         Some("Collection")
     );
 }
@@ -1757,10 +1747,7 @@ fn resolve_self_refs_static_in_generic() {
     let resolved = ty.resolve_self_refs("App\\Cat", None);
     assert_eq!(
         resolved,
-        PhpType::Generic(
-            "array".to_string(),
-            vec![PhpType::StaticType(atom("App\\Cat"))]
-        )
+        PhpType::generic("array", vec![PhpType::StaticType(atom("App\\Cat"))])
     );
 }
 
@@ -2162,11 +2149,7 @@ fn callable_return_type_with_return() {
 
 #[test]
 fn callable_return_type_without_return() {
-    let ty = PhpType::Callable {
-        kind: "callable".to_owned(),
-        params: vec![],
-        return_type: None,
-    };
+    let ty = PhpType::callable_spec("callable", vec![], None);
     assert!(ty.callable_return_type().is_none());
 }
 
@@ -2353,7 +2336,7 @@ mod subtype_tests {
 
     #[test]
     fn fqn_closure_is_subtype_of_callable_union_null() {
-        let callable_or_null = PhpType::Union(vec![PhpType::callable(), PhpType::null()]);
+        let callable_or_null = PhpType::union(vec![PhpType::callable(), PhpType::null()]);
         assert!(PhpType::Named(atom("\\Closure")).is_subtype_of(&callable_or_null));
     }
 
@@ -2371,13 +2354,13 @@ mod subtype_tests {
 
     #[test]
     fn array_key_is_subtype_of_int_string_union() {
-        let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+        let int_or_string = PhpType::union(vec![PhpType::int(), PhpType::string()]);
         assert!(PhpType::Named(atom("array-key")).is_subtype_of(&int_or_string));
     }
 
     #[test]
     fn int_string_union_is_subtype_of_array_key() {
-        let int_or_string = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+        let int_or_string = PhpType::union(vec![PhpType::int(), PhpType::string()]);
         assert!(int_or_string.is_subtype_of(&PhpType::Named(atom("array-key"))));
     }
 
@@ -2433,7 +2416,7 @@ mod subtype_tests {
     #[test]
     fn intersection_is_subtype_when_any_member_is() {
         // Foo & Bar <: Foo
-        let inter = PhpType::Intersection(vec![
+        let inter = PhpType::intersection(vec![
             PhpType::Named(atom("Foo")),
             PhpType::Named(atom("Bar")),
         ]);
@@ -2443,7 +2426,7 @@ mod subtype_tests {
     #[test]
     fn subtype_of_intersection_requires_all() {
         // Foo <: Foo & Bar — false (Foo is not necessarily a Bar)
-        let inter = PhpType::Intersection(vec![
+        let inter = PhpType::intersection(vec![
             PhpType::Named(atom("Foo")),
             PhpType::Named(atom("Bar")),
         ]);
@@ -3035,19 +3018,19 @@ mod simplification_tests {
 
     #[test]
     fn dedup_union() {
-        let t = PhpType::Union(vec![PhpType::string(), PhpType::string()]);
+        let t = PhpType::union(vec![PhpType::string(), PhpType::string()]);
         assert_eq!(t.simplified().to_string(), "string");
     }
 
     #[test]
     fn true_false_becomes_bool() {
-        let t = PhpType::Union(vec![PhpType::true_(), PhpType::false_()]);
+        let t = PhpType::union(vec![PhpType::true_(), PhpType::false_()]);
         assert_eq!(t.simplified().to_string(), "bool");
     }
 
     #[test]
     fn true_false_with_extra_member() {
-        let t = PhpType::Union(vec![PhpType::true_(), PhpType::false_(), PhpType::null()]);
+        let t = PhpType::union(vec![PhpType::true_(), PhpType::false_(), PhpType::null()]);
         let s = t.simplified();
         let display = s.to_string();
         assert!(display.contains("bool"), "should contain bool: {display}");
@@ -3064,19 +3047,19 @@ mod simplification_tests {
 
     #[test]
     fn mixed_absorbs_union() {
-        let t = PhpType::Union(vec![PhpType::mixed(), PhpType::string(), PhpType::int()]);
+        let t = PhpType::union(vec![PhpType::mixed(), PhpType::string(), PhpType::int()]);
         assert_eq!(t.simplified().to_string(), "mixed");
     }
 
     #[test]
     fn scalar_refinement_absorbed() {
-        let t = PhpType::Union(vec![PhpType::Named(atom("positive-int")), PhpType::int()]);
+        let t = PhpType::union(vec![PhpType::Named(atom("positive-int")), PhpType::int()]);
         assert_eq!(t.simplified().to_string(), "int");
     }
 
     #[test]
     fn non_empty_string_absorbed_by_string() {
-        let t = PhpType::Union(vec![
+        let t = PhpType::union(vec![
             PhpType::Named(atom("non-empty-string")),
             PhpType::string(),
         ]);
@@ -3085,19 +3068,19 @@ mod simplification_tests {
 
     #[test]
     fn list_absorbed_by_array() {
-        let t = PhpType::Union(vec![PhpType::Named(atom("list")), PhpType::array()]);
+        let t = PhpType::union(vec![PhpType::Named(atom("list")), PhpType::array()]);
         assert_eq!(t.simplified().to_string(), "array");
     }
 
     #[test]
     fn single_member_union_unwrapped() {
-        let t = PhpType::Union(vec![PhpType::int()]);
+        let t = PhpType::union(vec![PhpType::int()]);
         assert_eq!(t.simplified(), PhpType::int());
     }
 
     #[test]
     fn single_member_intersection_unwrapped() {
-        let t = PhpType::Intersection(vec![PhpType::Named(atom("Foo"))]);
+        let t = PhpType::intersection(vec![PhpType::Named(atom("Foo"))]);
         assert_eq!(t.simplified(), PhpType::Named(atom("Foo")));
     }
 
@@ -3121,8 +3104,8 @@ mod simplification_tests {
 
     #[test]
     fn nested_union_flattened() {
-        let t = PhpType::Union(vec![
-            PhpType::Union(vec![
+        let t = PhpType::union(vec![
+            PhpType::union(vec![
                 PhpType::Named(atom("Foo")),
                 PhpType::Named(atom("Bar")),
             ]),
@@ -3138,8 +3121,8 @@ mod simplification_tests {
 
     #[test]
     fn nested_intersection_flattened() {
-        let t = PhpType::Intersection(vec![
-            PhpType::Intersection(vec![
+        let t = PhpType::intersection(vec![
+            PhpType::intersection(vec![
                 PhpType::Named(atom("Foo")),
                 PhpType::Named(atom("Bar")),
             ]),
@@ -3155,15 +3138,15 @@ mod simplification_tests {
 
     #[test]
     fn intersection_with_never_collapses() {
-        let t = PhpType::Intersection(vec![PhpType::Named(atom("Foo")), PhpType::never()]);
+        let t = PhpType::intersection(vec![PhpType::Named(atom("Foo")), PhpType::never()]);
         assert_eq!(t.simplified(), PhpType::never());
     }
 
     #[test]
     fn generic_args_simplified() {
-        let t = PhpType::Generic(
-            "array".into(),
-            vec![PhpType::Union(vec![PhpType::true_(), PhpType::false_()])],
+        let t = PhpType::generic(
+            "array",
+            vec![PhpType::union(vec![PhpType::true_(), PhpType::false_()])],
         );
         let s = t.simplified();
         assert_eq!(s.to_string(), "array<bool>");
@@ -3171,7 +3154,7 @@ mod simplification_tests {
 
     #[test]
     fn dedup_case_insensitive() {
-        let t = PhpType::Union(vec![PhpType::Named(atom("String")), PhpType::string()]);
+        let t = PhpType::union(vec![PhpType::Named(atom("String")), PhpType::string()]);
         // Should deduplicate — only one remains.
         let s = t.simplified();
         assert!(
@@ -3195,8 +3178,8 @@ mod distribute_tests {
     #[test]
     fn distribute_simple() {
         // (A|B) & C → (A&C) | (B&C)
-        let t = PhpType::Intersection(vec![
-            PhpType::Union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("B"))]),
+        let t = PhpType::intersection(vec![
+            PhpType::union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("B"))]),
             PhpType::Named(atom("C")),
         ]);
         let d = t.distribute_intersection();
@@ -3209,7 +3192,7 @@ mod distribute_tests {
 
     #[test]
     fn distribute_no_union_unchanged() {
-        let t = PhpType::Intersection(vec![
+        let t = PhpType::intersection(vec![
             PhpType::Named(atom("Foo")),
             PhpType::Named(atom("Bar")),
         ]);
@@ -3227,9 +3210,9 @@ mod distribute_tests {
     #[test]
     fn distribute_two_unions() {
         // (A|B) & (C|D) → (A&C) | (A&D) | (B&C) | (B&D)
-        let t = PhpType::Intersection(vec![
-            PhpType::Union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("B"))]),
-            PhpType::Union(vec![PhpType::Named(atom("C")), PhpType::Named(atom("D"))]),
+        let t = PhpType::intersection(vec![
+            PhpType::union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("B"))]),
+            PhpType::union(vec![PhpType::Named(atom("C")), PhpType::Named(atom("D"))]),
         ]);
         let d = t.distribute_intersection();
         if let PhpType::Union(members) = &d {
@@ -3242,8 +3225,8 @@ mod distribute_tests {
     #[test]
     fn distribute_with_simplification() {
         // (A|A) & B → after distribution and simplification → A & B
-        let t = PhpType::Intersection(vec![
-            PhpType::Union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("A"))]),
+        let t = PhpType::intersection(vec![
+            PhpType::union(vec![PhpType::Named(atom("A")), PhpType::Named(atom("A"))]),
             PhpType::Named(atom("B")),
         ]);
         let d = t.distribute_intersection();
@@ -3458,7 +3441,7 @@ mod predicate_tests {
 
     #[test]
     fn is_object_false_for_object_shape() {
-        assert!(!PhpType::ObjectShape(vec![]).is_object());
+        assert!(!PhpType::object_shape(vec![]).is_object());
     }
 
     // ── is_callable ────────────────────────────────────────────
@@ -3482,21 +3465,13 @@ mod predicate_tests {
 
     #[test]
     fn is_callable_true_for_callable_variant() {
-        let t = PhpType::Callable {
-            kind: "callable".into(),
-            params: vec![],
-            return_type: None,
-        };
+        let t = PhpType::callable_spec("callable", vec![], None);
         assert!(t.is_callable());
     }
 
     #[test]
     fn is_callable_true_for_closure_variant() {
-        let t = PhpType::Callable {
-            kind: "Closure".into(),
-            params: vec![],
-            return_type: Some(Box::new(PhpType::void())),
-        };
+        let t = PhpType::callable_spec("Closure", vec![], Some(PhpType::void()));
         assert!(t.is_callable());
     }
 
@@ -3595,7 +3570,7 @@ mod predicate_tests {
 
     #[test]
     fn predicates_false_for_union() {
-        let u = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+        let u = PhpType::union(vec![PhpType::int(), PhpType::string()]);
         assert!(!u.is_bool());
         assert!(!u.is_true());
         assert!(!u.is_false());
@@ -3689,11 +3664,7 @@ mod predicate_tests {
 
     #[test]
     fn is_closure_callable_variant() {
-        let ty = PhpType::Callable {
-            kind: "Closure".to_string(),
-            params: vec![],
-            return_type: Some(Box::new(PhpType::void())),
-        };
+        let ty = PhpType::callable_spec("Closure", vec![], Some(PhpType::void()));
         assert!(ty.is_closure());
     }
 
@@ -3748,7 +3719,7 @@ mod predicate_tests {
 
     #[test]
     fn is_named_false_for_non_named() {
-        assert!(!PhpType::Generic("list".to_string(), vec![PhpType::int()]).is_named("list"));
+        assert!(!PhpType::generic("list", vec![PhpType::int()]).is_named("list"));
         assert!(!PhpType::Nullable(Box::new(PhpType::Named(atom("Foo")))).is_named("Foo"));
     }
 
@@ -3856,4 +3827,22 @@ fn parse_callable_return_string() {
         "expected Callable, got: {:?}",
         ty
     );
+}
+
+/// `PhpType` is embedded millions of times over a large project (once per
+/// parameter, return, and property type, plus every nested position inside
+/// them), so its size is load-bearing for peak memory. Every variant's
+/// payload must stay within two pointers; a variant that grows past that
+/// widens every slot in the program.
+#[test]
+fn php_type_size_is_bounded() {
+    assert_eq!(
+        size_of::<PhpType>(),
+        24,
+        "PhpType grew past two pointers plus a discriminant — box the new \
+         variant's payload instead (see the type's Size doc comment)"
+    );
+    // The niche in the discriminant keeps the optional form the same size,
+    // which is what `MethodInfo`/`ParameterInfo` actually store.
+    assert_eq!(size_of::<Option<PhpType>>(), size_of::<PhpType>());
 }

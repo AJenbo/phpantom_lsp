@@ -237,7 +237,7 @@ pub(crate) fn infer_return_type(
     let effective = if deduped.len() == 1 {
         deduped.into_iter().next().unwrap()
     } else if deduped.len() <= 3 {
-        PhpType::Union(deduped)
+        PhpType::union(deduped)
     } else {
         return None;
     };

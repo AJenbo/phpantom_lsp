@@ -135,9 +135,9 @@ fn format_type_list(types: &[&PhpType], sep: &str) -> PhpType {
         return cloned.into_iter().next().unwrap();
     }
     if sep == "&" {
-        PhpType::Intersection(cloned)
+        PhpType::intersection(cloned)
     } else {
-        PhpType::Union(cloned)
+        PhpType::union(cloned)
     }
 }
 

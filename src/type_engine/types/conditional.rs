@@ -150,13 +150,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
     match conditional {
-        PhpType::Conditional {
-            param,
-            negated,
-            condition,
-            then_type,
-            else_type,
-        } => {
+        PhpType::Conditional(cond) => {
+            let (param, negated, condition, then_type, else_type) = (
+                &cond.param,
+                &cond.negated,
+                &cond.condition,
+                &cond.then_type,
+                &cond.else_type,
+            );
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             let target = param.as_str();
@@ -188,7 +189,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
             let arg_text = arg_text_owned.as_deref();
 
-            if matches!(condition.as_ref(), PhpType::ClassString(_)) {
+            if matches!(condition, PhpType::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
                 // When a bound is present AND resolves to a real class (not
                 // a template parameter like `T`), the conditional checks
@@ -214,7 +215,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // When they differ (e.g. condition=`class-string<FormFlowTypeInterface>`,
                 // then=`FormFlowInterface`), the bound is a concrete
                 // class and a subtype check is required.
-                let class_string_bound_name: Option<&str> = match condition.as_ref() {
+                let class_string_bound_name: Option<&str> = match condition {
                     PhpType::ClassString(Some(inner)) => match inner.as_ref() {
                         PhpType::Named(name) => Some(name.as_str()),
                         _ => None,
@@ -435,7 +436,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     class_loader,
                     tpl,
                 )
-            } else if condition.as_ref().is_null() {
+            } else if condition.is_null() {
                 // The null (`then`) branch is taken when the argument is
                 // absent (the parameter falls back to its null default) or
                 // when `null` is passed explicitly. This mirrors the AST
@@ -468,7 +469,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         tpl,
                     )
                 }
-            } else if let PhpType::Literal(lit) = condition.as_ref() {
+            } else if let PhpType::Literal(lit) = condition {
                 let expected = lit
                     .string_content()
                     .map(ToOwned::to_owned)
@@ -507,9 +508,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     class_loader,
                     tpl,
                 )
-            } else if let Some((cond_class, cond_const)) =
-                class_const_condition_parts(condition.as_ref())
-            {
+            } else if let Some((cond_class, cond_const)) = class_const_condition_parts(condition) {
                 // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
                 // Take the then-branch when the bound argument is the same
                 // class constant.
@@ -544,10 +543,10 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // through to the else branch as before.
                 let decided = arg_text.and_then(|arg| {
                     let form = classify_arg_form(arg);
-                    text_condition_result(condition.as_ref(), &form).or_else(|| {
+                    text_condition_result(condition, &form).or_else(|| {
                         tpl.arg_type_resolver
                             .and_then(|resolve| resolve(arg))
-                            .and_then(|arg_ty| type_condition_result(&arg_ty, condition.as_ref()))
+                            .and_then(|arg_ty| type_condition_result(&arg_ty, condition))
                     })
                 });
                 let branch = match decided {
@@ -747,7 +746,7 @@ fn type_category(t: &PhpType) -> Option<&'static str> {
         Some("null")
     } else if t.is_array_like() {
         Some("array")
-    } else if matches!(t, PhpType::Callable { .. }) || t.base_name().is_some() {
+    } else if matches!(t, PhpType::Callable(_)) || t.base_name().is_some() {
         // A closure/callable or any class instance — not a scalar or array.
         Some("object")
     } else {
@@ -859,7 +858,7 @@ fn union_branch_types(a: Option<PhpType>, b: Option<PhpType>) -> Option<PhpType>
     match members.len() {
         0 => None,
         1 => members.into_iter().next(),
-        _ => Some(PhpType::Union(members)),
+        _ => Some(PhpType::union(members)),
     }
 }
 
@@ -899,7 +898,7 @@ pub fn evaluate_nested_conditionals_text(
         )
     };
     match ty {
-        PhpType::Conditional { .. } => {
+        PhpType::Conditional(_) => {
             let resolved = resolve_conditional_with_text_args_and_defaults(
                 ty,
                 params,
@@ -925,9 +924,7 @@ pub fn evaluate_nested_conditionals_text(
                 PhpType::Named(atom("mixed"))
             }
         }
-        PhpType::Generic(name, args) => {
-            PhpType::Generic(name.clone(), args.iter().map(recurse).collect())
-        }
+        PhpType::Generic(g) => PhpType::generic_atom(g.name, g.args.iter().map(recurse).collect()),
         PhpType::Union(members) => PhpType::Union(members.iter().map(recurse).collect()),
         PhpType::Intersection(members) => {
             PhpType::Intersection(members.iter().map(recurse).collect())
@@ -1076,7 +1073,7 @@ fn extract_class_name_from_text(text: &str) -> Option<String> {
 /// class constants and return `None`.
 fn class_const_condition_parts(condition: &PhpType) -> Option<(&str, &str)> {
     let raw = match condition {
-        PhpType::Raw(s) => s.as_str(),
+        PhpType::Raw(s) => s,
         PhpType::Named(s) => s.as_str(),
         _ => return None,
     };
@@ -1179,13 +1176,14 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
     match conditional {
-        PhpType::Conditional {
-            param,
-            negated,
-            condition,
-            then_type,
-            else_type,
-        } => {
+        PhpType::Conditional(cond) => {
+            let (param, negated, condition, then_type, else_type) = (
+                &cond.param,
+                &cond.negated,
+                &cond.condition,
+                &cond.then_type,
+                &cond.else_type,
+            );
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             let target = param.as_str();
@@ -1215,11 +1213,11 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     .copied()
                     .flatten();
 
-            if matches!(condition.as_ref(), PhpType::ClassString(_)) {
+            if matches!(condition, PhpType::ClassString(_)) {
                 // Extract the bound from `class-string<Bound>` and determine
                 // whether it is a template parameter or a concrete class.
                 // Mirrors the logic in resolve_conditional_with_text_args_and_defaults.
-                let class_string_bound_name: Option<&str> = match condition.as_ref() {
+                let class_string_bound_name: Option<&str> = match condition {
                     PhpType::ClassString(Some(inner)) => match inner.as_ref() {
                         PhpType::Named(name) => Some(name.as_str()),
                         _ => None,
@@ -1346,7 +1344,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     class_loader,
                     tpl,
                 )
-            } else if condition.as_ref().is_null() {
+            } else if condition.is_null() {
                 // The null (`then`) branch is taken when the argument is
                 // absent (the parameter falls back to its null default) or
                 // when `null` is passed explicitly.
@@ -1377,7 +1375,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 }
-            } else if let PhpType::Literal(lit) = condition.as_ref() {
+            } else if let PhpType::Literal(lit) = condition {
                 let expected = lit
                     .string_content()
                     .map(ToOwned::to_owned)
@@ -1424,9 +1422,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 }
-            } else if let Some((cond_class, cond_const)) =
-                class_const_condition_parts(condition.as_ref())
-            {
+            } else if let Some((cond_class, cond_const)) = class_const_condition_parts(condition) {
                 // Class-constant condition (e.g. `$mode is PDO::FETCH_ASSOC`).
                 let matched = arg_expr
                     .and_then(extract_class_const_from_expr)
@@ -1451,7 +1447,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 )
             } else {
                 // IsType equivalent: check scalar types from AST literals.
-                if condition_is_scalar_type(condition.as_ref(), "string")
+                if condition_is_scalar_type(condition, "string")
                     && matches!(
                         arg_expr,
                         Some(
@@ -1471,7 +1467,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     );
                 }
-                if condition_is_scalar_type(condition.as_ref(), "int")
+                if condition_is_scalar_type(condition, "int")
                     && matches!(arg_expr, Some(Expression::Literal(Literal::Integer(_))))
                 {
                     let take_then = !*negated;
@@ -1485,7 +1481,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     );
                 }
-                if condition_is_scalar_type(condition.as_ref(), "float")
+                if condition_is_scalar_type(condition, "float")
                     && matches!(arg_expr, Some(Expression::Literal(Literal::Float(_))))
                 {
                     let take_then = !*negated;
@@ -1501,7 +1497,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                 }
                 // Check if the condition mentions `array` and the
                 // argument is an array literal (`[...]`).
-                if condition_includes_array(condition.as_ref())
+                if condition_includes_array(condition)
                     && let Some(Expression::Array(_)) = arg_expr
                 {
                     return resolve_conditional_with_args_and_defaults(
@@ -1563,13 +1559,14 @@ pub fn resolve_conditional_without_args_and_defaults(
     template_defaults: Option<&HashMap<String, PhpType>>,
 ) -> Option<PhpType> {
     match conditional {
-        PhpType::Conditional {
-            param,
-            negated,
-            condition,
-            then_type,
-            else_type,
-        } => {
+        PhpType::Conditional(cond) => {
+            let (param, negated, condition, then_type, else_type) = (
+                &cond.param,
+                &cond.negated,
+                &cond.condition,
+                &cond.then_type,
+                &cond.else_type,
+            );
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             let target = param.as_str();
@@ -1591,7 +1588,7 @@ pub fn resolve_conditional_without_args_and_defaults(
             let param_info = params.iter().find(|p| p.name == target);
             let has_null_default = param_info.is_some_and(|p| !p.is_required);
 
-            if condition.as_ref().is_null() && has_null_default {
+            if condition.is_null() && has_null_default {
                 resolve_conditional_without_args_and_defaults(then_type, params, template_defaults)
             } else {
                 // Try else branch
@@ -1700,21 +1697,15 @@ pub fn resolve_conditional_from_values(
     conditional: &PhpType,
     values: &HashMap<String, PhpType>,
 ) -> Option<PhpType> {
-    if let PhpType::Conditional {
-        param,
-        negated,
-        condition,
-        then_type,
-        else_type,
-    } = conditional
-        && !param.starts_with('$')
+    if let PhpType::Conditional(cond) = conditional
+        && !cond.param.starts_with('$')
     {
         return try_resolve_with_template_default(
-            param,
-            *negated,
-            condition,
-            then_type,
-            else_type,
+            &cond.param,
+            cond.negated,
+            &cond.condition,
+            &cond.then_type,
+            &cond.else_type,
             Some(values),
         );
     }
@@ -2002,7 +1993,7 @@ mod tests {
         let mut defaults = HashMap::new();
         defaults.insert(
             "T".to_string(),
-            PhpType::Union(vec![
+            PhpType::union(vec![
                 PhpType::Named(atom("string")),
                 PhpType::Named(atom("null")),
             ]),

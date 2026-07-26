@@ -44,15 +44,15 @@ impl PhpType {
                 PhpType::Intersection(types.iter().map(|t| t.resolve_names(resolver)).collect())
             }
 
-            PhpType::Generic(name, args) => {
-                let resolved_name = if is_keyword_type(name) {
-                    name.clone()
+            PhpType::Generic(g) => {
+                let resolved_name = if is_keyword_type(&g.name) {
+                    g.name
                 } else {
-                    resolver(name)
+                    atom(&resolver(&g.name))
                 };
-                PhpType::Generic(
+                PhpType::generic_atom(
                     resolved_name,
-                    args.iter().map(|a| a.resolve_names(resolver)).collect(),
+                    g.args.iter().map(|a| a.resolve_names(resolver)).collect(),
                 )
             }
 
@@ -80,17 +80,14 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable {
-                kind,
-                params,
-                return_type,
-            } => PhpType::Callable {
-                kind: if is_keyword_type(kind) {
-                    kind.clone()
+            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+                kind: if is_keyword_type(&c.kind) {
+                    c.kind
                 } else {
-                    resolver(kind)
+                    atom(&resolver(&c.kind))
                 },
-                params: params
+                params: c
+                    .params
                     .iter()
                     .map(|p| CallableParam {
                         type_hint: p.type_hint.resolve_names(resolver),
@@ -98,24 +95,16 @@ impl PhpType {
                         variadic: p.variadic,
                     })
                     .collect(),
-                return_type: return_type
-                    .as_ref()
-                    .map(|rt| Box::new(rt.resolve_names(resolver))),
-            },
+                return_type: c.return_type.as_ref().map(|rt| rt.resolve_names(resolver)),
+            })),
 
-            PhpType::Conditional {
-                param,
-                negated,
-                condition,
-                then_type,
-                else_type,
-            } => PhpType::Conditional {
-                param: param.clone(),
-                negated: *negated,
-                condition: Box::new(condition.resolve_names(resolver)),
-                then_type: Box::new(then_type.resolve_names(resolver)),
-                else_type: Box::new(else_type.resolve_names(resolver)),
-            },
+            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+                param: c.param,
+                negated: c.negated,
+                condition: c.condition.resolve_names(resolver),
+                then_type: c.then_type.resolve_names(resolver),
+                else_type: c.else_type.resolve_names(resolver),
+            })),
 
             PhpType::ClassString(inner) => {
                 PhpType::ClassString(inner.as_ref().map(|i| Box::new(i.resolve_names(resolver))))
@@ -129,17 +118,15 @@ impl PhpType {
 
             PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(inner.resolve_names(resolver))),
 
-            PhpType::IntRange(min, max) => PhpType::IntRange(min.clone(), max.clone()),
+            PhpType::IntRange(..) => self.clone(),
 
             PhpType::IndexAccess(target, index) => PhpType::IndexAccess(
                 Box::new(target.resolve_names(resolver)),
                 Box::new(index.resolve_names(resolver)),
             ),
 
-            PhpType::Literal(s) => PhpType::Literal(s.clone()),
-
-            // Raw types can't be structurally resolved — pass through.
-            PhpType::Raw(s) => PhpType::Raw(s.clone()),
+            // Literals and raw types can't be structurally resolved.
+            PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
 
             PhpType::StaticType(s) => PhpType::StaticType(atom(&resolver(s))),
             PhpType::ThisType(s) => PhpType::ThisType(atom(&resolver(s))),
@@ -170,9 +157,9 @@ impl PhpType {
                 PhpType::Intersection(types.iter().map(|t| t.shorten()).collect())
             }
 
-            PhpType::Generic(name, args) => PhpType::Generic(
-                Self::short_name_of(name).to_owned(),
-                args.iter().map(|a| a.shorten()).collect(),
+            PhpType::Generic(g) => PhpType::generic(
+                Self::short_name_of(&g.name),
+                g.args.iter().map(|a| a.shorten()).collect(),
             ),
 
             PhpType::Array(inner) => PhpType::Array(Box::new(inner.shorten())),
@@ -199,13 +186,10 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable {
-                kind,
-                params,
-                return_type,
-            } => PhpType::Callable {
-                kind: Self::short_name_of(kind).to_owned(),
-                params: params
+            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+                kind: atom(Self::short_name_of(&c.kind)),
+                params: c
+                    .params
                     .iter()
                     .map(|p| CallableParam {
                         type_hint: p.type_hint.shorten(),
@@ -213,22 +197,16 @@ impl PhpType {
                         variadic: p.variadic,
                     })
                     .collect(),
-                return_type: return_type.as_ref().map(|rt| Box::new(rt.shorten())),
-            },
+                return_type: c.return_type.as_ref().map(|rt| rt.shorten()),
+            })),
 
-            PhpType::Conditional {
-                param,
-                negated,
-                condition,
-                then_type,
-                else_type,
-            } => PhpType::Conditional {
-                param: param.clone(),
-                negated: *negated,
-                condition: Box::new(condition.shorten()),
-                then_type: Box::new(then_type.shorten()),
-                else_type: Box::new(else_type.shorten()),
-            },
+            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+                param: c.param,
+                negated: c.negated,
+                condition: c.condition.shorten(),
+                then_type: c.then_type.shorten(),
+                else_type: c.else_type.shorten(),
+            })),
 
             PhpType::ClassString(inner) => {
                 PhpType::ClassString(inner.as_ref().map(|i| Box::new(i.shorten())))
@@ -242,19 +220,15 @@ impl PhpType {
 
             PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(inner.shorten())),
 
-            PhpType::IntRange(min, max) => PhpType::IntRange(min.clone(), max.clone()),
+            PhpType::IntRange(..) => self.clone(),
 
             PhpType::IndexAccess(target, index) => {
                 PhpType::IndexAccess(Box::new(target.shorten()), Box::new(index.shorten()))
             }
 
-            PhpType::Literal(s) => PhpType::Literal(s.clone()),
-
-            PhpType::Raw(s) => {
-                // Best-effort: apply the old string-based shortening
-                // for raw types that we couldn't parse structurally.
-                PhpType::Raw(s.clone())
-            }
+            // Literals carry no class name; raw types cannot be
+            // structurally shortened.
+            PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
 
             PhpType::StaticType(s) => PhpType::StaticType(atom(Self::short_name_of(s))),
             PhpType::ThisType(s) => PhpType::ThisType(atom(Self::short_name_of(s))),
@@ -343,19 +317,18 @@ impl PhpType {
                     .map(|t| t.resolve_self_refs_bounded(class_name, parent_class))
                     .collect(),
             ),
-            PhpType::Generic(name, args) => {
-                let resolved_name = if is_self_ref_name(name) {
-                    class_name.to_string()
-                } else if name.eq_ignore_ascii_case("parent") {
-                    parent_class
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| name.clone())
+            PhpType::Generic(g) => {
+                let resolved_name = if is_self_ref_name(&g.name) {
+                    atom(class_name)
+                } else if g.name.eq_ignore_ascii_case("parent") {
+                    parent_class.map(atom).unwrap_or(g.name)
                 } else {
-                    name.clone()
+                    g.name
                 };
-                PhpType::Generic(
+                PhpType::generic_atom(
                     resolved_name,
-                    args.iter()
+                    g.args
+                        .iter()
                         .map(|a| a.resolve_self_refs_bounded(class_name, parent_class))
                         .collect(),
                 )
@@ -397,13 +370,10 @@ impl PhpType {
                     })
                     .collect(),
             ),
-            PhpType::Callable {
-                kind,
-                params,
-                return_type,
-            } => PhpType::Callable {
-                kind: kind.clone(),
-                params: params
+            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+                kind: c.kind,
+                params: c
+                    .params
                     .iter()
                     .map(|p| super::CallableParam {
                         type_hint: p
@@ -413,23 +383,24 @@ impl PhpType {
                         variadic: p.variadic,
                     })
                     .collect(),
-                return_type: return_type
+                return_type: c
+                    .return_type
                     .as_ref()
-                    .map(|r| Box::new(r.resolve_self_refs_bounded(class_name, parent_class))),
-            },
-            PhpType::Conditional {
-                param,
-                negated,
-                condition,
-                then_type,
-                else_type,
-            } => PhpType::Conditional {
-                param: param.clone(),
-                negated: *negated,
-                condition: Box::new(condition.resolve_self_refs_bounded(class_name, parent_class)),
-                then_type: Box::new(then_type.resolve_self_refs_bounded(class_name, parent_class)),
-                else_type: Box::new(else_type.resolve_self_refs_bounded(class_name, parent_class)),
-            },
+                    .map(|r| r.resolve_self_refs_bounded(class_name, parent_class)),
+            })),
+            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+                param: c.param,
+                negated: c.negated,
+                condition: c
+                    .condition
+                    .resolve_self_refs_bounded(class_name, parent_class),
+                then_type: c
+                    .then_type
+                    .resolve_self_refs_bounded(class_name, parent_class),
+                else_type: c
+                    .else_type
+                    .resolve_self_refs_bounded(class_name, parent_class),
+            })),
             PhpType::KeyOf(inner) => PhpType::KeyOf(Box::new(
                 inner.resolve_self_refs_bounded(class_name, parent_class),
             )),
@@ -466,15 +437,16 @@ impl PhpType {
                     .map(|t| t.replace_bare_self(class_name))
                     .collect(),
             ),
-            PhpType::Generic(name, args) => {
-                let resolved_name = if name.eq_ignore_ascii_case("self") {
-                    class_name.to_string()
+            PhpType::Generic(g) => {
+                let resolved_name = if g.name.eq_ignore_ascii_case("self") {
+                    atom(class_name)
                 } else {
-                    name.clone()
+                    g.name
                 };
-                PhpType::Generic(
+                PhpType::generic_atom(
                     resolved_name,
-                    args.iter()
+                    g.args
+                        .iter()
                         .map(|a| a.replace_bare_self(class_name))
                         .collect(),
                 )
@@ -493,8 +465,8 @@ impl PhpType {
             PhpType::Union(types) | PhpType::Intersection(types) => {
                 types.iter().any(|t| t.contains_bare_self())
             }
-            PhpType::Generic(name, args) => {
-                name.eq_ignore_ascii_case("self") || args.iter().any(|a| a.contains_bare_self())
+            PhpType::Generic(g) => {
+                g.name.eq_ignore_ascii_case("self") || g.args.iter().any(|a| a.contains_bare_self())
             }
             PhpType::Array(inner) => inner.contains_bare_self(),
             _ => false,
@@ -511,30 +483,23 @@ impl PhpType {
             PhpType::Union(types) | PhpType::Intersection(types) => {
                 types.iter().any(|t| t.contains_self_ref())
             }
-            PhpType::Generic(name, args) => {
-                is_self_ref_name(name) || args.iter().any(|a| a.contains_self_ref())
+            PhpType::Generic(g) => {
+                is_self_ref_name(&g.name) || g.args.iter().any(|a| a.contains_self_ref())
             }
             PhpType::Array(inner) => inner.contains_self_ref(),
             PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
                 entries.iter().any(|e| e.value_type.contains_self_ref())
             }
-            PhpType::Callable {
-                params,
-                return_type,
-                ..
-            } => {
-                params.iter().any(|p| p.type_hint.contains_self_ref())
-                    || return_type.as_ref().is_some_and(|r| r.contains_self_ref())
+            PhpType::Callable(c) => {
+                c.params.iter().any(|p| p.type_hint.contains_self_ref())
+                    || c.return_type
+                        .as_ref()
+                        .is_some_and(|r| r.contains_self_ref())
             }
-            PhpType::Conditional {
-                condition,
-                then_type,
-                else_type,
-                ..
-            } => {
-                condition.contains_self_ref()
-                    || then_type.contains_self_ref()
-                    || else_type.contains_self_ref()
+            PhpType::Conditional(c) => {
+                c.condition.contains_self_ref()
+                    || c.then_type.contains_self_ref()
+                    || c.else_type.contains_self_ref()
             }
             PhpType::ClassString(inner) | PhpType::InterfaceString(inner) => {
                 inner.as_ref().is_some_and(|t| t.contains_self_ref())
@@ -567,7 +532,7 @@ impl PhpType {
         // Generic nodes where only the name part is replaced.
         let replacement_name = match replacement {
             PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => n.as_str(),
-            PhpType::Generic(n, _) => n.as_str(),
+            PhpType::Generic(g) => g.name.as_str(),
             _ => "",
         };
         match self {
@@ -605,15 +570,16 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Generic(name, args) => {
-                let resolved_name = if is_self_ref_name(name) {
-                    replacement_name.to_string()
+            PhpType::Generic(g) => {
+                let resolved_name = if is_self_ref_name(&g.name) {
+                    atom(replacement_name)
                 } else {
-                    name.clone()
+                    g.name
                 };
-                PhpType::Generic(
+                PhpType::generic_atom(
                     resolved_name,
-                    args.iter()
+                    g.args
+                        .iter()
                         .map(|a| a.replace_self_with_type(replacement))
                         .collect(),
                 )
@@ -645,13 +611,10 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable {
-                kind,
-                params,
-                return_type,
-            } => PhpType::Callable {
-                kind: kind.clone(),
-                params: params
+            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+                kind: c.kind,
+                params: c
+                    .params
                     .iter()
                     .map(|p| CallableParam {
                         type_hint: p.type_hint.replace_self_with_type(replacement),
@@ -659,24 +622,19 @@ impl PhpType {
                         variadic: p.variadic,
                     })
                     .collect(),
-                return_type: return_type
+                return_type: c
+                    .return_type
                     .as_ref()
-                    .map(|r| Box::new(r.replace_self_with_type(replacement))),
-            },
+                    .map(|r| r.replace_self_with_type(replacement)),
+            })),
 
-            PhpType::Conditional {
-                param,
-                negated,
-                condition,
-                then_type,
-                else_type,
-            } => PhpType::Conditional {
-                param: param.clone(),
-                negated: *negated,
-                condition: Box::new(condition.replace_self_with_type(replacement)),
-                then_type: Box::new(then_type.replace_self_with_type(replacement)),
-                else_type: Box::new(else_type.replace_self_with_type(replacement)),
-            },
+            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+                param: c.param,
+                negated: c.negated,
+                condition: c.condition.replace_self_with_type(replacement),
+                then_type: c.then_type.replace_self_with_type(replacement),
+                else_type: c.else_type.replace_self_with_type(replacement),
+            })),
 
             PhpType::ClassString(inner) => PhpType::ClassString(
                 inner
@@ -698,7 +656,7 @@ impl PhpType {
                 PhpType::ValueOf(Box::new(inner.replace_self_with_type(replacement)))
             }
 
-            PhpType::IntRange(lo, hi) => PhpType::IntRange(lo.clone(), hi.clone()),
+            PhpType::IntRange(..) => self.clone(),
 
             PhpType::IndexAccess(base, index) => PhpType::IndexAccess(
                 Box::new(base.replace_self_with_type(replacement)),
@@ -773,14 +731,14 @@ impl PhpType {
                 let mut flat = Vec::with_capacity(resolved.len());
                 for t in resolved {
                     match t {
-                        PhpType::Union(inner) => flat.extend(inner),
+                        PhpType::Union(inner) => flat.extend(inner.into_vec()),
                         other => flat.push(other),
                     }
                 }
                 if flat.len() == 1 {
                     flat.into_iter().next().unwrap()
                 } else {
-                    PhpType::Union(flat)
+                    PhpType::union(flat)
                 }
             }
 
@@ -789,44 +747,42 @@ impl PhpType {
                 let mut flat = Vec::with_capacity(resolved.len());
                 for t in resolved {
                     match t {
-                        PhpType::Intersection(inner) => flat.extend(inner),
+                        PhpType::Intersection(inner) => flat.extend(inner.into_vec()),
                         other => flat.push(other),
                     }
                 }
                 if flat.len() == 1 {
                     flat.into_iter().next().unwrap()
                 } else {
-                    PhpType::Intersection(flat)
+                    PhpType::intersection(flat)
                 }
             }
 
-            PhpType::Generic(name, args) => {
+            PhpType::Generic(g) => {
                 // The base name might itself be a template parameter.
-                if let Some(replacement) = subs.get(name.as_str()) {
+                if let Some(replacement) = subs.get(g.name.as_str()) {
                     match replacement {
-                        PhpType::Named(n) => PhpType::Generic(
-                            n.to_string(),
-                            args.iter().map(|a| a.substitute(subs)).collect(),
+                        PhpType::Named(n) => PhpType::generic_atom(
+                            *n,
+                            g.args.iter().map(|a| a.substitute(subs)).collect(),
                         ),
-                        PhpType::Generic(base, _) => {
-                            // Use the replacement's base name but keep the
-                            // original generic args (substituted).  The
-                            // replacement's own args are discarded because
-                            // the source type provides its own parameters.
-                            PhpType::Generic(
-                                base.clone(),
-                                args.iter().map(|a| a.substitute(subs)).collect(),
-                            )
-                        }
+                        // Use the replacement's base name but keep the
+                        // original generic args (substituted).  The
+                        // replacement's own args are discarded because
+                        // the source type provides its own parameters.
+                        PhpType::Generic(base) => PhpType::generic_atom(
+                            base.name,
+                            g.args.iter().map(|a| a.substitute(subs)).collect(),
+                        ),
                         // For non-class replacements (union, intersection,
                         // etc.), the generic wrapper is meaningless — return
                         // the replacement as-is.
                         _ => replacement.clone(),
                     }
                 } else {
-                    PhpType::Generic(
-                        name.clone(),
-                        args.iter().map(|a| a.substitute(subs)).collect(),
+                    PhpType::generic_atom(
+                        g.name,
+                        g.args.iter().map(|a| a.substitute(subs)).collect(),
                     )
                 }
             }
@@ -855,13 +811,10 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable {
-                kind,
-                params,
-                return_type,
-            } => PhpType::Callable {
-                kind: kind.clone(),
-                params: params
+            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+                kind: c.kind,
+                params: c
+                    .params
                     .iter()
                     .map(|p| CallableParam {
                         type_hint: p.type_hint.substitute(subs),
@@ -869,22 +822,16 @@ impl PhpType {
                         variadic: p.variadic,
                     })
                     .collect(),
-                return_type: return_type.as_ref().map(|r| Box::new(r.substitute(subs))),
-            },
+                return_type: c.return_type.as_ref().map(|r| r.substitute(subs)),
+            })),
 
-            PhpType::Conditional {
-                param,
-                negated,
-                condition,
-                then_type,
-                else_type,
-            } => PhpType::Conditional {
-                param: param.clone(),
-                negated: *negated,
-                condition: Box::new(condition.substitute(subs)),
-                then_type: Box::new(then_type.substitute(subs)),
-                else_type: Box::new(else_type.substitute(subs)),
-            },
+            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+                param: c.param,
+                negated: c.negated,
+                condition: c.condition.substitute(subs),
+                then_type: c.then_type.substitute(subs),
+                else_type: c.else_type.substitute(subs),
+            })),
 
             PhpType::ClassString(inner) => {
                 PhpType::ClassString(inner.as_ref().map(|t| Box::new(t.substitute(subs))))
@@ -968,11 +915,14 @@ impl PhpType {
                 }
             }
 
-            PhpType::Generic(name, args) => {
-                if !is_keyword_type(name) && !name.is_empty() && !names.contains(name) {
-                    names.push(name.clone());
+            PhpType::Generic(g) => {
+                if !is_keyword_type(&g.name)
+                    && !g.name.is_empty()
+                    && !names.iter().any(|n| n == g.name.as_str())
+                {
+                    names.push(g.name.to_string());
                 }
-                for a in args {
+                for a in &g.args {
                     a.collect_class_names(names);
                 }
             }
@@ -985,15 +935,11 @@ impl PhpType {
                 }
             }
 
-            PhpType::Callable {
-                params,
-                return_type,
-                ..
-            } => {
-                for p in params {
+            PhpType::Callable(c) => {
+                for p in &c.params {
                     p.type_hint.collect_class_names(names);
                 }
-                if let Some(ret) = return_type {
+                if let Some(ret) = &c.return_type {
                     ret.collect_class_names(names);
                 }
             }
@@ -1019,15 +965,10 @@ impl PhpType {
                 index.collect_class_names(names);
             }
 
-            PhpType::Conditional {
-                condition,
-                then_type,
-                else_type,
-                ..
-            } => {
-                condition.collect_class_names(names);
-                then_type.collect_class_names(names);
-                else_type.collect_class_names(names);
+            PhpType::Conditional(c) => {
+                c.condition.collect_class_names(names);
+                c.then_type.collect_class_names(names);
+                c.else_type.collect_class_names(names);
             }
 
             PhpType::StaticType(s) | PhpType::ThisType(s) => {
@@ -1065,10 +1006,12 @@ impl PhpType {
 
             // For generics, only the base name is top-level.
             // `Collection<int, User>` → `["Collection"]`.
-            PhpType::Generic(name, _)
-                if !is_keyword_type(name) && !name.is_empty() && !names.contains(name) =>
+            PhpType::Generic(g)
+                if !is_keyword_type(&g.name)
+                    && !g.name.is_empty()
+                    && !names.iter().any(|n| n == g.name.as_str()) =>
             {
-                names.push(name.clone());
+                names.push(g.name.to_string());
             }
 
             PhpType::StaticType(s) | PhpType::ThisType(s)

@@ -34,19 +34,21 @@ pub(super) fn replace_eloquent_collection_typed(ty: &PhpType, custom_collection:
 /// base name is the Eloquent Collection FQN with `custom_collection`.
 fn replace_collection_in_type(ty: &PhpType, custom_collection: &str) -> PhpType {
     match ty {
-        PhpType::Generic(name, args) if name == ELOQUENT_COLLECTION_FQN => {
-            let new_args = args
+        PhpType::Generic(g) if g.name == ELOQUENT_COLLECTION_FQN => {
+            let new_args = g
+                .args
                 .iter()
                 .map(|a| replace_collection_in_type(a, custom_collection))
                 .collect();
-            PhpType::Generic(custom_collection.to_string(), new_args)
+            PhpType::generic(custom_collection, new_args)
         }
-        PhpType::Generic(name, args) => {
-            let new_args = args
+        PhpType::Generic(g) => {
+            let new_args = g
+                .args
                 .iter()
                 .map(|a| replace_collection_in_type(a, custom_collection))
                 .collect();
-            PhpType::Generic(name.clone(), new_args)
+            PhpType::generic_atom(g.name, new_args)
         }
         PhpType::Union(members) => PhpType::Union(
             members
@@ -145,8 +147,7 @@ pub(super) fn build_builder_forwarded_methods(
 
     // Build a substitution map: TModel → concrete model class name,
     // and static/$this/self → Builder<ConcreteModel>.
-    let builder_self_type =
-        PhpType::Generic(builder_fqn.clone(), vec![PhpType::Named(class.fqn())]);
+    let builder_self_type = PhpType::generic(&builder_fqn, vec![PhpType::Named(class.fqn())]);
     let mut subs = super::self_ref_subs(builder_self_type.clone());
     insert_builder_template_substitutions(
         &mut subs,

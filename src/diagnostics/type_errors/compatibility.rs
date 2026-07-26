@@ -319,7 +319,7 @@ pub(crate) fn is_type_compatible(
                     "int" | "integer" | "float" | "double"
                 )
             }
-            PhpType::Literal(LiteralValue::Int(_) | LiteralValue::Float(_)) => true,
+            PhpType::Literal(l) => matches!(**l, LiteralValue::Int(_) | LiteralValue::Float(_)),
             _ => false,
         };
         if is_numeric_like {
@@ -334,9 +334,7 @@ pub(crate) fn is_type_compatible(
     if !strict_types {
         let arg_is_numeric_string = match arg_type {
             PhpType::Named(sub) => sub.eq_ignore_ascii_case("numeric-string"),
-            PhpType::Literal(LiteralValue::String(s)) => {
-                LiteralValue::string_raw(s.clone()).is_numeric_string()
-            }
+            PhpType::Literal(l) => matches!(**l, LiteralValue::String(_)) && l.is_numeric_string(),
             _ => false,
         };
         if arg_is_numeric_string {
@@ -350,8 +348,8 @@ pub(crate) fn is_type_compatible(
                     return true;
                 }
                 PhpType::IntRange(min, max)
-                    if let PhpType::Literal(LiteralValue::String(s)) = arg_type
-                        && LiteralValue::string_raw(s.clone())
+                    if let Some(lit @ LiteralValue::String(_)) = arg_type.as_literal()
+                        && lit
                             .string_content()
                             .and_then(|content| content.parse::<i64>().ok())
                             .is_some_and(|value| int_literal_is_within_range(value, min, max)) =>
@@ -387,10 +385,11 @@ pub(crate) fn is_type_compatible(
     // property name at runtime).  For string literals, we check
     // against the model's known properties when the class can be
     // loaded.
-    if let PhpType::Generic(name, args) = param_type
-        && name.eq_ignore_ascii_case("model-property")
-        && args.len() == 1
+    if let PhpType::Generic(g) = param_type
+        && g.name.eq_ignore_ascii_case("model-property")
+        && g.args.len() == 1
     {
+        let args = &g.args;
         if let PhpType::Literal(lit) = arg_type
             && let Some(prop_name) = lit.string_content()
         {
@@ -417,15 +416,15 @@ pub(crate) fn is_type_compatible(
     // or any interface that extends Traversable (e.g. `Arrayable<K,V>`),
     // we can't verify the generic type arguments covariantly at this
     // phase.  Stay silent (MAYBE) when the base types are compatible.
-    if let PhpType::Generic(name, _) = param_type
-        && (name.eq_ignore_ascii_case("iterable")
-            || class_loader(name).is_some_and(|cls| {
+    if let PhpType::Generic(g) = param_type
+        && (g.name.eq_ignore_ascii_case("iterable")
+            || class_loader(&g.name).is_some_and(|cls| {
                 crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
             }))
     {
         // Array-like args always satisfy iterable/Traversable generics.
         if arg_type.is_array_like()
-            || matches!(arg_type, PhpType::Generic(n, _) if is_array_like_name(n))
+            || matches!(arg_type, PhpType::Generic(n) if is_array_like_name(&n.name))
             || matches!(arg_type, PhpType::Array(_) | PhpType::ArrayShape(_))
         {
             return true;
@@ -452,9 +451,9 @@ pub(crate) fn is_type_compatible(
     // (which has all our MAYBE rules) rather than falling through to
     // `is_subtype_of_typed` (which uses strict structural subtyping
     // and misses Stringable, type juggling, etc.).
-    if let (PhpType::Generic(name_arg, args_arg), PhpType::Generic(name_param, args_param)) =
-        (arg_type, param_type)
-    {
+    if let (PhpType::Generic(ga), PhpType::Generic(gp)) = (arg_type, param_type) {
+        let (name_arg, args_arg) = (&ga.name, &ga.args);
+        let (name_param, args_param) = (&gp.name, &gp.args);
         let base_arg = name_arg.to_ascii_lowercase();
         let base_param = name_param.to_ascii_lowercase();
         let bases_match = base_arg == base_param
@@ -474,9 +473,9 @@ pub(crate) fn is_type_compatible(
     // A list is an array with sequential int keys starting at 0.
     // In practice, PHP codebases use these interchangeably and we
     // can't verify the structural guarantee statically.
-    if let (PhpType::Generic(name_arg, args_arg), PhpType::Generic(name_param, args_param)) =
-        (arg_type, param_type)
-    {
+    if let (PhpType::Generic(ga), PhpType::Generic(gp)) = (arg_type, param_type) {
+        let (name_arg, args_arg) = (&ga.name, &ga.args);
+        let (name_param, args_param) = (&gp.name, &gp.args);
         let arg_is_list = name_arg.eq_ignore_ascii_case("list");
         let param_is_list = name_param.eq_ignore_ascii_case("list");
         let arg_is_array = is_array_like_name(name_arg) && !arg_is_list;
@@ -541,12 +540,12 @@ pub(crate) fn is_type_compatible(
     // ── Generic array → X[] : YES ───────────────────────────────
     // `array<int, string>` → `string[]` — the value type of the
     // generic form is more specific than (or equal to) the slice.
-    if let PhpType::Generic(name, args) = arg_type
-        && is_array_like_name(name)
+    if let PhpType::Generic(g) = arg_type
+        && is_array_like_name(&g.name)
         && let PhpType::Array(inner) = param_type
     {
         let mixed = PhpType::mixed();
-        let val = args.last().unwrap_or(&mixed);
+        let val = g.args.last().unwrap_or(&mixed);
         if is_type_compatible(val, inner, class_loader, strict_types) {
             return true;
         }
@@ -556,11 +555,11 @@ pub(crate) fn is_type_compatible(
     // `string[]` → `array<int, string>` — the key type is unknown,
     // it *might* be int at runtime.
     if let PhpType::Array(inner) = arg_type
-        && let PhpType::Generic(name, args) = param_type
-        && is_array_like_name(name)
+        && let PhpType::Generic(g) = param_type
+        && is_array_like_name(&g.name)
     {
         let mixed = PhpType::mixed();
-        let val = args.last().unwrap_or(&mixed);
+        let val = g.args.last().unwrap_or(&mixed);
         if is_type_compatible(inner, val, class_loader, strict_types) {
             return true;
         }
@@ -569,11 +568,11 @@ pub(crate) fn is_type_compatible(
     // ── list<X> → X[] : YES ────────────────────────────────────
     // A list is a stricter form of array (sequential int keys).
     // It always satisfies the weaker `X[]` constraint.
-    if let PhpType::Generic(name, args) = arg_type
-        && name.eq_ignore_ascii_case("list")
-        && args.len() == 1
+    if let PhpType::Generic(g) = arg_type
+        && g.name.eq_ignore_ascii_case("list")
+        && g.args.len() == 1
         && let PhpType::Array(inner) = param_type
-        && is_type_compatible(&args[0], inner, class_loader, strict_types)
+        && is_type_compatible(&g.args[0], inner, class_loader, strict_types)
     {
         return true;
     }
@@ -582,10 +581,10 @@ pub(crate) fn is_type_compatible(
     // `X[]` is `array<mixed, X>` — it might have non-sequential
     // keys, so it might not be a valid list.  Stay silent.
     if let PhpType::Array(inner) = arg_type
-        && let PhpType::Generic(name, args) = param_type
-        && name.eq_ignore_ascii_case("list")
-        && args.len() == 1
-        && is_type_compatible(inner, &args[0], class_loader, strict_types)
+        && let PhpType::Generic(g) = param_type
+        && g.name.eq_ignore_ascii_case("list")
+        && g.args.len() == 1
+        && is_type_compatible(inner, &g.args[0], class_loader, strict_types)
     {
         return true;
     }
@@ -736,7 +735,7 @@ pub(crate) fn is_type_compatible(
     // accepted where `array<string, mixed>` or similar is expected.
     // The shape is a more specific form of the typed array.
     if matches!(arg_type, PhpType::ArrayShape(_))
-        && matches!(param_type, PhpType::Generic(name, _) if is_array_like_name(name))
+        && matches!(param_type, PhpType::Generic(g) if is_array_like_name(&g.name))
     {
         return true;
     }
@@ -811,7 +810,7 @@ fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
 /// inside unions as well as at the top level.
 fn is_any_array_type(ty: &PhpType) -> bool {
     matches!(ty, PhpType::Array(_) | PhpType::ArrayShape(_))
-        || matches!(ty, PhpType::Generic(name, _) if is_array_like_name(name))
+        || matches!(ty, PhpType::Generic(g) if is_array_like_name(&g.name))
         || is_bare_array(ty)
 }
 
@@ -828,10 +827,10 @@ fn contains_self_or_parent(ty: &PhpType) -> bool {
         PhpType::Union(members) | PhpType::Intersection(members) => {
             members.iter().any(contains_self_or_parent)
         }
-        PhpType::Generic(name, args) => {
-            let low = name.to_ascii_lowercase();
+        PhpType::Generic(g) => {
+            let low = g.name.to_ascii_lowercase();
             matches!(low.as_str(), "self" | "static" | "$this" | "parent")
-                || args.iter().any(contains_self_or_parent)
+                || g.args.iter().any(contains_self_or_parent)
         }
         PhpType::ClassString(inner) | PhpType::InterfaceString(inner) => inner
             .as_ref()

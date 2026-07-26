@@ -180,16 +180,13 @@ fn link_callback_to_array_element(
 /// on the argument types.  We approximate this with:
 /// `($start is string ? list<string> : list<int|float>)`.
 fn patch_range(func: &mut FunctionInfo) {
-    func.conditional_return = Some(PhpType::Conditional {
-        param: "$start".to_string(),
-        negated: false,
-        condition: Box::new(PhpType::Named(atom("string"))),
-        then_type: Box::new(PhpType::list(PhpType::string())),
-        else_type: Box::new(PhpType::list(PhpType::Union(vec![
-            PhpType::int(),
-            PhpType::float(),
-        ]))),
-    });
+    func.conditional_return = Some(PhpType::conditional(
+        "$start",
+        false,
+        PhpType::Named(atom("string")),
+        PhpType::list(PhpType::string()),
+        PhpType::list(PhpType::union(vec![PhpType::int(), PhpType::float()])),
+    ));
 }
 
 /// Override the pre-8.4 return type of `stream_bucket_make_writeable()`.
@@ -284,8 +281,8 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         .template_param_bounds
         .entry(atom("TIterator"))
         .or_insert_with(|| {
-            PhpType::Generic(
-                "Traversable".to_string(),
+            PhpType::generic(
+                "Traversable",
                 vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
             )
         });
@@ -436,8 +433,8 @@ fn patch_array_iterator(class: &mut ClassInfo) {
             .iter_mut()
             .find(|p| p.name == "$array")
         {
-            param.type_hint = Some(PhpType::Generic(
-                "array".to_string(),
+            param.type_hint = Some(PhpType::generic(
+                "array",
                 vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
             ));
         }
@@ -459,8 +456,8 @@ fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
         .template_param_bounds
         .entry(atom("TIterator"))
         .or_insert_with(|| {
-            PhpType::Generic(
-                "Traversable".to_string(),
+            PhpType::generic(
+                "Traversable",
                 vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
             )
         });

@@ -258,18 +258,18 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
 
         for member in members {
             let (base, generic_args) = match member {
-                PhpType::Generic(name, args) => {
+                PhpType::Generic(g) => {
                     let cleaned_args: Vec<PhpType> =
-                        args.iter().map(strip_fqn_prefix_typed).collect();
-                    (name.clone(), cleaned_args)
+                        g.args.iter().map(strip_fqn_prefix_typed).collect();
+                    (g.name.to_string(), cleaned_args)
                 }
                 PhpType::Named(name) => (name.to_string(), vec![]),
                 PhpType::Nullable(inner) => match inner.as_ref() {
                     PhpType::Named(name) => (name.to_string(), vec![]),
-                    PhpType::Generic(name, args) => {
+                    PhpType::Generic(g) => {
                         let cleaned_args: Vec<PhpType> =
-                            args.iter().map(strip_fqn_prefix_typed).collect();
-                        (name.clone(), cleaned_args)
+                            g.args.iter().map(strip_fqn_prefix_typed).collect();
+                        (g.name.to_string(), cleaned_args)
                     }
                     _ => continue,
                 },
@@ -313,7 +313,7 @@ pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> 
         // argument list does not leak into the class name.
         let (type_token, _remainder) = split_type_token(desc);
         let base = match PhpType::parse(type_token) {
-            PhpType::Generic(name, _) => name,
+            PhpType::Generic(g) => g.name.to_string(),
             PhpType::Named(name) => name.to_string(),
             _ => continue,
         };
@@ -353,7 +353,7 @@ pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> 
         }
         let (type_token, _remainder) = split_type_token(desc);
         let interface = match PhpType::parse(type_token) {
-            PhpType::Generic(name, _) => name,
+            PhpType::Generic(g) => g.name.to_string(),
             PhpType::Named(name) => name.to_string(),
             _ => continue,
         };
@@ -1468,7 +1468,7 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
 fn has_parameterisation(ty: &PhpType) -> bool {
     matches!(
         ty,
-        PhpType::Generic(_, _) | PhpType::ArrayShape(_) | PhpType::ObjectShape(_)
+        PhpType::Generic(_) | PhpType::ArrayShape(_) | PhpType::ObjectShape(_)
     )
 }
 

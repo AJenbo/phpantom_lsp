@@ -864,10 +864,10 @@ fn match_type_pattern(
                 .or_insert_with(|| concrete.clone());
         }
         // Generic types with matching base names — recurse into args.
-        (PhpType::Generic(p_base, p_args), PhpType::Generic(c_base, c_args))
-            if p_base == c_base && p_args.len() == c_args.len() =>
+        (PhpType::Generic(p), PhpType::Generic(c))
+            if p.name == c.name && p.args.len() == c.args.len() =>
         {
-            for (p_arg, c_arg) in p_args.iter().zip(c_args.iter()) {
+            for (p_arg, c_arg) in p.args.iter().zip(c.args.iter()) {
                 match_type_pattern(p_arg, c_arg, template_params, template_bounds, subs);
             }
         }

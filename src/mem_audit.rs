@@ -19,7 +19,9 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap};
-use crate::php_type::{CallableParam, LiteralValue, PhpType, ShapeEntry};
+use crate::php_type::{
+    CallableParam, CallableType, ConditionalType, GenericType, LiteralValue, PhpType, ShapeEntry,
+};
 use crate::types::{
     ClassInfo, ConstantInfo, FunctionInfo, LaravelMetadata, MethodInfo, ParameterInfo,
     PropertyInfo, PropertySource, SharedVec, TraitAlias, TraitPrecedence, TypeAliasDef,
@@ -166,10 +168,10 @@ fn vs(v: &Vec<String>) -> Sz {
     z
 }
 
-fn ty_vec(v: &Vec<PhpType>) -> Sz {
+fn ty_vec(v: &[PhpType]) -> Sz {
     let mut z = Sz::default();
-    z.add(v.capacity() * PT);
-    z.slot(v.capacity());
+    z.add(v.len() * PT);
+    z.slot(v.len());
     for t in v {
         z += ty(t);
     }
@@ -194,6 +196,8 @@ thread_local! {
 fn variant_name(t: &PhpType) -> &'static str {
     match t {
         PhpType::Named(_) => "Named",
+        PhpType::StaticType(_) => "StaticType",
+        PhpType::ThisType(_) => "ThisType",
         PhpType::Nullable(_) => "Nullable",
         PhpType::Union(_) => "Union",
         PhpType::Intersection(_) => "Intersection",
@@ -201,8 +205,8 @@ fn variant_name(t: &PhpType) -> &'static str {
         PhpType::Array(_) => "Array",
         PhpType::ArrayShape(_) => "ArrayShape",
         PhpType::ObjectShape(_) => "ObjectShape",
-        PhpType::Callable { .. } => "Callable",
-        PhpType::Conditional { .. } => "Conditional",
+        PhpType::Callable(_) => "Callable",
+        PhpType::Conditional(_) => "Conditional",
         PhpType::ClassString(_) => "ClassString",
         PhpType::InterfaceString(_) => "InterfaceString",
         PhpType::KeyOf(_) => "KeyOf",
@@ -231,20 +235,20 @@ fn ty(t: &PhpType) -> Sz {
     record_type(t);
     let mut z = Sz::default();
     match t {
-        PhpType::Named(_) => {}
+        PhpType::Named(_) | PhpType::StaticType(_) | PhpType::ThisType(_) => {}
         PhpType::Nullable(b) | PhpType::Array(b) | PhpType::KeyOf(b) | PhpType::ValueOf(b) => {
             z.add(PT);
             z.slot(1);
             z += ty(b);
         }
         PhpType::Union(v) | PhpType::Intersection(v) => z += ty_vec(v),
-        PhpType::Generic(name, v) => {
-            z.add(name.capacity());
-            z += ty_vec(v);
+        PhpType::Generic(g) => {
+            z.add(size_of::<GenericType>());
+            z += ty_vec(&g.args);
         }
         PhpType::ArrayShape(v) | PhpType::ObjectShape(v) => {
-            z.add(v.capacity() * size_of::<ShapeEntry>());
-            z.slot(v.capacity());
+            z.add(v.len() * size_of::<ShapeEntry>());
+            z.slot(v.len());
             for e in v {
                 if let Some(k) = &e.key {
                     z.add(k.capacity());
@@ -252,34 +256,24 @@ fn ty(t: &PhpType) -> Sz {
                 z += ty(&e.value_type);
             }
         }
-        PhpType::Callable {
-            kind,
-            params,
-            return_type,
-        } => {
-            z.add(kind.capacity());
-            z.add(params.capacity() * size_of::<CallableParam>());
-            z.slot(params.capacity());
-            for p in params {
+        PhpType::Callable(c) => {
+            z.add(size_of::<CallableType>());
+            // The boxed payload always holds one `Option<PhpType>` slot,
+            // whether or not a return type was written.
+            z.slot(1);
+            z.add(c.params.capacity() * size_of::<CallableParam>());
+            z.slot(c.params.capacity());
+            for p in &c.params {
                 z += ty(&p.type_hint);
             }
-            if let Some(b) = return_type {
-                z.add(PT);
-                z.slot(1);
+            if let Some(b) = &c.return_type {
                 z += ty(b);
             }
         }
-        PhpType::Conditional {
-            param,
-            condition,
-            then_type,
-            else_type,
-            ..
-        } => {
-            z.add(param.capacity());
-            for b in [condition, then_type, else_type] {
-                z.add(PT);
-                z.slot(1);
+        PhpType::Conditional(c) => {
+            z.add(size_of::<ConditionalType>());
+            z.slot(3);
+            for b in [&c.condition, &c.then_type, &c.else_type] {
                 z += ty(b);
             }
         }
@@ -290,10 +284,8 @@ fn ty(t: &PhpType) -> Sz {
                 z += ty(b);
             }
         }
-        PhpType::IntRange(a, b) => {
-            z.add(a.capacity());
-            z.add(b.capacity());
-        }
+        // Interned bounds: no per-value heap payload.
+        PhpType::IntRange(..) => {}
         PhpType::IndexAccess(a, b) => {
             z.add(PT);
             z.slot(1);
@@ -302,12 +294,15 @@ fn ty(t: &PhpType) -> Sz {
             z.slot(1);
             z += ty(b);
         }
-        PhpType::Literal(l) => match l {
-            LiteralValue::Int(x) | LiteralValue::Float(x) | LiteralValue::String(x) => {
-                z.add(x.capacity())
+        PhpType::Literal(l) => {
+            z.add(size_of::<LiteralValue>());
+            match &**l {
+                LiteralValue::Int(x) | LiteralValue::Float(x) | LiteralValue::String(x) => {
+                    z.add(x.len())
+                }
             }
-        },
-        PhpType::Raw(x) => z.add(x.capacity()),
+        }
+        PhpType::Raw(x) => z.add(x.len()),
     }
     z
 }
@@ -899,8 +894,9 @@ impl Audit {
     /// Turn the simulation counters into projected reclaim, so each
     /// candidate representation change can be ranked directly.
     fn print_reclaim(&self) {
-        // Shrinking `PhpType` to a pointer-sized handle (box the rare
-        // variants) saves this much per slot.
+        // Shrinking `PhpType` further, to a single pointer-sized handle
+        // (interning, or a thin vec/string for the remaining two-word
+        // payloads), would save this much per slot.
         const PT_SHRUNK: usize = 16;
         let per_slot = PT.saturating_sub(PT_SHRUNK);
         let heap_slots: usize = [
@@ -927,7 +923,7 @@ impl Audit {
 
         eprintln!("  [projected reclaim]");
         eprintln!(
-            "    PhpType 64→16 B: {} slots ({} inline in structs + {} in heap allocs) → {:.1} MB",
+            "    PhpType {PT}→{PT_SHRUNK} B: {} slots ({} inline in structs + {} in heap allocs) → {:.1} MB",
             pt_total,
             self.pt_inline_slots,
             heap_slots,

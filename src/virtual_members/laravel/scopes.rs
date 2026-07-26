@@ -19,8 +19,8 @@ use super::helpers::extends_eloquent_model;
 /// Build the default return type for scope methods that don't declare a return
 /// type or return `void`.
 fn default_scope_return_type() -> PhpType {
-    PhpType::Generic(
-        "Illuminate\\Database\\Eloquent\\Builder".to_string(),
+    PhpType::generic(
+        "Illuminate\\Database\\Eloquent\\Builder",
         vec![PhpType::static_()],
     )
 }
@@ -209,8 +209,8 @@ pub fn build_scope_methods_for_builder(
                 // generic args are present.  Wrap bare Builder return types
                 // as `Builder<ModelName>` to preserve the chain.
                 if is_bare_builder_type(ret) {
-                    *ret = PhpType::Generic(
-                        ELOQUENT_BUILDER_FQN.to_string(),
+                    *ret = PhpType::generic(
+                        ELOQUENT_BUILDER_FQN,
                         vec![PhpType::Named(atom(model_name))],
                     );
                 }

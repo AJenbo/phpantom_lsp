@@ -1605,7 +1605,7 @@ pub(crate) fn bind_foreach_key<'b>(
         // Default: key is int|string.
         scope.set(
             &var_name,
-            vec![ResolvedType::from_type_string(PhpType::Union(vec![
+            vec![ResolvedType::from_type_string(PhpType::union(vec![
                 PhpType::int(),
                 PhpType::string(),
             ]))],

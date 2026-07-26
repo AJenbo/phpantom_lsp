@@ -17,7 +17,7 @@ impl PhpType {
             // are treated as identical.
             (PhpType::Nullable(inner), PhpType::Union(members))
             | (PhpType::Union(members), PhpType::Nullable(inner)) => {
-                let as_union = PhpType::Union(vec![inner.as_ref().clone(), PhpType::null()]);
+                let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
                 as_union.equivalent(&PhpType::Union(members.clone()))
             }
             (PhpType::Union(a), PhpType::Union(b))
@@ -33,10 +33,13 @@ impl PhpType {
                 sb.sort_unstable();
                 sa == sb
             }
-            (PhpType::Generic(na, aa), PhpType::Generic(nb, ab)) => {
-                Self::short_name_of(na) == Self::short_name_of(nb)
-                    && aa.len() == ab.len()
-                    && aa.iter().zip(ab.iter()).all(|(x, y)| x.equivalent(y))
+            (PhpType::Generic(a), PhpType::Generic(b)) => {
+                Self::short_name_of(&a.name) == Self::short_name_of(&b.name)
+                    && a.args.len() == b.args.len()
+                    && a.args
+                        .iter()
+                        .zip(b.args.iter())
+                        .all(|(x, y)| x.equivalent(y))
             }
             (PhpType::Array(a), PhpType::Array(b)) => a.equivalent(b),
             _ => false,
@@ -95,11 +98,11 @@ impl PhpType {
         // ── Nullable normalisation ──────────────────────────────────
         // Treat `?T` as `T|null` for uniform handling.
         if let PhpType::Nullable(inner) = self {
-            let as_union = PhpType::Union(vec![inner.as_ref().clone(), PhpType::null()]);
+            let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
             return as_union.is_subtype_of(supertype);
         }
         if let PhpType::Nullable(inner) = supertype {
-            let as_union = PhpType::Union(vec![inner.as_ref().clone(), PhpType::null()]);
+            let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
             return self.is_subtype_of(&as_union);
         }
 
@@ -111,7 +114,7 @@ impl PhpType {
         // `string` alone). Reflexive `array-key <: array-key` is already
         // handled above, so this only fires against structural supertypes.
         if self.is_array_key() {
-            let as_union = PhpType::Union(vec![PhpType::int(), PhpType::string()]);
+            let as_union = PhpType::union(vec![PhpType::int(), PhpType::string()]);
             return as_union.is_subtype_of(supertype);
         }
 
@@ -210,9 +213,9 @@ impl PhpType {
                 PhpType::Array(inner_sup) => {
                     return inner_sub.is_subtype_of(inner_sup);
                 }
-                PhpType::Generic(name, params) if is_array_like_name(name) => {
+                PhpType::Generic(g) if is_array_like_name(&g.name) => {
                     // T[] <: array<int, T2> when T <: T2
-                    if let Some(val) = params.last() {
+                    if let Some(val) = g.args.last() {
                         return inner_sub.is_subtype_of(val);
                     }
                 }
@@ -228,19 +231,19 @@ impl PhpType {
 
             // ArrayShape <: array<K, V>  (or other generic array-like)
             // Every shape key must be a subtype of K, every value a subtype of V.
-            if let PhpType::Generic(name, params) = supertype
-                && is_array_like_name(name)
+            if let PhpType::Generic(g) = supertype
+                && is_array_like_name(&g.name)
             {
-                match params.len() {
+                match g.args.len() {
                     // array<V> — only check values.
                     1 => {
-                        let val_type = &params[0];
+                        let val_type = &g.args[0];
                         return entries.iter().all(|e| e.value_type.is_subtype_of(val_type));
                     }
                     // array<K, V> — check both keys and values.
                     2 => {
-                        let key_type = &params[0];
-                        let val_type = &params[1];
+                        let key_type = &g.args[0];
+                        let val_type = &g.args[1];
                         return entries.iter().all(|e| {
                             // Determine the key's type: named string keys are
                             // literal-string, positional keys are int.
@@ -271,27 +274,26 @@ impl PhpType {
         }
 
         // ── Generic covariance (array-like containers) ──────────────
-        if let (PhpType::Generic(name_sub, args_sub), PhpType::Generic(name_sup, args_sup)) =
-            (self, supertype)
-        {
-            let base_sub = name_sub.to_ascii_lowercase();
-            let base_sup = name_sup.to_ascii_lowercase();
+        if let (PhpType::Generic(sub), PhpType::Generic(sup)) = (self, supertype) {
+            let base_sub = sub.name.to_ascii_lowercase();
+            let base_sup = sup.name.to_ascii_lowercase();
 
             // Same base or compatible bases (list <: array, etc.)
             let bases_compatible = base_sub == base_sup
-                || (is_array_like_name(name_sub) && is_array_like_name(name_sup));
+                || (is_array_like_name(&sub.name) && is_array_like_name(&sup.name));
 
-            if bases_compatible && args_sub.len() == args_sup.len() {
-                return args_sub
+            if bases_compatible && sub.args.len() == sup.args.len() {
+                return sub
+                    .args
                     .iter()
-                    .zip(args_sup.iter())
+                    .zip(sup.args.iter())
                     .all(|(s, t)| s.is_subtype_of(t));
             }
         }
 
         // Generic array-like <: bare `array` / `iterable`
-        if let PhpType::Generic(name, _) = self
-            && is_array_like_name(name)
+        if let PhpType::Generic(g) = self
+            && is_array_like_name(&g.name)
             && let PhpType::Named(sup) = supertype
         {
             return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
@@ -327,19 +329,9 @@ impl PhpType {
         }
 
         // ── Callable subtyping ──────────────────────────────────────
-        if let (
-            PhpType::Callable {
-                params: params_sub,
-                return_type: ret_sub,
-                ..
-            },
-            PhpType::Callable {
-                params: params_sup,
-                return_type: ret_sup,
-                ..
-            },
-        ) = (self, supertype)
-        {
+        if let (PhpType::Callable(sub), PhpType::Callable(sup)) = (self, supertype) {
+            let (params_sub, ret_sub) = (&sub.params, &sub.return_type);
+            let (params_sup, ret_sup) = (&sup.params, &sup.return_type);
             // Return type is covariant.
             let ret_ok = match (ret_sub, ret_sup) {
                 (Some(rs), Some(rp)) => rs.is_subtype_of(rp),
@@ -362,7 +354,7 @@ impl PhpType {
         // Callable/Closure specification <: callable | Closure | object
         // A callable specification like `Closure(int): void` is always
         // a Closure instance, which is both callable and an object.
-        if matches!(self, PhpType::Callable { .. })
+        if matches!(self, PhpType::Callable(_))
             && let PhpType::Named(sup) = supertype
         {
             return matches!(
@@ -376,7 +368,7 @@ impl PhpType {
         // it violates the specification, so treat it as compatible.
         if let PhpType::Named(sub) = self
             && matches!(sub.to_ascii_lowercase().as_str(), "callable" | "closure")
-            && matches!(supertype, PhpType::Callable { .. })
+            && matches!(supertype, PhpType::Callable(_))
         {
             return true;
         }

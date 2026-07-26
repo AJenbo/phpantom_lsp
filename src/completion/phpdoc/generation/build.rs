@@ -156,12 +156,11 @@ pub(crate) fn enrichment_plain_typed(
     }
 
     if is_callable_keyword(pt) {
-        let kind = callable_display_name(pt).to_string();
-        return Some(PhpType::Callable {
-            kind,
-            params: vec![],
-            return_type: Some(Box::new(PhpType::mixed())),
-        });
+        return Some(PhpType::callable_spec(
+            callable_display_name(pt),
+            vec![],
+            Some(PhpType::mixed()),
+        ));
     }
 
     // Union types — enrich individual callable / array parts.
@@ -175,12 +174,11 @@ pub(crate) fn enrichment_plain_typed(
                 .iter()
                 .map(|member| {
                     if is_callable_keyword(member) {
-                        let kind = callable_display_name(member).to_string();
-                        PhpType::Callable {
-                            kind,
-                            params: vec![],
-                            return_type: Some(Box::new(PhpType::mixed())),
-                        }
+                        PhpType::callable_spec(
+                            callable_display_name(member),
+                            vec![],
+                            Some(PhpType::mixed()),
+                        )
                     } else if is_bare_array(member) {
                         PhpType::generic_array_val(PhpType::mixed())
                     } else {
@@ -188,7 +186,7 @@ pub(crate) fn enrichment_plain_typed(
                     }
                 })
                 .collect();
-            return Some(PhpType::Union(enriched));
+            return Some(PhpType::union(enriched));
         }
         return None;
     }
@@ -212,7 +210,7 @@ pub(crate) fn enrichment_plain_typed(
             .iter()
             .map(|s| PhpType::Named(atom(s.as_ref())))
             .collect();
-        return Some(PhpType::Generic(name.to_string(), args));
+        return Some(PhpType::generic(name, args));
     }
 
     None

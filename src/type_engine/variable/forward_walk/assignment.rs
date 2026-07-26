@@ -634,7 +634,7 @@ pub(crate) fn process_increment_decrement<'b>(
     if is_numeric_like {
         scope.set(
             &var_name,
-            vec![ResolvedType::from_type_string(PhpType::Union(vec![
+            vec![ResolvedType::from_type_string(PhpType::union(vec![
                 PhpType::int(),
                 PhpType::float(),
             ]))],
@@ -1360,7 +1360,7 @@ pub(crate) fn infer_arithmetic_result_type(
         (Some(false), Some(false)) => {
             if is_division {
                 // int / int can return float (e.g. 7/2 = 3.5).
-                PhpType::Union(vec![PhpType::int(), PhpType::float()])
+                PhpType::union(vec![PhpType::int(), PhpType::float()])
             } else {
                 PhpType::int()
             }
@@ -1368,7 +1368,7 @@ pub(crate) fn infer_arithmetic_result_type(
         // At least one float, the other is known: result is float.
         (Some(true), Some(_)) | (Some(_), Some(true)) => PhpType::float(),
         // One or both operands are unknown: fall back to int|float.
-        _ => PhpType::Union(vec![PhpType::int(), PhpType::float()]),
+        _ => PhpType::union(vec![PhpType::int(), PhpType::float()]),
     }
 }
 
@@ -1562,7 +1562,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                         PhpType::ObjectShape(widened)
                     }
                     Some(ref ty) if matches!(ty, PhpType::Named(s) if matches!(s.to_ascii_lowercase().as_str(), "int" | "integer" | "string" | "float" | "double" | "real" | "bool" | "boolean")) => {
-                        PhpType::ObjectShape(vec![ShapeEntry {
+                        PhpType::object_shape(vec![ShapeEntry {
                             key: Some("scalar".to_string()),
                             value_type: ty.clone(),
                             optional: false,
@@ -1576,7 +1576,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => {
                 // Unary +/- preserves int or float; conservatively
                 // return int|float.
-                Some(PhpType::Union(vec![PhpType::int(), PhpType::float()]))
+                Some(PhpType::union(vec![PhpType::int(), PhpType::float()]))
             }
             UnaryPrefixOperator::BitwiseNot(_) => None, // handled below
             UnaryPrefixOperator::Not(_) => Some(PhpType::bool()),

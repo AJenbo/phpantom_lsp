@@ -236,10 +236,10 @@ pub(crate) fn try_enter_closure_expr<'b>(
 /// Widen a literal type to its base type (e.g. `1` → `int`, `'foo'` → `string`).
 /// Non-literal types are returned unchanged.
 pub(crate) fn widen_literal(ty: &PhpType) -> PhpType {
-    match ty {
-        PhpType::Literal(crate::php_type::LiteralValue::Int(_)) => PhpType::int(),
-        PhpType::Literal(crate::php_type::LiteralValue::String(_)) => PhpType::string(),
-        PhpType::Literal(crate::php_type::LiteralValue::Float(_)) => PhpType::float(),
-        _ => ty.clone(),
+    match ty.as_literal() {
+        Some(crate::php_type::LiteralValue::Int(_)) => PhpType::int(),
+        Some(crate::php_type::LiteralValue::String(_)) => PhpType::string(),
+        Some(crate::php_type::LiteralValue::Float(_)) => PhpType::float(),
+        None => ty.clone(),
     }
 }

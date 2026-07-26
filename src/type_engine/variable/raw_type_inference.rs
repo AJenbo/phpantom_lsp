@@ -77,7 +77,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     }
 
     if has_string_keys && !shape_entries.is_empty() {
-        return Some(PhpType::ArrayShape(shape_entries));
+        return Some(PhpType::array_shape(shape_entries));
     }
 
     if types.is_empty() {
@@ -116,7 +116,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     let elem_type = if types.len() == 1 {
         types.into_iter().next().unwrap()
     } else {
-        PhpType::Union(types)
+        PhpType::union(types)
     };
     Some(PhpType::list(elem_type))
 }

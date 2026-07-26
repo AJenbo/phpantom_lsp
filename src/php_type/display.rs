@@ -23,7 +23,7 @@ impl fmt::Display for PhpType {
                     // Wrap callable types in parentheses so
                     // `(Closure(int): string)|Foo` is not misread as
                     // `Closure(int): string|Foo`.
-                    if matches!(ty, PhpType::Callable { .. }) {
+                    if matches!(ty, PhpType::Callable(_)) {
                         write!(f, "({ty})")?;
                     } else {
                         write!(f, "{ty}")?;
@@ -42,9 +42,10 @@ impl fmt::Display for PhpType {
                 Ok(())
             }
 
-            PhpType::Generic(name, args) => {
+            PhpType::Generic(g) => {
+                let name = &g.name;
                 write!(f, "{name}<")?;
-                for (i, arg) in args.iter().enumerate() {
+                for (i, arg) in g.args.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
@@ -83,32 +84,30 @@ impl fmt::Display for PhpType {
                 write!(f, "}}")
             }
 
-            PhpType::Callable {
-                kind,
-                params,
-                return_type,
-            } => {
+            PhpType::Callable(c) => {
+                let kind = &c.kind;
                 write!(f, "{kind}(")?;
-                for (i, param) in params.iter().enumerate() {
+                for (i, param) in c.params.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
                     write!(f, "{param}")?;
                 }
                 write!(f, ")")?;
-                if let Some(ret) = return_type {
+                if let Some(ret) = &c.return_type {
                     write!(f, ": {ret}")?;
                 }
                 Ok(())
             }
 
-            PhpType::Conditional {
-                param,
-                negated,
-                condition,
-                then_type,
-                else_type,
-            } => {
+            PhpType::Conditional(c) => {
+                let ConditionalType {
+                    param,
+                    negated,
+                    condition,
+                    then_type,
+                    else_type,
+                } = &**c;
                 if *negated {
                     write!(f, "{param} is not {condition} ? {then_type} : {else_type}")
                 } else {

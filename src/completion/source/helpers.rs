@@ -300,7 +300,7 @@ pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<Php
                     };
                     return_type = Some(match return_type.take() {
                         Some(existing) if existing.equivalent(&inferred) => existing,
-                        Some(existing) => PhpType::Union(vec![existing, inferred]),
+                        Some(existing) => PhpType::union(vec![existing, inferred]),
                         None => inferred,
                     });
                 }
@@ -318,8 +318,8 @@ pub(crate) fn infer_generator_type_from_closure_yields(text: &str) -> Option<Php
     let value = value_type.unwrap_or_else(PhpType::mixed);
     let ret = return_type.unwrap_or_else(PhpType::void);
 
-    Some(PhpType::Generic(
-        "Generator".to_string(),
+    Some(PhpType::generic(
+        "Generator",
         vec![key, value, PhpType::mixed(), ret],
     ))
 }
@@ -1104,7 +1104,7 @@ mod tests {
     /// Extract the `<TKey, TValue>` args from an inferred `Generator` type.
     fn generator_args(text: &str) -> Vec<PhpType> {
         match infer_generator_type_from_closure_yields(text) {
-            Some(PhpType::Generic(name, args)) if name == "Generator" => args,
+            Some(PhpType::Generic(g)) if g.name == "Generator" => g.args,
             other => panic!("expected Generator<...>, got {other:?}"),
         }
     }

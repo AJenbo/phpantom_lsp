@@ -1095,7 +1095,7 @@ bounded by the same fix as P33.
 
 ---
 
-## Memory baseline (2026-07-26)
+## Memory baseline (2026-07-26, refreshed after the `PhpType` shrink)
 
 Measured with the `mem-audit` cargo feature, which installs a counting
 global allocator and prints a deep-size walk of every long-lived store
@@ -1125,15 +1125,18 @@ mimalloc, since that is what every shipped Linux binary runs (see
 
 | Measure                       | Mid-size Laravel app | Large Laravel app |
 | ----------------------------- | -------------------- | ----------------- |
-| Peak RSS (`VmHWM`)            | 578 MB               | 834 MB            |
-| RSS after mimalloc collect    | 552 MB               | 814 MB            |
-| Live heap (allocator-reported)| 415 MB               | 634 MB            |
-| Live allocations              | 2.46 M               | 3.83 M            |
-| Allocator + page overhead     | 136 MB (25% of RSS)  | 179 MB (22%)      |
+| Peak RSS (`VmHWM`)            | 505 MB               | 706 MB            |
+| RSS after mimalloc collect    | 477 MB               | 686 MB            |
+| Live heap (allocator-reported)| 344 MB               | 514 MB            |
+| Live allocations              | 2.45 M               | 3.81 M            |
+| Allocator + page overhead     | 133 MB (28% of RSS)  | 172 MB (25%)      |
 
-For reference, the same run under plain glibc `malloc` (no mimalloc)
-peaks higher despite a *lower* overhead percentage: 622 MB / 855 MB
-peak, 100 MB (19%) / 133 MB (17%) overhead. mimalloc holds more
+The glibc figures below were taken against the original baseline (the
+one with a 64-byte `PhpType`) and have not been re-measured since; the
+relative picture they illustrate is unchanged. Under plain glibc
+`malloc` (no mimalloc) the same run peaked higher despite a *lower*
+overhead percentage: 622 MB / 855 MB peak, 100 MB (19%) / 133 MB (17%)
+overhead. mimalloc holds more
 allocator/page overhead in percentage terms but a smaller absolute
 peak, because PHPantom already tunes it (`configure_allocator`: a
 short purge delay plus a per-process THP opt-out) to return freed
@@ -1143,18 +1146,18 @@ Bytes released per store (drop-and-measure, mid-size / large):
 
 | Store                  | Released         | Allocations     |
 | ---------------------- | ---------------- | --------------- |
-| `resolved_class_cache` | 205 MB / 336 MB  | 1.17 M / 1.96 M |
+| `resolved_class_cache` | 143 MB / 237 MB  | 1.17 M / 1.94 M |
 | `symbol_maps`          | 40 MB / 64 MB    | 367 K / 602 K   |
 | `reference_index`      | 26 MB / 43 MB    | 204 K / 330 K   |
-| `uri_classes_index`    | 25 MB / 36 MB    | 122 K / 172 K   |
+| `uri_classes_index`    | 25 MB / 27 MB    | 122 K / 171 K   |
 | `resolved_names`       | 4.6 MB / 6.7 MB  | 53 K / 75 K     |
 | everything else        | < 6 MB each      | —               |
 
 Within the member data, the largest field-level groups on the large app
-are `MethodInfo` structs (122 MB across 223 K distinct methods at 560 B
-each), parameter vectors (86 MB across 187 K vectors holding 312 K
-parameters at 256 B each), `PhpType` heap payloads (~66 MB), and
-`method_index` (20 MB).
+are `MethodInfo` structs (92 MB across 232 K distinct methods at 400 B
+each), parameter vectors (51 MB across 191 K vectors holding 325 K
+parameters at 136 B each), `PhpType` heap payloads (~33 MB), and
+`method_index` (21 MB).
 
 Two findings from the baseline are worth recording because they close
 off obvious-looking ideas:
@@ -1172,72 +1175,30 @@ off obvious-looking ideas:
 
 ---
 
-## P37. `PhpType` is 64 bytes and is embedded ~3 M times
-
-**Impact: High · Effort: Medium**
-
-`PhpType` is 64 bytes because its largest variants force that size:
-`Conditional` carries a `String` plus three `Box`es, `Callable` carries
-a `String` plus a `Vec` plus an `Option<Box>`, and `Generic` carries a
-`String` plus a `Vec`. Every `PhpType` slot in the program pays for
-them.
-
-Measured on the large Laravel app: **2.94 M slots** (1.90 M sitting
-inline in struct fields, 1.05 M inside heap allocations). The variants
-that force the 64-byte size are rare — the mix is `Named` 70.6%,
-`Generic` 12.8%, `Union` 10.2%, `Callable` 2.9%, `Nullable` 1.2%,
-`Conditional` 1.1%, everything else under 0.5%.
-
-The cost lands squarely on the hottest structs. `MethodInfo` is 560 B,
-of which four `Option<PhpType>` fields (`return_type`,
-`native_return_type`, `conditional_return`, `if_this_is`) account for
-256 B. `ParameterInfo` is 256 B, of which three `Option<PhpType>`
-fields account for 192 B.
-
-### Fix
-
-Box the rare variants so the enum's payload fits a pointer, e.g.
-`Conditional(Box<ConditionalType>)`, `Callable(Box<CallableType>)`,
-`Generic(Box<GenericType>)`, `Union(Box<Vec<PhpType>>)`,
-`IntRange(Box<(String, String)>)`. `Named(Atom)` stays inline, which is
-the 70% case, so the common path gains an indirection nowhere.
-
-Reclaim at 16 B per slot: **83 MB** on the mid-size app, **135 MB** on
-the large one. `MethodInfo` drops to ~368 B and `ParameterInfo` to
-~112 B. A less aggressive version that only boxes `Conditional` and
-`Callable` (leaving 24 B, since `Box<[T]>` and `Box<str>` are fat
-pointers) still reclaims roughly two thirds of that.
-
-Note `Generic`'s first field is a `String` holding a class name or
-keyword — a bounded set that should be an `Atom` regardless.
-
----
-
-## P38. Resolved type values are duplicated ~33x
+## P38. Resolved type values are duplicated ~34x
 
 **Impact: High · Effort: High**
 
-The same measurement pass that produced P37 rendered every live
-`PhpType` and counted distinct forms: **1.68 M values collapse to
-50,590 distinct rendered types** on the large Laravel app, and 1.02 M to
-30,903 on the mid-size one. Both are almost exactly **33x duplication**.
-Every `string`, `?Carbon`, `Collection<User>`, and
-`Builder<TModel>` is re-allocated per method, per parameter, per class
-that inherits it.
+The memory audit renders every live `PhpType` and counts distinct
+forms: **1.76 M values collapse to 51,272 distinct rendered types** on
+the large Laravel app, and 1.07 M to 31,074 on the mid-size one. Both
+are almost exactly **34x duplication**. Every `string`, `?Carbon`,
+`Collection<User>`, and `Builder<TModel>` is re-allocated per method,
+per parameter, per class that inherits it.
 
 Interning types the way `Atom` interns names would collapse both halves
-of the cost at once: each slot becomes a pointer-or-index handle, and
-each distinct type is allocated once. Combined with the slot shrink from
-P37 the ceiling is roughly 230 MB on the large app and 140 MB on the
-mid-size one — the single largest structural win available.
+of the remaining cost at once: each slot becomes a pointer-or-index
+handle (24 B down to 8 B, worth another ~24 MB of slot bytes on the
+large app on its own), and each distinct type is allocated once instead
+of ~34 times. The audit's "PhpType 24→16 B" projection covers only the
+slot half; the duplicate payloads are the larger share.
 
-This is deliberately filed separately from P37 because it is a much
-larger change: `PhpType` is currently a value that substitution paths
-mutate in place, so interning means moving to a construct-and-intern
-API (`PhpType::named(...)`, `PhpType::union(...)`) and auditing every
-site that builds or rewrites a type. Do P37 first — it is
-self-contained, it delivers most of the per-slot win, and it does not
-foreclose interning later.
+This is a much larger change than the slot shrink that preceded it:
+`PhpType` is a value that substitution paths mutate in place, so
+interning means moving fully to a construct-and-intern API (the
+`PhpType::union(...)` / `PhpType::generic(...)` constructors added by
+the slot shrink are the beginning of that surface) and auditing every
+site that builds or rewrites a type.
 
 Take care not to feed the interner unbounded text: `Raw` holds
 free-text parse fallbacks and `Literal` holds source literals, so those
@@ -1304,17 +1265,17 @@ Two options, either of which is small:
 
 ---
 
-## P41. 3.8 M live allocations cost ~180 MB in allocator overhead
+## P41. 3.8 M live allocations cost ~170 MB in allocator overhead
 
 **Impact: Medium · Effort: Medium**
 
 Independent of what we store, *how many* allocations we hold costs
 real memory. On the large Laravel app, mimalloc (the allocator every
 shipped Linux binary runs — see the "Memory baseline" note above)
-reports 634 MB live across 3.83 M allocations (average 174 B), while
-peak RSS is 834 MB. The 179 MB difference (22% of RSS; 25% on the
+reports 514 MB live across 3.81 M allocations (average 142 B), while
+peak RSS is 706 MB. The 172 MB difference (25% of RSS; 28% on the
 mid-size app) is mimalloc's per-size-class page and slot rounding —
-roughly 47 B per live allocation.
+roughly 45 B per live allocation.
 
 This is *after* the existing `configure_allocator` tuning (a short
 purge delay plus a per-process transparent-huge-pages opt-out — see
@@ -1328,11 +1289,10 @@ absolute peak RSS. `MALLOC_ARENA_MAX` capping under plain glibc moves
 peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
 trimmed live figure, confirming arena count was never the lever.
 
-What is left is allocation *count* itself: at ~47 B of overhead per
+What is left is allocation *count* itself: at ~45 B of overhead per
 live allocation, each allocation avoided is worth more than its own
-`size_of`. P37, P39, and P40 each remove hundreds of thousands of
-allocations as a side effect (folding `Option<PhpType>` heap payloads
-into fewer, larger buffers; interning `SymbolKind` strings; sharing
+`size_of`. P39 and P40 each remove hundreds of thousands of allocations
+as a side effect (interning `SymbolKind` strings; sharing
 `method_index`), so re-measure this line after those land. If a
 meaningful gap remains afterward, the next lever is arena-allocating
 the member metadata (bump-allocate `MethodInfo`/`PropertyInfo`/

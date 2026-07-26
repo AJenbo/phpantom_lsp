@@ -337,11 +337,11 @@ pub(crate) fn is_subtype_of_typed(
 
     // ── Nullable normalisation ──────────────────────────────────
     if let PhpType::Nullable(inner) = subtype {
-        let as_union = PhpType::Union(vec![inner.as_ref().clone(), PhpType::null()]);
+        let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
         return is_subtype_of_typed(&as_union, supertype, class_loader);
     }
     if let PhpType::Nullable(inner) = supertype {
-        let as_union = PhpType::Union(vec![inner.as_ref().clone(), PhpType::null()]);
+        let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
         return is_subtype_of_typed(subtype, &as_union, class_loader);
     }
 
@@ -371,9 +371,9 @@ pub(crate) fn is_subtype_of_typed(
     // namespace-qualified name and the other uses a short name
     // (e.g. `list<Pen>` vs `list<Demo\Pen>`).  Re-check with the
     // class loader so nominal hierarchy applies to inner params.
-    if let (PhpType::Generic(name_sub, args_sub), PhpType::Generic(name_sup, args_sup)) =
-        (subtype, supertype)
-    {
+    if let (PhpType::Generic(sub), PhpType::Generic(sup)) = (subtype, supertype) {
+        let (name_sub, args_sub) = (&sub.name, &sub.args);
+        let (name_sup, args_sup) = (&sup.name, &sup.args);
         let base_sub = name_sub.to_ascii_lowercase();
         let base_sup = name_sup.to_ascii_lowercase();
         let bases_compatible = base_sub == base_sup
@@ -448,12 +448,12 @@ pub(crate) fn is_subtype_of_typed(
     // permissive (return true) to avoid false positives.
     if let PhpType::Literal(lit) = subtype
         && lit.string_content().is_some()
-        && let PhpType::Generic(name, args) = supertype
-        && name.eq_ignore_ascii_case("model-property")
-        && args.len() == 1
+        && let PhpType::Generic(g) = supertype
+        && g.name.eq_ignore_ascii_case("model-property")
+        && g.args.len() == 1
     {
         let prop_name = lit.string_content().unwrap();
-        if let Some(model_name) = args[0].base_name()
+        if let Some(model_name) = g.args[0].base_name()
             && let Some(cls) = class_loader(model_name)
         {
             let resolved = crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
@@ -473,7 +473,7 @@ pub(crate) fn is_subtype_of_typed(
     // content cannot be resolved to a class — it may simply live in
     // a file we haven't indexed — and only reject when the resolved
     // class provably fails to satisfy the bound.
-    if let PhpType::Literal(crate::php_type::LiteralValue::String(_)) = subtype
+    if let Some(crate::php_type::LiteralValue::String(_)) = subtype.as_literal()
         && matches!(
             supertype,
             PhpType::ClassString(_) | PhpType::InterfaceString(_)

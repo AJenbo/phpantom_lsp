@@ -56,7 +56,7 @@ impl Backend {
             // substitute class-level template parameters in the
             // method's parameter and return types.
             let generic_args: Vec<PhpType> = match &rt.type_string {
-                PhpType::Generic(_, args) => args.clone(),
+                PhpType::Generic(g) => g.args.clone(),
                 _ => {
                     // When the resolved type has no generic annotation
                     // but the class declares template parameters (e.g.
@@ -670,11 +670,8 @@ impl Backend {
 /// - Other types -> returns `None` (not a callable).
 fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarget> {
     match return_type {
-        PhpType::Callable {
-            params,
-            return_type,
-            ..
-        } => {
+        PhpType::Callable(c) => {
+            let (params, return_type) = (&c.params, &c.return_type);
             let parameters: Vec<ParameterInfo> = params
                 .iter()
                 .enumerate()
@@ -692,7 +689,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 .collect();
             Some(ResolvedCallableTarget {
                 parameters: parameters.into(),
-                return_type: return_type.as_deref().cloned(),
+                return_type: return_type.clone(),
                 accepts_any_args: false,
                 ..Default::default()
             })
