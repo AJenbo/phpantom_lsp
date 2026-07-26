@@ -1604,10 +1604,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-baseline-2026-07-26" class="md-nav__link">
+  <a href="#memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Memory baseline (2026-07-26)
+        Memory baseline (2026-07-26, refreshed after the <code>PhpType</code> shrink)
       </span>
     </span>
   </a>
@@ -1615,38 +1615,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p37-phptype-is-64-bytes-and-is-embedded-3-m-times" class="md-nav__link">
+  <a href="#p38-resolved-type-values-are-duplicated-34x" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P37. <code>PhpType</code> is 64 bytes and is embedded ~3 M times
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P37. PhpType is 64 bytes and is embedded ~3 M times">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p38-resolved-type-values-are-duplicated-33x" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P38. Resolved type values are duplicated ~33x
+        P38. Resolved type values are duplicated ~34x
       </span>
     </span>
   </a>
@@ -1676,10 +1648,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead" class="md-nav__link">
+  <a href="#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P41. 3.8 M live allocations cost ~180 MB in allocator overhead
+        P41. 3.8 M live allocations cost ~170 MB in allocator overhead
       </span>
     </span>
   </a>
@@ -2444,10 +2416,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-baseline-2026-07-26" class="md-nav__link">
+  <a href="#memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Memory baseline (2026-07-26)
+        Memory baseline (2026-07-26, refreshed after the <code>PhpType</code> shrink)
       </span>
     </span>
   </a>
@@ -2455,38 +2427,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p37-phptype-is-64-bytes-and-is-embedded-3-m-times" class="md-nav__link">
+  <a href="#p38-resolved-type-values-are-duplicated-34x" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P37. <code>PhpType</code> is 64 bytes and is embedded ~3 M times
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="P37. PhpType is 64 bytes and is embedded ~3 M times">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fix_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p38-resolved-type-values-are-duplicated-33x" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P38. Resolved type values are duplicated ~33x
+        P38. Resolved type values are duplicated ~34x
       </span>
     </span>
   </a>
@@ -2516,10 +2460,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead" class="md-nav__link">
+  <a href="#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        P41. 3.8 M live allocations cost ~180 MB in allocator overhead
+        P41. 3.8 M live allocations cost ~170 MB in allocator overhead
       </span>
     </span>
   </a>
@@ -3539,7 +3483,7 @@ anyway; it can only add a new persistent cache entry for a class that
 was otherwise <em>never</em> resolved in the pass, which is a narrow case
 bounded by the same fix as P33.</p>
 <hr />
-<h2 id="memory-baseline-2026-07-26">Memory baseline (2026-07-26)<a class="headerlink" href="#memory-baseline-2026-07-26" title="Permanent link">&para;</a></h2>
+<h2 id="memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink">Memory baseline (2026-07-26, refreshed after the <code>PhpType</code> shrink)<a class="headerlink" href="#memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink" title="Permanent link">&para;</a></h2>
 <p>Measured with the <code>mem-audit</code> cargo feature, which installs a counting
 global allocator and prints a deep-size walk of every long-lived store
 at the end of <code>analyze</code> when <code>PHPANTOM_MEM_AUDIT</code> is set:</p>
@@ -3572,34 +3516,37 @@ mimalloc, since that is what every shipped Linux binary runs (see
 <tbody>
 <tr>
 <td>Peak RSS (<code>VmHWM</code>)</td>
-<td>578 MB</td>
-<td>834 MB</td>
+<td>505 MB</td>
+<td>706 MB</td>
 </tr>
 <tr>
 <td>RSS after mimalloc collect</td>
-<td>552 MB</td>
-<td>814 MB</td>
+<td>477 MB</td>
+<td>686 MB</td>
 </tr>
 <tr>
 <td>Live heap (allocator-reported)</td>
-<td>415 MB</td>
-<td>634 MB</td>
+<td>344 MB</td>
+<td>514 MB</td>
 </tr>
 <tr>
 <td>Live allocations</td>
-<td>2.46 M</td>
-<td>3.83 M</td>
+<td>2.45 M</td>
+<td>3.81 M</td>
 </tr>
 <tr>
 <td>Allocator + page overhead</td>
-<td>136 MB (25% of RSS)</td>
-<td>179 MB (22%)</td>
+<td>133 MB (28% of RSS)</td>
+<td>172 MB (25%)</td>
 </tr>
 </tbody>
 </table>
-<p>For reference, the same run under plain glibc <code>malloc</code> (no mimalloc)
-peaks higher despite a <em>lower</em> overhead percentage: 622 MB / 855 MB
-peak, 100 MB (19%) / 133 MB (17%) overhead. mimalloc holds more
+<p>The glibc figures below were taken against the original baseline (the
+one with a 64-byte <code>PhpType</code>) and have not been re-measured since; the
+relative picture they illustrate is unchanged. Under plain glibc
+<code>malloc</code> (no mimalloc) the same run peaked higher despite a <em>lower</em>
+overhead percentage: 622 MB / 855 MB peak, 100 MB (19%) / 133 MB (17%)
+overhead. mimalloc holds more
 allocator/page overhead in percentage terms but a smaller absolute
 peak, because PHPantom already tunes it (<code>configure_allocator</code>: a
 short purge delay plus a per-process THP opt-out) to return freed
@@ -3616,8 +3563,8 @@ parse-burst memory promptly. See P41 for what's left after that tuning.</p>
 <tbody>
 <tr>
 <td><code>resolved_class_cache</code></td>
-<td>205 MB / 336 MB</td>
-<td>1.17 M / 1.96 M</td>
+<td>143 MB / 237 MB</td>
+<td>1.17 M / 1.94 M</td>
 </tr>
 <tr>
 <td><code>symbol_maps</code></td>
@@ -3631,8 +3578,8 @@ parse-burst memory promptly. See P41 for what's left after that tuning.</p>
 </tr>
 <tr>
 <td><code>uri_classes_index</code></td>
-<td>25 MB / 36 MB</td>
-<td>122 K / 172 K</td>
+<td>25 MB / 27 MB</td>
+<td>122 K / 171 K</td>
 </tr>
 <tr>
 <td><code>resolved_names</code></td>
@@ -3647,10 +3594,10 @@ parse-burst memory promptly. See P41 for what's left after that tuning.</p>
 </tbody>
 </table>
 <p>Within the member data, the largest field-level groups on the large app
-are <code>MethodInfo</code> structs (122 MB across 223 K distinct methods at 560 B
-each), parameter vectors (86 MB across 187 K vectors holding 312 K
-parameters at 256 B each), <code>PhpType</code> heap payloads (~66 MB), and
-<code>method_index</code> (20 MB).</p>
+are <code>MethodInfo</code> structs (92 MB across 232 K distinct methods at 400 B
+each), parameter vectors (51 MB across 191 K vectors holding 325 K
+parameters at 136 B each), <code>PhpType</code> heap payloads (~33 MB), and
+<code>method_index</code> (21 MB).</p>
 <p>Two findings from the baseline are worth recording because they close
 off obvious-looking ideas:</p>
 <ul>
@@ -3666,58 +3613,26 @@ off obvious-looking ideas:</p>
   <code>SharedVec</code>, not worth a commit by itself.</li>
 </ul>
 <hr />
-<h2 id="p37-phptype-is-64-bytes-and-is-embedded-3-m-times">P37. <code>PhpType</code> is 64 bytes and is embedded ~3 M times<a class="headerlink" href="#p37-phptype-is-64-bytes-and-is-embedded-3-m-times" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Effort: Medium</strong></p>
-<p><code>PhpType</code> is 64 bytes because its largest variants force that size:
-<code>Conditional</code> carries a <code>String</code> plus three <code>Box</code>es, <code>Callable</code> carries
-a <code>String</code> plus a <code>Vec</code> plus an <code>Option&lt;Box&gt;</code>, and <code>Generic</code> carries a
-<code>String</code> plus a <code>Vec</code>. Every <code>PhpType</code> slot in the program pays for
-them.</p>
-<p>Measured on the large Laravel app: <strong>2.94 M slots</strong> (1.90 M sitting
-inline in struct fields, 1.05 M inside heap allocations). The variants
-that force the 64-byte size are rare — the mix is <code>Named</code> 70.6%,
-<code>Generic</code> 12.8%, <code>Union</code> 10.2%, <code>Callable</code> 2.9%, <code>Nullable</code> 1.2%,
-<code>Conditional</code> 1.1%, everything else under 0.5%.</p>
-<p>The cost lands squarely on the hottest structs. <code>MethodInfo</code> is 560 B,
-of which four <code>Option&lt;PhpType&gt;</code> fields (<code>return_type</code>,
-<code>native_return_type</code>, <code>conditional_return</code>, <code>if_this_is</code>) account for
-256 B. <code>ParameterInfo</code> is 256 B, of which three <code>Option&lt;PhpType&gt;</code>
-fields account for 192 B.</p>
-<h3 id="fix_7">Fix<a class="headerlink" href="#fix_7" title="Permanent link">&para;</a></h3>
-<p>Box the rare variants so the enum's payload fits a pointer, e.g.
-<code>Conditional(Box&lt;ConditionalType&gt;)</code>, <code>Callable(Box&lt;CallableType&gt;)</code>,
-<code>Generic(Box&lt;GenericType&gt;)</code>, <code>Union(Box&lt;Vec&lt;PhpType&gt;&gt;)</code>,
-<code>IntRange(Box&lt;(String, String)&gt;)</code>. <code>Named(Atom)</code> stays inline, which is
-the 70% case, so the common path gains an indirection nowhere.</p>
-<p>Reclaim at 16 B per slot: <strong>83 MB</strong> on the mid-size app, <strong>135 MB</strong> on
-the large one. <code>MethodInfo</code> drops to ~368 B and <code>ParameterInfo</code> to
-~112 B. A less aggressive version that only boxes <code>Conditional</code> and
-<code>Callable</code> (leaving 24 B, since <code>Box&lt;[T]&gt;</code> and <code>Box&lt;str&gt;</code> are fat
-pointers) still reclaims roughly two thirds of that.</p>
-<p>Note <code>Generic</code>'s first field is a <code>String</code> holding a class name or
-keyword — a bounded set that should be an <code>Atom</code> regardless.</p>
-<hr />
-<h2 id="p38-resolved-type-values-are-duplicated-33x">P38. Resolved type values are duplicated ~33x<a class="headerlink" href="#p38-resolved-type-values-are-duplicated-33x" title="Permanent link">&para;</a></h2>
+<h2 id="p38-resolved-type-values-are-duplicated-34x">P38. Resolved type values are duplicated ~34x<a class="headerlink" href="#p38-resolved-type-values-are-duplicated-34x" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Effort: High</strong></p>
-<p>The same measurement pass that produced P37 rendered every live
-<code>PhpType</code> and counted distinct forms: <strong>1.68 M values collapse to
-50,590 distinct rendered types</strong> on the large Laravel app, and 1.02 M to
-30,903 on the mid-size one. Both are almost exactly <strong>33x duplication</strong>.
-Every <code>string</code>, <code>?Carbon</code>, <code>Collection&lt;User&gt;</code>, and
-<code>Builder&lt;TModel&gt;</code> is re-allocated per method, per parameter, per class
-that inherits it.</p>
+<p>The memory audit renders every live <code>PhpType</code> and counts distinct
+forms: <strong>1.76 M values collapse to 51,272 distinct rendered types</strong> on
+the large Laravel app, and 1.07 M to 31,074 on the mid-size one. Both
+are almost exactly <strong>34x duplication</strong>. Every <code>string</code>, <code>?Carbon</code>,
+<code>Collection&lt;User&gt;</code>, and <code>Builder&lt;TModel&gt;</code> is re-allocated per method,
+per parameter, per class that inherits it.</p>
 <p>Interning types the way <code>Atom</code> interns names would collapse both halves
-of the cost at once: each slot becomes a pointer-or-index handle, and
-each distinct type is allocated once. Combined with the slot shrink from
-P37 the ceiling is roughly 230 MB on the large app and 140 MB on the
-mid-size one — the single largest structural win available.</p>
-<p>This is deliberately filed separately from P37 because it is a much
-larger change: <code>PhpType</code> is currently a value that substitution paths
-mutate in place, so interning means moving to a construct-and-intern
-API (<code>PhpType::named(...)</code>, <code>PhpType::union(...)</code>) and auditing every
-site that builds or rewrites a type. Do P37 first — it is
-self-contained, it delivers most of the per-slot win, and it does not
-foreclose interning later.</p>
+of the remaining cost at once: each slot becomes a pointer-or-index
+handle (24 B down to 8 B, worth another ~24 MB of slot bytes on the
+large app on its own), and each distinct type is allocated once instead
+of ~34 times. The audit's "PhpType 24→16 B" projection covers only the
+slot half; the duplicate payloads are the larger share.</p>
+<p>This is a much larger change than the slot shrink that preceded it:
+<code>PhpType</code> is a value that substitution paths mutate in place, so
+interning means moving fully to a construct-and-intern API (the
+<code>PhpType::union(...)</code> / <code>PhpType::generic(...)</code> constructors added by
+the slot shrink are the beginning of that surface) and auditing every
+site that builds or rewrites a type.</p>
 <p>Take care not to feed the interner unbounded text: <code>Raw</code> holds
 free-text parse fallbacks and <code>Literal</code> holds source literals, so those
 should keep owned payloads or use a separate bounded cache.</p>
@@ -3770,15 +3685,15 @@ its own index over them.</p>
    shrinking it.</li>
 </ol>
 <hr />
-<h2 id="p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead">P41. 3.8 M live allocations cost ~180 MB in allocator overhead<a class="headerlink" href="#p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead" title="Permanent link">&para;</a></h2>
+<h2 id="p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead">P41. 3.8 M live allocations cost ~170 MB in allocator overhead<a class="headerlink" href="#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p>Independent of what we store, <em>how many</em> allocations we hold costs
 real memory. On the large Laravel app, mimalloc (the allocator every
 shipped Linux binary runs — see the "Memory baseline" note above)
-reports 634 MB live across 3.83 M allocations (average 174 B), while
-peak RSS is 834 MB. The 179 MB difference (22% of RSS; 25% on the
+reports 514 MB live across 3.81 M allocations (average 142 B), while
+peak RSS is 706 MB. The 172 MB difference (25% of RSS; 28% on the
 mid-size app) is mimalloc's per-size-class page and slot rounding —
-roughly 47 B per live allocation.</p>
+roughly 45 B per live allocation.</p>
 <p>This is <em>after</em> the existing <code>configure_allocator</code> tuning (a short
 purge delay plus a per-process transparent-huge-pages opt-out — see
 <code>src/lib.rs</code>), which already earns back real RSS: the same run under
@@ -3790,11 +3705,10 @@ the shipped allocator and it is outperforming the alternative on
 absolute peak RSS. <code>MALLOC_ARENA_MAX</code> capping under plain glibc moves
 peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
 trimmed live figure, confirming arena count was never the lever.</p>
-<p>What is left is allocation <em>count</em> itself: at ~47 B of overhead per
+<p>What is left is allocation <em>count</em> itself: at ~45 B of overhead per
 live allocation, each allocation avoided is worth more than its own
-<code>size_of</code>. P37, P39, and P40 each remove hundreds of thousands of
-allocations as a side effect (folding <code>Option&lt;PhpType&gt;</code> heap payloads
-into fewer, larger buffers; interning <code>SymbolKind</code> strings; sharing
+<code>size_of</code>. P39 and P40 each remove hundreds of thousands of allocations
+as a side effect (interning <code>SymbolKind</code> strings; sharing
 <code>method_index</code>), so re-measure this line after those land. If a
 meaningful gap remains afterward, the next lever is arena-allocating
 the member metadata (bump-allocate <code>MethodInfo</code>/<code>PropertyInfo</code>/
