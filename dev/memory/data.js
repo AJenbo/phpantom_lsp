@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785032740388,
+  "lastUpdate": 1785036344979,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21395,6 +21395,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "5dee2ec75a6c1c75b15c108c21a949e2f4005b09",
+          "message": "docs: remove stale eager resolution nav link",
+          "timestamp": "2026-07-25T22:09:04-05:00",
+          "tree_id": "894cb909a8cc2409c08aee7a5726f37f3d8847e6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5dee2ec75a6c1c75b15c108c21a949e2f4005b09"
+        },
+        "date": 1785036342544,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.8,
             "unit": "MiB"
           }
         ]
