@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785023510933,
+  "lastUpdate": 1785032440719,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -120575,6 +120575,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.706,
             "range": "± 0.033",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "03ceb68e61b9ebc9cc60f614764ff24212deaf98",
+          "message": "refactor: model static and $this as bounded types in the type system\n\nAdd PhpType::StaticType(Atom) and PhpType::ThisType(Atom) variants\nthat preserve late-static-binding semantics instead of flattening\nstatic/$this to a bare class name.  StaticType carries the bound\nclass (\"at least this class or a subclass\"), ThisType is more\nspecific (\"the exact runtime instance type\").\n\nThe subtype chain is ThisType(A) <: StaticType(A) <: Named(A).\nDisplay: static(Foo), $this(Foo) -- shows the bound class.\n\nProduction sites updated:\n- replace_self(fqn) now delegates to resolve_self_refs_bounded()\n  so static -> StaticType(fqn) and $this -> ThisType(fqn);\n  replace_self_with_type(&receiver) is unchanged (preserves full\n  generic receiver types for accurate chain resolution)\n- Subject resolution: $this -> ThisType, static -> StaticType\n- First-class callable partial application: preserves static/this\n- Template substitution: preserve_static path uses bounded types\n- new static() -> StaticType instead of Named\n- Diagnostic param checking: resolve_self_refs_bounded() produces\n  bounded types so class-string<static> is properly validated\n\nSubtype checking updated:\n- StaticType(A) <: Named(A) and ThisType(A) <: Named(A)\n- ThisType(A) <: StaticType(A)\n- base_name(), top_level_class_names(), collect_class_names() all\n  handle the new variants\n\nPeripheral sites updated:\n- return_type_is_mixin_self handles StaticType/ThisType\n- is_simple_php_type handles StaticType/ThisType\n- Union member deduplication handles StaticType/ThisType",
+          "timestamp": "2026-07-25T21:09:17-05:00",
+          "tree_id": "9d2c1c931241cf5609782998f965c4ea42b2c187",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/03ceb68e61b9ebc9cc60f614764ff24212deaf98"
+        },
+        "date": 1785032437081,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 4,
+            "range": "± 0.228",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.039,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.1,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.144,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.243,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.269,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.141,
+            "range": "± 0.071",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.203,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.104,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.05,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.047,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.054,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 5.59,
+            "range": "± 0.035",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.176,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.321,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.06,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.046,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.122,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.089,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.079,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.219,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 1.279,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 7.512,
+            "range": "± 0.322",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 1.294,
+            "range": "± 0.043",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.054,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.052,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 70.282,
+            "range": "± 0.253",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.758,
+            "range": "± 0.03",
             "unit": "ms"
           }
         ]
