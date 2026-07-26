@@ -47,11 +47,16 @@ zip = "2"
 # musl's built-in malloc is very slow under the multi-threaded,
 # allocation-heavy load of parallel indexing and parse workers (4-6x
 # slower whole-project analysis), so the static musl binaries we ship
-# for Linux use mimalloc instead. Scoped to musl only: glibc, macOS,
-# and Windows system allocators perform fine, and mimalloc retains
-# freed pages more aggressively than they do, so enabling it where it
-# isn't needed just raises resident memory.
-[target.'cfg(target_env = "musl")'.dependencies]
+# for Linux use mimalloc instead.
+#
+# Scoped to Linux rather than musl alone so that a local `cargo build`
+# on a glibc workstation gets the same allocator as the binaries we
+# release: every Linux artifact we publish is musl, so no shipped build
+# is affected by widening this, while performance and memory figures
+# measured locally now match what users actually run. macOS and Windows
+# release from their own targets and use the system allocator both in
+# CI and locally, so they are already representative and are left alone.
+[target.'cfg(target_os = "linux")'.dependencies]
 mimalloc = { version = "0.1.47", optional = true }
 libmimalloc-sys = { version = "0.1", optional = true, features = ["extended"] }
 libc = { version = "0.2", optional = true }
@@ -67,6 +72,11 @@ flate2 = "1"
 # can be toggled off for benchmarking or debugging without editing code.
 default = ["mimalloc"]
 mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys", "dep:libc"]
+# Deep-size accounting of the long-lived symbol stores, printed at the
+# end of `analyze` when PHPANTOM_MEM_AUDIT is set. Off by default: it
+# installs a counting global allocator that adds two atomics to every
+# allocation, so it must never be enabled in a shipped build.
+mem-audit = []
 
 [dev-dependencies]
 datatest-stable = "0.3"

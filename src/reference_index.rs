@@ -32,6 +32,18 @@ pub(crate) enum ReferenceIndexKey {
     },
 }
 
+impl ReferenceIndexKey {
+    /// Memory-audit tooling: heap bytes held by the key's name string.
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn audit_heap(&self) -> usize {
+        match self {
+            Self::Class(s) | Self::Function(s) | Self::Constant(s) => s.capacity(),
+            Self::Member { name, .. } => name.capacity(),
+            Self::LaravelString { key, .. } => key.capacity(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReferenceIndexEntry {
     pub(crate) uri: String,
@@ -58,6 +70,19 @@ pub(crate) struct ReferenceIndexInner {
 impl ReferenceIndexInner {
     pub(crate) fn get(&self, key: &ReferenceIndexKey) -> Option<&Vec<ReferenceIndexEntry>> {
         self.by_key.get(key)
+    }
+
+    /// Memory-audit tooling: expose the internal maps for deep-size
+    /// accounting.
+    #[allow(clippy::type_complexity)]
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn audit_maps(
+        &self,
+    ) -> (
+        &HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>,
+        &HashMap<String, Vec<ReferenceIndexKey>>,
+    ) {
+        (&self.by_key, &self.uri_keys)
     }
 
     #[cfg(test)]

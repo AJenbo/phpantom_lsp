@@ -119,6 +119,20 @@ impl<T: Clone> SharedVec<T> {
     }
 }
 
+impl<T> SharedVec<T> {
+    /// Memory-audit tooling: identity of the shared allocation.
+    #[cfg(feature = "mem-audit")]
+    pub fn audit_ptr(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+
+    /// Memory-audit tooling: capacity of the shared `Vec`.
+    #[cfg(feature = "mem-audit")]
+    pub fn audit_capacity(&self) -> usize {
+        self.0.capacity()
+    }
+}
+
 // Allow `SharedVec` to be used with serde if ever needed in the future,
 // and support `From` conversions for ergonomic construction.
 

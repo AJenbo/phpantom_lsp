@@ -157,6 +157,36 @@ impl ResolvedCacheInner {
         self.map.get(key)
     }
 
+    /// Memory-audit tooling: expose the internal maps for deep-size
+    /// accounting, plus the approximate bucket bytes of the two
+    /// substituted-member intern tables.
+    #[allow(clippy::type_complexity)]
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn audit_maps(
+        &self,
+    ) -> (
+        &HashMap<ResolvedClassCacheKey, Arc<ClassInfo>>,
+        &HashMap<String, HashSet<ResolvedClassCacheKey>>,
+        &HashMap<String, HashSet<ResolvedClassCacheKey>>,
+        usize,
+    ) {
+        let bucket = |cap: usize, slot: usize| {
+            if cap == 0 {
+                0
+            } else {
+                ((cap * 8).div_ceil(7).max(4)).next_power_of_two() * (slot + 1)
+            }
+        };
+        let substituted = bucket(
+            self.substituted_methods.capacity(),
+            std::mem::size_of::<((usize, u128), SubstitutedEntry)>(),
+        ) + bucket(
+            self.substituted_properties.capacity(),
+            std::mem::size_of::<((usize, u128), SubstitutedPropertyEntry)>(),
+        );
+        (&self.map, &self.fqn_keys, &self.reverse_deps, substituted)
+    }
+
     /// Whether a key is present in the cache.
     pub fn contains_key(&self, key: &ResolvedClassCacheKey) -> bool {
         self.map.contains_key(key)

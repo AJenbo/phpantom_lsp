@@ -268,6 +268,32 @@ pub(crate) enum SymbolKind {
     },
 }
 
+impl SymbolKind {
+    /// Memory-audit tooling: heap bytes held by this span's strings.
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn audit_heap(&self) -> usize {
+        match self {
+            Self::ClassReference { name, .. }
+            | Self::ClassDeclaration { name }
+            | Self::Variable { name }
+            | Self::CompactVariable { name }
+            | Self::FunctionCall { name, .. }
+            | Self::ConstantReference { name }
+            | Self::MemberDeclaration { name, .. }
+            | Self::NamespaceDeclaration { name }
+            | Self::LaravelMacroString { name, .. }
+            | Self::CommandOwnParam { name, .. } => name.capacity(),
+            Self::MemberAccess {
+                subject_text,
+                member_name,
+                ..
+            } => subject_text.capacity() + member_name.capacity(),
+            Self::LaravelStringKey { key, .. } => key.capacity(),
+            Self::SelfStaticParent(_) | Self::Keyword | Self::CastType | Self::Comment => 0,
+        }
+    }
+}
+
 /// Identifies the category of a [`SymbolKind::LaravelStringKey`] span.
 ///
 /// Adding a new Laravel navigation feature only requires adding a variant

@@ -871,6 +871,14 @@ function spans); only the enclosing class and namespace are needed.
 Skipping the index build entirely in the `analyze` pipeline is a
 free win under either direction.
 
+**Quantified by the memory audit (see "Memory baseline" below):** on a
+large Laravel app the index holds 218,167 entries behind 74,454 distinct
+`(key, uri)` pairs — **2.9x span duplication** — costing 43 MB across
+330 K allocations. Direction 1 (dedup + count) collapses that to
+roughly the distinct-pair count, an estimated ~5 MB. Still worth doing,
+and now the third-largest single store after the resolved-class cache
+and `symbol_maps`.
+
 ---
 
 ## P32. Vendor package scan reads every file twice for origin classification
@@ -924,9 +932,13 @@ Two compounding causes:
    substitution, trait / interface / enrichment merges, Eloquent Builder
    and scope forwarding) are interned so value-identical results
    collapse to one allocation with a shared parameter list. What remains
-   per class is the flattened `Vec<Arc<_>>` itself — one pointer slot
-   per visible member — which the separated-metadata fix below would
-   eliminate.
+   per class is the flattened `Vec<Arc<_>>` itself plus its
+   `method_index` — one pointer slot per visible member. Measured on a
+   full Laravel app (~2 K resolved classes) this residual is only
+   ~10 MB across the whole resolved-class cache; the member
+   *allocations* the vecs point at, not the pointer slots, are the bulk.
+   Bounding the cache (fix below) reclaims both; separating the pointer
+   slots on their own is not worth the rewrite.
 
 2. **The cache is retained for the whole session, unbounded.** Eager
    population plus lazy resolution during the pass fill the cache with
@@ -935,7 +947,7 @@ Two compounding causes:
    sits resident for nothing. (Disabling eager population does not help:
    the per-file diagnostic pass refills the cache to the same size.)
 
-Fixes, cheapest first (each stands alone):
+Fix:
 
 1. **Bound the resolved-class cache.** After the workspace pass, the
    fully-flattened metadata for every project class does not need to stay
@@ -945,19 +957,16 @@ Fixes, cheapest first (each stands alone):
    cycles are broken by the cache's in-flight set, which `clear()`
    deliberately leaves untouched, so clearing mid-resolution cannot
    resurrect unbounded recursion. **Low-Medium.**
-2. **Separated metadata.** The structural fix for the remaining
-   per-class pointer vectors: store member identifier `Atom`s per class
-   and keep a single global member store, resolving members on demand
-   instead of flattening a per-class `Vec` of pointers (Mago's model).
-   With member *allocations* already shared and interned across methods,
-   properties, and constants, the win left here is the pointer slots
-   themselves. This needs substitution moved to query time to fit
-   PHPantom's transform-on-inherit model (an inherited member is not
-   byte-identical to the declaring class's once template substitution or
-   bare-`self` rewriting applies, so a pure `(fqn, name)` redirect would
-   lose the transform). Profiling closed this as not worth the rewrite
-   for analysis *speed*; it remains a valid direction for *memory* if the
-   cache bound above proves insufficient. **High.**
+
+Separating the per-class member vectors from a global member store
+(Mago's model, resolving members on demand instead of flattening a
+`Vec` of pointers) was the other candidate here, but measurement showed
+the residual pointer slots + `method_index` are only ~10 MB across the
+whole cache once member allocations are shared and interned. That is not
+worth moving substitution to query time (the transform-on-inherit model
+means an inherited member is not byte-identical to the declaring class's
+once template substitution or bare-`self` rewriting applies), so the
+lever is bounding the cache, not separating the metadata.
 
 ---
 
@@ -1072,6 +1081,265 @@ unexpected acceptance changes.
 The provider-internal callers in `src/virtual_members/` and the
 interface merge inside `resolve_class_fully_inner` are intentional
 (they run *while* the cache entry is being built) and are out of scope.
+
+**Still worth doing, and orthogonal to the memory work below.** This is
+a CPU fix (11% of diagnostic-pass CPU), not a memory one, but it is
+memory-neutral-to-positive: today each of the 25,676 calls builds a
+full inheritance-merged `ClassInfo` (its own methods/properties vecs)
+and immediately discards it, which is 25,676 transient allocations of
+exactly the kind P41 cares about. Routing through the cache turns most
+of those into a hit against an entry the diagnostic pass populates
+anyway; it can only add a new persistent cache entry for a class that
+was otherwise *never* resolved in the pass, which is a narrow case
+bounded by the same fix as P33.
+
+---
+
+## Memory baseline (2026-07-26)
+
+Measured with the `mem-audit` cargo feature, which installs a counting
+global allocator and prints a deep-size walk of every long-lived store
+at the end of `analyze` when `PHPANTOM_MEM_AUDIT` is set:
+
+```sh
+cargo build --release --features mem-audit
+PHPANTOM_MEM_AUDIT=1 ./target/release/phpantom_lsp analyze \
+  --project-root <dir> --no-colour
+```
+
+The walk dedups shared `Arc`s by pointer, so a member reached from
+several classes is counted once. It reports both a field-level
+attribution and a drop-and-measure probe that clears each store and
+reads the exact allocator delta, which cross-checks the walk. Since
+which allocator is active changes the RSS/overhead figures (see P41),
+the audit labels its own build (`target … / … libc, allocator …`) —
+always check that line before comparing a new run to the table below.
+
+The byte/allocation figures (live heap, per-store bytes released,
+`PhpType` duplication) are allocator-independent — they come from
+`size_of`/`capacity()`, not from the allocator — and were cross-checked
+identical under both `System` and `mimalloc`. Only RSS and the
+"overhead" line are allocator-specific; those are reported here for
+mimalloc, since that is what every shipped Linux binary runs (see
+`docs/BUILDING.md` for reproducing that exact build locally):
+
+| Measure                       | Mid-size Laravel app | Large Laravel app |
+| ----------------------------- | -------------------- | ----------------- |
+| Peak RSS (`VmHWM`)            | 578 MB               | 834 MB            |
+| RSS after mimalloc collect    | 552 MB               | 814 MB            |
+| Live heap (allocator-reported)| 415 MB               | 634 MB            |
+| Live allocations              | 2.46 M               | 3.83 M            |
+| Allocator + page overhead     | 136 MB (25% of RSS)  | 179 MB (22%)      |
+
+For reference, the same run under plain glibc `malloc` (no mimalloc)
+peaks higher despite a *lower* overhead percentage: 622 MB / 855 MB
+peak, 100 MB (19%) / 133 MB (17%) overhead. mimalloc holds more
+allocator/page overhead in percentage terms but a smaller absolute
+peak, because PHPantom already tunes it (`configure_allocator`: a
+short purge delay plus a per-process THP opt-out) to return freed
+parse-burst memory promptly. See P41 for what's left after that tuning.
+
+Bytes released per store (drop-and-measure, mid-size / large):
+
+| Store                  | Released         | Allocations     |
+| ---------------------- | ---------------- | --------------- |
+| `resolved_class_cache` | 205 MB / 336 MB  | 1.17 M / 1.96 M |
+| `symbol_maps`          | 40 MB / 64 MB    | 367 K / 602 K   |
+| `reference_index`      | 26 MB / 43 MB    | 204 K / 330 K   |
+| `uri_classes_index`    | 25 MB / 36 MB    | 122 K / 172 K   |
+| `resolved_names`       | 4.6 MB / 6.7 MB  | 53 K / 75 K     |
+| everything else        | < 6 MB each      | —               |
+
+Within the member data, the largest field-level groups on the large app
+are `MethodInfo` structs (122 MB across 223 K distinct methods at 560 B
+each), parameter vectors (86 MB across 187 K vectors holding 312 K
+parameters at 256 B each), `PhpType` heap payloads (~66 MB), and
+`method_index` (20 MB).
+
+Two findings from the baseline are worth recording because they close
+off obvious-looking ideas:
+
+- **Boxing the display-only docblock fields is a net loss.** Only 9-10%
+  of methods have no description, `@return` text, links, `@see` refs, or
+  deprecation data, so moving the six fields behind one `Option<Box<…>>`
+  would add a pointer plus an allocation header to the other 90%. The
+  same holds for constants. Properties and parameters are mostly
+  doc-free but their doc fields are few, so the win there is ~2-8 MB and
+  not worth the indirection on its own.
+- **A shared empty `SharedVec` saves under 1 MB.** Only 13% of parameter
+  vectors are empty. Worth folding into another change that touches
+  `SharedVec`, not worth a commit by itself.
+
+---
+
+## P37. `PhpType` is 64 bytes and is embedded ~3 M times
+
+**Impact: High · Effort: Medium**
+
+`PhpType` is 64 bytes because its largest variants force that size:
+`Conditional` carries a `String` plus three `Box`es, `Callable` carries
+a `String` plus a `Vec` plus an `Option<Box>`, and `Generic` carries a
+`String` plus a `Vec`. Every `PhpType` slot in the program pays for
+them.
+
+Measured on the large Laravel app: **2.94 M slots** (1.90 M sitting
+inline in struct fields, 1.05 M inside heap allocations). The variants
+that force the 64-byte size are rare — the mix is `Named` 70.6%,
+`Generic` 12.8%, `Union` 10.2%, `Callable` 2.9%, `Nullable` 1.2%,
+`Conditional` 1.1%, everything else under 0.5%.
+
+The cost lands squarely on the hottest structs. `MethodInfo` is 560 B,
+of which four `Option<PhpType>` fields (`return_type`,
+`native_return_type`, `conditional_return`, `if_this_is`) account for
+256 B. `ParameterInfo` is 256 B, of which three `Option<PhpType>`
+fields account for 192 B.
+
+### Fix
+
+Box the rare variants so the enum's payload fits a pointer, e.g.
+`Conditional(Box<ConditionalType>)`, `Callable(Box<CallableType>)`,
+`Generic(Box<GenericType>)`, `Union(Box<Vec<PhpType>>)`,
+`IntRange(Box<(String, String)>)`. `Named(Atom)` stays inline, which is
+the 70% case, so the common path gains an indirection nowhere.
+
+Reclaim at 16 B per slot: **83 MB** on the mid-size app, **135 MB** on
+the large one. `MethodInfo` drops to ~368 B and `ParameterInfo` to
+~112 B. A less aggressive version that only boxes `Conditional` and
+`Callable` (leaving 24 B, since `Box<[T]>` and `Box<str>` are fat
+pointers) still reclaims roughly two thirds of that.
+
+Note `Generic`'s first field is a `String` holding a class name or
+keyword — a bounded set that should be an `Atom` regardless.
+
+---
+
+## P38. Resolved type values are duplicated ~33x
+
+**Impact: High · Effort: High**
+
+The same measurement pass that produced P37 rendered every live
+`PhpType` and counted distinct forms: **1.68 M values collapse to
+50,590 distinct rendered types** on the large Laravel app, and 1.02 M to
+30,903 on the mid-size one. Both are almost exactly **33x duplication**.
+Every `string`, `?Carbon`, `Collection<User>`, and
+`Builder<TModel>` is re-allocated per method, per parameter, per class
+that inherits it.
+
+Interning types the way `Atom` interns names would collapse both halves
+of the cost at once: each slot becomes a pointer-or-index handle, and
+each distinct type is allocated once. Combined with the slot shrink from
+P37 the ceiling is roughly 230 MB on the large app and 140 MB on the
+mid-size one — the single largest structural win available.
+
+This is deliberately filed separately from P37 because it is a much
+larger change: `PhpType` is currently a value that substitution paths
+mutate in place, so interning means moving to a construct-and-intern
+API (`PhpType::named(...)`, `PhpType::union(...)`) and auditing every
+site that builds or rewrites a type. Do P37 first — it is
+self-contained, it delivers most of the per-slot win, and it does not
+foreclose interning later.
+
+Take care not to feed the interner unbounded text: `Raw` holds
+free-text parse fallbacks and `Literal` holds source literals, so those
+should keep owned payloads or use a separate bounded cache.
+
+---
+
+## P39. `SymbolKind` stores owned strings per span
+
+**Impact: Medium · Effort: Low-Medium**
+
+`symbol_maps` is the second-largest store: 40 MB / 367 K allocations on
+the mid-size app, 64 MB / 602 K on the large one. The span vectors
+dominate it — 353 K spans costing 31 MB of struct bytes (88 B per
+`SymbolSpan`) plus 4.5 MB of string payloads across 254 K separate
+allocations.
+
+`SymbolSpan` is `{ start: u32, end: u32, kind: SymbolKind }`, and
+`SymbolKind` is fat because nearly every variant owns a `String`.
+`MemberAccess` owns two (`subject_text` and `member_name`).
+
+Two independent changes:
+
+1. **Interned names.** `member_name`, class names, variable names,
+   function names, and constant names are all drawn from bounded sets
+   already interned elsewhere. Making them `Atom` drops 16 B per field
+   and removes the per-span allocation entirely.
+2. **`subject_text` as a byte range.** It is the source text of the LHS
+   expression, which is unbounded free text and must not be interned.
+   Every consumer has the file content available, so storing
+   `(start, end)` offsets and slicing on demand removes the string
+   without losing anything.
+
+Together these should take `SymbolKind` from ~80 B to ~24-32 B,
+reclaiming roughly 17 MB on the large app and eliminating ~250 K
+allocations.
+
+---
+
+## P40. `method_index` is a per-class `HashMap` even when the member vec is shared
+
+**Impact: Low-Medium · Effort: Low**
+
+`ClassInfo::method_index` is an `AtomMap<u32>` rebuilt per resolved
+class: 11 MB across 2 K classes on the mid-size app, 20 MB across 3.3 K
+on the large one — roughly 6 KB per class. At ~214 members a class the
+hashbrown bucket array rounds to 512 slots of 16 B plus control bytes,
+while the data it indexes is 214 entries of 12 B.
+
+The flattened member vectors are already shared between classes (only
+8.6 MB of slot vectors back 3.3 K classes), but each class still builds
+its own index over them.
+
+Two options, either of which is small:
+
+1. **Sorted `Vec<(Atom, u32)>` with binary search.** Roughly a third of
+   the memory (20 MB to ~7 MB) and better cache behaviour at these
+   sizes. Lookup goes from O(1) to O(log n) on ~200 entries, which is
+   3-4 comparisons of `Copy` pointer-sized keys.
+2. **Share the index alongside the member vector.** When two classes
+   share a `SharedVec` of methods they can share one `Arc` of its index,
+   which keeps O(1) lookup and removes the duplication instead of
+   shrinking it.
+
+---
+
+## P41. 3.8 M live allocations cost ~180 MB in allocator overhead
+
+**Impact: Medium · Effort: Medium**
+
+Independent of what we store, *how many* allocations we hold costs
+real memory. On the large Laravel app, mimalloc (the allocator every
+shipped Linux binary runs — see the "Memory baseline" note above)
+reports 634 MB live across 3.83 M allocations (average 174 B), while
+peak RSS is 834 MB. The 179 MB difference (22% of RSS; 25% on the
+mid-size app) is mimalloc's per-size-class page and slot rounding —
+roughly 47 B per live allocation.
+
+This is *after* the existing `configure_allocator` tuning (a short
+purge delay plus a per-process transparent-huge-pages opt-out — see
+`src/lib.rs`), which already earns back real RSS: the same run under
+plain glibc `malloc` peaks *higher* (622 MB / 855 MB) despite a lower
+overhead percentage (19% / 17%), because glibc holds freed arena
+pages far more readily than mimalloc does once tuned. So the
+allocator swap this item used to propose is already done — mimalloc is
+the shipped allocator and it is outperforming the alternative on
+absolute peak RSS. `MALLOC_ARENA_MAX` capping under plain glibc moves
+peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
+trimmed live figure, confirming arena count was never the lever.
+
+What is left is allocation *count* itself: at ~47 B of overhead per
+live allocation, each allocation avoided is worth more than its own
+`size_of`. P37, P39, and P40 each remove hundreds of thousands of
+allocations as a side effect (folding `Option<PhpType>` heap payloads
+into fewer, larger buffers; interning `SymbolKind` strings; sharing
+`method_index`), so re-measure this line after those land. If a
+meaningful gap remains afterward, the next lever is arena-allocating
+the member metadata (bump-allocate `MethodInfo`/`PropertyInfo`/
+`ParameterInfo` per resolved class instead of one `Box`/`Arc` per
+member) — a much larger change than anything else in this list, so only
+worth it if the per-allocation overhead is still the dominant cost once
+the count itself has come down.
 
 ---
 

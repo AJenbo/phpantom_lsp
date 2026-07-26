@@ -83,16 +83,24 @@
 //!     parsing (`parse_object_shape`, `extract_object_shape_property_type`,
 //!     `is_object_shape`)
 
-// Use mimalloc on musl builds (the static Linux binaries we ship),
-// where the system allocator is 4-6x slower for our parallel,
-// allocation-heavy workload. Defined in the library rather than the
-// binary so every artifact built from this crate uses the same
-// allocator: the language server, and also the benchmark and test
-// harnesses, which link the library but not `main.rs`. Everywhere else
-// the system allocator performs fine and holds less memory when idle.
-#[cfg(all(feature = "mimalloc", target_env = "musl"))]
+// Use mimalloc on Linux, where the system allocator is 4-6x slower for
+// our parallel, allocation-heavy workload. Defined in the library
+// rather than the binary so every artifact built from this crate uses
+// the same allocator: the language server, and also the benchmark and
+// test harnesses, which link the library but not `main.rs`. The Linux
+// binaries we ship are musl; covering glibc too keeps a local dev build
+// representative of them (see the dependency note in Cargo.toml).
+#[cfg(all(feature = "mimalloc", target_os = "linux", not(feature = "mem-audit")))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+// The `mem-audit` feature replaces the global allocator with a counting
+// wrapper that delegates to whichever allocator this build would
+// otherwise use, so the audit reports live bytes for the real
+// allocator. Never enabled in a shipped build (see Cargo.toml).
+#[cfg(feature = "mem-audit")]
+#[global_allocator]
+static GLOBAL: mem_audit::CountingAlloc = mem_audit::CountingAlloc;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -160,8 +168,8 @@ pub const PARSE_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 /// Tune the global allocator for a language-server workload.
 ///
-/// Only does anything on musl builds, where mimalloc is the global
-/// allocator (musl's own malloc is 4-6x slower for our parallel,
+/// Only does anything on Linux, where mimalloc is the global allocator
+/// (the system malloc is 4-6x slower for our parallel,
 /// allocation-heavy indexing). Two adjustments keep mimalloc's
 /// resident memory close to the live working set:
 ///
@@ -186,7 +194,7 @@ pub const PARSE_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 /// Must be called at the very start of `main`, before the async runtime
 /// spawns any threads. No-op when mimalloc is not the active allocator.
 pub fn configure_allocator() {
-    #[cfg(all(feature = "mimalloc", target_env = "musl"))]
+    #[cfg(all(feature = "mimalloc", target_os = "linux"))]
     unsafe {
         // `mi_option_purge_delay` is index 15 in mimalloc v3's option
         // enum (see c_src/mimalloc/v3/include/mimalloc.h in libmimalloc-sys),
@@ -236,6 +244,8 @@ pub(crate) mod inheritance;
 mod inlay_hints;
 mod linked_editing;
 mod mago;
+#[cfg(feature = "mem-audit")]
+mod mem_audit;
 pub(crate) mod names;
 mod parser;
 pub(crate) mod phar;

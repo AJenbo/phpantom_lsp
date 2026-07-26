@@ -18,6 +18,34 @@ The stubs are downloaded on first build and cached in `stubs/`. To update to the
 
 For details on how symbol resolution and stub loading work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+### Matching the released binary
+
+The Linux binaries we publish are static musl builds using mimalloc as
+the allocator (see the comment on the `mimalloc` dependency in
+`Cargo.toml`). A plain `cargo build --release` on a glibc workstation
+already uses the same allocator — mimalloc is enabled for Linux, not
+just musl — so day-to-day performance and memory testing on any Linux
+dev machine is representative without extra setup.
+
+To build the exact target we ship (e.g. to reproduce a memory or
+performance report bit-for-bit), build for musl:
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+sudo apt install musl-tools   # provides musl-gcc; adjust for your distro
+CARGO_BUILD_TARGET=x86_64-unknown-linux-musl cargo build --release
+```
+
+This produces `target/x86_64-unknown-linux-musl/release/phpantom_lsp`
+alongside your normal build (it doesn't touch `target/release/`), so it
+doesn't disturb incremental builds of your everyday work.
+
+If you're benchmarking or profiling memory and get numbers that look
+off from what's documented in `docs/todo/performance.md`, check which
+allocator built the binary before assuming a regression — macOS and
+Windows use the system allocator in both CI and locally already, so
+they need no special steps.
+
 ## Testing
 
 Run the full test suite:

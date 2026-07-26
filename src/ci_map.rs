@@ -89,6 +89,24 @@ impl<V> CiMap<V> {
         self.inner.values().map(|(k, v)| (k.as_str(), v))
     }
 
+    /// Memory-audit tooling: approximate heap bytes of the map (bucket
+    /// array plus both key spellings), with per-value heap supplied by
+    /// `val_heap`.
+    #[cfg(feature = "mem-audit")]
+    pub fn audit_heap(&self, mut val_heap: impl FnMut(&V) -> usize) -> usize {
+        let cap = self.inner.capacity();
+        let buckets = if cap == 0 {
+            0
+        } else {
+            ((cap * 8).div_ceil(7).max(4)).next_power_of_two()
+        };
+        let mut b = buckets * (std::mem::size_of::<(String, (String, V))>() + 1);
+        for (folded, (orig, v)) in &self.inner {
+            b += folded.capacity() + orig.capacity() + val_heap(v);
+        }
+        b
+    }
+
     /// Iterate over the original (as-inserted) key spellings.
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.inner.values().map(|(k, _)| k.as_str())
@@ -149,6 +167,22 @@ pub struct CiSet {
 }
 
 impl CiSet {
+    /// Memory-audit tooling: approximate heap bytes of the set.
+    #[cfg(feature = "mem-audit")]
+    pub fn audit_heap(&self) -> usize {
+        let cap = self.inner.capacity();
+        let buckets = if cap == 0 {
+            0
+        } else {
+            ((cap * 8).div_ceil(7).max(4)).next_power_of_two()
+        };
+        let mut b = buckets * (std::mem::size_of::<String>() + 1);
+        for s in &self.inner {
+            b += s.capacity();
+        }
+        b
+    }
+
     pub fn new() -> Self {
         Self {
             inner: HashSet::new(),

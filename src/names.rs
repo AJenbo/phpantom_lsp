@@ -24,6 +24,22 @@ pub struct OwnedResolvedNames {
 }
 
 impl OwnedResolvedNames {
+    /// Memory-audit tooling: `(entry count, approximate heap bytes)`.
+    #[cfg(feature = "mem-audit")]
+    pub fn audit_heap(&self) -> (usize, usize) {
+        let cap = self.names.capacity();
+        let buckets = if cap == 0 {
+            0
+        } else {
+            ((cap * 8).div_ceil(7).max(4)).next_power_of_two()
+        };
+        let mut bytes = buckets * (std::mem::size_of::<(u32, (String, bool))>() + 1);
+        for (fqn, _) in self.names.values() {
+            bytes += fqn.capacity();
+        }
+        (self.names.len(), bytes)
+    }
+
     /// Build an `OwnedResolvedNames` by copying every entry out of the
     /// arena-backed `ResolvedNames`.
     pub fn from_resolved(resolved: &mago_names::ResolvedNames<'_>) -> Self {

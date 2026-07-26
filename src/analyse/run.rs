@@ -555,6 +555,16 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         eprint!("\r\x1b[2K {}\n", progress_bar(file_count, file_count));
     }
 
+    #[cfg(feature = "mem-audit")]
+    if std::env::var_os("PHPANTOM_MEM_AUDIT").is_some() {
+        let runner_bytes: usize = file_data
+            .iter()
+            .flatten()
+            .map(|(uri, content)| uri.capacity() + content.capacity())
+            .sum();
+        crate::mem_audit::report(&backend, runner_bytes);
+    }
+
     // Sort by path so output order is deterministic.
     all_file_diagnostics.sort_by(|a, b| a.0.cmp(&b.0));
 
