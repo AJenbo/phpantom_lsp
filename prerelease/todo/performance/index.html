@@ -1603,6 +1603,89 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#memory-baseline-2026-07-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Memory baseline (2026-07-26)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p37-phptype-is-64-bytes-and-is-embedded-3-m-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P37. <code>PhpType</code> is 64 bytes and is embedded ~3 M times
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P37. PhpType is 64 bytes and is embedded ~3 M times">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p38-resolved-type-values-are-duplicated-33x" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P38. Resolved type values are duplicated ~33x
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p39-symbolkind-stores-owned-strings-per-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P39. <code>SymbolKind</code> stores owned strings per span
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P40. <code>method_index</code> is a per-class <code>HashMap</code> even when the member vec is shared
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P41. 3.8 M live allocations cost ~180 MB in allocator overhead
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2354,6 +2437,89 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#memory-baseline-2026-07-26" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Memory baseline (2026-07-26)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p37-phptype-is-64-bytes-and-is-embedded-3-m-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P37. <code>PhpType</code> is 64 bytes and is embedded ~3 M times
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P37. PhpType is 64 bytes and is embedded ~3 M times">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p38-resolved-type-values-are-duplicated-33x" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P38. Resolved type values are duplicated ~33x
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p39-symbolkind-stores-owned-strings-per-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P39. <code>SymbolKind</code> stores owned strings per span
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P40. <code>method_index</code> is a per-class <code>HashMap</code> even when the member vec is shared
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P41. 3.8 M live allocations cost ~180 MB in allocator overhead
       </span>
     </span>
   </a>
@@ -3173,6 +3339,13 @@ against the full-index memory aim — and the index is built on every
 function spans); only the enclosing class and namespace are needed.
 Skipping the index build entirely in the <code>analyze</code> pipeline is a
 free win under either direction.</p>
+<p><strong>Quantified by the memory audit (see "Memory baseline" below):</strong> on a
+large Laravel app the index holds 218,167 entries behind 74,454 distinct
+<code>(key, uri)</code> pairs — <strong>2.9x span duplication</strong> — costing 43 MB across
+330 K allocations. Direction 1 (dedup + count) collapses that to
+roughly the distinct-pair count, an estimated ~5 MB. Still worth doing,
+and now the third-largest single store after the resolved-class cache
+and <code>symbol_maps</code>.</p>
 <hr />
 <h2 id="p32-vendor-package-scan-reads-every-file-twice-for-origin-classification">P32. Vendor package scan reads every file twice for origin classification<a class="headerlink" href="#p32-vendor-package-scan-reads-every-file-twice-for-origin-classification" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
@@ -3219,9 +3392,13 @@ holds ~247 KB per resolved class.</p>
    substitution, trait / interface / enrichment merges, Eloquent Builder
    and scope forwarding) are interned so value-identical results
    collapse to one allocation with a shared parameter list. What remains
-   per class is the flattened <code>Vec&lt;Arc&lt;_&gt;&gt;</code> itself — one pointer slot
-   per visible member — which the separated-metadata fix below would
-   eliminate.</p>
+   per class is the flattened <code>Vec&lt;Arc&lt;_&gt;&gt;</code> itself plus its
+   <code>method_index</code> — one pointer slot per visible member. Measured on a
+   full Laravel app (~2 K resolved classes) this residual is only
+   ~10 MB across the whole resolved-class cache; the member
+   <em>allocations</em> the vecs point at, not the pointer slots, are the bulk.
+   Bounding the cache (fix below) reclaims both; separating the pointer
+   slots on their own is not worth the rewrite.</p>
 </li>
 <li>
 <p><strong>The cache is retained for the whole session, unbounded.</strong> Eager
@@ -3232,7 +3409,7 @@ holds ~247 KB per resolved class.</p>
    the per-file diagnostic pass refills the cache to the same size.)</p>
 </li>
 </ol>
-<p>Fixes, cheapest first (each stands alone):</p>
+<p>Fix:</p>
 <ol>
 <li><strong>Bound the resolved-class cache.</strong> After the workspace pass, the
    fully-flattened metadata for every project class does not need to stay
@@ -3242,20 +3419,16 @@ holds ~247 KB per resolved class.</p>
    cycles are broken by the cache's in-flight set, which <code>clear()</code>
    deliberately leaves untouched, so clearing mid-resolution cannot
    resurrect unbounded recursion. <strong>Low-Medium.</strong></li>
-<li><strong>Separated metadata.</strong> The structural fix for the remaining
-   per-class pointer vectors: store member identifier <code>Atom</code>s per class
-   and keep a single global member store, resolving members on demand
-   instead of flattening a per-class <code>Vec</code> of pointers (Mago's model).
-   With member <em>allocations</em> already shared and interned across methods,
-   properties, and constants, the win left here is the pointer slots
-   themselves. This needs substitution moved to query time to fit
-   PHPantom's transform-on-inherit model (an inherited member is not
-   byte-identical to the declaring class's once template substitution or
-   bare-<code>self</code> rewriting applies, so a pure <code>(fqn, name)</code> redirect would
-   lose the transform). Profiling closed this as not worth the rewrite
-   for analysis <em>speed</em>; it remains a valid direction for <em>memory</em> if the
-   cache bound above proves insufficient. <strong>High.</strong></li>
 </ol>
+<p>Separating the per-class member vectors from a global member store
+(Mago's model, resolving members on demand instead of flattening a
+<code>Vec</code> of pointers) was the other candidate here, but measurement showed
+the residual pointer slots + <code>method_index</code> are only ~10 MB across the
+whole cache once member allocations are shared and interned. That is not
+worth moving substitution to query time (the transform-on-inherit model
+means an inherited member is not byte-identical to the declaring class's
+once template substitution or bare-<code>self</code> rewriting applies), so the
+lever is bounding the cache, not separating the metadata.</p>
 <hr />
 <h2 id="p34-eager-class-population-is-single-threaded">P34. Eager class population is single-threaded<a class="headerlink" href="#p34-eager-class-population-is-single-threaded" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
@@ -3355,6 +3528,280 @@ unexpected acceptance changes.</p>
 <p>The provider-internal callers in <code>src/virtual_members/</code> and the
 interface merge inside <code>resolve_class_fully_inner</code> are intentional
 (they run <em>while</em> the cache entry is being built) and are out of scope.</p>
+<p><strong>Still worth doing, and orthogonal to the memory work below.</strong> This is
+a CPU fix (11% of diagnostic-pass CPU), not a memory one, but it is
+memory-neutral-to-positive: today each of the 25,676 calls builds a
+full inheritance-merged <code>ClassInfo</code> (its own methods/properties vecs)
+and immediately discards it, which is 25,676 transient allocations of
+exactly the kind P41 cares about. Routing through the cache turns most
+of those into a hit against an entry the diagnostic pass populates
+anyway; it can only add a new persistent cache entry for a class that
+was otherwise <em>never</em> resolved in the pass, which is a narrow case
+bounded by the same fix as P33.</p>
+<hr />
+<h2 id="memory-baseline-2026-07-26">Memory baseline (2026-07-26)<a class="headerlink" href="#memory-baseline-2026-07-26" title="Permanent link">&para;</a></h2>
+<p>Measured with the <code>mem-audit</code> cargo feature, which installs a counting
+global allocator and prints a deep-size walk of every long-lived store
+at the end of <code>analyze</code> when <code>PHPANTOM_MEM_AUDIT</code> is set:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release<span class="w"> </span>--features<span class="w"> </span>mem-audit
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">PHPANTOM_MEM_AUDIT</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
+</code></pre></div>
+<p>The walk dedups shared <code>Arc</code>s by pointer, so a member reached from
+several classes is counted once. It reports both a field-level
+attribution and a drop-and-measure probe that clears each store and
+reads the exact allocator delta, which cross-checks the walk. Since
+which allocator is active changes the RSS/overhead figures (see P41),
+the audit labels its own build (<code>target … / … libc, allocator …</code>) —
+always check that line before comparing a new run to the table below.</p>
+<p>The byte/allocation figures (live heap, per-store bytes released,
+<code>PhpType</code> duplication) are allocator-independent — they come from
+<code>size_of</code>/<code>capacity()</code>, not from the allocator — and were cross-checked
+identical under both <code>System</code> and <code>mimalloc</code>. Only RSS and the
+"overhead" line are allocator-specific; those are reported here for
+mimalloc, since that is what every shipped Linux binary runs (see
+<code>docs/BUILDING.md</code> for reproducing that exact build locally):</p>
+<table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>Mid-size Laravel app</th>
+<th>Large Laravel app</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Peak RSS (<code>VmHWM</code>)</td>
+<td>578 MB</td>
+<td>834 MB</td>
+</tr>
+<tr>
+<td>RSS after mimalloc collect</td>
+<td>552 MB</td>
+<td>814 MB</td>
+</tr>
+<tr>
+<td>Live heap (allocator-reported)</td>
+<td>415 MB</td>
+<td>634 MB</td>
+</tr>
+<tr>
+<td>Live allocations</td>
+<td>2.46 M</td>
+<td>3.83 M</td>
+</tr>
+<tr>
+<td>Allocator + page overhead</td>
+<td>136 MB (25% of RSS)</td>
+<td>179 MB (22%)</td>
+</tr>
+</tbody>
+</table>
+<p>For reference, the same run under plain glibc <code>malloc</code> (no mimalloc)
+peaks higher despite a <em>lower</em> overhead percentage: 622 MB / 855 MB
+peak, 100 MB (19%) / 133 MB (17%) overhead. mimalloc holds more
+allocator/page overhead in percentage terms but a smaller absolute
+peak, because PHPantom already tunes it (<code>configure_allocator</code>: a
+short purge delay plus a per-process THP opt-out) to return freed
+parse-burst memory promptly. See P41 for what's left after that tuning.</p>
+<p>Bytes released per store (drop-and-measure, mid-size / large):</p>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Released</th>
+<th>Allocations</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>resolved_class_cache</code></td>
+<td>205 MB / 336 MB</td>
+<td>1.17 M / 1.96 M</td>
+</tr>
+<tr>
+<td><code>symbol_maps</code></td>
+<td>40 MB / 64 MB</td>
+<td>367 K / 602 K</td>
+</tr>
+<tr>
+<td><code>reference_index</code></td>
+<td>26 MB / 43 MB</td>
+<td>204 K / 330 K</td>
+</tr>
+<tr>
+<td><code>uri_classes_index</code></td>
+<td>25 MB / 36 MB</td>
+<td>122 K / 172 K</td>
+</tr>
+<tr>
+<td><code>resolved_names</code></td>
+<td>4.6 MB / 6.7 MB</td>
+<td>53 K / 75 K</td>
+</tr>
+<tr>
+<td>everything else</td>
+<td>&lt; 6 MB each</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>Within the member data, the largest field-level groups on the large app
+are <code>MethodInfo</code> structs (122 MB across 223 K distinct methods at 560 B
+each), parameter vectors (86 MB across 187 K vectors holding 312 K
+parameters at 256 B each), <code>PhpType</code> heap payloads (~66 MB), and
+<code>method_index</code> (20 MB).</p>
+<p>Two findings from the baseline are worth recording because they close
+off obvious-looking ideas:</p>
+<ul>
+<li><strong>Boxing the display-only docblock fields is a net loss.</strong> Only 9-10%
+  of methods have no description, <code>@return</code> text, links, <code>@see</code> refs, or
+  deprecation data, so moving the six fields behind one <code>Option&lt;Box&lt;…&gt;&gt;</code>
+  would add a pointer plus an allocation header to the other 90%. The
+  same holds for constants. Properties and parameters are mostly
+  doc-free but their doc fields are few, so the win there is ~2-8 MB and
+  not worth the indirection on its own.</li>
+<li><strong>A shared empty <code>SharedVec</code> saves under 1 MB.</strong> Only 13% of parameter
+  vectors are empty. Worth folding into another change that touches
+  <code>SharedVec</code>, not worth a commit by itself.</li>
+</ul>
+<hr />
+<h2 id="p37-phptype-is-64-bytes-and-is-embedded-3-m-times">P37. <code>PhpType</code> is 64 bytes and is embedded ~3 M times<a class="headerlink" href="#p37-phptype-is-64-bytes-and-is-embedded-3-m-times" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Effort: Medium</strong></p>
+<p><code>PhpType</code> is 64 bytes because its largest variants force that size:
+<code>Conditional</code> carries a <code>String</code> plus three <code>Box</code>es, <code>Callable</code> carries
+a <code>String</code> plus a <code>Vec</code> plus an <code>Option&lt;Box&gt;</code>, and <code>Generic</code> carries a
+<code>String</code> plus a <code>Vec</code>. Every <code>PhpType</code> slot in the program pays for
+them.</p>
+<p>Measured on the large Laravel app: <strong>2.94 M slots</strong> (1.90 M sitting
+inline in struct fields, 1.05 M inside heap allocations). The variants
+that force the 64-byte size are rare — the mix is <code>Named</code> 70.6%,
+<code>Generic</code> 12.8%, <code>Union</code> 10.2%, <code>Callable</code> 2.9%, <code>Nullable</code> 1.2%,
+<code>Conditional</code> 1.1%, everything else under 0.5%.</p>
+<p>The cost lands squarely on the hottest structs. <code>MethodInfo</code> is 560 B,
+of which four <code>Option&lt;PhpType&gt;</code> fields (<code>return_type</code>,
+<code>native_return_type</code>, <code>conditional_return</code>, <code>if_this_is</code>) account for
+256 B. <code>ParameterInfo</code> is 256 B, of which three <code>Option&lt;PhpType&gt;</code>
+fields account for 192 B.</p>
+<h3 id="fix_7">Fix<a class="headerlink" href="#fix_7" title="Permanent link">&para;</a></h3>
+<p>Box the rare variants so the enum's payload fits a pointer, e.g.
+<code>Conditional(Box&lt;ConditionalType&gt;)</code>, <code>Callable(Box&lt;CallableType&gt;)</code>,
+<code>Generic(Box&lt;GenericType&gt;)</code>, <code>Union(Box&lt;Vec&lt;PhpType&gt;&gt;)</code>,
+<code>IntRange(Box&lt;(String, String)&gt;)</code>. <code>Named(Atom)</code> stays inline, which is
+the 70% case, so the common path gains an indirection nowhere.</p>
+<p>Reclaim at 16 B per slot: <strong>83 MB</strong> on the mid-size app, <strong>135 MB</strong> on
+the large one. <code>MethodInfo</code> drops to ~368 B and <code>ParameterInfo</code> to
+~112 B. A less aggressive version that only boxes <code>Conditional</code> and
+<code>Callable</code> (leaving 24 B, since <code>Box&lt;[T]&gt;</code> and <code>Box&lt;str&gt;</code> are fat
+pointers) still reclaims roughly two thirds of that.</p>
+<p>Note <code>Generic</code>'s first field is a <code>String</code> holding a class name or
+keyword — a bounded set that should be an <code>Atom</code> regardless.</p>
+<hr />
+<h2 id="p38-resolved-type-values-are-duplicated-33x">P38. Resolved type values are duplicated ~33x<a class="headerlink" href="#p38-resolved-type-values-are-duplicated-33x" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Effort: High</strong></p>
+<p>The same measurement pass that produced P37 rendered every live
+<code>PhpType</code> and counted distinct forms: <strong>1.68 M values collapse to
+50,590 distinct rendered types</strong> on the large Laravel app, and 1.02 M to
+30,903 on the mid-size one. Both are almost exactly <strong>33x duplication</strong>.
+Every <code>string</code>, <code>?Carbon</code>, <code>Collection&lt;User&gt;</code>, and
+<code>Builder&lt;TModel&gt;</code> is re-allocated per method, per parameter, per class
+that inherits it.</p>
+<p>Interning types the way <code>Atom</code> interns names would collapse both halves
+of the cost at once: each slot becomes a pointer-or-index handle, and
+each distinct type is allocated once. Combined with the slot shrink from
+P37 the ceiling is roughly 230 MB on the large app and 140 MB on the
+mid-size one — the single largest structural win available.</p>
+<p>This is deliberately filed separately from P37 because it is a much
+larger change: <code>PhpType</code> is currently a value that substitution paths
+mutate in place, so interning means moving to a construct-and-intern
+API (<code>PhpType::named(...)</code>, <code>PhpType::union(...)</code>) and auditing every
+site that builds or rewrites a type. Do P37 first — it is
+self-contained, it delivers most of the per-slot win, and it does not
+foreclose interning later.</p>
+<p>Take care not to feed the interner unbounded text: <code>Raw</code> holds
+free-text parse fallbacks and <code>Literal</code> holds source literals, so those
+should keep owned payloads or use a separate bounded cache.</p>
+<hr />
+<h2 id="p39-symbolkind-stores-owned-strings-per-span">P39. <code>SymbolKind</code> stores owned strings per span<a class="headerlink" href="#p39-symbolkind-stores-owned-strings-per-span" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
+<p><code>symbol_maps</code> is the second-largest store: 40 MB / 367 K allocations on
+the mid-size app, 64 MB / 602 K on the large one. The span vectors
+dominate it — 353 K spans costing 31 MB of struct bytes (88 B per
+<code>SymbolSpan</code>) plus 4.5 MB of string payloads across 254 K separate
+allocations.</p>
+<p><code>SymbolSpan</code> is <code>{ start: u32, end: u32, kind: SymbolKind }</code>, and
+<code>SymbolKind</code> is fat because nearly every variant owns a <code>String</code>.
+<code>MemberAccess</code> owns two (<code>subject_text</code> and <code>member_name</code>).</p>
+<p>Two independent changes:</p>
+<ol>
+<li><strong>Interned names.</strong> <code>member_name</code>, class names, variable names,
+   function names, and constant names are all drawn from bounded sets
+   already interned elsewhere. Making them <code>Atom</code> drops 16 B per field
+   and removes the per-span allocation entirely.</li>
+<li><strong><code>subject_text</code> as a byte range.</strong> It is the source text of the LHS
+   expression, which is unbounded free text and must not be interned.
+   Every consumer has the file content available, so storing
+   <code>(start, end)</code> offsets and slicing on demand removes the string
+   without losing anything.</li>
+</ol>
+<p>Together these should take <code>SymbolKind</code> from ~80 B to ~24-32 B,
+reclaiming roughly 17 MB on the large app and eliminating ~250 K
+allocations.</p>
+<hr />
+<h2 id="p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared">P40. <code>method_index</code> is a per-class <code>HashMap</code> even when the member vec is shared<a class="headerlink" href="#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Effort: Low</strong></p>
+<p><code>ClassInfo::method_index</code> is an <code>AtomMap&lt;u32&gt;</code> rebuilt per resolved
+class: 11 MB across 2 K classes on the mid-size app, 20 MB across 3.3 K
+on the large one — roughly 6 KB per class. At ~214 members a class the
+hashbrown bucket array rounds to 512 slots of 16 B plus control bytes,
+while the data it indexes is 214 entries of 12 B.</p>
+<p>The flattened member vectors are already shared between classes (only
+8.6 MB of slot vectors back 3.3 K classes), but each class still builds
+its own index over them.</p>
+<p>Two options, either of which is small:</p>
+<ol>
+<li><strong>Sorted <code>Vec&lt;(Atom, u32)&gt;</code> with binary search.</strong> Roughly a third of
+   the memory (20 MB to ~7 MB) and better cache behaviour at these
+   sizes. Lookup goes from O(1) to O(log n) on ~200 entries, which is
+   3-4 comparisons of <code>Copy</code> pointer-sized keys.</li>
+<li><strong>Share the index alongside the member vector.</strong> When two classes
+   share a <code>SharedVec</code> of methods they can share one <code>Arc</code> of its index,
+   which keeps O(1) lookup and removes the duplication instead of
+   shrinking it.</li>
+</ol>
+<hr />
+<h2 id="p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead">P41. 3.8 M live allocations cost ~180 MB in allocator overhead<a class="headerlink" href="#p41-38-m-live-allocations-cost-180-mb-in-allocator-overhead" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p>Independent of what we store, <em>how many</em> allocations we hold costs
+real memory. On the large Laravel app, mimalloc (the allocator every
+shipped Linux binary runs — see the "Memory baseline" note above)
+reports 634 MB live across 3.83 M allocations (average 174 B), while
+peak RSS is 834 MB. The 179 MB difference (22% of RSS; 25% on the
+mid-size app) is mimalloc's per-size-class page and slot rounding —
+roughly 47 B per live allocation.</p>
+<p>This is <em>after</em> the existing <code>configure_allocator</code> tuning (a short
+purge delay plus a per-process transparent-huge-pages opt-out — see
+<code>src/lib.rs</code>), which already earns back real RSS: the same run under
+plain glibc <code>malloc</code> peaks <em>higher</em> (622 MB / 855 MB) despite a lower
+overhead percentage (19% / 17%), because glibc holds freed arena
+pages far more readily than mimalloc does once tuned. So the
+allocator swap this item used to propose is already done — mimalloc is
+the shipped allocator and it is outperforming the alternative on
+absolute peak RSS. <code>MALLOC_ARENA_MAX</code> capping under plain glibc moves
+peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
+trimmed live figure, confirming arena count was never the lever.</p>
+<p>What is left is allocation <em>count</em> itself: at ~47 B of overhead per
+live allocation, each allocation avoided is worth more than its own
+<code>size_of</code>. P37, P39, and P40 each remove hundreds of thousands of
+allocations as a side effect (folding <code>Option&lt;PhpType&gt;</code> heap payloads
+into fewer, larger buffers; interning <code>SymbolKind</code> strings; sharing
+<code>method_index</code>), so re-measure this line after those land. If a
+meaningful gap remains afterward, the next lever is arena-allocating
+the member metadata (bump-allocate <code>MethodInfo</code>/<code>PropertyInfo</code>/
+<code>ParameterInfo</code> per resolved class instead of one <code>Box</code>/<code>Arc</code> per
+member) — a much larger change than anything else in this list, so only
+worth it if the per-allocation overhead is still the dominant cost once
+the count itself has come down.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class
