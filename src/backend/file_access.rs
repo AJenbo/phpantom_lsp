@@ -7,6 +7,7 @@
 //! lock-and-unwrap boilerplate that used to be duplicated across the
 //! completion handler, definition resolver, and other consumers.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::Url;
@@ -193,6 +194,44 @@ impl Backend {
             namespace,
             resolved_names,
         }
+    }
+
+    /// Subset of [`file_context_at`](Self::file_context_at) for callers
+    /// that only need the enclosing class list and namespace (e.g.
+    /// resolving `self`/`static`/`parent`). Skips the `use`-map and
+    /// `resolved_names` clones.
+    pub(crate) fn classes_and_namespace_at(
+        &self,
+        uri: &str,
+        byte_offset: u32,
+    ) -> (Vec<Arc<ClassInfo>>, Option<String>) {
+        let classes = self
+            .symbols
+            .uri_classes_index
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let namespace = self.namespace_at_offset(uri, byte_offset);
+        (classes, namespace)
+    }
+
+    /// Subset of [`file_context_at`](Self::file_context_at) for callers
+    /// that only need the `use`-map and namespace (e.g. resolving a bare
+    /// name to its FQN). Skips the class-list and `resolved_names` clones.
+    pub(crate) fn use_map_and_namespace_at(
+        &self,
+        uri: &str,
+        byte_offset: u32,
+    ) -> (HashMap<String, String>, Option<String>) {
+        let use_map = self
+            .file_imports
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let namespace = self.namespace_at_offset(uri, byte_offset);
+        (use_map, namespace)
     }
 
     /// Return the namespace that contains the given byte offset in a file.

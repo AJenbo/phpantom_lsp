@@ -26,7 +26,6 @@ within the same impact tier.
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
 | P36 | [Diagnostic-path call sites re-merge inheritance per call](todo/performance.md#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache)          | Medium      | Low         |
-| P31 | [Reference index stores per-span entries when consumers only read distinct URIs](todo/performance.md#p31-reference-index-stores-per-span-entries-when-consumers-only-read-distinct-uris)          | Medium      | Low-Medium  |
 | P38 | [Resolved type values are duplicated ~34x](todo/performance.md#p38-resolved-type-values-are-duplicated-34x)                                                          | High        | High        |
 | P39 | [`SymbolKind` stores owned strings per span](todo/performance.md#p39-symbolkind-stores-owned-strings-per-span)                                                       | Medium      | Low-Medium  |
 | P40 | [`method_index` is a per-class `HashMap` even when the member vec is shared](todo/performance.md#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared) | Low-Medium  | Low         |
@@ -217,6 +216,7 @@ unlikely to move the needle for most users.
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Medium      |
 | P23 | [`workspace/symbol` lowercases every symbol name per request](todo/performance.md#p23-workspacesymbol-allocates-a-lowercase-copy-of-every-symbol-name-per-request)          | Low-Medium  | Low         |
 | P28 | [`process_assert_narrowing` clones the scope per variable for every statement](todo/performance.md#p28-process_assert_narrowing-clones-the-top-level-scope-once-per-variable-for-every-statement) | Low-Medium  | Low         |
+| P42 | [Reference index is built during the headless `analyze` pipeline but never queried there](todo/performance.md#p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there) | Low-Medium  | Low         |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X3  | Completion item detail on demand (`completionItem/resolve`)                                                                                                                 | Medium      | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium      |

@@ -1311,58 +1311,46 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     );
 
     // ── 6. Reference index ──────────────────────────────────────────
+    // Per key, only the distinct contributing URIs are stored (as a
+    // shared per-file `Arc<str>`) mapped to a non-declaration span
+    // count, so there is no per-span duplication left to account for.
     let mut refs = Sz::default();
-    let mut n_entries = 0usize;
+    let mut n_key_uri_pairs = 0usize;
     let n_keys;
+    let mut distinct_uris: HashSet<*const u8> = HashSet::new();
     {
         let idx = backend.reference_index.read();
         let (by_key, uri_keys) = idx.audit_maps();
         n_keys = by_key.len();
-        refs +=
-            map_buckets::<crate::reference_index::ReferenceIndexKey, Vec<u8>>(by_key.capacity());
-        for (k, v) in by_key {
+        refs += map_buckets::<crate::reference_index::ReferenceIndexKey, HashMap<Arc<str>, u32>>(
+            by_key.capacity(),
+        );
+        for (k, inner) in by_key {
             refs.add(k.audit_heap());
-            n_entries += v.len();
-            refs.add(v.capacity() * size_of::<crate::reference_index::ReferenceIndexEntry>());
-            for e in v {
-                refs.add(e.uri.capacity());
+            n_key_uri_pairs += inner.len();
+            refs += map_buckets::<Arc<str>, u32>(inner.capacity());
+            for uri in inner.keys() {
+                distinct_uris.insert(Arc::as_ptr(uri).cast::<u8>());
             }
         }
-        refs += map_buckets::<String, Vec<crate::reference_index::ReferenceIndexKey>>(
+        refs += map_buckets::<Arc<str>, Vec<crate::reference_index::ReferenceIndexKey>>(
             uri_keys.capacity(),
         );
         for (uri, keys) in uri_keys {
-            refs.add(uri.capacity());
+            refs.add(ARC + uri.len());
             refs.add(keys.capacity() * size_of::<crate::reference_index::ReferenceIndexKey>());
             for k in keys {
                 refs.add(k.audit_heap());
             }
         }
     }
-    // How much of the index survives P31 direction 1: per key, keep the
-    // distinct URIs plus a non-declaration count, drop the never-read
-    // offsets and the per-span duplication.
-    let mut distinct_pairs = 0usize;
-    {
-        let idx = backend.reference_index.read();
-        let (by_key, _) = idx.audit_maps();
-        let mut uris: HashSet<&str> = HashSet::new();
-        for entries in by_key.values() {
-            uris.clear();
-            for e in entries {
-                uris.insert(e.uri.as_str());
-            }
-            distinct_pairs += uris.len();
-        }
-    }
     eprintln!(
-        "── reference_index: {} keys, {} entries, {:.1} MB ({} allocs) | distinct (key, uri) pairs: {} ({:.1}x span duplication)",
+        "── reference_index: {} keys, {} (key, uri) pairs, {} distinct uris, {:.1} MB ({} allocs)",
         n_keys,
-        n_entries,
+        n_key_uri_pairs,
+        distinct_uris.len(),
         mb(refs.bytes),
         refs.allocs,
-        distinct_pairs,
-        n_entries as f64 / distinct_pairs.max(1) as f64,
     );
 
     // ── 7. Remaining session stores ─────────────────────────────────
@@ -1569,7 +1557,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("file_imports", &mut || backend.file_imports.write().clear());
     probe("symbol_maps", &mut || backend.symbol_maps.write().clear());
     probe("reference_index", &mut || {
-        let uris: Vec<String> = backend
+        let uris: Vec<Arc<str>> = backend
             .reference_index
             .read()
             .audit_maps()

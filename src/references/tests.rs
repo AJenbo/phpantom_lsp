@@ -2342,7 +2342,7 @@ fn workspace_indexing_batch_merges_disk_files() {
     let class_candidates = backend
         .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Impl\\A".to_string())])
         .expect("reference index should be active after workspace indexing");
-    assert!(class_candidates.contains(&use_uri));
+    assert!(class_candidates.contains(use_uri.as_str()));
 
     let member_candidates = backend
         .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Member {
@@ -2350,7 +2350,7 @@ fn workspace_indexing_batch_merges_disk_files() {
             is_static: false,
         }])
         .expect("reference index should be active after workspace indexing");
-    assert!(member_candidates.contains(&use_uri));
+    assert!(member_candidates.contains(use_uri.as_str()));
 
     let function_snapshot =
         backend.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Function(

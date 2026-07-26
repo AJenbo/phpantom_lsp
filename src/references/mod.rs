@@ -81,7 +81,7 @@ impl Backend {
 
     fn user_file_symbol_maps_matching(
         &self,
-        candidate_uris: Option<&HashSet<String>>,
+        candidate_uris: Option<&HashSet<Arc<str>>>,
     ) -> Vec<(String, Arc<SymbolMap>)> {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 

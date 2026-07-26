@@ -831,56 +831,6 @@ waiting on the triggers above.
 
 ---
 
-## P31. Reference index stores per-span entries when consumers only read distinct URIs
-
-**Impact: Medium · Effort: Low-Medium**
-
-The cross-file reference candidate index (`reference_index`) stores
-one entry per matching span, each with its own cloned URI `String`
-plus `start`/`end` offsets and an `is_declaration` flag. It has two
-consumers: `reference_candidate_uris_for_keys` reads only the
-distinct URIs per key, and the inlay-hint reference counts
-(`ref_count` in `src/inlay_hints.rs`) count the non-declaration
-entries per key. The `start`/`end` offsets are never read
-anywhere. Class and function spans additionally fan out into up
-to three name keys each (FQN, source spelling, short name), each with
-its own entry copy. On a large project this multiplies out to
-millions of heap-allocated URI strings held for the whole session —
-against the full-index memory aim — and the index is built on every
-`update_ast` in *all* indexing strategies and in the headless
-`analyze` pipeline, where it is never queried.
-
-Two directions, pick one:
-
-1. **Shrink to what is consumed.** Store per key the deduplicated
-   URIs plus a non-declaration span count (what the inlay-hint
-   consumer needs), e.g. `HashMap<Key, HashMap<Arc<str>, u32>>`
-   with per-file URI interning so each file's URI is allocated
-   once. Drop the unused offsets. Smallest change, keeps the
-   current candidate-pruning design.
-2. **Make the spans pay for themselves.** Keep the per-span entries
-   but have find-references consume them directly (the original
-   O(k)-lookup goal), skipping the per-file symbol-map re-scan for
-   keys that cannot produce false positives (constants, Laravel
-   string keys). More work, bigger payoff.
-
-Also worth fixing while in there: building entries calls
-`file_context_at` (which clones the file's full use map) once per
-`self`/`static`/`parent` span (and in fallback paths for class and
-function spans); only the enclosing class and namespace are needed.
-Skipping the index build entirely in the `analyze` pipeline is a
-free win under either direction.
-
-**Quantified by the memory audit (see "Memory baseline" below):** on a
-large Laravel app the index holds 218,167 entries behind 74,454 distinct
-`(key, uri)` pairs — **2.9x span duplication** — costing 43 MB across
-330 K allocations. Direction 1 (dedup + count) collapses that to
-roughly the distinct-pair count, an estimated ~5 MB. Still worth doing,
-and now the third-largest single store after the resolved-class cache
-and `symbol_maps`.
-
----
-
 ## P32. Vendor package scan reads every file twice for origin classification
 
 **Impact: Medium · Effort: Low-Medium**
@@ -916,7 +866,7 @@ set after the pass is ~1.16 GB, of which the resolved-class cache is
 **~748 MB — about 65%**. Ranked by the RSS each structure releases
 when dropped: resolved-class cache ~748 MB, class indexes
 (`method_store` + `fqn_class_index` + `uri_classes_index`) ~99 MB,
-`symbol_maps` ~26 MB, `reference_index` ~14 MB (see P31). The cache
+`symbol_maps` ~26 MB, `reference_index` ~14 MB. The cache
 holds ~247 KB per resolved class.
 
 Two compounding causes:
@@ -1300,6 +1250,28 @@ the member metadata (bump-allocate `MethodInfo`/`PropertyInfo`/
 member) — a much larger change than anything else in this list, so only
 worth it if the per-allocation overhead is still the dominant cost once
 the count itself has come down.
+
+---
+
+## P42. Reference index is built during the headless `analyze` pipeline but never queried there
+
+**Impact: Low-Medium · Effort: Low**
+
+`reindex_references_for_symbol_maps_batch` (`src/reference_index.rs`)
+runs on every `update_ast`, including from the parallel index workers
+in `src/analyse/run.rs` that back the headless `analyze` CLI
+subcommand. That pipeline never calls
+`reference_candidate_uris_for_keys` or any other reader of
+`reference_index` (it has no find-references, rename, or inlay-hints
+request to serve), so every span the workers walk to build index
+entries there is wasted CPU and short-lived allocation.
+
+Skip the build in that mode: add a per-`Backend` flag (not a
+process-global static or thread-local, so test isolation between
+`Backend` instances is preserved) that `Backend::new_headless` sets
+and `reindex_references_for_symbol_maps_batch` checks before doing any
+work, so the skip applies uniformly to every caller of `update_ast` in
+headless mode rather than special-casing the `analyze` call site.
 
 ---
 

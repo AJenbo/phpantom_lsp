@@ -44,16 +44,16 @@ impl ReferenceIndexKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReferenceIndexEntry {
-    pub(crate) uri: String,
-    pub(crate) start: u32,
-    pub(crate) end: u32,
-    pub(crate) is_declaration: bool,
-}
-
 /// The candidate index plus a reverse map of which keys each URI has
 /// entries under.
+///
+/// Per key, only the distinct contributing URIs are kept (as the shared
+/// per-file `Arc<str>`) mapped to the number of non-declaration spans
+/// that URI contributed for that key — the two facts consumers actually
+/// read (`reference_candidate_uris_for_keys` needs the URI set,
+/// `inlay_hints::ref_count` needs the non-declaration count). The
+/// per-span `start`/`end` offsets and the raw span multiplicity are
+/// never read anywhere, so they are not stored.
 ///
 /// The reverse map keeps per-file eviction proportional to that file's
 /// own contributions.  Without it, evicting a URI means scanning every
@@ -63,12 +63,12 @@ pub(crate) struct ReferenceIndexEntry {
 /// every keystroke.
 #[derive(Default)]
 pub(crate) struct ReferenceIndexInner {
-    by_key: HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>,
-    uri_keys: HashMap<String, Vec<ReferenceIndexKey>>,
+    by_key: HashMap<ReferenceIndexKey, HashMap<Arc<str>, u32>>,
+    uri_keys: HashMap<Arc<str>, Vec<ReferenceIndexKey>>,
 }
 
 impl ReferenceIndexInner {
-    pub(crate) fn get(&self, key: &ReferenceIndexKey) -> Option<&Vec<ReferenceIndexEntry>> {
+    pub(crate) fn get(&self, key: &ReferenceIndexKey) -> Option<&HashMap<Arc<str>, u32>> {
         self.by_key.get(key)
     }
 
@@ -79,8 +79,8 @@ impl ReferenceIndexInner {
     pub(crate) fn audit_maps(
         &self,
     ) -> (
-        &HashMap<ReferenceIndexKey, Vec<ReferenceIndexEntry>>,
-        &HashMap<String, Vec<ReferenceIndexKey>>,
+        &HashMap<ReferenceIndexKey, HashMap<Arc<str>, u32>>,
+        &HashMap<Arc<str>, Vec<ReferenceIndexKey>>,
     ) {
         (&self.by_key, &self.uri_keys)
     }
@@ -106,7 +106,7 @@ impl Backend {
     pub(crate) fn reference_candidate_uris_for_keys(
         &self,
         keys: &[ReferenceIndexKey],
-    ) -> Option<HashSet<String>> {
+    ) -> Option<HashSet<Arc<str>>> {
         if !self.workspace_indexed.load(Ordering::Acquire) {
             return None;
         }
@@ -115,7 +115,7 @@ impl Backend {
         let mut uris = HashSet::new();
         for key in keys {
             if let Some(entries) = index.get(key) {
-                uris.extend(entries.iter().map(|entry| entry.uri.clone()));
+                uris.extend(entries.keys().cloned());
             }
         }
         Some(uris)
@@ -159,27 +159,40 @@ impl Backend {
             evict_reference_index_uri_locked(&mut index, uri);
         }
         for (uri, entries) in rebuilt {
+            if entries.is_empty() {
+                continue;
+            }
+            let uri: Arc<str> = Arc::from(uri.as_str());
             let mut keys: HashSet<ReferenceIndexKey> = HashSet::new();
-            for (key, entry) in entries {
-                index.by_key.entry(key.clone()).or_default().push(entry);
+            for (key, is_declaration) in entries {
+                let count = index
+                    .by_key
+                    .entry(key.clone())
+                    .or_default()
+                    .entry(Arc::clone(&uri))
+                    .or_insert(0);
+                if !is_declaration {
+                    *count += 1;
+                }
                 keys.insert(key);
             }
-            if !keys.is_empty() {
-                index.uri_keys.insert(uri, keys.into_iter().collect());
-            }
+            index.uri_keys.insert(uri, keys.into_iter().collect());
         }
     }
 
+    /// Build the `(key, is_declaration)` pairs a file contributes to the
+    /// index. The caller interns the URI once per file and shares it
+    /// across every key, rather than allocating a fresh `String` per span.
     fn reference_entries_for_symbol_map(
         &self,
         uri: &str,
         symbol_map: &SymbolMap,
-    ) -> Vec<(ReferenceIndexKey, ReferenceIndexEntry)> {
+    ) -> Vec<(ReferenceIndexKey, bool)> {
         if !self.is_reference_indexable_uri(uri) {
             return Vec::new();
         }
 
-        let mut entries: Vec<(ReferenceIndexKey, ReferenceIndexEntry)> = Vec::new();
+        let mut entries: Vec<(ReferenceIndexKey, bool)> = Vec::new();
         for span in &symbol_map.spans {
             let is_declaration = matches!(
                 &span.kind,
@@ -192,25 +205,16 @@ impl Backend {
             );
 
             for key in self.reference_keys_for_span(uri, span) {
-                entries.push((
-                    key,
-                    ReferenceIndexEntry {
-                        uri: uri.to_string(),
-                        start: span.start,
-                        end: span.end,
-                        is_declaration,
-                    },
-                ));
+                entries.push((key, is_declaration));
             }
         }
 
         if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in classes {
                 for prop in &class.properties {
-                    let Some((start, end)) = member_range(prop.name_offset, &prop.name, true)
-                    else {
+                    if prop.name_offset == 0 {
                         continue;
-                    };
+                    }
                     entries.push((
                         ReferenceIndexKey::Member {
                             name: prop
@@ -220,12 +224,7 @@ impl Backend {
                                 .to_string(),
                             is_static: prop.is_static,
                         },
-                        ReferenceIndexEntry {
-                            uri: uri.to_string(),
-                            start,
-                            end,
-                            is_declaration: true,
-                        },
+                        true,
                     ));
                 }
             }
@@ -246,8 +245,8 @@ impl Backend {
                 } else if let Some(fqn) = self.resolved_name_at(uri, span.start) {
                     fqn
                 } else {
-                    let ctx = self.file_context_at(uri, span.start);
-                    normalize_symbol_name(Self::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace))
+                    let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
+                    normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
                 };
                 class_keys(&resolved, name)
             }
@@ -257,15 +256,15 @@ impl Backend {
                 class_keys(&fqn, name)
             }
             SymbolKind::SelfStaticParent(kind) if *kind != SelfStaticParentKind::This => {
-                let ctx = self.file_context_at(uri, span.start);
-                let Some(current_class) = find_class_at_offset(&ctx.classes, span.start) else {
+                let (classes, namespace) = self.classes_and_namespace_at(uri, span.start);
+                let Some(current_class) = find_class_at_offset(&classes, span.start) else {
                     return Vec::new();
                 };
                 let fqn = match kind {
                     SelfStaticParentKind::Parent => {
                         current_class.parent_class.map(normalize_symbol_name)
                     }
-                    _ => Some(build_fqn(&current_class.name, ctx.namespace.as_deref())),
+                    _ => Some(build_fqn(&current_class.name, namespace.as_deref())),
                 };
                 fqn.map(|name| class_keys(&name, short_name(&name)))
                     .unwrap_or_default()
@@ -277,8 +276,8 @@ impl Backend {
                 let resolved = if let Some(fqn) = self.resolved_name_at(uri, span.start) {
                     fqn
                 } else {
-                    let ctx = self.file_context_at(uri, span.start);
-                    normalize_symbol_name(Self::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace))
+                    let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
+                    normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
                 };
                 function_keys(&resolved, name)
             }
@@ -335,7 +334,7 @@ fn evict_reference_index_uri_locked(index: &mut ReferenceIndexInner, uri: &str) 
     };
     for key in keys {
         if let Some(entries) = index.by_key.get_mut(&key) {
-            entries.retain(|entry| entry.uri != uri);
+            entries.remove(uri);
             if entries.is_empty() {
                 index.by_key.remove(&key);
             }
@@ -370,14 +369,6 @@ fn symbol_name_keys(resolved: &str, source_name: &str) -> Vec<String> {
     keys.sort();
     keys.dedup();
     keys
-}
-
-fn member_range(name_offset: u32, name: &str, has_dollar_prefix: bool) -> Option<(u32, u32)> {
-    if name_offset == 0 {
-        return None;
-    }
-    let len = name.len() as u32 + u32::from(has_dollar_prefix);
-    Some((name_offset, name_offset.saturating_add(len)))
 }
 
 #[cfg(test)]
@@ -620,24 +611,19 @@ mod tests {
     }
 
     #[test]
-    fn evicting_unknown_uri_and_zero_member_offset_are_noops() {
+    fn evicting_unknown_uri_is_noop() {
         let mut index = ReferenceIndexInner::default();
         let key = ReferenceIndexKey::Class("Foo".to_string());
-        let uri = "file:///project/src/Foo.php".to_string();
-        index.by_key.insert(
-            key.clone(),
-            vec![ReferenceIndexEntry {
-                uri: uri.clone(),
-                start: 0,
-                end: 3,
-                is_declaration: true,
-            }],
-        );
+        let uri: Arc<str> = Arc::from("file:///project/src/Foo.php");
+        index
+            .by_key
+            .entry(key.clone())
+            .or_default()
+            .insert(Arc::clone(&uri), 0);
         index.uri_keys.insert(uri, vec![key.clone()]);
 
         evict_reference_index_uri_locked(&mut index, "file:///project/src/Other.php");
         assert!(index.by_key.contains_key(&key));
-        assert_eq!(member_range(0, "name", true), None);
     }
 
     fn assert_candidate_contains(backend: &Backend, key: ReferenceIndexKey, uri: &str) {

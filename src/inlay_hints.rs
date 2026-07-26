@@ -403,7 +403,7 @@ impl Backend {
         self.reference_index
             .read()
             .get(key)
-            .map(|entries| entries.iter().filter(|e| !e.is_declaration).count())
+            .map(|entries| entries.values().map(|&count| count as usize).sum())
             .unwrap_or(0)
     }
 
