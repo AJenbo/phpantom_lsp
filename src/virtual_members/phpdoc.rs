@@ -1029,7 +1029,7 @@ fn return_type_is_mixin_self(
             || short_name(stripped) == mixin_short
     };
     match ty {
-        PhpType::Named(n) => check_name(n),
+        PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => check_name(n),
         PhpType::Generic(n, _) => check_name(n),
         PhpType::Nullable(inner) => return_type_is_mixin_self(
             inner,

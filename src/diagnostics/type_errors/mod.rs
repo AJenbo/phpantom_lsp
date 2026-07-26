@@ -558,17 +558,17 @@ impl Backend {
                     None
                 };
                 class_part.and_then(|cp| {
-                    let low = cp.to_ascii_lowercase();
-                    match low.as_str() {
-                        "self" | "static" | "$this" => {
-                            find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
-                                .map(|c| c.fqn().to_string())
-                        }
-                        "parent" => {
-                            find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
-                                .and_then(|c| c.parent_class.as_ref().map(|p| p.to_string()))
-                        }
-                        _ => class_loader(cp).map(|cls| cls.fqn().to_string()),
+                    if cp.eq_ignore_ascii_case("self")
+                        || cp.eq_ignore_ascii_case("static")
+                        || cp.eq_ignore_ascii_case("$this")
+                    {
+                        find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
+                            .map(|c| c.fqn().to_string())
+                    } else if cp.eq_ignore_ascii_case("parent") {
+                        find_innermost_enclosing_class(&file_ctx.classes, call_site.args_start)
+                            .and_then(|c| c.parent_class.as_ref().map(|p| p.to_string()))
+                    } else {
+                        class_loader(cp).map(|cls| cls.fqn().to_string())
                     }
                 })
             };
@@ -637,7 +637,7 @@ impl Backend {
                 let effective_param_type = if param_type.contains_self_ref() {
                     if let Some(ref fqn) = call_context_class {
                         resolved_param =
-                            param_type.resolve_self_refs(fqn, ctx_parent_fqn.as_deref());
+                            param_type.resolve_self_refs_bounded(fqn, ctx_parent_fqn.as_deref());
                         &resolved_param
                     } else {
                         param_type
@@ -702,8 +702,10 @@ impl Backend {
                                 let resolved_alt;
                                 let effective_alt = if alt_type.contains_self_ref() {
                                     if let Some(ref fqn) = call_context_class {
-                                        resolved_alt = alt_type
-                                            .resolve_self_refs(fqn, ctx_parent_fqn.as_deref());
+                                        resolved_alt = alt_type.resolve_self_refs_bounded(
+                                            fqn,
+                                            ctx_parent_fqn.as_deref(),
+                                        );
                                         &resolved_alt
                                     } else {
                                         alt_type

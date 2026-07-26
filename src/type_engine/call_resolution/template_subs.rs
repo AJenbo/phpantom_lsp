@@ -684,7 +684,11 @@ impl Backend {
         if is_self_or_static(trimmed) {
             return ctx.current_class.map(|c| {
                 if ctx.preserve_static {
-                    PhpType::Named(atom(trimmed))
+                    match trimmed {
+                        "static" => PhpType::StaticType(c.fqn()),
+                        "$this" => PhpType::ThisType(c.fqn()),
+                        _ => PhpType::Named(c.fqn()),
+                    }
                 } else {
                     PhpType::Named(atom(c.name.as_ref()))
                 }

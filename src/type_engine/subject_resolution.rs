@@ -45,9 +45,17 @@ pub(crate) fn resolve_subject_type(
     let trimmed = subject_text.trim();
 
     match trimmed {
-        "$this" | "self" | "static" => {
+        "self" => {
             let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
             Some(PhpType::Named(atom(&fqn)))
+        }
+        "static" => {
+            let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
+            Some(PhpType::StaticType(atom(&fqn)))
+        }
+        "$this" => {
+            let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
+            Some(PhpType::ThisType(atom(&fqn)))
         }
         "parent" => {
             let cls = find_class_at_offset(ctx.local_classes, access_offset)?;

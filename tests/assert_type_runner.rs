@@ -742,19 +742,23 @@ fn types_match(expected: &str, actual: &str) -> bool {
 
 /// Shorten FQN components in a type string.
 /// `App\Models\User|null` → `User|null`
+/// `static(App\Models\User)` → `static(User)`
 fn shorten_fqn_components(ty: &str) -> String {
-    ty.split('|')
-        .map(|part| {
-            let trimmed = part.trim();
-            if trimmed.contains('\\') {
-                // Take the last segment.
-                trimmed.rsplit('\\').next().unwrap_or(trimmed)
-            } else {
-                trimmed
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("|")
+    let mut result = String::new();
+    let mut word = String::new();
+    for ch in ty.chars() {
+        if ch == '\\' {
+            word.clear();
+        } else if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+            word.push(ch);
+        } else {
+            result.push_str(&word);
+            word.clear();
+            result.push(ch);
+        }
+    }
+    result.push_str(&word);
+    result
 }
 
 /// Strip trailing `, mixed` params from Generator types so that

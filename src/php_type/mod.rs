@@ -55,6 +55,30 @@ pub enum PhpType {
     /// never fed unbounded free text.
     Named(Atom),
 
+    /// Late-static-binding type with a known lower bound.
+    ///
+    /// Represents `static` or `$this` resolved in the context of a class:
+    /// "the runtime class, which is at least `bound`."  Unlike
+    /// [`Named`](PhpType::Named) with the class FQN, this preserves the
+    /// polymorphic semantics of `static` — a `StaticType("Base")` is a
+    /// subtype of `Base` but is not the same as `Named("Base")` because it
+    /// could be any subclass at runtime.
+    ///
+    /// Produced when `Named("static")` is resolved in a class context.
+    /// `self` is NOT represented here — it resolves to
+    /// `Named(declaring_class)` since it is invariant.
+    StaticType(Atom),
+
+    /// The `$this` type with a known lower bound.
+    ///
+    /// More specific than [`StaticType`](PhpType::StaticType): represents
+    /// the exact runtime instance, not just "this class or a subclass."
+    /// `ThisType("Foo") <: StaticType("Foo") <: Named("Foo")`.
+    ///
+    /// Important for fluent interfaces (`@return $this`) where the return
+    /// type must preserve the receiver's exact type through method chains.
+    ThisType(Atom),
+
     /// Nullable type: `?T`.
     Nullable(Box<PhpType>),
 
@@ -971,6 +995,9 @@ impl PhpType {
             PhpType::Named(s) if !is_scalar_name(s) => {
                 Some(s.strip_prefix('\\').unwrap_or(s.as_str()))
             }
+            PhpType::StaticType(s) | PhpType::ThisType(s) => {
+                Some(s.strip_prefix('\\').unwrap_or(s.as_str()))
+            }
             PhpType::Generic(name, _) if !is_scalar_name(name) => {
                 Some(name.strip_prefix('\\').unwrap_or(name.as_str()))
             }
@@ -998,7 +1025,9 @@ impl PhpType {
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
         match self {
-            PhpType::Named(s) => native_scalar_name(s).map(|n| n.to_string()),
+            PhpType::Named(s) | PhpType::StaticType(s) | PhpType::ThisType(s) => {
+                native_scalar_name(s).map(|n| n.to_string())
+            }
             PhpType::Generic(name, _) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
@@ -1051,7 +1080,9 @@ impl PhpType {
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
         match self {
-            PhpType::Named(s) => native_scalar_name(s).map(|n| PhpType::Named(atom(n))),
+            PhpType::Named(s) | PhpType::StaticType(s) | PhpType::ThisType(s) => {
+                native_scalar_name(s).map(|n| PhpType::Named(atom(n)))
+            }
             PhpType::Generic(name, _) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
@@ -1781,6 +1812,7 @@ impl PhpType {
             PhpType::Conditional { .. } => true,
             PhpType::IntRange(..) => true,
             PhpType::Literal(..) => true,
+            PhpType::StaticType(_) | PhpType::ThisType(_) => true,
             PhpType::Raw(s) => s.contains('<') || s.contains('{') || s.ends_with("[]"),
         }
     }
@@ -1869,6 +1901,8 @@ impl PhpType {
             | PhpType::InterfaceString(None)
             | PhpType::IntRange(..)
             | PhpType::Literal(..)
+            | PhpType::StaticType(_)
+            | PhpType::ThisType(_)
             | PhpType::Raw(..) => false,
         }
     }
