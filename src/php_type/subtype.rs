@@ -140,6 +140,18 @@ impl PhpType {
             return is_named_subtype(sub, sup);
         }
 
+        // ── StaticType / ThisType <: bound class ────────────────────
+        // StaticType(A) <: A and ThisType(A) <: A always hold.
+        // ThisType(A) <: StaticType(A) also holds ($this is more specific).
+        if let PhpType::StaticType(sub) | PhpType::ThisType(sub) = self {
+            match supertype {
+                PhpType::Named(sup) | PhpType::StaticType(sup) => {
+                    return is_named_subtype(sub, sup);
+                }
+                _ => {}
+            }
+        }
+
         // ── Literal subtyping ───────────────────────────────────────
         if let PhpType::Literal(lit) = self {
             return literal_is_subtype_of(lit, supertype);
@@ -384,10 +396,9 @@ impl PhpType {
 /// used for the base name of `Generic` nodes where we have a
 /// `&str` rather than a `&PhpType`.
 pub(crate) fn is_self_ref_name(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "self" | "static" | "$this"
-    )
+    name.eq_ignore_ascii_case("self")
+        || name.eq_ignore_ascii_case("static")
+        || name.eq_ignore_ascii_case("$this")
 }
 
 // ---------------------------------------------------------------------------

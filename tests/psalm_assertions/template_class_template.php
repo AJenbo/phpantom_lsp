@@ -188,10 +188,10 @@ namespace PsalmTest_template_class_template_7 {
 
     assertType('Foo<E>', $efoo);
     assertType('Foo<E>', $efoo2);
-    assertType('Foo<E>', $efoo3);
+    assertType('Foo<static(PsalmTest_template_class_template_7\E)>', $efoo3);
     assertType('Foo<E>', $gfoo);
     assertType('Foo<E>', $gfoo2);
-    assertType('Foo<G>', $gfoo3);
+    assertType('Foo<static(PsalmTest_template_class_template_7\G)>', $gfoo3);
 }
 
 // Test: classTemplateExternalClasses

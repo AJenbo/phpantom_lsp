@@ -647,7 +647,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         if let Some(ref ret) = method_ret
                             && ret.contains_self_ref()
                         {
-                            return vec![ResolvedType::from_type_string(PhpType::static_())];
+                            return vec![ResolvedType::from_type_string(PhpType::StaticType(
+                                ctx.current_class.fqn(),
+                            ))];
                         }
                     }
                 }
@@ -700,7 +702,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         if let Some(ref ret) = method_ret
                             && ret.contains_self_ref()
                         {
-                            return vec![ResolvedType::from_type_string(PhpType::static_())];
+                            return vec![ResolvedType::from_type_string(PhpType::ThisType(
+                                ctx.current_class.fqn(),
+                            ))];
                         }
                     }
                 }

@@ -10,6 +10,8 @@ impl fmt::Display for PhpType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PhpType::Named(s) => write!(f, "{s}"),
+            PhpType::StaticType(bound) => write!(f, "static({bound})"),
+            PhpType::ThisType(bound) => write!(f, "$this({bound})"),
 
             PhpType::Nullable(inner) => write!(f, "?{inner}"),
 

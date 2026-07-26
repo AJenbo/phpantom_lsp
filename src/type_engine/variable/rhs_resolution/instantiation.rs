@@ -37,7 +37,11 @@ pub(super) fn resolve_rhs_instantiation(
                 ctx.class_loader,
             ),
         };
-        let parsed_name = PhpType::Named(atom(&fqn));
+        let parsed_name = if name == "static" {
+            PhpType::StaticType(atom(&fqn))
+        } else {
+            PhpType::Named(atom(&fqn))
+        };
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
             &ctx.current_class.name,

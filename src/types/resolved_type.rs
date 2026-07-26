@@ -191,7 +191,7 @@ impl ResolvedType {
                     .filter(|m| {
                         // Keep members that were not resolved to a class.
                         match m {
-                            PhpType::Named(n) => {
+                            PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => {
                                 let stripped = n.strip_prefix('\\').unwrap_or(n);
                                 !class_fqns.iter().any(|fqn| {
                                     fqn == stripped || crate::util::short_name(fqn) == stripped

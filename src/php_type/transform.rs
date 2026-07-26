@@ -140,6 +140,9 @@ impl PhpType {
 
             // Raw types can't be structurally resolved — pass through.
             PhpType::Raw(s) => PhpType::Raw(s.clone()),
+
+            PhpType::StaticType(s) => PhpType::StaticType(atom(&resolver(s))),
+            PhpType::ThisType(s) => PhpType::ThisType(atom(&resolver(s))),
         }
     }
 
@@ -252,6 +255,9 @@ impl PhpType {
                 // for raw types that we couldn't parse structurally.
                 PhpType::Raw(s.clone())
             }
+
+            PhpType::StaticType(s) => PhpType::StaticType(atom(Self::short_name_of(s))),
+            PhpType::ThisType(s) => PhpType::ThisType(atom(Self::short_name_of(s))),
         }
     }
 
@@ -285,17 +291,155 @@ impl PhpType {
     ///
     /// [`resolve_names`]: PhpType::resolve_names
     pub fn resolve_self_refs(&self, class_name: &str, parent_class: Option<&str>) -> PhpType {
-        // self / static / $this — case-insensitive, whole-tree walk.
-        let replaced = self.replace_self(class_name);
-        match parent_class {
-            Some(parent) => {
-                let subs = std::collections::HashMap::from([(
-                    "parent".to_string(),
-                    PhpType::Named(atom(parent)),
-                )]);
-                replaced.substitute(&subs)
+        self.resolve_self_refs_bounded(class_name, parent_class)
+    }
+
+    /// Like [`resolve_self_refs`] but produces bounded static types:
+    /// `static` → [`StaticType(bound)`](PhpType::StaticType),
+    /// `$this` → [`ThisType(bound)`](PhpType::ThisType),
+    /// `self` → [`Named(class_name)`](PhpType::Named),
+    /// `parent` → [`Named(parent_class)`](PhpType::Named).
+    ///
+    /// Use this when the caller needs to preserve the late-static-binding
+    /// distinction rather than flattening everything to a concrete class.
+    pub fn resolve_self_refs_bounded(
+        &self,
+        class_name: &str,
+        parent_class: Option<&str>,
+    ) -> PhpType {
+        match self {
+            PhpType::Named(s) if is_self_ref_name(s) || s.eq_ignore_ascii_case("parent") => {
+                if s.eq_ignore_ascii_case("static") {
+                    PhpType::StaticType(atom(class_name))
+                } else if s.eq_ignore_ascii_case("$this") {
+                    PhpType::ThisType(atom(class_name))
+                } else if s.eq_ignore_ascii_case("parent") {
+                    match parent_class {
+                        Some(p) => PhpType::Named(atom(p)),
+                        None => self.clone(),
+                    }
+                } else {
+                    PhpType::Named(atom(class_name))
+                }
             }
-            None => replaced,
+            PhpType::Named(_)
+            | PhpType::StaticType(_)
+            | PhpType::ThisType(_)
+            | PhpType::Literal(_)
+            | PhpType::Raw(_)
+            | PhpType::IntRange(..) => self.clone(),
+            PhpType::Nullable(inner) => PhpType::Nullable(Box::new(
+                inner.resolve_self_refs_bounded(class_name, parent_class),
+            )),
+            PhpType::Union(types) => PhpType::Union(
+                types
+                    .iter()
+                    .map(|t| t.resolve_self_refs_bounded(class_name, parent_class))
+                    .collect(),
+            ),
+            PhpType::Intersection(types) => PhpType::Intersection(
+                types
+                    .iter()
+                    .map(|t| t.resolve_self_refs_bounded(class_name, parent_class))
+                    .collect(),
+            ),
+            PhpType::Generic(name, args) => {
+                let resolved_name = if is_self_ref_name(name) {
+                    class_name.to_string()
+                } else if name.eq_ignore_ascii_case("parent") {
+                    parent_class
+                        .map(|p| p.to_string())
+                        .unwrap_or_else(|| name.clone())
+                } else {
+                    name.clone()
+                };
+                PhpType::Generic(
+                    resolved_name,
+                    args.iter()
+                        .map(|a| a.resolve_self_refs_bounded(class_name, parent_class))
+                        .collect(),
+                )
+            }
+            PhpType::Array(inner) => PhpType::Array(Box::new(
+                inner.resolve_self_refs_bounded(class_name, parent_class),
+            )),
+            PhpType::ClassString(inner) => PhpType::ClassString(
+                inner
+                    .as_ref()
+                    .map(|t| Box::new(t.resolve_self_refs_bounded(class_name, parent_class))),
+            ),
+            PhpType::InterfaceString(inner) => PhpType::InterfaceString(
+                inner
+                    .as_ref()
+                    .map(|t| Box::new(t.resolve_self_refs_bounded(class_name, parent_class))),
+            ),
+            PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+                entries
+                    .iter()
+                    .map(|e| super::ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: e
+                            .value_type
+                            .resolve_self_refs_bounded(class_name, parent_class),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+                entries
+                    .iter()
+                    .map(|e| super::ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: e
+                            .value_type
+                            .resolve_self_refs_bounded(class_name, parent_class),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            PhpType::Callable {
+                kind,
+                params,
+                return_type,
+            } => PhpType::Callable {
+                kind: kind.clone(),
+                params: params
+                    .iter()
+                    .map(|p| super::CallableParam {
+                        type_hint: p
+                            .type_hint
+                            .resolve_self_refs_bounded(class_name, parent_class),
+                        optional: p.optional,
+                        variadic: p.variadic,
+                    })
+                    .collect(),
+                return_type: return_type
+                    .as_ref()
+                    .map(|r| Box::new(r.resolve_self_refs_bounded(class_name, parent_class))),
+            },
+            PhpType::Conditional {
+                param,
+                negated,
+                condition,
+                then_type,
+                else_type,
+            } => PhpType::Conditional {
+                param: param.clone(),
+                negated: *negated,
+                condition: Box::new(condition.resolve_self_refs_bounded(class_name, parent_class)),
+                then_type: Box::new(then_type.resolve_self_refs_bounded(class_name, parent_class)),
+                else_type: Box::new(else_type.resolve_self_refs_bounded(class_name, parent_class)),
+            },
+            PhpType::KeyOf(inner) => PhpType::KeyOf(Box::new(
+                inner.resolve_self_refs_bounded(class_name, parent_class),
+            )),
+            PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(
+                inner.resolve_self_refs_bounded(class_name, parent_class),
+            )),
+            PhpType::IndexAccess(base, index) => PhpType::IndexAccess(
+                Box::new(base.resolve_self_refs_bounded(class_name, parent_class)),
+                Box::new(index.resolve_self_refs_bounded(class_name, parent_class)),
+            ),
         }
     }
 
@@ -399,6 +543,7 @@ impl PhpType {
             PhpType::IndexAccess(base, index) => {
                 base.contains_self_ref() || index.contains_self_ref()
             }
+            PhpType::StaticType(_) | PhpType::ThisType(_) => false,
             PhpType::Literal(_) | PhpType::Raw(_) | PhpType::IntRange(_, _) => false,
         }
     }
@@ -421,12 +566,24 @@ impl PhpType {
         // Extract the base class name from the replacement for use in
         // Generic nodes where only the name part is replaced.
         let replacement_name = match replacement {
-            PhpType::Named(n) => n.as_str(),
+            PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => n.as_str(),
             PhpType::Generic(n, _) => n.as_str(),
             _ => "",
         };
         match self {
-            PhpType::Named(_) if self.is_self_ref() => replacement.clone(),
+            PhpType::Named(s) if self.is_self_ref() => {
+                if let PhpType::Named(name) = replacement {
+                    if s.eq_ignore_ascii_case("static") {
+                        PhpType::StaticType(*name)
+                    } else if s.eq_ignore_ascii_case("$this") {
+                        PhpType::ThisType(*name)
+                    } else {
+                        replacement.clone()
+                    }
+                } else {
+                    replacement.clone()
+                }
+            }
 
             PhpType::Named(_) | PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
 
@@ -547,6 +704,8 @@ impl PhpType {
                 Box::new(base.replace_self_with_type(replacement)),
                 Box::new(index.replace_self_with_type(replacement)),
             ),
+
+            PhpType::StaticType(_) | PhpType::ThisType(_) => self.clone(),
         }
     }
 
@@ -585,6 +744,8 @@ impl PhpType {
             }
 
             PhpType::Literal(_) | PhpType::Raw(_) | PhpType::IntRange(_, _) => self.clone(),
+
+            PhpType::StaticType(_) | PhpType::ThisType(_) => self.clone(),
 
             PhpType::Nullable(inner) => {
                 let resolved = inner.substitute(subs);
@@ -869,6 +1030,12 @@ impl PhpType {
                 else_type.collect_class_names(names);
             }
 
+            PhpType::StaticType(s) | PhpType::ThisType(s) => {
+                if !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
+                    names.push(s.to_string());
+                }
+            }
+
             PhpType::Literal(_) | PhpType::Raw(_) | PhpType::IntRange(_, _) => {}
         }
     }
@@ -902,6 +1069,12 @@ impl PhpType {
                 if !is_keyword_type(name) && !name.is_empty() && !names.contains(name) =>
             {
                 names.push(name.clone());
+            }
+
+            PhpType::StaticType(s) | PhpType::ThisType(s)
+                if !s.is_empty() && !names.iter().any(|n| n == s.as_str()) =>
+            {
+                names.push(s.to_string());
             }
 
             // `User[]` — the inner type is the top-level class.

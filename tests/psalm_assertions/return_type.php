@@ -20,7 +20,7 @@ namespace PsalmTest_return_type_1 {
 
     $b = LoadChild::load();
 
-    assertType('LoadChild', $b);
+    assertType('static(PsalmTest_return_type_1\LoadChild)', $b);
 }
 
 // Test: extendsStaticCallArrayReturnType
@@ -40,7 +40,7 @@ namespace PsalmTest_return_type_2 {
 
     $bees = MultiChild::loadMultiple();
 
-    assertType('array<int, MultiChild>', $bees);
+    assertType('array<int, static(PsalmTest_return_type_2\MultiChild)>', $bees);
 }
 
 // Test: overrideReturnType

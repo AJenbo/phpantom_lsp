@@ -1676,13 +1676,16 @@ fn replace_self_named() {
 #[test]
 fn replace_self_static() {
     let ty = PhpType::parse("static");
-    assert_eq!(ty.replace_self("App\\User").to_string(), "App\\User");
+    assert_eq!(
+        ty.replace_self("App\\User").to_string(),
+        "static(App\\User)"
+    );
 }
 
 #[test]
 fn replace_self_this() {
     let ty = PhpType::parse("$this");
-    assert_eq!(ty.replace_self("App\\User").to_string(), "App\\User");
+    assert_eq!(ty.replace_self("App\\User").to_string(), "$this(App\\User)");
 }
 
 #[test]
@@ -1696,7 +1699,7 @@ fn replace_self_in_union() {
 fn replace_self_in_generic() {
     let ty = PhpType::parse("Collection<int, static>");
     let replaced = ty.replace_self("App\\User");
-    assert_eq!(replaced.to_string(), "Collection<int, App\\User>");
+    assert_eq!(replaced.to_string(), "Collection<int, static(App\\User)>");
 }
 
 #[test]
@@ -1752,7 +1755,13 @@ fn resolve_self_refs_in_array_element() {
 fn resolve_self_refs_static_in_generic() {
     let ty = PhpType::parse("array<static>");
     let resolved = ty.resolve_self_refs("App\\Cat", None);
-    assert_eq!(resolved, PhpType::parse("array<App\\Cat>"));
+    assert_eq!(
+        resolved,
+        PhpType::Generic(
+            "array".to_string(),
+            vec![PhpType::StaticType(atom("App\\Cat"))]
+        )
+    );
 }
 
 #[test]

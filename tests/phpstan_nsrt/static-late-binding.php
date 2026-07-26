@@ -78,30 +78,30 @@ class B extends A
         assertType('bool', X::retStaticConst(...)());
         assertType('mixed', $clUnioned->retStaticConst(...)());
 
-        assertType('StaticLateBinding\A', A::retStatic());
-        assertType('StaticLateBinding\B', B::retStatic());
-        assertType('B', self::retStatic());
-        assertType('B', static::retStatic());
-        assertType('A', parent::retStatic());
-        assertType('B', $this->retStatic());
+        assertType('static(StaticLateBinding\A)', A::retStatic());
+        assertType('static(StaticLateBinding\B)', B::retStatic());
+        assertType('static(StaticLateBinding\B)', self::retStatic());
+        assertType('static(StaticLateBinding\B)', static::retStatic());
+        assertType('static(StaticLateBinding\A)', parent::retStatic());
+        assertType('static(StaticLateBinding\B)', $this->retStatic());
         assertType('bool', X::retStatic());
-        assertType('bool|StaticLateBinding\A', $clUnioned::retStatic());
+        assertType('static(StaticLateBinding\A)|bool', $clUnioned::retStatic());
 
-        assertType('StaticLateBinding\A', A::retStatic(...)());
-        assertType('StaticLateBinding\B', B::retStatic(...)());
-        assertType('static', self::retStatic(...)());
-        assertType('static', static::retStatic(...)());
-        assertType('static', parent::retStatic(...)());
-        assertType('static', $this->retStatic(...)());
+        assertType('static(StaticLateBinding\A)', A::retStatic(...)());
+        assertType('static(StaticLateBinding\B)', B::retStatic(...)());
+        assertType('static(StaticLateBinding\B)', self::retStatic(...)());
+        assertType('static(StaticLateBinding\B)', static::retStatic(...)());
+        assertType('static(StaticLateBinding\B)', parent::retStatic(...)());
+        assertType('$this(StaticLateBinding\B)', $this->retStatic(...)());
         assertType('bool', X::retStatic(...)());
-        assertType('StaticLateBinding\A|bool', $clUnioned::retStatic(...)());
+        assertType('static(StaticLateBinding\A)|bool', $clUnioned::retStatic(...)());
 
-        assertType('A', A::retNonStatic());
-        assertType('B', B::retNonStatic());
-        assertType('B', self::retNonStatic());
-        assertType('B', static::retNonStatic());
-        assertType('A', parent::retNonStatic());
-        assertType('B', $this->retNonStatic());
+        assertType('static(StaticLateBinding\A)', A::retNonStatic());
+        assertType('static(StaticLateBinding\B)', B::retNonStatic());
+        assertType('static(StaticLateBinding\B)', self::retNonStatic());
+        assertType('static(StaticLateBinding\B)', static::retNonStatic());
+        assertType('static(StaticLateBinding\A)', parent::retNonStatic());
+        assertType('static(StaticLateBinding\B)', $this->retNonStatic());
         assertType('bool', X::retNonStatic());
         assertType('*ERROR*', $clUnioned->retNonStatic());
     }

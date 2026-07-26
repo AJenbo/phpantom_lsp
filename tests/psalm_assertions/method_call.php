@@ -12,7 +12,7 @@ namespace PsalmTest_method_call_1 {
 
     $b = (new DateTimeImmutable())->modify("+3 hours");
 
-    assertType('MyDate', $yesterday);
+    assertType('static(PsalmTest_method_call_1\MyDate)', $yesterday);
     assertType('DateTimeImmutable|false', $b);
 }
 

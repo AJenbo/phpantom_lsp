@@ -170,6 +170,10 @@ fn type_hint_to_classes_typed_depth(
             })]
         }
 
+        PhpType::StaticType(s) | PhpType::ThisType(s) => {
+            resolve_named_type(s, &[], owning_class_name, all_classes, class_loader, depth)
+        }
+
         // ── Named type (class name, keyword, or alias) ─────────────
         PhpType::Named(name) => resolve_named_type(
             name,

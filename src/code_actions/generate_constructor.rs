@@ -303,8 +303,11 @@ fn collect_qualifying_properties<'a>(
 /// intersections, array shapes, generics, etc.
 fn is_simple_php_type(ty: &PhpType) -> bool {
     match ty {
-        PhpType::Named(_) => true,
-        PhpType::Nullable(inner) => matches!(inner.as_ref(), PhpType::Named(_)),
+        PhpType::Named(_) | PhpType::StaticType(_) | PhpType::ThisType(_) => true,
+        PhpType::Nullable(inner) => matches!(
+            inner.as_ref(),
+            PhpType::Named(_) | PhpType::StaticType(_) | PhpType::ThisType(_)
+        ),
         _ => false,
     }
 }
