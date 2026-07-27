@@ -53,16 +53,21 @@ within the same impact tier.
 
 ## Sprint 8 — Blade support
 
-| #   | Item                                                                                                                      | Impact | Effort |
-| --- | ------------------------------------------------------------------------------------------------------------------------- | ------ | ------ |
-|     | Clear [refactoring gate](todo/refactor.md)                                                                                | —      | —      |
-| BL1 | [Blade-aware code actions](todo/blade.md#8-blade-aware-code-actions)                                                      | Medium | Medium |
-| BL2 | [Template and component file discovery](todo/blade.md#9-template-and-component-file-discovery)                            | High   | Medium |
-| BL3 | [Component tag parsing (`<x-...>`, `<livewire:...>`, `@props`)](todo/blade.md#10-x-component-tag-parsing-in-preprocessor) | High   | High   |
-| BL4 | [Component and view name completion](todo/blade.md#13-component-and-view-name-completion)                                 | High   | Medium |
-| BL5 | [Go-to-definition for view names and components](todo/blade.md#15-go-to-definition-for-view-names-and-components)         | Medium | Medium |
-| BL6 | [`@extends` signature merging and component class typing](todo/blade.md#16-signature-merging-for-extends)                 | Medium | High   |
-| BL7 | [Blade directive completion](todo/blade.md#19-directive-name-completion)                                                  | Medium | Low    |
+| #    | Item                                                                                                                       | Impact     | Effort     |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------- |
+|      | Clear [refactoring gate](todo/refactor.md)                                                                                | —          | —          |
+| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium     |
+| BL13 | [Mismatched and unbalanced directive diagnostics](todo/blade.md#bl13-mismatched-and-unbalanced-directive-diagnostics)       | Medium     | Low-Medium |
+| BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Low        |
+| BL7  | [Blade directive completion](todo/blade.md#bl7-directive-name-completion)                                                  | Medium     | Low        |
+| BL2  | [Template and component file discovery](todo/blade.md#bl2-template-and-component-file-discovery)                            | High       | Medium     |
+| BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium     |
+| BL3  | [Component tag parsing (`<x-...>`, `<livewire:...>`, `@props`)](todo/blade.md#bl3-x-component-tag-parsing-in-preprocessor) | High       | High       |
+| BL4  | [Component and view name completion](todo/blade.md#bl4-component-and-view-name-completion)                                 | High       | Medium     |
+| BL5  | [Go-to-definition for view names and components](todo/blade.md#bl5-go-to-definition-for-view-names-and-components)         | Medium     | Medium     |
+| BL6  | [`@extends` signature merging and component class typing](todo/blade.md#bl6-signature-merging-for-extends)                 | Medium     | High       |
+| BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
+| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format---check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Low-Medium |
 
 # Backlog
 
@@ -190,11 +195,11 @@ unlikely to move the needle for most users.
 | L28 | [Path helper links and completion](todo/laravel.md#l28-path-helper-links-and-completion)                                                                                    | Low         | Low         |
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
-| BL8 | [Template signature resolution chain](todo/blade.md#21-template-signature-resolution-chain) (Bladestan-compatible contract model)                                           | High        | Medium      |
-| BL9 | [`view()` call-site validation](todo/blade.md#24-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
-| BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#22-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
-| BL11 | [Custom directive discovery](todo/blade.md#23-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
-| BL12 | [Call-site variable inference](todo/blade.md#25-call-site-variable-inference-late-addition) (late addition, lowest-priority source)                                         | Low-Medium  | Medium-High |
+| BL8 | [Template signature resolution chain](todo/blade.md#bl8-template-signature-resolution-chain) (Bladestan-compatible contract model)                                           | High        | Medium      |
+| BL9 | [`view()` call-site validation](todo/blade.md#bl9-view-call-site-validation) (diagnostics against template signatures)                                                       | Medium-High | Medium-High |
+| BL10 | [Cross-file `@section` / `@stack` name intelligence](todo/blade.md#bl10-cross-file-section-stack-name-intelligence)                                                         | Medium      | Medium      |
+| BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Low-Medium  |
+| BL12 | [Call-site variable inference](todo/blade.md#bl12-call-site-variable-inference-late-addition) (late addition, lowest-priority source)                                         | Low-Medium  | Medium-High |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Low         |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium      |
