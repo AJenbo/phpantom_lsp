@@ -608,6 +608,58 @@ foo('line4');
     );
 }
 
+#[tokio::test]
+async fn range_excluding_early_arg_does_not_shift_later_hints() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let text = r#"<?php
+function make(string $prefix, string $name, int $entries, int $versions, int $stale): void {}
+make(
+    'p',
+    'n',
+    1,
+    2,
+    3,
+);
+"#;
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Exclude the first argument's line ('p') from the requested range; the
+    // remaining arguments must still map to their own parameter, not the
+    // previous one, even though the positional counter must skip over the
+    // excluded argument.
+    let range = Range {
+        start: Position {
+            line: 4,
+            character: 0,
+        },
+        end: Position {
+            line: 8,
+            character: 20,
+        },
+    };
+
+    let hints = backend
+        .handle_inlay_hints(uri.as_ref(), text, range)
+        .unwrap_or_default();
+
+    let lbls: Vec<String> = hints.iter().map(hint_label).collect();
+    assert_eq!(
+        lbls,
+        vec!["name:", "entries:", "versions:", "stale:"],
+        "hints after a range-excluded argument must still map to their own parameter"
+    );
+}
+
 // ─── String literal matching suppression ────────────────────────────────────
 
 #[tokio::test]

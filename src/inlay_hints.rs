@@ -462,11 +462,6 @@ impl Backend {
         let mut positional_counter: usize = 0;
 
         for (arg_idx, &arg_offset) in call_site.arg_offsets.iter().enumerate() {
-            // Skip arguments outside the viewport range.
-            if arg_offset < range_start || arg_offset > range_end {
-                continue;
-            }
-
             // Skip named arguments — the parameter name is already visible.
             if call_site.named_arg_indices.contains(&(arg_idx as u32)) {
                 continue;
@@ -497,6 +492,14 @@ impl Backend {
             };
 
             positional_counter += 1;
+
+            // Skip rendering arguments outside the viewport range, but only
+            // after the positional counter above has been advanced — the
+            // counter must track every argument regardless of visibility so
+            // that arguments rendered later still map to the right parameter.
+            if arg_offset < range_start || arg_offset > range_end {
+                continue;
+            }
 
             let param = &params[param_idx];
 
