@@ -66,6 +66,11 @@ impl Backend {
             return vec![loc];
         }
 
+        // Request input keys: jump to the validation rule that declares them.
+        if let Some(loc) = laravel::resolve_request_field_definition(self, uri, content, position) {
+            return vec![loc];
+        }
+
         // env() fallback: not yet indexed in the symbol map.
         laravel::resolve_env_definition(self, content, position)
             .into_iter()

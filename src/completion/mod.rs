@@ -18,6 +18,9 @@
 ///   and raw variable type resolution for array shape value chaining
 /// - **eloquent_string**: Eloquent relation dot-notation and column name string
 ///   completion inside method arguments like `with('`, `where('`, etc.
+/// - **laravel_request_keys**: Request input field name completion inside
+///   `$request->input('`, `->has('`, `$request['`, etc., driven by the
+///   validation rules in scope
 /// - **use_edit**: Use-statement insertion and conflict analysis
 ///
 /// ## Sub-grouped modules
@@ -63,6 +66,7 @@ pub(crate) mod builder;
 pub(crate) mod command_params;
 pub(crate) mod eloquent_string;
 pub(crate) mod handler;
+pub(crate) mod laravel_request_keys;
 pub(crate) mod laravel_route_controller;
 pub(crate) mod laravel_string_keys;
 pub mod named_args;

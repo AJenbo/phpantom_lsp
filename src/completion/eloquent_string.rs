@@ -118,6 +118,12 @@ pub(crate) struct StringCallContext {
     pub is_static: bool,
     pub arg_index: usize,
     pub string_content_start: usize,
+    /// Byte offset of the `(` that opens the call's argument list.
+    ///
+    /// `subject` only captures a bare identifier or `$variable`; callers that
+    /// need the full receiver expression (e.g. `$request->safe()`) re-read it
+    /// from the source text preceding this offset.
+    pub call_open_paren: usize,
 }
 
 /// Detect a string-inside-call context at the cursor position.
@@ -195,6 +201,7 @@ pub(crate) fn detect_string_call_context(
         is_static,
         arg_index,
         string_content_start,
+        call_open_paren: paren_pos,
     })
 }
 
