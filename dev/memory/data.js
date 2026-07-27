@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785138661466,
+  "lastUpdate": 1785158072983,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21803,6 +21803,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "579bce936bc3490a19aba6487b7bc7b46a87cce9",
+          "message": "Type narrowing against `@phpstan-assert`/`@psalm-assert` no longer leaks\nmemory",
+          "timestamp": "2026-07-27T14:59:08+02:00",
+          "tree_id": "c186c899c7211dd4d6d2eec0cd8753aaa3e86f63",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/579bce936bc3490a19aba6487b7bc7b46a87cce9"
+        },
+        "date": 1785158068963,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.2,
             "unit": "MiB"
           }
         ]
