@@ -7,7 +7,7 @@ use super::*;
 
 pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Class name — declaration site, not a reference.
-    let name = bytes_to_str(class.name.value).to_string();
+    let name = crate::atom::atom_bytes(class.name.value);
     ctx.spans.push(SymbolSpan {
         start: class.name.span.start.offset,
         end: class.name.span.end.offset,
@@ -116,7 +116,7 @@ fn class_is_console_command(class: &Class<'_>) -> bool {
 
 pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Interface name — declaration site, not a reference.
-    let name = bytes_to_str(iface.name.value).to_string();
+    let name = crate::atom::atom_bytes(iface.name.value);
     ctx.spans.push(SymbolSpan {
         start: iface.name.span.start.offset,
         end: iface.name.span.end.offset,
@@ -162,7 +162,7 @@ pub(super) fn extract_from_interface<'a>(iface: &'a Interface<'a>, ctx: &mut Ext
 
 pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Trait name — declaration site, not a reference.
-    let name = bytes_to_str(trait_def.name.value).to_string();
+    let name = crate::atom::atom_bytes(trait_def.name.value);
     ctx.spans.push(SymbolSpan {
         start: trait_def.name.span.start.offset,
         end: trait_def.name.span.end.offset,
@@ -196,7 +196,7 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
 
 pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Enum name — declaration site, not a reference.
-    let name = bytes_to_str(enum_def.name.value).to_string();
+    let name = crate::atom::atom_bytes(enum_def.name.value);
     ctx.spans.push(SymbolSpan {
         start: enum_def.name.span.start.offset,
         end: enum_def.name.span.end.offset,
@@ -380,7 +380,7 @@ pub(super) fn extract_from_class_member<'a>(
                 start: case_name_ident.span.start.offset,
                 end: case_name_ident.span.end.offset,
                 kind: SymbolKind::MemberDeclaration {
-                    name: bytes_to_str(case_name_ident.value).to_string(),
+                    name: crate::atom::atom_bytes(case_name_ident.value),
                     is_static: true,
                 },
             });
@@ -420,7 +420,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
                 &trait_raw,
             ));
             // Emit MemberAccess for the original method name.
-            let method_name = bytes_to_str(abs.method_name.value).to_string();
+            let method_name = crate::atom::atom_bytes(abs.method_name.value);
             ctx.spans.push(SymbolSpan {
                 start: abs.method_name.span.start.offset,
                 end: abs.method_name.span.end.offset,
@@ -438,7 +438,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
             // Unqualified reference: use the first trait name from the
             // `use` list, or fall back to `self`.
             let subject = first_trait_name.unwrap_or("self").to_string();
-            let method_name = bytes_to_str(ident.value).to_string();
+            let method_name = crate::atom::atom_bytes(ident.value);
             ctx.spans.push(SymbolSpan {
                 start: ident.span.start.offset,
                 end: ident.span.end.offset,
@@ -458,7 +458,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
     // Using `self` as the subject so that `resolve_trait_alias` on
     // the owning class maps the alias back to the original method.
     if let Some(ref alias_ident) = alias_adapt.alias {
-        let alias_name = bytes_to_str(alias_ident.value).to_string();
+        let alias_name = crate::atom::atom_bytes(alias_ident.value);
         ctx.spans.push(SymbolSpan {
             start: alias_ident.span.start.offset,
             end: alias_ident.span.end.offset,
@@ -493,7 +493,7 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
     ));
 
     // Emit MemberAccess for the method name.
-    let method_name = bytes_to_str(prec.method_reference.method_name.value).to_string();
+    let method_name = crate::atom::atom_bytes(prec.method_reference.method_name.value);
     ctx.spans.push(SymbolSpan {
         start: prec.method_reference.method_name.span.start.offset,
         end: prec.method_reference.method_name.span.end.offset,
@@ -525,7 +525,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         start: method.name.span.start.offset,
         end: method.name.span.end.offset,
         kind: SymbolKind::MemberDeclaration {
-            name: bytes_to_str(method.name.value).to_string(),
+            name: crate::atom::atom_bytes(method.name.value),
             is_static,
         },
     });
@@ -587,7 +587,9 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
             ctx.spans.push(SymbolSpan {
                 start: file_offset,
                 end,
-                kind: SymbolKind::Variable { name: name.clone() },
+                kind: SymbolKind::Variable {
+                    name: crate::atom::atom(&name),
+                },
             });
             ctx.var_defs.push(VarDefSite {
                 offset: file_offset,
@@ -625,7 +627,9 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         ctx.spans.push(SymbolSpan {
             start: param_offset,
             end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable { name: name.clone() },
+            kind: SymbolKind::Variable {
+                name: crate::atom::atom(&name),
+            },
         });
         ctx.var_defs.push(VarDefSite {
             offset: param_offset,
@@ -676,7 +680,9 @@ pub(super) fn extract_inline_docblock(
             ctx.spans.push(SymbolSpan {
                 start: file_offset,
                 end: file_offset + name_len,
-                kind: SymbolKind::Variable { name: name.clone() },
+                kind: SymbolKind::Variable {
+                    name: crate::atom::atom(&name),
+                },
             });
             ctx.var_defs.push(VarDefSite {
                 offset: file_offset,
@@ -725,7 +731,9 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
                 ctx.spans.push(SymbolSpan {
                     start: var_offset,
                     end: var.span.end.offset,
-                    kind: SymbolKind::Variable { name: name.clone() },
+                    kind: SymbolKind::Variable {
+                        name: crate::atom::atom(&name),
+                    },
                 });
                 ctx.var_defs.push(VarDefSite {
                     offset: var_offset,
@@ -754,7 +762,9 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
             ctx.spans.push(SymbolSpan {
                 start: var_offset,
                 end: var.span.end.offset,
-                kind: SymbolKind::Variable { name: name.clone() },
+                kind: SymbolKind::Variable {
+                    name: crate::atom::atom(&name),
+                },
             });
             ctx.var_defs.push(VarDefSite {
                 offset: var_offset,
@@ -786,7 +796,7 @@ pub(super) fn extract_from_class_constant<'a>(
             start: item.name.span.start.offset,
             end: item.name.span.end.offset,
             kind: SymbolKind::MemberDeclaration {
-                name: bytes_to_str(item.name.value).to_string(),
+                name: crate::atom::atom_bytes(item.name.value),
                 is_static: true,
             },
         });
@@ -817,7 +827,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
     extract_from_attribute_lists(&func.attribute_lists, ctx, 0);
 
     // Function name as a navigable reference.
-    let name = bytes_to_str(func.name.value).to_string();
+    let name = crate::atom::atom_bytes(func.name.value);
     ctx.spans.push(SymbolSpan {
         start: func.name.span.start.offset,
         end: func.name.span.end.offset,
@@ -862,7 +872,9 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             ctx.spans.push(SymbolSpan {
                 start: file_offset,
                 end,
-                kind: SymbolKind::Variable { name: name.clone() },
+                kind: SymbolKind::Variable {
+                    name: crate::atom::atom(&name),
+                },
             });
             ctx.var_defs.push(VarDefSite {
                 offset: file_offset,
@@ -901,7 +913,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             start: param_offset,
             end: param.variable.span.end.offset,
             kind: SymbolKind::Variable {
-                name: pname.clone(),
+                name: crate::atom::atom(&pname),
             },
         });
         ctx.var_defs.push(VarDefSite {
@@ -942,7 +954,7 @@ pub(super) fn extract_from_use_statement(use_stmt: &Use<'_>, spans: &mut Vec<Sym
         // Use statement names are always fully qualified (even without a
         // leading `\`), so force `is_fqn = true`.  `class_ref_span`
         // derives the flag from a leading `\` which use statements omit.
-        let name = strip_fqn_prefix(&full).to_string();
+        let name = crate::atom::atom(strip_fqn_prefix(&full));
         spans.push(SymbolSpan {
             start: item.name.span().start.offset,
             end: item.name.span().end.offset,

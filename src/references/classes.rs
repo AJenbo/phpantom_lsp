@@ -94,7 +94,7 @@ impl Backend {
                 let matched = match &span.kind {
                     SymbolKind::ClassReference { name, is_fqn, .. } => {
                         let resolved = if *is_fqn {
-                            name.clone()
+                            name.to_string()
                         } else if let Some(fqn) =
                             resolved_names.as_ref().and_then(|rn| rn.get(span.start))
                         {

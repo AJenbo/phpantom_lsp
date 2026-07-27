@@ -26,7 +26,9 @@ pub(super) fn extract_closure_expr<'a>(closure: &'a Closure<'a>, ctx: &mut Extra
         ctx.spans.push(SymbolSpan {
             start: param.variable.span.start.offset,
             end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable { name: name.clone() },
+            kind: SymbolKind::Variable {
+                name: crate::atom::atom(&name),
+            },
         });
         // Emit VarDefSite for closure parameter.
         let cp_offset = param.variable.span.start.offset;
@@ -52,7 +54,9 @@ pub(super) fn extract_closure_expr<'a>(closure: &'a Closure<'a>, ctx: &mut Extra
             ctx.spans.push(SymbolSpan {
                 start: var.variable.span.start.offset,
                 end: var.variable.span.end.offset,
-                kind: SymbolKind::Variable { name: name.clone() },
+                kind: SymbolKind::Variable {
+                    name: crate::atom::atom(&name),
+                },
             });
             // Emit VarDefSite so that GTD inside the closure body
             // can find the captured variable.  The definition is
@@ -106,7 +110,9 @@ pub(super) fn extract_arrow_function_expr<'a>(
         ctx.spans.push(SymbolSpan {
             start: param.variable.span.start.offset,
             end: param.variable.span.end.offset,
-            kind: SymbolKind::Variable { name: name.clone() },
+            kind: SymbolKind::Variable {
+                name: crate::atom::atom(&name),
+            },
         });
         // Emit VarDefSite for arrow function parameter.
         let ap_offset = param.variable.span.start.offset;

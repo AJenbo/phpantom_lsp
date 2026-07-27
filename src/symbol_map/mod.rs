@@ -28,8 +28,7 @@
 pub(crate) mod docblock;
 mod extraction;
 
-use std::collections::HashMap;
-
+use crate::atom::Atom;
 use crate::php_type::PhpType;
 
 // Re-export the public entry point from extraction.
@@ -119,7 +118,7 @@ pub(crate) enum SymbolKind {
     /// type hint, `new Foo`, `extends Foo`, `implements Foo`,
     /// `use` statement target, `catch (Foo $e)`, etc.
     ClassReference {
-        name: String,
+        name: Atom,
         /// `true` when the original PHP source used a leading `\`
         /// (fully-qualified name).  When set, the resolver should use the
         /// name as-is without prepending the file's namespace.
@@ -133,13 +132,13 @@ pub(crate) enum SymbolKind {
     /// (`class Foo`, `interface Bar`, etc.).  Go-to-definition returns
     /// the symbol's own location so editors can fall back to
     /// Find References.  Also useful for document highlights.
-    ClassDeclaration { name: String },
+    ClassDeclaration { name: Atom },
 
     /// Member name on the RHS of `->`, `?->`, or `::`.
     /// `subject_text` is the source text of the LHS expression.
     MemberAccess {
         subject_text: String,
-        member_name: String,
+        member_name: Atom,
         is_static: bool,
         is_method_call: bool,
         /// `true` when this span was extracted from a docblock reference
@@ -162,7 +161,7 @@ pub(crate) enum SymbolKind {
     /// A `$variable` token (usage or definition site).
     Variable {
         /// Name without `$` prefix.
-        name: String,
+        name: Atom,
     },
 
     /// A string literal argument inside `compact('var')` that references
@@ -173,7 +172,7 @@ pub(crate) enum SymbolKind {
     /// replacing only the bare name text.
     CompactVariable {
         /// Variable name without `$` prefix.
-        name: String,
+        name: Atom,
     },
 
     /// Standalone function call name (not a method call).
@@ -184,14 +183,14 @@ pub(crate) enum SymbolKind {
     /// unknown-function diagnostic (which must skip definitions) and by
     /// find-references / document-highlight (which may want to include
     /// both).
-    FunctionCall { name: String, is_definition: bool },
+    FunctionCall { name: Atom, is_definition: bool },
 
     /// `self`, `static`, `parent`, or `$this` in a navigable context.
     SelfStaticParent(SelfStaticParentKind),
 
     /// A constant name in a navigable context (`define()` name,
     /// class constant access, standalone constant reference).
-    ConstantReference { name: String },
+    ConstantReference { name: Atom },
 
     /// A method, property, or constant name at its *declaration* site.
     ///
@@ -202,7 +201,7 @@ pub(crate) enum SymbolKind {
     MemberDeclaration {
         /// The member name (e.g. `"save"`, `"name"`, `"MAX_SIZE"`).
         /// For properties this is the name WITHOUT the `$` prefix.
-        name: String,
+        name: Atom,
         /// Whether this is a static member (`static function`, `static $prop`,
         /// or class constant — constants are always accessed statically).
         is_static: bool,
@@ -212,7 +211,7 @@ pub(crate) enum SymbolKind {
     /// Used by the rename handler to support namespace renaming.
     NamespaceDeclaration {
         /// The full namespace name (e.g. `"App\\Models"`).
-        name: String,
+        name: Atom,
     },
 
     /// A PHP keyword token (e.g. `as`, `foreach`, `if`, `new`, `use`).
@@ -270,24 +269,24 @@ pub(crate) enum SymbolKind {
 
 impl SymbolKind {
     /// Memory-audit tooling: heap bytes held by this span's strings.
+    ///
+    /// `Atom` fields are globally interned (stored once in the intern
+    /// table, not per-span), so they contribute nothing here.
     #[cfg(feature = "mem-audit")]
     pub(crate) fn audit_heap(&self) -> usize {
         match self {
-            Self::ClassReference { name, .. }
-            | Self::ClassDeclaration { name }
-            | Self::Variable { name }
-            | Self::CompactVariable { name }
-            | Self::FunctionCall { name, .. }
-            | Self::ConstantReference { name }
-            | Self::MemberDeclaration { name, .. }
-            | Self::NamespaceDeclaration { name }
-            | Self::LaravelMacroString { name, .. }
-            | Self::CommandOwnParam { name, .. } => name.capacity(),
-            Self::MemberAccess {
-                subject_text,
-                member_name,
-                ..
-            } => subject_text.capacity() + member_name.capacity(),
+            Self::ClassReference { .. }
+            | Self::ClassDeclaration { .. }
+            | Self::Variable { .. }
+            | Self::CompactVariable { .. }
+            | Self::FunctionCall { .. }
+            | Self::ConstantReference { .. }
+            | Self::MemberDeclaration { .. }
+            | Self::NamespaceDeclaration { .. } => 0,
+            Self::LaravelMacroString { name, .. } | Self::CommandOwnParam { name, .. } => {
+                name.capacity()
+            }
+            Self::MemberAccess { subject_text, .. } => subject_text.capacity(),
             Self::LaravelStringKey { key, .. } => key.capacity(),
             Self::SelfStaticParent(_) | Self::Keyword | Self::CastType | Self::Comment => 0,
         }
@@ -519,7 +518,7 @@ pub(crate) struct SymbolMap {
     ///
     /// This lets references/rename jump straight to relevant `->name` /
     /// `::name` spans without rescanning the full `spans` vec for each file.
-    pub member_access_indices: HashMap<String, Vec<usize>>,
+    pub member_access_indices: crate::atom::AtomMap<Vec<usize>>,
     /// Variable definition sites, sorted by `(scope_start, offset)`.
     pub var_defs: Vec<VarDefSite>,
     /// Scope boundaries `(start_offset, end_offset)` for functions,
@@ -631,7 +630,7 @@ impl SymbolMap {
     /// Indices into [`Self::spans`] for member accesses named `name`.
     pub fn member_access_indices(&self, name: &str) -> &[usize] {
         self.member_access_indices
-            .get(name)
+            .get(&crate::atom::atom(name))
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }

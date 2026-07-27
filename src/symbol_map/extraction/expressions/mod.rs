@@ -39,7 +39,7 @@ pub(super) fn extract_variable_symbol_spans<'a>(
                     kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
                 });
             } else {
-                let name = raw.strip_prefix('$').unwrap_or(raw).to_string();
+                let name = crate::atom::atom(raw.strip_prefix('$').unwrap_or(raw));
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
                     end: dv.span.end.offset,
@@ -70,7 +70,7 @@ pub(super) fn extract_from_expression<'a>(
                     kind: SymbolKind::SelfStaticParent(SelfStaticParentKind::This),
                 });
             } else {
-                let name = raw.strip_prefix('$').unwrap_or(raw).to_string();
+                let name = crate::atom::atom(raw.strip_prefix('$').unwrap_or(raw));
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
                     end: dv.span.end.offset,
@@ -301,8 +301,8 @@ pub(super) fn extract_from_expression<'a>(
         // constant references — including namespaced ones.  These are
         // never class names, so always emit `ConstantReference`.
         Expression::ConstantAccess(ca) => {
-            let name = bytes_to_str(ca.name.value()).to_string();
-            let name_clean = strip_fqn_prefix(&name).to_string();
+            let name = bytes_to_str(ca.name.value());
+            let name_clean = crate::atom::atom(strip_fqn_prefix(name));
             ctx.spans.push(SymbolSpan {
                 start: ca.name.span().start.offset,
                 end: ca.name.span().end.offset,

@@ -180,7 +180,7 @@ impl Backend {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
                 let ctx = self.file_context(uri);
                 let fqn = if *is_fqn {
-                    name.clone()
+                    name.to_string()
                 } else {
                     ctx.resolve_name_at(name, span_start)
                 };

@@ -1156,38 +1156,6 @@ should keep owned payloads or use a separate bounded cache.
 
 ---
 
-## P39. `SymbolKind` stores owned strings per span
-
-**Impact: Medium · Effort: Low-Medium**
-
-`symbol_maps` is the second-largest store: 40 MB / 367 K allocations on
-the mid-size app, 64 MB / 602 K on the large one. The span vectors
-dominate it — 353 K spans costing 31 MB of struct bytes (88 B per
-`SymbolSpan`) plus 4.5 MB of string payloads across 254 K separate
-allocations.
-
-`SymbolSpan` is `{ start: u32, end: u32, kind: SymbolKind }`, and
-`SymbolKind` is fat because nearly every variant owns a `String`.
-`MemberAccess` owns two (`subject_text` and `member_name`).
-
-Two independent changes:
-
-1. **Interned names.** `member_name`, class names, variable names,
-   function names, and constant names are all drawn from bounded sets
-   already interned elsewhere. Making them `Atom` drops 16 B per field
-   and removes the per-span allocation entirely.
-2. **`subject_text` as a byte range.** It is the source text of the LHS
-   expression, which is unbounded free text and must not be interned.
-   Every consumer has the file content available, so storing
-   `(start, end)` offsets and slicing on demand removes the string
-   without losing anything.
-
-Together these should take `SymbolKind` from ~80 B to ~24-32 B,
-reclaiming roughly 17 MB on the large app and eliminating ~250 K
-allocations.
-
----
-
 ## P40. `method_index` is a per-class `HashMap` even when the member vec is shared
 
 **Impact: Low-Medium · Effort: Low**
@@ -1272,6 +1240,62 @@ process-global static or thread-local, so test isolation between
 and `reindex_references_for_symbol_maps_batch` checks before doing any
 work, so the skip applies uniformly to every caller of `update_ast` in
 headless mode rather than special-casing the `analyze` call site.
+
+---
+
+## P43. `MemberAccess.subject_text` still allocates a `String` per span
+
+**Impact: Low-Medium · Effort: Medium**
+
+Every other name field on `SymbolKind` (`member_name`, class names,
+variable names, function names, constant names) is now `Atom`,
+eliminating their per-span allocation. `MemberAccess::subject_text` is
+the one field left as an owned `String`, and it is not a simple
+byte-range problem the way it first looked.
+
+`subject_text` is not a slice of the file's raw source — it is the
+*synthesized* canonical text `expr_to_subject_text` builds from the AST
+(`symbol_map/extraction/subject_text.rs`, `type_engine/subject_expr.rs`).
+It diverges from the raw bytes in ways consumers actually depend on:
+
+- `(new Foo($x))->bar()` lowers straight to `"Foo"`, dropping `new` and
+  the constructor arguments entirely — documented as intentional,
+  matching historical behaviour ("the constructed instance resolves
+  through its class").
+- Whitespace around `->`/`::` is normalised away (`$this -> foo` still
+  serialises to `"$this->foo"`); a raw source slice would keep the
+  spaces and break the byte-exact splitting `SubjectExpr::parse` does
+  (`split_last_arrow_raw` and friends have no whitespace tolerance).
+- Expressions the lowering can't represent collapse to `""`, and
+  several consumers key off `.is_empty()` as an explicit
+  "unresolvable" sentinel (e.g. `resolve_target_classes` callers). A
+  raw slice would hand them real, non-empty text instead and defeat
+  that check.
+
+Storing `(start, end)` into the file content and slicing at request
+time would reproduce none of this and would silently change subject
+resolution for the shapes above — exactly the class of silently-wrong
+result the project's no-diagnostic-suppression rule exists to prevent
+for diagnostics, and the same logic applies to any other resolution
+path.
+
+A safe version of the same idea is still possible, just bigger than a
+plain byte range:
+
+1. Add an enum (`SubjectText::Range { start, end } |
+   SubjectText::Owned(Box<str>)`), chosen at extraction time by
+   comparing the synthesized text against the raw byte range of the
+   object expression and only paying for `Owned` when they differ
+   (nested calls, `new`-as-subject, unsupported forms).
+2. Thread the file content through the ~15 call sites across `hover`,
+   `definition`, `references`, `diagnostics`, `code_actions`, and the
+   `symbol_map` test helpers that currently read `subject_text` as a
+   bare `&str`, since `SubjectText::as_str` needs it to resolve the
+   `Range` case.
+
+Worth re-measuring after: most `MemberAccess` subjects in typical PHP
+code are plain variables/`$this`/class names, which take the free
+`Range` path, so the `Owned` fallback should be rare in practice.
 
 ---
 

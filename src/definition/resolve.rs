@@ -357,11 +357,11 @@ impl Backend {
                 let ctx = self.file_context(uri);
                 let fqn = ctx.resolve_name_at(name, cursor_offset);
                 let mut candidates = vec![fqn];
-                if name.contains('\\') && !candidates.contains(name) {
-                    candidates.push(name.clone());
+                if name.contains('\\') && !candidates.iter().any(|c| c == name) {
+                    candidates.push(name.to_string());
                 }
-                if !candidates.contains(name) {
-                    candidates.push(name.clone());
+                if !candidates.iter().any(|c| c == name) {
+                    candidates.push(name.to_string());
                 }
                 self.resolve_function_definition(&candidates)
                     .map(|loc| vec![loc])
@@ -371,8 +371,8 @@ impl Backend {
                 let ctx = self.file_context(uri);
                 let fqn = ctx.resolve_name_at(name, cursor_offset);
                 let mut candidates = vec![fqn];
-                if !candidates.contains(name) {
-                    candidates.push(name.clone());
+                if !candidates.iter().any(|c| c == name) {
+                    candidates.push(name.to_string());
                 }
                 // Try class constant (Name::CONST) first — but the symbol
                 // map records class constants as MemberAccess, so this path

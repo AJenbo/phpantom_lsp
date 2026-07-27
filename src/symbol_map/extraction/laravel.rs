@@ -290,7 +290,7 @@ pub(super) fn try_emit_array_callable_span(
         end: inner_end,
         kind: SymbolKind::MemberAccess {
             subject_text,
-            member_name: member_name.to_string(),
+            member_name: crate::atom::atom(member_name),
             is_static,
             is_method_call: true,
             is_docblock_reference: false,
@@ -341,7 +341,7 @@ pub(super) fn emit_compact_name_spans(
                 start: inner_start,
                 end: inner_end,
                 kind: SymbolKind::CompactVariable {
-                    name: name.to_string(),
+                    name: crate::atom::atom(name),
                 },
             });
         }
@@ -629,7 +629,7 @@ pub(super) fn laravel_route_scan_expr(
                 end: inner_end,
                 kind: SymbolKind::MemberAccess {
                     subject_text: controller.to_string(),
-                    member_name: method_name.to_string(),
+                    member_name: crate::atom::atom(method_name),
                     is_static: true,
                     is_method_call: true,
                     is_docblock_reference: false,

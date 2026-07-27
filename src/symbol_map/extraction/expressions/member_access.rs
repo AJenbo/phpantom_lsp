@@ -16,7 +16,7 @@ pub(super) fn extract_access_expr<'a>(
 
             match &pa.property {
                 ClassLikeMemberSelector::Identifier(ident) => {
-                    let member_name = bytes_to_str(ident.value).to_string();
+                    let member_name = crate::atom::atom_bytes(ident.value);
                     ctx.spans.push(SymbolSpan {
                         start: ident.span.start.offset,
                         end: ident.span.end.offset,
@@ -45,7 +45,7 @@ pub(super) fn extract_access_expr<'a>(
 
             match &pa.property {
                 ClassLikeMemberSelector::Identifier(ident) => {
-                    let member_name = bytes_to_str(ident.value).to_string();
+                    let member_name = crate::atom::atom_bytes(ident.value);
                     ctx.spans.push(SymbolSpan {
                         start: ident.span.start.offset,
                         end: ident.span.end.offset,
@@ -75,7 +75,7 @@ pub(super) fn extract_access_expr<'a>(
             if let Variable::Direct(dv) = &spa.property {
                 let prop_name = {
                     let s = bytes_to_str(dv.name);
-                    s.strip_prefix('$').unwrap_or(s).to_string()
+                    crate::atom::atom(s.strip_prefix('$').unwrap_or(s))
                 };
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
@@ -96,7 +96,7 @@ pub(super) fn extract_access_expr<'a>(
             emit_class_expr_span(cca.class, ctx, scope_start);
 
             if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
-                let const_name = bytes_to_str(ident.value).to_string();
+                let const_name = bytes_to_str(ident.value);
                 if const_name == "class" {
                     // `Foo::class` — the navigable part is `Foo`.
                 } else {
@@ -105,7 +105,7 @@ pub(super) fn extract_access_expr<'a>(
                         end: ident.span.end.offset,
                         kind: SymbolKind::MemberAccess {
                             subject_text,
-                            member_name: const_name,
+                            member_name: crate::atom::atom(const_name),
                             is_static: true,
                             is_method_call: false,
                             is_docblock_reference: false,

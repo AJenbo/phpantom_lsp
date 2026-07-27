@@ -14,8 +14,9 @@ pub(super) fn extract_from_statement<'a>(
         Statement::Namespace(ns) => {
             // Emit a span for the namespace name itself so rename can target it.
             if let Some(ref ident) = ns.name {
-                let name = bytes_to_str(ident.value()).to_string();
-                if !name.is_empty() {
+                let raw = bytes_to_str(ident.value());
+                if !raw.is_empty() {
+                    let name = crate::atom::atom(raw);
                     ctx.spans.push(SymbolSpan {
                         start: ident.span().start.offset,
                         end: ident.span().end.offset,
@@ -211,7 +212,7 @@ pub(super) fn extract_from_statement<'a>(
                         start: var.span.start.offset,
                         end: var.span.end.offset,
                         kind: SymbolKind::Variable {
-                            name: var_name.clone(),
+                            name: crate::atom::atom(&var_name),
                         },
                     });
                     // Emit VarDefSite for catch variable.
@@ -256,7 +257,9 @@ pub(super) fn extract_from_statement<'a>(
                     ctx.spans.push(SymbolSpan {
                         start: dv.span.start.offset,
                         end: dv.span.end.offset,
-                        kind: SymbolKind::Variable { name: name.clone() },
+                        kind: SymbolKind::Variable {
+                            name: crate::atom::atom(&name),
+                        },
                     });
                     // Emit VarDefSite for global variable.
                     let global_offset = dv.span.start.offset;
@@ -283,7 +286,9 @@ pub(super) fn extract_from_statement<'a>(
                 ctx.spans.push(SymbolSpan {
                     start: dv.span.start.offset,
                     end: dv.span.end.offset,
-                    kind: SymbolKind::Variable { name: name.clone() },
+                    kind: SymbolKind::Variable {
+                        name: crate::atom::atom(&name),
+                    },
                 });
                 // Emit VarDefSite for static variable.
                 let static_offset = dv.span.start.offset;

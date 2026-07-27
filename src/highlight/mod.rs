@@ -61,7 +61,7 @@ impl Backend {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
                 let ctx = self.file_context(uri);
                 let fqn = if *is_fqn {
-                    name.clone()
+                    name.to_string()
                 } else {
                     ctx.resolve_name_at(name, span.start)
                 };
@@ -224,7 +224,7 @@ impl Backend {
             let fqn = match &span.kind {
                 SymbolKind::ClassReference { name, is_fqn, .. } => {
                     if *is_fqn {
-                        name.clone()
+                        name.to_string()
                     } else {
                         Self::resolve_to_fqn(name, use_map, namespace)
                     }

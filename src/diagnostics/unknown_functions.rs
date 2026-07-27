@@ -107,7 +107,7 @@ impl Backend {
                     name,
                     is_definition: true,
                 } => {
-                    let mut names = vec![name.clone()];
+                    let mut names = vec![name.to_string()];
                     if let Some(ns) = file_namespace {
                         names.push(format!("{}\\{}", ns, name));
                     }

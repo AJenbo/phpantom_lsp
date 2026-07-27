@@ -9,7 +9,7 @@ fn make_span(start: u32, end: u32, name: &str) -> SymbolSpan {
         start,
         end,
         kind: SymbolKind::ClassReference {
-            name: name.to_string(),
+            name: crate::atom::atom(name),
             is_fqn: false,
             context: ClassRefContext::Other,
         },

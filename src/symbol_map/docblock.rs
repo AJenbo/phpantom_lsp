@@ -56,7 +56,7 @@ pub(crate) fn is_navigable_type(name: &str) -> bool {
 /// `name` in all cases.
 pub(super) fn class_ref_span(start: u32, end: u32, raw_name: &str) -> SymbolSpan {
     let is_fqn = raw_name.starts_with('\\');
-    let name = strip_fqn_prefix(raw_name).to_string();
+    let name = crate::atom::atom(strip_fqn_prefix(raw_name));
     SymbolSpan {
         start,
         end,
@@ -76,7 +76,7 @@ pub(super) fn class_ref_span_ctx(
     ctx: ClassRefContext,
 ) -> SymbolSpan {
     let is_fqn = raw_name.starts_with('\\');
-    let name = strip_fqn_prefix(raw_name).to_string();
+    let name = crate::atom::atom(strip_fqn_prefix(raw_name));
     SymbolSpan {
         start,
         end,
@@ -648,7 +648,7 @@ pub(super) fn emit_type_spans(
                 .unwrap_or(trimmed);
             if is_navigable_type(base) {
                 let is_fqn = trimmed.starts_with('\\');
-                let name = strip_fqn_prefix(trimmed).to_string();
+                let name = crate::atom::atom(strip_fqn_prefix(trimmed));
                 spans.push(SymbolSpan {
                     start: token_file_offset,
                     end: token_file_offset + trimmed.len() as u32,
@@ -1065,7 +1065,7 @@ fn emit_identifier_span(name: &str, start: u32, end: u32, spans: &mut Vec<Symbol
     let check_name = strip_fqn_prefix(name).trim();
     if is_navigable_type(check_name) {
         let is_fqn = name.starts_with('\\');
-        let display_name = strip_fqn_prefix(name).trim().to_string();
+        let display_name = crate::atom::atom(strip_fqn_prefix(name).trim());
         spans.push(SymbolSpan {
             start,
             end,
@@ -1262,7 +1262,7 @@ fn extract_method_tag_symbols(
                 start: name_file_start,
                 end: name_file_end,
                 kind: SymbolKind::MemberDeclaration {
-                    name: method_name.to_string(),
+                    name: crate::atom::atom(method_name),
                     is_static,
                 },
             });
@@ -1375,7 +1375,7 @@ fn extract_property_tag_symbols(
         start: name_file_start,
         end: name_file_end,
         kind: SymbolKind::MemberDeclaration {
-            name: prop_name.to_string(),
+            name: crate::atom::atom(prop_name),
             is_static: false,
         },
     });
@@ -1515,7 +1515,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 end: member_end,
                 kind: SymbolKind::MemberAccess {
                     subject_text: clean_class.to_string(),
-                    member_name: member_name.to_string(),
+                    member_name: crate::atom::atom(member_name),
                     is_static: true,
                     is_method_call: false,
                     is_docblock_reference: true,
@@ -1550,7 +1550,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             end: member_end,
             kind: SymbolKind::MemberAccess {
                 subject_text: clean_class.to_string(),
-                member_name: member_part.to_string(),
+                member_name: crate::atom::atom(member_part),
                 is_static: false,
                 is_method_call: false,
                 is_docblock_reference: true,
@@ -1589,7 +1589,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 start,
                 end,
                 kind: SymbolKind::FunctionCall {
-                    name: clean.to_string(),
+                    name: crate::atom::atom(clean),
                     is_definition: false,
                 },
             });

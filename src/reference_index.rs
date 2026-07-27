@@ -652,7 +652,7 @@ mod tests {
                 start: 0,
                 end: name.len() as u32,
                 kind: SymbolKind::ClassDeclaration {
-                    name: name.to_string(),
+                    name: crate::atom::atom(name),
                 },
             }],
             ..SymbolMap::default()

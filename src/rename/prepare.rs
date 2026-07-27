@@ -226,14 +226,14 @@ impl Backend {
                 // Include the `$` prefix in the range — the span already does.
                 Some((format!("${}", name), range))
             }
-            SymbolKind::CompactVariable { name } => Some((name.clone(), range)),
-            SymbolKind::ClassReference { name, .. } => Some((name.clone(), range)),
-            SymbolKind::ClassDeclaration { name } => Some((name.clone(), range)),
-            SymbolKind::MemberAccess { member_name, .. } => Some((member_name.clone(), range)),
-            SymbolKind::MemberDeclaration { name, .. } => Some((name.clone(), range)),
-            SymbolKind::FunctionCall { name, .. } => Some((name.clone(), range)),
-            SymbolKind::ConstantReference { name } => Some((name.clone(), range)),
-            SymbolKind::NamespaceDeclaration { name } => Some((name.clone(), range)),
+            SymbolKind::CompactVariable { name } => Some((name.to_string(), range)),
+            SymbolKind::ClassReference { name, .. } => Some((name.to_string(), range)),
+            SymbolKind::ClassDeclaration { name } => Some((name.to_string(), range)),
+            SymbolKind::MemberAccess { member_name, .. } => Some((member_name.to_string(), range)),
+            SymbolKind::MemberDeclaration { name, .. } => Some((name.to_string(), range)),
+            SymbolKind::FunctionCall { name, .. } => Some((name.to_string(), range)),
+            SymbolKind::ConstantReference { name } => Some((name.to_string(), range)),
+            SymbolKind::NamespaceDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
             SymbolKind::LaravelStringKey { .. }

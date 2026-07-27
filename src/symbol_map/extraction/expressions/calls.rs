@@ -72,8 +72,8 @@ pub(super) fn extract_call_expr<'a>(
         Call::Function(func_call) => {
             match func_call.function {
                 Expression::Identifier(ident) => {
-                    let name = bytes_to_str(ident.value()).to_string();
-                    let name_clean = strip_fqn_prefix(&name).to_string();
+                    let raw = bytes_to_str(ident.value());
+                    let name_clean = strip_fqn_prefix(raw);
                     if name_clean.eq_ignore_ascii_case("compact") {
                         try_emit_compact_string_spans(
                             &func_call.argument_list,
@@ -85,7 +85,7 @@ pub(super) fn extract_call_expr<'a>(
                         start: ident.span().start.offset,
                         end: ident.span().end.offset,
                         kind: SymbolKind::FunctionCall {
-                            name: name_clean.clone(),
+                            name: crate::atom::atom(name_clean),
                             is_definition: false,
                         },
                     });
@@ -142,7 +142,7 @@ pub(super) fn extract_call_expr<'a>(
             extract_from_expression(method_call.object, ctx, scope_start);
 
             if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
-                let member_name = bytes_to_str(ident.value).to_string();
+                let member_name = crate::atom::atom_bytes(ident.value);
                 if member_name.eq_ignore_ascii_case("macro") {
                     try_emit_laravel_macro_string_span(
                         &method_call.argument_list,
@@ -237,7 +237,7 @@ pub(super) fn extract_call_expr<'a>(
             extract_from_expression(method_call.object, ctx, scope_start);
 
             if let ClassLikeMemberSelector::Identifier(ident) = &method_call.method {
-                let member_name = bytes_to_str(ident.value).to_string();
+                let member_name = crate::atom::atom_bytes(ident.value);
                 if is_laravel_config_repository_call(method_call.object, &member_name) {
                     try_emit_laravel_string_span(
                         crate::symbol_map::LaravelStringKind::Config,
@@ -275,7 +275,7 @@ pub(super) fn extract_call_expr<'a>(
             emit_class_expr_span(static_call.class, ctx, scope_start);
 
             if let ClassLikeMemberSelector::Identifier(ident) = &static_call.method {
-                let member_name = bytes_to_str(ident.value).to_string();
+                let member_name = crate::atom::atom_bytes(ident.value);
                 if member_name.eq_ignore_ascii_case("macro") {
                     try_emit_laravel_macro_string_span(
                         &static_call.argument_list,
@@ -295,7 +295,7 @@ pub(super) fn extract_call_expr<'a>(
                     end: ident.span.end.offset,
                     kind: SymbolKind::MemberAccess {
                         subject_text: subject_text.clone(),
-                        member_name: member_name.clone(),
+                        member_name,
                         is_static: true,
                         is_method_call: true,
                         is_docblock_reference: false,
@@ -366,13 +366,13 @@ pub(super) fn extract_partial_application_expr<'a>(
     match partial {
         PartialApplication::Function(func_pa) => match func_pa.function {
             Expression::Identifier(ident) => {
-                let name = bytes_to_str(ident.value()).to_string();
-                let name_clean = strip_fqn_prefix(&name).to_string();
+                let raw = bytes_to_str(ident.value());
+                let name_clean = strip_fqn_prefix(raw);
                 ctx.spans.push(SymbolSpan {
                     start: ident.span().start.offset,
                     end: ident.span().end.offset,
                     kind: SymbolKind::FunctionCall {
-                        name: name_clean,
+                        name: crate::atom::atom(name_clean),
                         is_definition: false,
                     },
                 });
@@ -385,7 +385,7 @@ pub(super) fn extract_partial_application_expr<'a>(
             let subject_text = expr_to_subject_text(method_pa.object);
             extract_from_expression(method_pa.object, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &method_pa.method {
-                let member_name = bytes_to_str(ident.value).to_string();
+                let member_name = crate::atom::atom_bytes(ident.value);
                 ctx.spans.push(SymbolSpan {
                     start: ident.span.start.offset,
                     end: ident.span.end.offset,
@@ -404,7 +404,7 @@ pub(super) fn extract_partial_application_expr<'a>(
             let subject_text = expr_to_subject_text(static_pa.class);
             emit_class_expr_span(static_pa.class, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &static_pa.method {
-                let member_name = bytes_to_str(ident.value).to_string();
+                let member_name = crate::atom::atom_bytes(ident.value);
                 ctx.spans.push(SymbolSpan {
                     start: ident.span.start.offset,
                     end: ident.span.end.offset,

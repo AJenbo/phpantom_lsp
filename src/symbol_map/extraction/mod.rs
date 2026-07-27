@@ -241,12 +241,12 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
 
-    let mut member_access_indices: std::collections::HashMap<String, Vec<usize>> =
-        std::collections::HashMap::new();
+    let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
+        crate::atom::AtomMap::default();
     for (idx, span) in ctx.spans.iter().enumerate() {
         if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
             member_access_indices
-                .entry(member_name.clone())
+                .entry(*member_name)
                 .or_default()
                 .push(idx);
         }
