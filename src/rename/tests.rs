@@ -4369,3 +4369,166 @@ async fn rename_macro_chain_call_updates_registration_string() {
         "{caller_result}"
     );
 }
+
+// ─── Stale Symbol Map ───────────────────────────────────────────────────────
+
+/// Replace a file's buffer without refreshing its symbol map.
+///
+/// This is the state a request lands in between a `didChange` and the
+/// background parse that follows it: `open_files` already holds the new
+/// text, `symbol_maps` still describes the old.
+fn set_buffer_without_reparsing(backend: &Backend, uri: &Url, text: &str) {
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
+}
+
+/// A map built from older text must never become `TextEdit`s.
+///
+/// Inserting a line above the symbol shifts every offset after it, so
+/// converting them against the newer buffer yields ranges over unrelated
+/// code.  Rename is an explicit action, but the edits it returns are
+/// applied wholesale, so the response has to be dropped instead.
+#[tokio::test]
+async fn rename_returns_none_for_stale_symbol_map() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///stale.php").unwrap();
+    let before = concat!(
+        "<?php\n",
+        "function demo($store): string {\n",
+        "    $created = $store->get('k');\n",
+        "    return is_numeric($created) ? $created : 'no';\n",
+        "}\n",
+    );
+    // The user types a docblock above the assignment.
+    let after = before.replace("    $created = $store", "    /** */\n    $created = $store");
+
+    open_file(&backend, &uri, before).await;
+    set_buffer_without_reparsing(&backend, &uri, &after);
+
+    let (line, character) = line_char_of(&after, "$created = ");
+    assert!(
+        rename(&backend, &uri, line, character + 1, "$updated")
+            .await
+            .is_none(),
+        "stale map must not produce edits"
+    );
+    assert!(
+        prepare_rename(&backend, &uri, line, character + 1)
+            .await
+            .is_none(),
+        "stale map must not produce a prepare-rename range"
+    );
+
+    // Once the background parse lands, rename works again.
+    backend.update_ast(uri.as_str(), &after);
+    let edit = rename(&backend, &uri, line, character + 1, "$updated")
+        .await
+        .expect("fresh map should rename $created");
+    let result = apply_edits(&after, &edits_for_uri(&edit, &uri));
+    assert!(!result.contains("$created"), "{result}");
+}
+
+/// A same-length edit leaves the byte count intact, so the map still looks
+/// fresh.  Re-reading the text at each range is what catches it.
+#[tokio::test]
+async fn rename_returns_none_when_token_text_changed_in_place() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///overtyped.php").unwrap();
+    let before = concat!(
+        "<?php\n",
+        "class Widget {\n",
+        "    public function render(): string { return 'x'; }\n",
+        "}\n",
+        "function demo(Widget $w): string { return $w->render(); }\n",
+    );
+    let after = before.replace("render", "encode");
+    assert_eq!(before.len(), after.len());
+
+    open_file(&backend, &uri, before).await;
+    set_buffer_without_reparsing(&backend, &uri, &after);
+
+    let (line, character) = line_char_of(&after, "$w->encode");
+    assert!(
+        rename(&backend, &uri, line, character + 5, "display")
+            .await
+            .is_none(),
+        "overtyped token must not produce edits"
+    );
+}
+
+/// Cross-file renames read one map per file, so freshness has to be
+/// checked against *that* file's text, not the buffer the request arrived
+/// on.  Here the file under the cursor is up to date and the file holding
+/// the references is not.
+#[tokio::test]
+async fn rename_returns_none_when_a_referencing_file_is_stale() {
+    let backend = Backend::new_test();
+    let decl_uri = Url::parse("file:///decl.php").unwrap();
+    let usage_uri = Url::parse("file:///usage.php").unwrap();
+
+    let decl_text = concat!("<?php\n", "class Widget {}\n");
+    let usage_before = concat!(
+        "<?php\n",
+        "function demo(): Widget { return new Widget(); }\n",
+    );
+    let usage_after = usage_before.replace("<?php\n", "<?php\n// a new comment line\n");
+
+    open_file(&backend, &decl_uri, decl_text).await;
+    open_file(&backend, &usage_uri, usage_before).await;
+    set_buffer_without_reparsing(&backend, &usage_uri, &usage_after);
+
+    let (line, character) = line_char_of(decl_text, "class Widget");
+    assert!(
+        rename(&backend, &decl_uri, line, character + 6, "Gadget")
+            .await
+            .is_none(),
+        "a stale referencing file must drop the whole rename"
+    );
+
+    backend.update_ast(usage_uri.as_str(), &usage_after);
+    let edit = rename(&backend, &decl_uri, line, character + 6, "Gadget")
+        .await
+        .expect("fresh maps should rename Widget");
+    let result = apply_edits(&usage_after, &edits_for_uri(&edit, &usage_uri));
+    assert!(!result.contains("Widget"), "{result}");
+}
+
+/// Namespace rename walks every workspace file and rewrites inline FQN
+/// references from their symbol-map spans, so one stale file is enough to
+/// make the result inconsistent.  A half-renamed namespace does not
+/// compile, so the whole edit is dropped.
+#[tokio::test]
+async fn rename_namespace_returns_none_when_a_file_is_stale() {
+    let backend = Backend::new_test();
+    let decl_uri = Url::parse("file:///ns_decl.php").unwrap();
+    let usage_uri = Url::parse("file:///ns_usage.php").unwrap();
+
+    let decl_text = concat!("<?php\n", "namespace App\\Old;\n", "class Foo {}\n");
+    let usage_before = concat!(
+        "<?php\n",
+        "function demo(): \\App\\Old\\Foo { return new \\App\\Old\\Foo(); }\n",
+    );
+    let usage_after = usage_before.replace("<?php\n", "<?php\n// a new comment line\n");
+
+    open_file(&backend, &decl_uri, decl_text).await;
+    open_file(&backend, &usage_uri, usage_before).await;
+    set_buffer_without_reparsing(&backend, &usage_uri, &usage_after);
+
+    let (line, character) = line_char_of(decl_text, "namespace App\\Old;");
+    assert!(
+        rename(&backend, &decl_uri, line, character + 14, "New")
+            .await
+            .is_none(),
+        "a stale file must drop the whole namespace rename"
+    );
+
+    backend.update_ast(usage_uri.as_str(), &usage_after);
+    let edit = rename(&backend, &decl_uri, line, character + 14, "New")
+        .await
+        .expect("fresh maps should rename the namespace");
+    let result = apply_edits(&usage_after, &edits_for_uri(&edit, &usage_uri));
+    assert!(result.contains("App\\New\\Foo"), "{result}");
+    assert!(!result.contains("App\\Old"), "{result}");
+}

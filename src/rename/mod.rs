@@ -21,6 +21,9 @@
 //!   `use` import FQN is updated (last segment only), aliases are
 //!   preserved, and collisions with existing imports are resolved by
 //!   introducing an alias.
+//! - Staleness guards: every range that becomes a `TextEdit` is checked
+//!   against the text of the file it belongs to before the response goes
+//!   out.  See [`validate`] for why.
 //! - Namespace rename: when renaming a namespace segment, all
 //!   `namespace` declarations, `use` statements, and fully-qualified
 //!   references across the workspace are updated.  When a PSR-4
@@ -30,5 +33,6 @@
 mod class;
 mod namespace;
 mod prepare;
+mod validate;
 
 mod tests;

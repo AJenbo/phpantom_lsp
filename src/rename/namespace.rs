@@ -139,13 +139,19 @@ impl Backend {
             self.collect_use_statement_edits(&content, old_prefix, new_prefix, &mut file_edits);
 
             // 3. Update inline FQN references from the symbol map.
-            self.collect_fqn_reference_edits(
+            //    Steps 1 and 2 scan `content` directly, so only this one
+            //    can be poisoned by a map that predates the file; when it
+            //    is, the whole rename is dropped.  Emitting the other two
+            //    files' edits would leave the workspace half-renamed.
+            if !self.collect_fqn_reference_edits(
                 file_uri,
                 &content,
                 old_prefix,
                 new_prefix,
                 &mut file_edits,
-            );
+            ) {
+                return None;
+            }
 
             if !file_edits.is_empty() {
                 // Sort edits by start position descending so they don't
@@ -371,6 +377,10 @@ impl Backend {
 
     /// Collect text edits for inline FQN references (e.g. `\App\Old\Foo`
     /// in type hints or docblocks) that contain the old prefix.
+    ///
+    /// Returns `false` when the file's symbol map cannot be trusted
+    /// against its current text, in which case no edits are collected and
+    /// the caller must abandon the rename.
     fn collect_fqn_reference_edits(
         &self,
         file_uri: &str,
@@ -378,11 +388,17 @@ impl Backend {
         old_prefix: &str,
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
-    ) {
+    ) -> bool {
         let symbol_map = match self.symbol_maps.read().get(file_uri) {
             Some(sm) => sm.clone(),
-            None => return,
+            // No map means no offsets to mistrust: this file's namespace
+            // and use-statement edits come from scanning `content`.
+            None => return true,
         };
+
+        if !symbol_map.matches_source(content) {
+            return false;
+        }
 
         let old_prefix_lower = old_prefix.to_lowercase();
 
@@ -410,6 +426,13 @@ impl Backend {
             let source = content
                 .get(span.start as usize..span.end as usize)
                 .unwrap_or("");
+
+            // A same-length edit keeps `matches_source` happy while still
+            // moving the token, so re-read the span and require it to
+            // spell the name the map recorded.
+            if !source_spells_reference(source, name) {
+                return false;
+            }
 
             // Skip use-statement references (they don't have `\` in span
             // unless they are inline FQN like `\App\Foo` in code).
@@ -444,6 +467,8 @@ impl Backend {
                 new_text: new_name,
             });
         }
+
+        true
     }
 
     /// Determine PSR-4 directory rename operations for a namespace rename.
@@ -515,6 +540,26 @@ impl Backend {
 
         if ops.is_empty() { None } else { Some(ops) }
     }
+}
+
+/// Whether `source` is text that can spell a reference recorded as `name`.
+///
+/// Normally the span covers the whole name, but a group `use`
+/// (`use App\Old\{Foo, Bar};`) records the composed FQN `App\Old\Foo` on a
+/// span that covers only the trailing `Foo`, so a segment-aligned tail
+/// counts too.  Anything else means the offsets no longer describe the
+/// buffer.
+fn source_spells_reference(source: &str, name: &str) -> bool {
+    let source = strip_fqn_prefix(source);
+    let name = strip_fqn_prefix(name);
+    source.eq_ignore_ascii_case(name)
+        || name
+            .len()
+            .checked_sub(source.len())
+            .and_then(|split| name.split_at_checked(split))
+            .is_some_and(|(prefix, tail)| {
+                prefix.ends_with('\\') && tail.eq_ignore_ascii_case(source)
+            })
 }
 
 // ─── Namespace segment helpers ──────────────────────────────────────────────

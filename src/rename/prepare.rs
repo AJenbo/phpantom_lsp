@@ -16,6 +16,7 @@ use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
 
 use super::namespace::find_namespace_segment_at_offset;
+use super::validate::span_spells_its_name;
 
 impl Backend {
     /// Handle `textDocument/prepareRename`.
@@ -31,6 +32,13 @@ impl Backend {
         position: Position,
     ) -> Option<PrepareRenameResponse> {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
+
+        // The range below is built from this span's byte offsets, and the
+        // editor shows it as the text about to be replaced.  A map that
+        // predates the buffer would put it over unrelated code.
+        if !self.rename_map_matches(uri, content) || !span_spells_its_name(content, &span) {
+            return None;
+        }
 
         // Reject non-renameable symbols.
         if let SymbolKind::SelfStaticParent(_) = &span.kind {
@@ -86,6 +94,14 @@ impl Backend {
     ) -> Option<WorkspaceEdit> {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
+        // Every edit below is derived, directly or through find-references,
+        // from this span.  If the map it came from predates the buffer the
+        // whole response is nonsense, so drop it rather than rename the
+        // wrong symbol.
+        if !self.rename_map_matches(uri, content) || !span_spells_its_name(content, &span) {
+            return None;
+        }
+
         // Reject non-renameable symbols (same logic as prepare_rename).
         if let SymbolKind::SelfStaticParent(_) = &span.kind {
             // self, static, parent, and $this are never renameable.
@@ -116,6 +132,13 @@ impl Backend {
         let locations = self.find_references_for_rename(uri, content, position, true)?;
 
         if locations.is_empty() {
+            return None;
+        }
+
+        // The reference finders read one symbol map per file, so each
+        // location has to be checked against *that* file's text, not the
+        // buffer this request arrived on.
+        if !self.rename_locations_verified(&span.kind, &locations) {
             return None;
         }
 

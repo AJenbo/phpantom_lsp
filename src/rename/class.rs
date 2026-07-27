@@ -437,11 +437,24 @@ impl Backend {
                 && namespace_changed
                 && let Some(sm) = self.symbol_maps.read().get(file_uri_str).cloned()
             {
-                if let Some(ns_span) = sm
-                    .spans
-                    .iter()
-                    .find(|s| matches!(&s.kind, SymbolKind::NamespaceDeclaration { .. }))
-                {
+                // This is the one edit in this function built straight from
+                // symbol-map offsets rather than from a verified reference
+                // location, so it needs the same guard: the map must
+                // describe the file, and the span must still spell the
+                // namespace it claims to.
+                if !sm.matches_source(&file_content) {
+                    return None;
+                }
+
+                if let Some((ns_span, ns_name)) = sm.spans.iter().find_map(|s| match &s.kind {
+                    SymbolKind::NamespaceDeclaration { name } => Some((s, name)),
+                    _ => None,
+                }) {
+                    if file_content.get(ns_span.start as usize..ns_span.end as usize)
+                        != Some(ns_name.as_str())
+                    {
+                        return None;
+                    }
                     let start = offset_to_position(&file_content, ns_span.start as usize);
                     let end = offset_to_position(&file_content, ns_span.end as usize);
                     file_edits.push(TextEdit {
