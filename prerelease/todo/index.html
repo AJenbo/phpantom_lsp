@@ -1322,12 +1322,6 @@ within the same impact tier.</p>
 <td>High</td>
 </tr>
 <tr>
-<td>P40</td>
-<td><a href="../todo/performance/#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared"><code>method_index</code> is a per-class <code>HashMap</code> even when the member vec is shared</a></td>
-<td>Low-Medium</td>
-<td>Low</td>
-</tr>
-<tr>
 <td>P41</td>
 <td><a href="../todo/performance/#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead">3.8 M live allocations cost ~170 MB in allocator overhead</a></td>
 <td>Medium</td>
@@ -1463,45 +1457,75 @@ within the same impact tier.</p>
 </tr>
 <tr>
 <td>BL1</td>
-<td><a href="../todo/blade/#8-blade-aware-code-actions">Blade-aware code actions</a></td>
+<td><a href="../todo/blade/#bl1-blade-aware-code-actions">Blade-aware code actions</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
+<td>BL13</td>
+<td><a href="../todo/blade/#bl13-mismatched-and-unbalanced-directive-diagnostics">Mismatched and unbalanced directive diagnostics</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>BL14</td>
+<td><a href="../todo/blade/#bl14-folding-ranges-for-blade-files">Folding ranges for Blade files</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>BL7</td>
+<td><a href="../todo/blade/#bl7-directive-name-completion">Blade directive completion</a></td>
+<td>Medium</td>
+<td>Low</td>
+</tr>
+<tr>
 <td>BL2</td>
-<td><a href="../todo/blade/#9-template-and-component-file-discovery">Template and component file discovery</a></td>
+<td><a href="../todo/blade/#bl2-template-and-component-file-discovery">Template and component file discovery</a></td>
 <td>High</td>
 <td>Medium</td>
 </tr>
 <tr>
+<td>BL15</td>
+<td><a href="../todo/blade/#bl15-document-outline-symbols-for-blade-files">Document outline (symbols) for Blade files</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>BL3</td>
-<td><a href="../todo/blade/#10-x-component-tag-parsing-in-preprocessor">Component tag parsing (<code>&lt;x-...&gt;</code>, <code>&lt;livewire:...&gt;</code>, <code>@props</code>)</a></td>
+<td><a href="../todo/blade/#bl3-x-component-tag-parsing-in-preprocessor">Component tag parsing (<code>&lt;x-...&gt;</code>, <code>&lt;livewire:...&gt;</code>, <code>@props</code>)</a></td>
 <td>High</td>
 <td>High</td>
 </tr>
 <tr>
 <td>BL4</td>
-<td><a href="../todo/blade/#13-component-and-view-name-completion">Component and view name completion</a></td>
+<td><a href="../todo/blade/#bl4-component-and-view-name-completion">Component and view name completion</a></td>
 <td>High</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>BL5</td>
-<td><a href="../todo/blade/#15-go-to-definition-for-view-names-and-components">Go-to-definition for view names and components</a></td>
+<td><a href="../todo/blade/#bl5-go-to-definition-for-view-names-and-components">Go-to-definition for view names and components</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>BL6</td>
-<td><a href="../todo/blade/#16-signature-merging-for-extends"><code>@extends</code> signature merging and component class typing</a></td>
+<td><a href="../todo/blade/#bl6-signature-merging-for-extends"><code>@extends</code> signature merging and component class typing</a></td>
 <td>Medium</td>
 <td>High</td>
 </tr>
 <tr>
-<td>BL7</td>
-<td><a href="../todo/blade/#19-directive-name-completion">Blade directive completion</a></td>
-<td>Medium</td>
-<td>Low</td>
+<td>BL16</td>
+<td><a href="../todo/blade/#bl16-blade-aware-formatting">Blade-aware formatting</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td>BL17</td>
+<td><a href="../todo/blade/#bl17-format---check-cli-subcommand-for-ci"><code>format --check</code> CLI subcommand for CI</a> (depends on BL16)</td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
 </tr>
 </tbody>
 </table>
@@ -2234,31 +2258,31 @@ unlikely to move the needle for most users.</p>
 </tr>
 <tr>
 <td>BL8</td>
-<td><a href="../todo/blade/#21-template-signature-resolution-chain">Template signature resolution chain</a> (Bladestan-compatible contract model)</td>
+<td><a href="../todo/blade/#bl8-template-signature-resolution-chain">Template signature resolution chain</a> (Bladestan-compatible contract model)</td>
 <td>High</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>BL9</td>
-<td><a href="../todo/blade/#24-view-call-site-validation"><code>view()</code> call-site validation</a> (diagnostics against template signatures)</td>
+<td><a href="../todo/blade/#bl9-view-call-site-validation"><code>view()</code> call-site validation</a> (diagnostics against template signatures)</td>
 <td>Medium-High</td>
 <td>Medium-High</td>
 </tr>
 <tr>
 <td>BL10</td>
-<td><a href="../todo/blade/#22-cross-file-section-stack-name-intelligence">Cross-file <code>@section</code> / <code>@stack</code> name intelligence</a></td>
+<td><a href="../todo/blade/#bl10-cross-file-section-stack-name-intelligence">Cross-file <code>@section</code> / <code>@stack</code> name intelligence</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>BL11</td>
-<td><a href="../todo/blade/#23-custom-directive-discovery">Custom directive discovery</a> (<code>Blade::directive()</code> / <code>Blade::if()</code> registrations)</td>
+<td><a href="../todo/blade/#bl11-custom-directive-discovery">Custom directive discovery</a> (<code>Blade::directive()</code> / <code>Blade::if()</code> registrations)</td>
 <td>Medium</td>
 <td>Low-Medium</td>
 </tr>
 <tr>
 <td>BL12</td>
-<td><a href="../todo/blade/#25-call-site-variable-inference-late-addition">Call-site variable inference</a> (late addition, lowest-priority source)</td>
+<td><a href="../todo/blade/#bl12-call-site-variable-inference-late-addition">Call-site variable inference</a> (late addition, lowest-priority source)</td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
 </tr>
