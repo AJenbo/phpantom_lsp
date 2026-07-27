@@ -32,6 +32,39 @@ use crate::type_engine::resolver::ResolutionCtx;
 
 pub(crate) use crate::type_engine::subject_expr::parse_new_expression_class as extract_new_expression_class;
 
+/// Find the string literal the cursor sits inside, scanning backwards from
+/// `cursor_offset` for the opening quote.
+///
+/// Returns `(quote_offset, quote_char)`.  Escaped quotes are skipped by
+/// counting the preceding backslashes.  Returns `None` when a newline is
+/// reached first, since the cursor is then not inside a single-line string.
+pub(crate) fn find_open_quote(content: &str, cursor_offset: usize) -> Option<(usize, char)> {
+    let bytes = content.as_bytes();
+    if cursor_offset == 0 || cursor_offset > bytes.len() {
+        return None;
+    }
+    let mut i = cursor_offset;
+    while i > 0 {
+        i -= 1;
+        let ch = bytes[i];
+        if ch == b'\'' || ch == b'"' {
+            let mut backslashes = 0;
+            let mut j = i;
+            while j > 0 && bytes[j - 1] == b'\\' {
+                backslashes += 1;
+                j -= 1;
+            }
+            if backslashes % 2 == 0 {
+                return Some((i, ch as char));
+            }
+        }
+        if ch == b'\n' {
+            return None;
+        }
+    }
+    None
+}
+
 /// Extract the return type annotation from a closure or arrow-function
 /// literal, given its own source text (e.g. the closure's span text, or
 /// the text between a call's parentheses for one argument).
