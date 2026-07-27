@@ -81,14 +81,14 @@ impl Backend {
                     continue;
                 }
 
-                let matches_macro = if subject_text.contains('(') {
+                let matches_macro = if subject_text.as_str(&content).contains('(') {
                     // Chained call receivers like `$query->pluck(...)->macroName()`
                     // are expensive to resolve precisely here and are the main
                     // real-world macro-registration rename case.
                     true
                 } else {
                     let subject_fqns = self.resolve_subject_to_fqns(
-                        subject_text,
+                        subject_text.as_str(&content),
                         *is_static,
                         &file_ctx,
                         span.start,
@@ -284,14 +284,17 @@ impl Backend {
 
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let subject_fqns = self.resolve_subject_to_fqns(
-                                subject_text,
+                                subject_text.as_str(content),
                                 *is_static,
                                 ctx,
                                 span.start,
                                 content,
                             );
                             if subject_fqns.is_empty() {
-                                if !unresolved_member_subject_matches_scope(subject_text, hier) {
+                                if !unresolved_member_subject_matches_scope(
+                                    subject_text.as_str(content),
+                                    hier,
+                                ) {
                                     continue;
                                 }
                             } else if !subject_fqns.iter().any(|fqn| hier.contains(fqn)) {

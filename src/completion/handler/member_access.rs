@@ -465,7 +465,7 @@ impl Backend {
             };
             return Some(CompletionTarget {
                 access_kind,
-                subject: subject_text.clone(),
+                subject: subject_text.as_str(content).to_string(),
             });
         }
 

@@ -202,7 +202,7 @@ impl Backend {
                 // so we only return references on related classes.
                 let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
                     uri,
-                    subject_text,
+                    subject_text.as_str(content),
                     *is_static,
                     span_start,
                     member_name,
@@ -217,13 +217,13 @@ impl Backend {
                 if is_constructor_name(member_name) {
                     let seeds = self
                         .reference_file_content(uri)
-                        .map(|content| {
+                        .map(|file_content| {
                             self.resolve_subject_to_fqns(
-                                subject_text,
+                                subject_text.as_str(&file_content),
                                 *is_static,
                                 &self.file_context(uri),
                                 span_start,
-                                &content,
+                                &file_content,
                             )
                         })
                         .unwrap_or_default();

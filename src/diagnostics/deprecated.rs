@@ -122,8 +122,9 @@ impl Backend {
                     ..
                 } => {
                     // Resolve the subject type to a class.
+                    let subject_str = subject_text.as_str(content);
                     let base_class = resolve_subject_to_class_name(
-                        subject_text,
+                        subject_str,
                         *is_static,
                         file_use_map,
                         file_namespace,
@@ -138,7 +139,7 @@ impl Backend {
                     // file for every member access on the same variable.
                     let base_class = match base_class {
                         Some(c) => c,
-                        None if subject_text.starts_with('$') => {
+                        None if subject_str.starts_with('$') => {
                             let enclosing_name = local_classes
                                 .iter()
                                 .find(|c| {
@@ -149,7 +150,7 @@ impl Backend {
                                 .map(|c| c.name.to_string())
                                 .unwrap_or_default();
 
-                            let cache_key = (subject_text.trim().to_string(), enclosing_name);
+                            let cache_key = (subject_str.trim().to_string(), enclosing_name);
 
                             let cached = var_type_cache.entry(cache_key).or_insert_with_key(|_| {
                                 let enclosing_class = local_classes
@@ -175,7 +176,7 @@ impl Backend {
                                     preserve_static: false,
                                 };
 
-                                resolve_variable_subject(subject_text, *is_static, &rctx)
+                                resolve_variable_subject(subject_str, *is_static, &rctx)
                             });
 
                             match cached {

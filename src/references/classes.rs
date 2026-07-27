@@ -273,7 +273,7 @@ impl Backend {
                             Some(content) => {
                                 let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
                                 self.resolve_subject_to_fqns(
-                                    subject_text,
+                                    subject_text.as_str(content),
                                     *is_static,
                                     ctx,
                                     span.start,

@@ -2234,7 +2234,7 @@ async fn test_macro_registration_references_include_unresolved_chain_call() {
                 member_name,
                 subject_text,
                 ..
-            } if member_name == "shine" => Some(subject_text.clone()),
+            } if member_name == "shine" => Some(subject_text.as_str(caller_text).to_string()),
             _ => None,
         })
         .expect("expected member-access span for unresolved chain call");

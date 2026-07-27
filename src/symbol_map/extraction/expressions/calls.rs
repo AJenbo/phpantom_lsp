@@ -201,11 +201,17 @@ pub(super) fn extract_call_expr<'a>(
                     &mut ctx.call_sites,
                     &mut ctx.untyped_closure_sites,
                 );
+                let object_span = method_call.object.span();
                 ctx.spans.push(SymbolSpan {
                     start: ident.span.start.offset,
                     end: ident.span.end.offset,
                     kind: SymbolKind::MemberAccess {
-                        subject_text,
+                        subject_text: SubjectText::new(
+                            subject_text,
+                            object_span.start.offset,
+                            object_span.end.offset,
+                            ctx.content,
+                        ),
                         member_name,
                         is_static: false,
                         is_method_call: true,
@@ -255,11 +261,17 @@ pub(super) fn extract_call_expr<'a>(
                     &mut ctx.call_sites,
                     &mut ctx.untyped_closure_sites,
                 );
+                let object_span = method_call.object.span();
                 ctx.spans.push(SymbolSpan {
                     start: ident.span.start.offset,
                     end: ident.span.end.offset,
                     kind: SymbolKind::MemberAccess {
-                        subject_text,
+                        subject_text: SubjectText::new(
+                            subject_text,
+                            object_span.start.offset,
+                            object_span.end.offset,
+                            ctx.content,
+                        ),
                         member_name,
                         is_static: false,
                         is_method_call: true,
@@ -290,11 +302,17 @@ pub(super) fn extract_call_expr<'a>(
                     &mut ctx.call_sites,
                     &mut ctx.untyped_closure_sites,
                 );
+                let class_span = static_call.class.span();
                 ctx.spans.push(SymbolSpan {
                     start: ident.span.start.offset,
                     end: ident.span.end.offset,
                     kind: SymbolKind::MemberAccess {
-                        subject_text: subject_text.clone(),
+                        subject_text: SubjectText::new(
+                            subject_text.clone(),
+                            class_span.start.offset,
+                            class_span.end.offset,
+                            ctx.content,
+                        ),
                         member_name,
                         is_static: true,
                         is_method_call: true,
@@ -382,7 +400,13 @@ pub(super) fn extract_partial_application_expr<'a>(
             }
         },
         PartialApplication::Method(method_pa) => {
-            let subject_text = expr_to_subject_text(method_pa.object);
+            let object_span = method_pa.object.span();
+            let subject_text = SubjectText::new(
+                expr_to_subject_text(method_pa.object),
+                object_span.start.offset,
+                object_span.end.offset,
+                ctx.content,
+            );
             extract_from_expression(method_pa.object, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &method_pa.method {
                 let member_name = crate::atom::atom_bytes(ident.value);
@@ -401,7 +425,13 @@ pub(super) fn extract_partial_application_expr<'a>(
             }
         }
         PartialApplication::StaticMethod(static_pa) => {
-            let subject_text = expr_to_subject_text(static_pa.class);
+            let class_span = static_pa.class.span();
+            let subject_text = SubjectText::new(
+                expr_to_subject_text(static_pa.class),
+                class_span.start.offset,
+                class_span.end.offset,
+                ctx.content,
+            );
             emit_class_expr_span(static_pa.class, ctx, scope_start);
             if let ClassLikeMemberSelector::Identifier(ident) = &static_pa.method {
                 let member_name = crate::atom::atom_bytes(ident.value);

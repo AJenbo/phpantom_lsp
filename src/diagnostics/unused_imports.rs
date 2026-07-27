@@ -88,7 +88,7 @@ impl Backend {
                     ..
                 } => {
                     // Static access: `Foo::bar()` — subject_text is `"Foo"`
-                    let trimmed = subject_text.trim();
+                    let trimmed = subject_text.as_str(content).trim();
                     if !trimmed.starts_with('$')
                         && trimmed != "self"
                         && trimmed != "static"

@@ -699,13 +699,13 @@ impl Backend {
         let offset = position_to_offset(content, position);
 
         // Try the symbol map (primary path).
-        if let Some(result) = self.member_access_from_symbol_map(uri, offset) {
+        if let Some(result) = self.member_access_from_symbol_map(uri, content, offset) {
             return Some(result);
         }
         // Retry with offset − 1 for the end-of-token edge case (cursor
         // right after the last character of the member name).
         if offset > 0
-            && let Some(result) = self.member_access_from_symbol_map(uri, offset - 1)
+            && let Some(result) = self.member_access_from_symbol_map(uri, content, offset - 1)
         {
             return Some(result);
         }
@@ -718,6 +718,7 @@ impl Backend {
     fn member_access_from_symbol_map(
         &self,
         uri: &str,
+        content: &str,
         offset: u32,
     ) -> Option<(String, AccessKind)> {
         let maps = self.symbol_maps.read();
@@ -734,7 +735,7 @@ impl Backend {
                 } else {
                     AccessKind::Arrow
                 };
-                Some((subject_text.clone(), access_kind))
+                Some((subject_text.as_str(content).to_string(), access_kind))
             }
             _ => None,
         }

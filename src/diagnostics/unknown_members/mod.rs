@@ -334,6 +334,7 @@ impl Backend {
                     }
                     _ => continue,
                 };
+            let subject_text = subject_text.as_str(content);
 
             // ── Skip the magic `::class` constant ───────────────────
             if member_name == "class" && is_static {
@@ -454,7 +455,7 @@ impl Backend {
                 && !subject_text.starts_with("$this->");
 
             let cache_key = SubjectCacheKey {
-                subject_text: subject_text.clone(),
+                subject_text: subject_text.to_string(),
                 access_kind,
                 scope: scope_key_for(current_class, fn_scope_start),
                 var_def_offset,

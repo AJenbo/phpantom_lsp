@@ -239,7 +239,7 @@ impl Backend {
                     subject_text,
                     is_static: true,
                     ..
-                } => subject_text.as_str(),
+                } => subject_text.as_str(content),
                 _ => continue,
             };
 
@@ -585,11 +585,12 @@ impl Backend {
                     subject_text,
                     is_static: true,
                     ..
-                } if !subject_text.starts_with('$')
-                    && !subject_text.contains('\\')
-                    && !is_class_keyword(subject_text) =>
+                } if {
+                    let s = subject_text.as_str(content);
+                    !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
+                } =>
                 {
-                    subject_text.as_str()
+                    subject_text.as_str(content)
                 }
                 _ => continue,
             };
@@ -794,11 +795,12 @@ impl Backend {
                     subject_text,
                     is_static: true,
                     ..
-                } if !subject_text.starts_with('$')
-                    && !subject_text.contains('\\')
-                    && !is_class_keyword(subject_text) =>
+                } if {
+                    let s = subject_text.as_str(content);
+                    !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
+                } =>
                 {
-                    (subject_text.as_str(), ClassRefContext::Other)
+                    (subject_text.as_str(content), ClassRefContext::Other)
                 }
                 _ => continue,
             };

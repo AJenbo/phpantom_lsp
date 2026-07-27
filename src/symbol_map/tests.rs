@@ -254,7 +254,7 @@ fn method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "bar");
-        assert_eq!(subject_text, "$this");
+        assert_eq!(subject_text.as_str(php), "$this");
         assert!(!is_static);
         assert!(is_method_call);
     } else {
@@ -278,7 +278,7 @@ fn static_method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "create");
-        assert_eq!(subject_text, "self");
+        assert_eq!(subject_text.as_str(php), "self");
         assert!(is_static);
         assert!(is_method_call);
     } else {
@@ -421,7 +421,7 @@ fn chained_method_call_subject_text() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "find");
-        assert_eq!(subject_text, "$this->getService()");
+        assert_eq!(subject_text.as_str(php), "$this->getService()");
     } else {
         panic!("Expected MemberAccess");
     }
@@ -3221,7 +3221,7 @@ fn see_tag_member_method() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text, "Order");
+        assert_eq!(subject_text.as_str(php), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(is_static, "@see members are treated as static access");
     } else {
@@ -3264,7 +3264,7 @@ fn see_tag_member_hash_fragment() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text, "Order");
+        assert_eq!(subject_text.as_str(php), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(!is_static, "@see `#` fragments are instance members");
     } else {
@@ -3304,7 +3304,7 @@ fn see_tag_member_property() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text, "Order");
+        assert_eq!(subject_text.as_str(php), "Order");
         assert_eq!(member_name, "channel_type");
         assert!(is_static);
     } else {
@@ -3336,7 +3336,7 @@ fn see_tag_member_constant() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text, "Order");
+        assert_eq!(subject_text.as_str(php), "Order");
         assert_eq!(member_name, "STATUS_PENDING");
         assert!(is_static);
     } else {
@@ -3620,7 +3620,7 @@ fn see_tag_self_member_spans_emitted() {
             is_docblock_reference,
             ..
         } => {
-            assert_eq!(subject_text, "self");
+            assert_eq!(subject_text.as_str(php), "self");
             assert_eq!(member_name, "bar");
             assert!(*is_static);
             assert!(*is_docblock_reference);
@@ -3979,7 +3979,7 @@ fn array_callable_class_const_emits_member_access() {
             is_method_call,
             ..
         } => {
-            assert_eq!(subject_text, "IndexPageController");
+            assert_eq!(subject_text.as_str(php), "IndexPageController");
             assert_eq!(member_name, "indexPage");
             assert!(*is_static);
             assert!(*is_method_call);
@@ -4002,7 +4002,7 @@ fn array_callable_variable_emits_instance_member_access() {
             is_static,
             ..
         } => {
-            assert_eq!(subject_text, "$this");
+            assert_eq!(subject_text.as_str(php), "$this");
             assert_eq!(member_name, "handle");
             assert!(!*is_static);
         }

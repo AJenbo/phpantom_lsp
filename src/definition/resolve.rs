@@ -276,7 +276,7 @@ impl Backend {
                 };
                 let mctx = MemberDefinitionCtx {
                     member_name,
-                    subject: subject_text,
+                    subject: subject_text.as_str(content),
                     access_kind,
                     access_hint,
                 };

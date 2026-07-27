@@ -112,6 +112,61 @@ pub(crate) enum ClassRefContext {
     Attribute,
 }
 
+/// The subject (LHS) text of a [`SymbolKind::MemberAccess`] span.
+///
+/// Most subjects are a verbatim slice of the source (a plain variable,
+/// `$this`, a bare class name), so `Range` stores just the byte offsets
+/// and re-slices the file content on demand instead of paying for an
+/// allocation per span. `Owned` is the fallback for subjects synthesised
+/// from the AST that diverge from the raw bytes at that span: `(new
+/// Foo($x))->bar()` lowers to `"Foo"` (dropping `new` and the constructor
+/// arguments), whitespace around `->`/`::` is normalised away, and
+/// expressions the lowering can't represent collapse to `""`.
+#[derive(Debug, Clone)]
+pub(crate) enum SubjectText {
+    /// Byte range `[start, end)` into the file content whose raw slice is
+    /// exactly the synthesised subject text.
+    Range { start: u32, end: u32 },
+    /// The synthesised subject text, stored because it diverges from (or
+    /// has no corresponding) raw source span.
+    Owned(Box<str>),
+}
+
+impl SubjectText {
+    /// Build from a synthesised `text` and the raw span `[start, end)` of
+    /// the expression it was derived from. Reuses the raw bytes when they
+    /// match `text` exactly, falling back to an owned allocation otherwise.
+    pub(crate) fn new(text: String, start: u32, end: u32, content: &str) -> Self {
+        match content.get(start as usize..end as usize) {
+            Some(raw) if raw == text => Self::Range { start, end },
+            _ => Self::Owned(text.into_boxed_str()),
+        }
+    }
+
+    /// Build from an already-synthesised `text` with no known matching
+    /// source span (e.g. a literal `"self"` fallback, or text resolved
+    /// from elsewhere in a chain).
+    pub(crate) fn owned(text: String) -> Self {
+        Self::Owned(text.into_boxed_str())
+    }
+
+    pub(crate) fn as_str<'a>(&'a self, content: &'a str) -> &'a str {
+        match self {
+            Self::Range { start, end } => &content[*start as usize..*end as usize],
+            Self::Owned(s) => s,
+        }
+    }
+
+    /// Memory-audit tooling: heap bytes held by this subject text.
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Range { .. } => 0,
+            Self::Owned(s) => s.len(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum SymbolKind {
     /// Class/interface/trait/enum name in a type context:
@@ -137,7 +192,7 @@ pub(crate) enum SymbolKind {
     /// Member name on the RHS of `->`, `?->`, or `::`.
     /// `subject_text` is the source text of the LHS expression.
     MemberAccess {
-        subject_text: String,
+        subject_text: SubjectText,
         member_name: Atom,
         is_static: bool,
         is_method_call: bool,
@@ -286,7 +341,7 @@ impl SymbolKind {
             Self::LaravelMacroString { name, .. } | Self::CommandOwnParam { name, .. } => {
                 name.capacity()
             }
-            Self::MemberAccess { subject_text, .. } => subject_text.capacity(),
+            Self::MemberAccess { subject_text, .. } => subject_text.heap_bytes(),
             Self::LaravelStringKey { key, .. } => key.capacity(),
             Self::SelfStaticParent(_) | Self::Keyword | Self::CastType | Self::Comment => 0,
         }

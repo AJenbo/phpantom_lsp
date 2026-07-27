@@ -319,7 +319,7 @@ impl Backend {
                     // Verify the member exists on the resolved subject class
                     // and pick up deprecated/static modifiers from it.
                     match self.resolve_member_semantics(
-                        subject_text,
+                        subject_text.as_str(content),
                         member_name,
                         *is_static,
                         *is_method_call,

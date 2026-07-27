@@ -28,7 +28,6 @@ within the same impact tier.
 | P36 | [Diagnostic-path call sites re-merge inheritance per call](todo/performance.md#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache)          | Medium      | Low         |
 | P38 | [Resolved type values are duplicated ~34x](todo/performance.md#p38-resolved-type-values-are-duplicated-34x)                                                          | High        | High        |
 | P41 | [3.8 M live allocations cost ~170 MB in allocator overhead](todo/performance.md#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead)                          | Medium      | Medium      |
-| P43 | [`MemberAccess.subject_text` still allocates a `String` per span](todo/performance.md#p43-memberaccesssubject_text-still-allocates-a-string-per-span) | Low-Medium  | Medium      |
 | P33 | [Workspace diagnostics leaves the whole project fully resolved in memory](todo/performance.md#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory) | High        | Medium-High |
 | X10 | [Interactive requests block on the workspace index lock during initial indexing](todo/indexing.md#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing) | Medium      | Medium      |
 | L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |
@@ -115,6 +114,7 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B1  | [Rename can build edits from a symbol map that predates the buffer](todo/bugs.md#b1-rename-can-build-edits-from-a-symbol-map-that-predates-the-buffer)                       | Medium-High | Low-Medium  |
+| B2  | [`mem-audit` feature build fails: `Ustr::capacity()` does not exist](todo/bugs.md#b2-mem-audit-feature-build-fails-ustrcapacity-does-not-exist)                              | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

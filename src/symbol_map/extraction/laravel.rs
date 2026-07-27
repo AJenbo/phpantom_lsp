@@ -1,3 +1,4 @@
+use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
@@ -241,7 +242,7 @@ pub(super) fn try_emit_array_callable_span(
     };
 
     // First element determines the subject and access kind.
-    let (subject_text, is_static) = match first {
+    let (subject_text, subject_span, is_static) = match first {
         // `Class::class` — static-style access on the class name.
         Expression::Access(Access::ClassConstant(cca)) => {
             let is_class_const = matches!(
@@ -252,10 +253,12 @@ pub(super) fn try_emit_array_callable_span(
             if !is_class_const {
                 return;
             }
-            (expr_to_subject_text(cca.class), true)
+            (expr_to_subject_text(cca.class), cca.class.span(), true)
         }
         // `$this` / `$object` — instance-style access.
-        Expression::Variable(Variable::Direct(dv)) => (bytes_to_str(dv.name).to_string(), false),
+        Expression::Variable(Variable::Direct(dv)) => {
+            (bytes_to_str(dv.name).to_string(), dv.span, false)
+        }
         _ => return,
     };
     if subject_text.is_empty() {
@@ -289,7 +292,12 @@ pub(super) fn try_emit_array_callable_span(
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::MemberAccess {
-            subject_text,
+            subject_text: SubjectText::new(
+                subject_text,
+                subject_span.start.offset,
+                subject_span.end.offset,
+                content,
+            ),
             member_name: crate::atom::atom(member_name),
             is_static,
             is_method_call: true,
@@ -628,7 +636,7 @@ pub(super) fn laravel_route_scan_expr(
                 start: inner_start,
                 end: inner_end,
                 kind: SymbolKind::MemberAccess {
-                    subject_text: controller.to_string(),
+                    subject_text: SubjectText::owned(controller.to_string()),
                     member_name: crate::atom::atom(method_name),
                     is_static: true,
                     is_method_call: true,

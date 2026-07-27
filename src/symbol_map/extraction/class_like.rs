@@ -421,11 +421,17 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
             ));
             // Emit MemberAccess for the original method name.
             let method_name = crate::atom::atom_bytes(abs.method_name.value);
+            let trait_span = abs.trait_name.span();
             ctx.spans.push(SymbolSpan {
                 start: abs.method_name.span.start.offset,
                 end: abs.method_name.span.end.offset,
                 kind: SymbolKind::MemberAccess {
-                    subject_text: trait_raw,
+                    subject_text: SubjectText::new(
+                        trait_raw,
+                        trait_span.start.offset,
+                        trait_span.end.offset,
+                        ctx.content,
+                    ),
                     member_name: method_name,
                     is_static: true,
                     is_method_call: true,
@@ -443,7 +449,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
                 start: ident.span.start.offset,
                 end: ident.span.end.offset,
                 kind: SymbolKind::MemberAccess {
-                    subject_text: subject,
+                    subject_text: SubjectText::owned(subject),
                     member_name: method_name,
                     is_static: true,
                     is_method_call: true,
@@ -463,7 +469,7 @@ pub(super) fn extract_from_trait_alias_adaptation<'a>(
             start: alias_ident.span.start.offset,
             end: alias_ident.span.end.offset,
             kind: SymbolKind::MemberAccess {
-                subject_text: "self".to_string(),
+                subject_text: SubjectText::owned("self".to_string()),
                 member_name: alias_name,
                 is_static: true,
                 is_method_call: true,
@@ -494,11 +500,17 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
 
     // Emit MemberAccess for the method name.
     let method_name = crate::atom::atom_bytes(prec.method_reference.method_name.value);
+    let trait_span = prec.method_reference.trait_name.span();
     ctx.spans.push(SymbolSpan {
         start: prec.method_reference.method_name.span.start.offset,
         end: prec.method_reference.method_name.span.end.offset,
         kind: SymbolKind::MemberAccess {
-            subject_text: trait_raw,
+            subject_text: SubjectText::new(
+                trait_raw,
+                trait_span.start.offset,
+                trait_span.end.offset,
+                ctx.content,
+            ),
             member_name: method_name,
             is_static: true,
             is_method_call: true,

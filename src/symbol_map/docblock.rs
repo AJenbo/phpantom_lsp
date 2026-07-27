@@ -25,7 +25,8 @@ use crate::php_type::PhpType;
 use crate::types::TemplateVariance;
 
 use super::{
-    ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolSpan, self_static_parent_kind,
+    ClassRefContext, SelfStaticParentKind, SubjectText, SymbolKind, SymbolSpan,
+    self_static_parent_kind,
 };
 use crate::util::strip_fqn_prefix;
 
@@ -1514,7 +1515,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
                 start: member_start,
                 end: member_end,
                 kind: SymbolKind::MemberAccess {
-                    subject_text: clean_class.to_string(),
+                    subject_text: SubjectText::owned(clean_class.to_string()),
                     member_name: crate::atom::atom(member_name),
                     is_static: true,
                     is_method_call: false,
@@ -1549,7 +1550,7 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
             start: member_start,
             end: member_end,
             kind: SymbolKind::MemberAccess {
-                subject_text: clean_class.to_string(),
+                subject_text: SubjectText::owned(clean_class.to_string()),
                 member_name: crate::atom::atom(member_part),
                 is_static: false,
                 is_method_call: false,

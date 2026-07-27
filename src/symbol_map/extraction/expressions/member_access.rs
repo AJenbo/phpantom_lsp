@@ -1,3 +1,4 @@
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::*;
@@ -11,7 +12,13 @@ pub(super) fn extract_access_expr<'a>(
 ) {
     match access {
         Access::Property(pa) => {
-            let subject_text = expr_to_subject_text(pa.object);
+            let object_span = pa.object.span();
+            let subject_text = SubjectText::new(
+                expr_to_subject_text(pa.object),
+                object_span.start.offset,
+                object_span.end.offset,
+                ctx.content,
+            );
             extract_from_expression(pa.object, ctx, scope_start);
 
             match &pa.property {
@@ -40,7 +47,13 @@ pub(super) fn extract_access_expr<'a>(
             }
         }
         Access::NullSafeProperty(pa) => {
-            let subject_text = expr_to_subject_text(pa.object);
+            let object_span = pa.object.span();
+            let subject_text = SubjectText::new(
+                expr_to_subject_text(pa.object),
+                object_span.start.offset,
+                object_span.end.offset,
+                ctx.content,
+            );
             extract_from_expression(pa.object, ctx, scope_start);
 
             match &pa.property {
@@ -69,7 +82,13 @@ pub(super) fn extract_access_expr<'a>(
             }
         }
         Access::StaticProperty(spa) => {
-            let subject_text = expr_to_subject_text(spa.class);
+            let class_span = spa.class.span();
+            let subject_text = SubjectText::new(
+                expr_to_subject_text(spa.class),
+                class_span.start.offset,
+                class_span.end.offset,
+                ctx.content,
+            );
             emit_class_expr_span(spa.class, ctx, scope_start);
 
             if let Variable::Direct(dv) = &spa.property {
@@ -92,7 +111,13 @@ pub(super) fn extract_access_expr<'a>(
             }
         }
         Access::ClassConstant(cca) => {
-            let subject_text = expr_to_subject_text(cca.class);
+            let class_span = cca.class.span();
+            let subject_text = SubjectText::new(
+                expr_to_subject_text(cca.class),
+                class_span.start.offset,
+                class_span.end.offset,
+                ctx.content,
+            );
             emit_class_expr_span(cca.class, ctx, scope_start);
 
             if let ClassLikeConstantSelector::Identifier(ident) = &cca.constant {
