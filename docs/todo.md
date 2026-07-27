@@ -112,8 +112,7 @@ unlikely to move the needle for most users.
 | D3  | [Deprecated rendering — chain subject resolution](todo/diagnostics.md#d3-deprecated-rendering-chain-subject-resolution)                                                    | Low-Medium  | Medium      |
 | D5  | [External tool diagnostic suppression actions](todo/diagnostics.md#d5-external-tool-diagnostic-suppression-actions)                                                         | Low         | Low         |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
-|     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
-| B2  | [Namespace rename writes an FQN into every name of a group `use`](todo/bugs.md#b2-namespace-rename-writes-an-fqn-into-every-name-of-a-group-use)                             | Medium      | Low         |
+|     | **[Bug Fixes](todo/bugs.md)** (no outstanding items)                                                                                                                        |             |             |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |

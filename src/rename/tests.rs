@@ -3535,10 +3535,14 @@ async fn rename_namespace_updates_group_use() {
     let edits_b = edits_for_uri(&edit, &uri_b);
     let result_b = apply_edits(text_b, &edits_b);
 
-    assert!(
-        result_b.contains("App\\New"),
-        "Group use prefix should be updated: {}",
-        result_b
+    assert_eq!(
+        result_b,
+        concat!(
+            "<?php\n",
+            "use App\\New\\{Foo, Bar};\n",
+            "function demo(Foo $f, Bar $b): void {}\n",
+        ),
+        "Group use prefix should be updated without touching member names"
     );
 }
 

@@ -434,10 +434,17 @@ impl Backend {
                 return false;
             }
 
-            // Skip use-statement references (they don't have `\` in span
-            // unless they are inline FQN like `\App\Foo` in code).
-            // Actually, use-statement spans DO contain the full FQN.
-            // We rely on deduplication to handle overlaps.
+            // A group-use member (`use App\Old\{Foo, Bar};`) records the
+            // composed FQN (`App\Old\Foo`) on a span that covers only the
+            // trailing segment (`Foo`). `collect_use_statement_edits`
+            // already rewrites the group's shared prefix, so emitting a
+            // second edit here would duplicate that rewrite onto the
+            // trailing segment, turning `App\New\{Foo, Bar}` into
+            // `App\New\{App\New\Foo, Bar}`. Skip it: only a span that
+            // spells the reference in full needs its own edit.
+            if !source_spells_reference_fully(source, name) {
+                continue;
+            }
 
             let new_name = if name_normalized.len() == old_prefix.len() {
                 if name.starts_with('\\') {
@@ -550,16 +557,23 @@ impl Backend {
 /// counts too.  Anything else means the offsets no longer describe the
 /// buffer.
 fn source_spells_reference(source: &str, name: &str) -> bool {
+    source_spells_reference_fully(source, name) || source_spells_reference_as_tail(source, name)
+}
+
+/// Whether `source` spells the entirety of `name` (case-insensitively).
+fn source_spells_reference_fully(source: &str, name: &str) -> bool {
+    strip_fqn_prefix(source).eq_ignore_ascii_case(strip_fqn_prefix(name))
+}
+
+/// Whether `source` spells only a segment-aligned tail of `name`, as a
+/// group-use member's span does (see [`source_spells_reference`]).
+fn source_spells_reference_as_tail(source: &str, name: &str) -> bool {
     let source = strip_fqn_prefix(source);
     let name = strip_fqn_prefix(name);
-    source.eq_ignore_ascii_case(name)
-        || name
-            .len()
-            .checked_sub(source.len())
-            .and_then(|split| name.split_at_checked(split))
-            .is_some_and(|(prefix, tail)| {
-                prefix.ends_with('\\') && tail.eq_ignore_ascii_case(source)
-            })
+    name.len()
+        .checked_sub(source.len())
+        .and_then(|split| name.split_at_checked(split))
+        .is_some_and(|(prefix, tail)| prefix.ends_with('\\') && tail.eq_ignore_ascii_case(source))
 }
 
 // ─── Namespace segment helpers ──────────────────────────────────────────────
