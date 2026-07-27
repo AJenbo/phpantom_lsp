@@ -1263,12 +1263,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for sp in &sm.spans {
                 sym.add(sp.kind.audit_heap());
             }
-            sym += map_buckets::<String, Vec<usize>>(sm.member_access_indices.capacity());
-            member_idx += map_buckets::<String, Vec<usize>>(sm.member_access_indices.capacity());
-            for (k, v) in &sm.member_access_indices {
-                sym.add(k.capacity());
+            sym += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
+            member_idx += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
+            for v in sm.member_access_indices.values() {
                 sym.add(v.capacity() * size_of::<usize>());
-                member_idx.add(k.capacity());
                 member_idx.add(v.capacity() * size_of::<usize>());
             }
             sym.add(sm.var_defs.capacity() * size_of::<crate::symbol_map::VarDefSite>());

@@ -114,7 +114,6 @@ unlikely to move the needle for most users.
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Low         |
 |     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
 | B1  | [Rename can build edits from a symbol map that predates the buffer](todo/bugs.md#b1-rename-can-build-edits-from-a-symbol-map-that-predates-the-buffer)                       | Medium-High | Low-Medium  |
-| B2  | [`mem-audit` feature build fails: `Ustr::capacity()` does not exist](todo/bugs.md#b2-mem-audit-feature-build-fails-ustrcapacity-does-not-exist)                              | Low         | Low         |
 |     | **[Code Actions](todo/actions.md)**                                                                                                                                         |             |             |
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium      |
