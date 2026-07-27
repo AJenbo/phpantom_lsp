@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785106190067,
+  "lastUpdate": 1785118079922,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21560,6 +21560,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 33.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b89d74d4bfefce69acaebea19d6935e39eb9cf38",
+          "message": "Parameter name inlay hints no longer shift to the wrong parameter when\nonly part of a multi-line call is visible",
+          "timestamp": "2026-07-27T03:52:23+02:00",
+          "tree_id": "dc740cd72a1b3a4e0ca5fc59bac94767ace4dc11",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b89d74d4bfefce69acaebea19d6935e39eb9cf38"
+        },
+        "date": 1785118077237,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.4,
             "unit": "MiB"
           },
           {
