@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::PhpType;
-use crate::types::{AssertionKind, ClassInfo, ParameterInfo, TypeAssertion};
+use crate::types::{AssertionKind, ClassInfo, ParameterInfo, SharedVec, TypeAssertion};
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -22,18 +22,24 @@ use super::*;
 /// Produced by [`extract_call_assertions`] so that callers can apply
 /// narrowing logic uniformly regardless of whether the call is
 /// `myFunc($x)` or `Assert::check($x)`.
+///
+/// The callee metadata is owned rather than borrowed: the callee is a
+/// clone produced by the loader (or by the trait/parent chain walk), so
+/// there is nothing outliving the call to borrow from. Moving the four
+/// fields out of that clone keeps the cost to an `Arc` bump plus three
+/// `Vec` moves, and lets the rest of the clone drop immediately.
 pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     /// The `@phpstan-assert` / `@psalm-assert` annotations on the callee.
-    pub(in crate::type_engine) assertions: &'a [TypeAssertion],
+    pub(in crate::type_engine) assertions: Vec<TypeAssertion>,
     /// The callee's parameter list (used to map assertion `$param` names
     /// to positional argument indices).
-    pub(in crate::type_engine) parameters: &'a [ParameterInfo],
+    pub(in crate::type_engine) parameters: SharedVec<ParameterInfo>,
     /// The call-site argument list.
     pub(in crate::type_engine) argument_list: &'a ArgumentList<'a>,
     /// Template parameter names from the callee's `@template` tags.
-    template_params: &'a [Atom],
+    template_params: Vec<Atom>,
     /// Template parameter → parameter name bindings (e.g. `("T", "$class")`).
-    template_bindings: &'a [(Atom, Atom)],
+    template_bindings: Vec<(Atom, Atom)>,
 }
 
 /// Try to extract assertion metadata from a call expression.
@@ -61,16 +67,12 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
             if func_info.type_assertions.is_empty() {
                 return None;
             }
-            // SAFETY: We leak the FunctionInfo to get a stable reference.
-            // This is acceptable because narrowing runs once per completion
-            // request and the allocation is small.
-            let func_info = Box::leak(Box::new(func_info));
             Some(CallAssertionInfo {
-                assertions: &func_info.type_assertions,
-                parameters: &func_info.parameters,
+                assertions: func_info.type_assertions,
+                parameters: func_info.parameters,
                 argument_list: &func_call.argument_list,
-                template_params: &func_info.template_params,
-                template_bindings: &func_info.template_bindings,
+                template_params: func_info.template_params,
+                template_bindings: func_info.template_bindings,
             })
         }
         Call::StaticMethod(static_call) => {
@@ -170,15 +172,12 @@ fn build_method_assertion_info<'a>(
 ) -> Option<CallAssertionInfo<'a>> {
     let method =
         find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
-    // Leak MethodInfo to get a stable reference for the duration of this
-    // narrowing pass.
-    let method = Box::leak(Box::new(method));
     Some(CallAssertionInfo {
-        assertions: &method.type_assertions,
-        parameters: &method.parameters,
+        assertions: method.type_assertions,
+        parameters: method.parameters,
         argument_list,
-        template_params: &method.template_params,
-        template_bindings: &method.template_bindings,
+        template_params: method.template_params,
+        template_bindings: method.template_bindings,
     })
 }
 
@@ -324,12 +323,12 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
         None => return false,
     };
     let mut definite = false;
-    for assertion in info.assertions {
+    for assertion in &info.assertions {
         if assertion.kind != AssertionKind::Always {
             continue;
         }
         if let Some(arg_var) =
-            find_assertion_arg_variable(info.argument_list, &assertion.param_name, info.parameters)
+            find_assertion_arg_variable(info.argument_list, &assertion.param_name, &info.parameters)
             && arg_var == ctx.var_name
         {
             // Resolve the asserted type.  When the type is a template
@@ -404,7 +403,7 @@ pub(in crate::type_engine) fn collect_assert_reexport_conditions<'a>(
         return Vec::new();
     };
     let mut out = Vec::new();
-    for assertion in info.assertions {
+    for assertion in &info.assertions {
         if assertion.kind != AssertionKind::Always {
             continue;
         }
@@ -420,7 +419,7 @@ pub(in crate::type_engine) fn collect_assert_reexport_conditions<'a>(
             continue;
         };
         if let Some(arg_expr) =
-            assertion_arg_expression(info.argument_list, &assertion.param_name, info.parameters)
+            assertion_arg_expression(info.argument_list, &assertion.param_name, &info.parameters)
         {
             out.push((arg_expr, asserts_true));
         }
@@ -476,7 +475,7 @@ pub(in crate::type_engine) fn call_asserts_not_null(
             && find_assertion_arg_variable(
                 info.argument_list,
                 &assertion.param_name,
-                info.parameters,
+                &info.parameters,
             )
             .as_deref()
                 == Some(ctx.var_name)

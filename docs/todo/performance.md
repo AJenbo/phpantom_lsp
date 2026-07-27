@@ -1182,14 +1182,56 @@ trimmed live figure, confirming arena count was never the lever.
 
 What is left is allocation *count* itself: at ~45 B of overhead per
 live allocation, each allocation avoided is worth more than its own
-`size_of`. P39 removes hundreds of thousands of allocations as a side
-effect (interning `SymbolKind` strings), so re-measure this line after
-it lands. If a meaningful gap remains afterward, the next lever is
-arena-allocating the member metadata (bump-allocate `MethodInfo`/`PropertyInfo`/
-`ParameterInfo` per resolved class instead of one `Box`/`Arc` per
-member) — a much larger change than anything else in this list, so only
-worth it if the per-allocation overhead is still the dominant cost once
-the count itself has come down.
+`size_of`. P39 removed hundreds of thousands of allocations as a side
+effect (interning `SymbolKind` strings).
+
+**2026-07-27 re-measurement.** With P39 landed, re-running the
+`mem-audit` walk turned up a genuine leak in the assertion-narrowing
+path (`src/type_engine/types/narrowing/assertions.rs`): every
+`@phpstan-assert`/`@psalm-assert` call-site evaluation `Box::leak`ed a
+cloned `FunctionInfo` or `MethodInfo` to get a stable reference for
+`CallAssertionInfo`, and neither clone was ever freed. Narrowing runs
+on every conditional the forward walker visits, so this leaked once
+per asserting call touched during a pass, for the life of the
+process — worse in a long-running LSP session (re-run on every
+keystroke) than in one-shot `analyze`. Fixed by having
+`CallAssertionInfo` own the four fields it actually needs (an
+`Arc`-shared parameter vector plus three small `Vec`s) instead of
+leaking the whole clone.
+
+Re-measured on four real projects (one small, two mid-size, one
+large) with the fixed build: live allocations dropped 7-12% on the
+three larger projects and 53% on the small one, which spends
+proportionally more of its pass time in narrowing relative to its
+total symbol count. Live bytes dropped correspondingly (tens of MB on
+the larger projects). The allocator-overhead *percentage* barely
+moved — mimalloc's rounding overhead per allocation is roughly
+constant regardless of which allocations are removed, so cutting
+count shrinks both the overhead and the total footprint by a similar
+proportion. This confirms the mechanism above without yet closing the
+gap enough to retire this item.
+
+While re-measuring, the audit's drop-and-measure probes (`src/mem_audit.rs`)
+were extended to cover every remaining `Backend` store (the phar
+archive cache, autoload/stub indexes, workspace PSR-4/vendor paths,
+diagnostic pull-model caches, and more). Previously 18-26% of live
+heap was an unattributed gap between the field-level walk and the
+allocator's own count; the probes now account for nearly all of it, so
+future passes on this item measure against a real residual (dominated
+by the `ustr` name interner and short-lived per-request state) instead
+of an unexplained shortfall. One find from the newly-covered stores:
+`phar_archives` (raw phar bytes plus a byte-offset index, kept for lazy
+re-extraction of phar-embedded PHP files such as vendor-shipped
+PHPStan) held on the order of 25 MB on projects with a phar-shaped
+dependency, previously invisible to the audit.
+
+If a meaningful gap remains once other in-flight allocation-count
+reductions land, the next lever is arena-allocating the member
+metadata (bump-allocate `MethodInfo`/`PropertyInfo`/`ParameterInfo` per
+resolved class instead of one `Box`/`Arc` per member) — a much larger
+change than anything else in this list, and today's re-measurement
+does not yet show the overhead percentage moving enough to justify it
+on its own.
 
 ---
 

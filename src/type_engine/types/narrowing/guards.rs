@@ -373,7 +373,7 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
         // inverted=true, same logic as try_apply_assert_condition_narrowing
         let function_returned_true = condition_negated;
 
-        for assertion in info.assertions {
+        for assertion in &info.assertions {
             let applies_positively = match assertion.kind {
                 AssertionKind::IfTrue => function_returned_true,
                 AssertionKind::IfFalse => !function_returned_true,
@@ -383,7 +383,7 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
             if let Some(arg_var) = find_assertion_arg_variable(
                 info.argument_list,
                 &assertion.param_name,
-                info.parameters,
+                &info.parameters,
             ) && arg_var == ctx.var_name
             {
                 let should_exclude = assertion.negated ^ !applies_positively;

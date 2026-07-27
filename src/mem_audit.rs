@@ -1579,6 +1579,88 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("global_functions", &mut || {
         backend.symbols.global_functions.write().clear()
     });
+    probe("global_defines", &mut || {
+        backend.symbols.global_defines.write().clear()
+    });
+    probe("gti_index", &mut || {
+        backend.symbols.gti_index.write().clear()
+    });
+    probe("uri_globals_index", &mut || {
+        backend.symbols.uri_globals_index.write().clear()
+    });
+    probe("fqn_uri + fqn_origin index", &mut || {
+        backend.symbols.fqn_uri_index.write().clear();
+        backend.symbols.fqn_origin_index.write().clear();
+    });
+    probe("autoload indexes", &mut || {
+        backend.symbols.autoload_function_index.write().clear();
+        backend
+            .symbols
+            .autoload_function_origin_index
+            .write()
+            .clear();
+        backend.symbols.autoload_constant_index.write().clear();
+        backend
+            .symbols
+            .autoload_constant_origin_index
+            .write()
+            .clear();
+        backend.symbols.autoload_file_paths.write().clear();
+    });
+    probe("class_not_found_cache", &mut || {
+        backend.symbols.class_not_found_cache.write().clear()
+    });
+    probe("stub indexes", &mut || {
+        backend.stub_index.write().clear();
+        backend.stub_function_index.write().clear();
+        backend.stub_constant_index.write().clear();
+    });
+    probe("parsed_uris", &mut || backend.parsed_uris.write().clear());
+    probe("laravel_aliases", &mut || {
+        *backend.laravel_aliases.write() = None
+    });
+    probe("laravel seed/mixin/pivot/command sets", &mut || {
+        backend.laravel_macro_seeds.write().clear();
+        backend.laravel_macro_mixin_uris.write().clear();
+        backend.laravel_date_seed_uris.write().clear();
+        *backend.laravel_pivots.write() = Default::default();
+        *backend.laravel_commands.write() = Default::default();
+    });
+    probe("blade_uris", &mut || backend.blade_uris.write().clear());
+    probe("phar_archives", &mut || {
+        backend.phar_archives.write().clear()
+    });
+    probe("open_files", &mut || backend.open_files.write().clear());
+    probe("did_change_parse_locks", &mut || {
+        backend.did_change_parse_locks.lock().clear()
+    });
+    probe("workspace psr4 + vendor paths", &mut || {
+        backend.workspace.psr4_mappings.write().clear();
+        backend.workspace.vendor_uri_prefixes.lock().clear();
+        backend.workspace.vendor_dir_paths.lock().clear();
+        backend
+            .workspace
+            .vendor_package_origin_roots
+            .write()
+            .clear();
+    });
+    probe("diagnostic state", &mut || {
+        backend.diag.pending_uris.lock().clear();
+        backend.diag.last_slow.lock().clear();
+        backend.diag.last_fast.lock().clear();
+        backend.diag.last_full.lock().clear();
+        backend.diag.result_ids.lock().clear();
+        backend.diag.suppressed.lock().clear();
+        *backend.diag.workspace_diags.lock() = Default::default();
+    });
+
+    let (residual_bytes, residual_allocs) = live_heap();
+    eprintln!(
+        "    ── residual after every probe: {:.1} MB in {} allocations (runner file contents {:.1} MB; the rest is ustr, thread-local caches, and runtime state)",
+        mb(residual_bytes),
+        residual_allocs,
+        mb(runner_content_bytes),
+    );
 
     eprintln!(
         "── audited live total {:.1} MB (cache section {:.1} MB) | VmRSS after collect {:.1} MB | VmHWM {:.1} MB",
