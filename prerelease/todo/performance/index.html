@@ -3571,14 +3571,52 @@ peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
 trimmed live figure, confirming arena count was never the lever.</p>
 <p>What is left is allocation <em>count</em> itself: at ~45 B of overhead per
 live allocation, each allocation avoided is worth more than its own
-<code>size_of</code>. P39 removes hundreds of thousands of allocations as a side
-effect (interning <code>SymbolKind</code> strings), so re-measure this line after
-it lands. If a meaningful gap remains afterward, the next lever is
-arena-allocating the member metadata (bump-allocate <code>MethodInfo</code>/<code>PropertyInfo</code>/
-<code>ParameterInfo</code> per resolved class instead of one <code>Box</code>/<code>Arc</code> per
-member) — a much larger change than anything else in this list, so only
-worth it if the per-allocation overhead is still the dominant cost once
-the count itself has come down.</p>
+<code>size_of</code>. P39 removed hundreds of thousands of allocations as a side
+effect (interning <code>SymbolKind</code> strings).</p>
+<p><strong>2026-07-27 re-measurement.</strong> With P39 landed, re-running the
+<code>mem-audit</code> walk turned up a genuine leak in the assertion-narrowing
+path (<code>src/type_engine/types/narrowing/assertions.rs</code>): every
+<code>@phpstan-assert</code>/<code>@psalm-assert</code> call-site evaluation <code>Box::leak</code>ed a
+cloned <code>FunctionInfo</code> or <code>MethodInfo</code> to get a stable reference for
+<code>CallAssertionInfo</code>, and neither clone was ever freed. Narrowing runs
+on every conditional the forward walker visits, so this leaked once
+per asserting call touched during a pass, for the life of the
+process — worse in a long-running LSP session (re-run on every
+keystroke) than in one-shot <code>analyze</code>. Fixed by having
+<code>CallAssertionInfo</code> own the four fields it actually needs (an
+<code>Arc</code>-shared parameter vector plus three small <code>Vec</code>s) instead of
+leaking the whole clone.</p>
+<p>Re-measured on four real projects (one small, two mid-size, one
+large) with the fixed build: live allocations dropped 7-12% on the
+three larger projects and 53% on the small one, which spends
+proportionally more of its pass time in narrowing relative to its
+total symbol count. Live bytes dropped correspondingly (tens of MB on
+the larger projects). The allocator-overhead <em>percentage</em> barely
+moved — mimalloc's rounding overhead per allocation is roughly
+constant regardless of which allocations are removed, so cutting
+count shrinks both the overhead and the total footprint by a similar
+proportion. This confirms the mechanism above without yet closing the
+gap enough to retire this item.</p>
+<p>While re-measuring, the audit's drop-and-measure probes (<code>src/mem_audit.rs</code>)
+were extended to cover every remaining <code>Backend</code> store (the phar
+archive cache, autoload/stub indexes, workspace PSR-4/vendor paths,
+diagnostic pull-model caches, and more). Previously 18-26% of live
+heap was an unattributed gap between the field-level walk and the
+allocator's own count; the probes now account for nearly all of it, so
+future passes on this item measure against a real residual (dominated
+by the <code>ustr</code> name interner and short-lived per-request state) instead
+of an unexplained shortfall. One find from the newly-covered stores:
+<code>phar_archives</code> (raw phar bytes plus a byte-offset index, kept for lazy
+re-extraction of phar-embedded PHP files such as vendor-shipped
+PHPStan) held on the order of 25 MB on projects with a phar-shaped
+dependency, previously invisible to the audit.</p>
+<p>If a meaningful gap remains once other in-flight allocation-count
+reductions land, the next lever is arena-allocating the member
+metadata (bump-allocate <code>MethodInfo</code>/<code>PropertyInfo</code>/<code>ParameterInfo</code> per
+resolved class instead of one <code>Box</code>/<code>Arc</code> per member) — a much larger
+change than anything else in this list, and today's re-measurement
+does not yet show the overhead percentage moving enough to justify it
+on its own.</p>
 <hr />
 <h2 id="p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there">P42. Reference index is built during the headless <code>analyze</code> pipeline but never queried there<a class="headerlink" href="#p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>
