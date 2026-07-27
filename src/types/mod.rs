@@ -1579,15 +1579,22 @@ pub struct ClassInfo {
     /// The outer [`SharedVec`] makes cloning the entire `ClassInfo`
     /// O(1) (Arc refcount bump on the Vec itself).
     pub methods: SharedVec<Arc<MethodInfo>>,
-    /// O(1) index from lowercased method name → position in `methods`
-    /// (PHP method names are case-insensitive).
+    /// Index from lowercased method name → position in `methods`
+    /// (PHP method names are case-insensitive), sorted by name for
+    /// binary search.
+    ///
+    /// A sorted `Vec` costs about a third of the equivalent `AtomMap`
+    /// (hashbrown rounds its bucket array up to the next power of two,
+    /// so a class with ~200 methods pays for 512 slots) while a lookup
+    /// only costs a handful of `Atom` comparisons, which are `Copy`
+    /// pointer-sized values.
     ///
     /// Rebuilt by [`rebuild_method_index`] after bulk mutations
     /// (inheritance merge, parsing). The `get_method*` and `has_method`
-    /// helpers use this for O(1) lookup instead of linear scan.
+    /// helpers use this for `O(log n)` lookup instead of linear scan.
     /// When empty or stale (detected via `indexed_method_count`),
     /// the helpers fall back to linear scan.
-    pub method_index: AtomMap<u32>,
+    pub method_index: Vec<(Atom, u32)>,
     /// The `methods.len()` at the time `method_index` was last built.
     /// Used to detect staleness: if `methods.len() != indexed_method_count`,
     /// the index is stale and the helpers fall back to linear scan.
@@ -1889,13 +1896,16 @@ impl ClassInfo {
         self.method_index.clear();
         self.method_index.reserve(self.methods.len());
         for (i, method) in self.methods.iter().enumerate() {
-            // First-writer-wins: matches the semantics of
-            // `.iter().find(|m| m.name == name)` which returns the
-            // first match when duplicate names exist.
             self.method_index
-                .entry(crate::atom::ascii_lowercase_atom(&method.name))
-                .or_insert(i as u32);
+                .push((crate::atom::ascii_lowercase_atom(&method.name), i as u32));
         }
+        // Sort by name (then by original index) so lookups can binary
+        // search. Sorting the index pairs is stable per name, and
+        // deduping keeps the lowest index for each name, matching the
+        // first-writer-wins semantics of the old `.iter().find(...)`
+        // linear scan when duplicate names exist.
+        self.method_index.sort_unstable();
+        self.method_index.dedup_by_key(|&mut (name, _)| name);
         self.indexed_method_count = self.methods.len() as u32;
     }
 
@@ -1909,16 +1919,17 @@ impl ClassInfo {
     /// Look up a method by name, ignoring ASCII case (PHP method names
     /// are case-insensitive).
     ///
-    /// Uses the `method_index` for O(1) lookup when available,
-    /// falling back to linear scan otherwise.
+    /// Uses the `method_index` for `O(log n)` binary search when
+    /// available, falling back to linear scan otherwise.
     #[inline]
     pub fn get_method(&self, name: &str) -> Option<&MethodInfo> {
         if self.method_index_valid() {
             let atom = crate::atom::ascii_lowercase_atom(name);
             return self
                 .method_index
-                .get(&atom)
-                .and_then(|&idx| self.methods.get(idx as usize))
+                .binary_search_by_key(&atom, |&(n, _)| n)
+                .ok()
+                .and_then(|pos| self.methods.get(self.method_index[pos].1 as usize))
                 .map(|arc| arc.as_ref());
         }
         self.methods
@@ -1940,7 +1951,10 @@ impl ClassInfo {
     pub fn has_method(&self, name: &str) -> bool {
         if self.method_index_valid() {
             let atom = crate::atom::ascii_lowercase_atom(name);
-            return self.method_index.contains_key(&atom);
+            return self
+                .method_index
+                .binary_search_by_key(&atom, |&(n, _)| n)
+                .is_ok();
         }
         self.methods
             .iter()
@@ -1959,8 +1973,9 @@ impl ClassInfo {
             let atom = crate::atom::ascii_lowercase_atom(name);
             return self
                 .method_index
-                .get(&atom)
-                .and_then(|&idx| self.methods.get(idx as usize))
+                .binary_search_by_key(&atom, |&(n, _)| n)
+                .ok()
+                .and_then(|pos| self.methods.get(self.method_index[pos].1 as usize))
                 .map(Arc::clone);
         }
         self.methods

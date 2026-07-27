@@ -1156,33 +1156,6 @@ should keep owned payloads or use a separate bounded cache.
 
 ---
 
-## P40. `method_index` is a per-class `HashMap` even when the member vec is shared
-
-**Impact: Low-Medium · Effort: Low**
-
-`ClassInfo::method_index` is an `AtomMap<u32>` rebuilt per resolved
-class: 11 MB across 2 K classes on the mid-size app, 20 MB across 3.3 K
-on the large one — roughly 6 KB per class. At ~214 members a class the
-hashbrown bucket array rounds to 512 slots of 16 B plus control bytes,
-while the data it indexes is 214 entries of 12 B.
-
-The flattened member vectors are already shared between classes (only
-8.6 MB of slot vectors back 3.3 K classes), but each class still builds
-its own index over them.
-
-Two options, either of which is small:
-
-1. **Sorted `Vec<(Atom, u32)>` with binary search.** Roughly a third of
-   the memory (20 MB to ~7 MB) and better cache behaviour at these
-   sizes. Lookup goes from O(1) to O(log n) on ~200 entries, which is
-   3-4 comparisons of `Copy` pointer-sized keys.
-2. **Share the index alongside the member vector.** When two classes
-   share a `SharedVec` of methods they can share one `Arc` of its index,
-   which keeps O(1) lookup and removes the duplication instead of
-   shrinking it.
-
----
-
 ## P41. 3.8 M live allocations cost ~170 MB in allocator overhead
 
 **Impact: Medium · Effort: Medium**
@@ -1209,11 +1182,10 @@ trimmed live figure, confirming arena count was never the lever.
 
 What is left is allocation *count* itself: at ~45 B of overhead per
 live allocation, each allocation avoided is worth more than its own
-`size_of`. P39 and P40 each remove hundreds of thousands of allocations
-as a side effect (interning `SymbolKind` strings; sharing
-`method_index`), so re-measure this line after those land. If a
-meaningful gap remains afterward, the next lever is arena-allocating
-the member metadata (bump-allocate `MethodInfo`/`PropertyInfo`/
+`size_of`. P39 removes hundreds of thousands of allocations as a side
+effect (interning `SymbolKind` strings), so re-measure this line after
+it lands. If a meaningful gap remains afterward, the next lever is
+arena-allocating the member metadata (bump-allocate `MethodInfo`/`PropertyInfo`/
 `ParameterInfo` per resolved class instead of one `Box`/`Arc` per
 member) — a much larger change than anything else in this list, so only
 worth it if the per-allocation overhead is still the dominant cost once

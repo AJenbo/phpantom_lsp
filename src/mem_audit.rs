@@ -736,7 +736,9 @@ impl Audit {
             z.add(ARC + VEC_HDR + c.constants.audit_capacity() * size_of::<Arc<ConstantInfo>>());
             self.cls_slots += z;
         }
-        self.cls_index += map_buckets::<Atom, u32>(c.method_index.capacity());
+        let mut idx = Sz::default();
+        idx.add(VEC_HDR + c.method_index.capacity() * size_of::<(Atom, u32)>());
+        self.cls_index += idx;
 
         let mut names = Sz::default();
         names.add(c.interfaces.capacity() * size_of::<Atom>());
@@ -947,11 +949,6 @@ impl Audit {
             self.empty_param_vecs,
             self.n_paramvecs,
             mb(self.empty_param_vecs * (ARC + VEC_HDR)),
-        );
-        eprintln!(
-            "    method_index as sorted Vec<(Atom,u32)>: {:.1} MB → ~{:.1} MB",
-            mb(self.cls_index.bytes),
-            mb(self.cls_index.bytes / 3),
         );
     }
 }
