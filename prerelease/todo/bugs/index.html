@@ -778,23 +778,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Bugs
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -810,37 +793,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b2-namespace-rename-writes-an-fqn-into-every-name-of-a-group-use" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2 Namespace rename writes an FQN into every name of a group <code>use</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -1282,11 +1234,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1298,25 +1245,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#b2-namespace-rename-writes-an-fqn-into-every-name-of-a-group-use" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2 Namespace rename writes an FQN into every name of a group <code>use</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -1346,35 +1274,7 @@ If the type resolution pipeline produces wrong data, fix the
 pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
-<h2 id="b2-namespace-rename-writes-an-fqn-into-every-name-of-a-group-use">B2 Namespace rename writes an FQN into every name of a group <code>use</code><a class="headerlink" href="#b2-namespace-rename-writes-an-fqn-into-every-name-of-a-group-use" title="Permanent link">&para;</a></h2>
-<p>Renaming namespace <code>App\Old</code> to <code>App\New</code> turns</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">use App\Old\{Foo, Bar};</span>
-</code></pre></div>
-<p>into</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">use App\New\{App\New\Foo, App\New\Bar};</span>
-</code></pre></div>
-<p>which is a parse error. This is covered by
-<code>rename_namespace_updates_group_use</code> in <code>src/rename/tests.rs</code>, but the
-assertion only checks that <code>App\New</code> appears somewhere in the result, so
-it passes on the broken output.</p>
-<p>Two paths in <code>rename/namespace.rs</code> edit the same line:</p>
-<ul>
-<li><code>collect_use_statement_edits</code> scans the source and rewrites the group
-  prefix (<code>App\Old</code> → <code>App\New</code>), which is the correct and complete edit.</li>
-<li><code>collect_fqn_reference_edits</code> walks the symbol map, where each name
-  inside the braces is a <code>ClassReference</code> span whose recorded <code>name</code> is
-  the <em>composed</em> FQN (<code>App\Old\Foo</code>) while the span itself covers only
-  the trailing <code>Foo</code>. It therefore emits a second edit replacing <code>Foo</code>
-  with the full <code>App\New\Foo</code>.</li>
-</ul>
-<p>The two edits do not overlap, so the <code>dedup_by(ranges_overlap)</code> pass that
-resolves the ordinary <code>use App\Old\Foo;</code> case does not catch them.</p>
-<p>The fix belongs in <code>collect_fqn_reference_edits</code>: a span whose source
-text is only a segment-aligned tail of its recorded name is a group-use
-member, and the group prefix edit already covers it, so it should be
-skipped. <code>source_spells_reference</code> in the same file already
-distinguishes the two shapes. Extend the test to assert the full
-expected line rather than a substring.</p>
+<p>No outstanding items.</p>
 
 
 
