@@ -338,6 +338,39 @@ check(
     (new ReflectionMethod(\Carbon\CarbonImmutable::class, 'this'))->isProtected()
 );
 
+// ─── Validation rules are the request's input contract ──────────────────────
+
+// Demo::requestInputKeys() claims these keys complete inside
+// `$request->input('…')`.  They come straight from rules(), so assert the
+// rule set the demo comments describe is the one the class actually declares.
+$bakeryRules = (new \App\Http\Requests\StoreBakeryRequest())->rules();
+check(
+    'StoreBakeryRequest::rules() declares the demoed keys',
+    array_keys($bakeryRules) === [
+        'name',
+        'apricot',
+        'dough_temp',
+        'notes',
+        'notes.*.body',
+        'owner.email',
+    ]
+);
+check(
+    'FormRequest extends Request, so its input accessors are inherited',
+    is_subclass_of(
+        \Illuminate\Foundation\Http\FormRequest::class,
+        \Illuminate\Http\Request::class
+    )
+);
+// `safe()` has no native return type — its docblock says
+// `ValidatedInput|array` — so the demo's `safe()->only([…])` relies on
+// ValidatedInput declaring the narrowing methods.
+check(
+    'ValidatedInput narrows with only()/except()',
+    method_exists(\Illuminate\Support\ValidatedInput::class, 'only')
+        && method_exists(\Illuminate\Support\ValidatedInput::class, 'except')
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
