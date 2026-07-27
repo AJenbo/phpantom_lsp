@@ -1615,17 +1615,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p39-symbolkind-stores-owned-strings-per-span" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P39. <code>SymbolKind</code> stores owned strings per span
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1652,6 +1641,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P42. Reference index is built during the headless <code>analyze</code> pipeline but never queried there
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p43-memberaccesssubject_text-still-allocates-a-string-per-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P43. <code>MemberAccess.subject_text</code> still allocates a <code>String</code> per span
       </span>
     </span>
   </a>
@@ -2427,17 +2427,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p39-symbolkind-stores-owned-strings-per-span" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P39. <code>SymbolKind</code> stores owned strings per span
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2464,6 +2453,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P42. Reference index is built during the headless <code>analyze</code> pipeline but never queried there
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p43-memberaccesssubject_text-still-allocates-a-string-per-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P43. <code>MemberAccess.subject_text</code> still allocates a <code>String</code> per span
       </span>
     </span>
   </a>
@@ -3593,32 +3593,6 @@ site that builds or rewrites a type.</p>
 free-text parse fallbacks and <code>Literal</code> holds source literals, so those
 should keep owned payloads or use a separate bounded cache.</p>
 <hr />
-<h2 id="p39-symbolkind-stores-owned-strings-per-span">P39. <code>SymbolKind</code> stores owned strings per span<a class="headerlink" href="#p39-symbolkind-stores-owned-strings-per-span" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low-Medium</strong></p>
-<p><code>symbol_maps</code> is the second-largest store: 40 MB / 367 K allocations on
-the mid-size app, 64 MB / 602 K on the large one. The span vectors
-dominate it — 353 K spans costing 31 MB of struct bytes (88 B per
-<code>SymbolSpan</code>) plus 4.5 MB of string payloads across 254 K separate
-allocations.</p>
-<p><code>SymbolSpan</code> is <code>{ start: u32, end: u32, kind: SymbolKind }</code>, and
-<code>SymbolKind</code> is fat because nearly every variant owns a <code>String</code>.
-<code>MemberAccess</code> owns two (<code>subject_text</code> and <code>member_name</code>).</p>
-<p>Two independent changes:</p>
-<ol>
-<li><strong>Interned names.</strong> <code>member_name</code>, class names, variable names,
-   function names, and constant names are all drawn from bounded sets
-   already interned elsewhere. Making them <code>Atom</code> drops 16 B per field
-   and removes the per-span allocation entirely.</li>
-<li><strong><code>subject_text</code> as a byte range.</strong> It is the source text of the LHS
-   expression, which is unbounded free text and must not be interned.
-   Every consumer has the file content available, so storing
-   <code>(start, end)</code> offsets and slicing on demand removes the string
-   without losing anything.</li>
-</ol>
-<p>Together these should take <code>SymbolKind</code> from ~80 B to ~24-32 B,
-reclaiming roughly 17 MB on the large app and eliminating ~250 K
-allocations.</p>
-<hr />
 <h2 id="p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared">P40. <code>method_index</code> is a per-class <code>HashMap</code> even when the member vec is shared<a class="headerlink" href="#p40-method_index-is-a-per-class-hashmap-even-when-the-member-vec-is-shared" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>
 <p><code>ClassInfo::method_index</code> is an <code>AtomMap&lt;u32&gt;</code> rebuilt per resolved
@@ -3689,6 +3663,56 @@ process-global static or thread-local, so test isolation between
 and <code>reindex_references_for_symbol_maps_batch</code> checks before doing any
 work, so the skip applies uniformly to every caller of <code>update_ast</code> in
 headless mode rather than special-casing the <code>analyze</code> call site.</p>
+<hr />
+<h2 id="p43-memberaccesssubject_text-still-allocates-a-string-per-span">P43. <code>MemberAccess.subject_text</code> still allocates a <code>String</code> per span<a class="headerlink" href="#p43-memberaccesssubject_text-still-allocates-a-string-per-span" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
+<p>Every other name field on <code>SymbolKind</code> (<code>member_name</code>, class names,
+variable names, function names, constant names) is now <code>Atom</code>,
+eliminating their per-span allocation. <code>MemberAccess::subject_text</code> is
+the one field left as an owned <code>String</code>, and it is not a simple
+byte-range problem the way it first looked.</p>
+<p><code>subject_text</code> is not a slice of the file's raw source — it is the
+<em>synthesized</em> canonical text <code>expr_to_subject_text</code> builds from the AST
+(<code>symbol_map/extraction/subject_text.rs</code>, <code>type_engine/subject_expr.rs</code>).
+It diverges from the raw bytes in ways consumers actually depend on:</p>
+<ul>
+<li><code>(new Foo($x))-&gt;bar()</code> lowers straight to <code>"Foo"</code>, dropping <code>new</code> and
+  the constructor arguments entirely — documented as intentional,
+  matching historical behaviour ("the constructed instance resolves
+  through its class").</li>
+<li>Whitespace around <code>-&gt;</code>/<code>::</code> is normalised away (<code>$this -&gt; foo</code> still
+  serialises to <code>"$this-&gt;foo"</code>); a raw source slice would keep the
+  spaces and break the byte-exact splitting <code>SubjectExpr::parse</code> does
+  (<code>split_last_arrow_raw</code> and friends have no whitespace tolerance).</li>
+<li>Expressions the lowering can't represent collapse to <code>""</code>, and
+  several consumers key off <code>.is_empty()</code> as an explicit
+  "unresolvable" sentinel (e.g. <code>resolve_target_classes</code> callers). A
+  raw slice would hand them real, non-empty text instead and defeat
+  that check.</li>
+</ul>
+<p>Storing <code>(start, end)</code> into the file content and slicing at request
+time would reproduce none of this and would silently change subject
+resolution for the shapes above — exactly the class of silently-wrong
+result the project's no-diagnostic-suppression rule exists to prevent
+for diagnostics, and the same logic applies to any other resolution
+path.</p>
+<p>A safe version of the same idea is still possible, just bigger than a
+plain byte range:</p>
+<ol>
+<li>Add an enum (<code>SubjectText::Range { start, end } |
+   SubjectText::Owned(Box&lt;str&gt;)</code>), chosen at extraction time by
+   comparing the synthesized text against the raw byte range of the
+   object expression and only paying for <code>Owned</code> when they differ
+   (nested calls, <code>new</code>-as-subject, unsupported forms).</li>
+<li>Thread the file content through the ~15 call sites across <code>hover</code>,
+   <code>definition</code>, <code>references</code>, <code>diagnostics</code>, <code>code_actions</code>, and the
+   <code>symbol_map</code> test helpers that currently read <code>subject_text</code> as a
+   bare <code>&amp;str</code>, since <code>SubjectText::as_str</code> needs it to resolve the
+   <code>Range</code> case.</li>
+</ol>
+<p>Worth re-measuring after: most <code>MemberAccess</code> subjects in typical PHP
+code are plain variables/<code>$this</code>/class names, which take the free
+<code>Range</code> path, so the <code>Owned</code> fallback should be rare in practice.</p>
 <hr />
 <h1 id="remaining-anti-pattern-fixes">Remaining anti-pattern fixes<a class="headerlink" href="#remaining-anti-pattern-fixes" title="Permanent link">&para;</a></h1>
 <p>Most remaining depth-cap issues were addressed by eager class
