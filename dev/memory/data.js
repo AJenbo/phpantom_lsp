@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785158072983,
+  "lastUpdate": 1785211877169,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21837,6 +21837,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "d816150c8bdb8f0e08bebe1c6bc61ea32777abf4",
+          "message": "fix(diagnostics): narrow literal types through compound expressions\n\nThe literal narrowing pass in the diagnostic path only handled direct\nExpression::Literal nodes, so compound expressions like ternaries\n($flag ? 'asc' : 'desc'), null-coalesce, match, and parenthesized\nwrappers resolved to the widened base type (e.g. string) instead of\nthe precise literal union ('asc'|'desc').\n\nExtract the inline narrowing logic into a recursive\nnarrow_literal_type() helper that walks the complete set of PHP\nexpression forms whose result is one of N sub-expression values:\nternary, null-coalesce, match, and parenthesized wrappers.  This is\na closed set — no other PHP expressions select among sub-values.\n\nWhen any leaf is a variable or non-literal expression, the function\nreturns None and the caller keeps the widened type from the general\nresolver, preserving the existing conservative behaviour.\n\nCloses #180",
+          "timestamp": "2026-07-27T22:54:56-05:00",
+          "tree_id": "c6c4f6f1153b6fc72022ec8f8eeffe4614399bb9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d816150c8bdb8f0e08bebe1c6bc61ea32777abf4"
+        },
+        "date": 1785211873871,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.1,
             "unit": "MiB"
           }
         ]
