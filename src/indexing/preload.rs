@@ -122,13 +122,77 @@ impl Backend {
         }
     }
 
+    /// Acquire `workspace_index_lock`, mirroring the in-flight index's own
+    /// progress into `progress` while another thread holds it.
+    ///
+    /// The background full index holds this lock for its entire run, so a
+    /// request that needs a complete index (find references, rename,
+    /// go-to-implementation, Laravel string keys) can wait for the rest of
+    /// the parse. Waiting is the right behaviour — partial results mean
+    /// missed references and false-positive diagnostics — but the wait has
+    /// to be visible, otherwise the request's progress token sits at
+    /// "Resolving…" with no indication that the index is what it is
+    /// waiting for.
+    fn acquire_workspace_index_lock(
+        &self,
+        progress: Option<&(dyn Fn(u32, String) + Sync)>,
+    ) -> parking_lot::MutexGuard<'_, ()> {
+        if let Some(guard) = self.workspace_index_lock.try_lock() {
+            return guard;
+        }
+        // Nothing to report the wait to; take the plain blocking path.
+        let Some(progress) = progress else {
+            return self.workspace_index_lock.lock();
+        };
+
+        let waiting_since = std::time::Instant::now();
+        loop {
+            let (percentage, message) = match self.workspace_index_status.lock().as_ref() {
+                Some((percentage, message)) => (
+                    *percentage,
+                    format!("Waiting for workspace index: {message}"),
+                ),
+                None => (0, "Waiting for workspace index".to_string()),
+            };
+            progress(percentage, message);
+
+            if let Some(guard) = self
+                .workspace_index_lock
+                .try_lock_for(std::time::Duration::from_millis(100))
+            {
+                tracing::debug!(
+                    "ensure_workspace_indexed: waited {:?} for the in-flight workspace index",
+                    waiting_since.elapsed()
+                );
+                return guard;
+            }
+        }
+    }
+
+    /// Publish an indexing milestone to both the caller's progress sink
+    /// and `workspace_index_status`, so requests blocked on the lock can
+    /// mirror it.
+    fn report_workspace_index_progress(
+        &self,
+        progress: Option<&(dyn Fn(u32, String) + Sync)>,
+        percentage: u32,
+        message: impl Into<String>,
+    ) {
+        let percentage = percentage.min(100);
+        let message = message.into();
+        *self.workspace_index_status.lock() = Some((percentage, message.clone()));
+        if let Some(progress) = progress {
+            progress(percentage, message);
+        }
+    }
+
     pub(crate) fn ensure_workspace_indexed_with_progress(
         &self,
         progress: Option<&(dyn Fn(u32, String) + Sync)>,
     ) {
-        let _workspace_index_guard = self.workspace_index_lock.lock();
+        let _workspace_index_guard = self.acquire_workspace_index_lock(progress);
         let start = std::time::Instant::now();
-        report_workspace_index_progress(progress, 1, "Preparing workspace index");
+        self.report_workspace_index_progress(progress, 1, "Preparing workspace index");
         // Collect URIs that already have symbol maps.
         let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
@@ -167,7 +231,7 @@ impl Backend {
         let phase2_work = if let Some(root) = workspace_root.clone() {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
 
-            report_workspace_index_progress(progress, 3, "Scanning workspace files");
+            self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
             let php_files =
                 crate::references::collect_php_files_gitignore(&root, &vendor_dir_paths);
@@ -202,7 +266,7 @@ impl Backend {
             .map(|(_, path)| index_progress_weight_for_path(path))
             .sum();
         let total_parse_units = phase1_units.saturating_add(phase2_units).max(1);
-        report_workspace_index_progress(
+        self.report_workspace_index_progress(
             progress,
             5,
             format!("Queued {total_to_parse} PHP files for indexing"),
@@ -219,7 +283,7 @@ impl Backend {
                     .map(|uri| (uri.to_string(), None::<String>))
                     .collect(),
                 Some(&|done_files, _phase_total, done_units, _phase_units| {
-                    report_workspace_index_progress(
+                    self.report_workspace_index_progress(
                         progress,
                         workspace_parse_percentage(done_units, total_parse_units),
                         format!("Parsing indexed files ({done_files}/{total_to_parse})"),
@@ -229,7 +293,7 @@ impl Backend {
         }
 
         if workspace_root.is_some() {
-            report_workspace_index_progress(
+            self.report_workspace_index_progress(
                 progress,
                 workspace_parse_percentage(phase1_units, total_parse_units),
                 format!(
@@ -250,7 +314,7 @@ impl Backend {
                     Some(&|done_files, _phase_total, done_units, _phase_units| {
                         let total_done = parsed_before_phase2 + done_files;
                         let total_units_done = units_before_phase2.saturating_add(done_units);
-                        report_workspace_index_progress(
+                        self.report_workspace_index_progress(
                             progress,
                             workspace_parse_percentage(total_units_done, total_parse_units),
                             format!("Parsing workspace files ({total_done}/{total_to_parse})"),
@@ -258,13 +322,14 @@ impl Backend {
                     }),
                 );
             }
-            report_workspace_index_progress(progress, 99, "Finalizing workspace index");
+            self.report_workspace_index_progress(progress, 99, "Finalizing workspace index");
             // Release pairs with the Acquire loads in
             // `reference_candidate_uris_for_keys` and `find_implementors`.
             self.workspace_indexed
                 .store(true, std::sync::atomic::Ordering::Release);
         }
-        report_workspace_index_progress(progress, 100, "Workspace index ready");
+        self.report_workspace_index_progress(progress, 100, "Workspace index ready");
+        *self.workspace_index_status.lock() = None;
         tracing::info!("ensure_workspace_indexed: total time {:?}", start.elapsed());
     }
 
@@ -512,16 +577,6 @@ impl Backend {
             .and_then(|url| url.to_file_path().ok())
             .map(|path| index_progress_weight_for_path(&path))
             .unwrap_or(1)
-    }
-}
-
-fn report_workspace_index_progress(
-    progress: Option<&(dyn Fn(u32, String) + Sync)>,
-    percentage: u32,
-    message: impl Into<String>,
-) {
-    if let Some(progress) = progress {
-        progress(percentage.min(100), message.into());
     }
 }
 

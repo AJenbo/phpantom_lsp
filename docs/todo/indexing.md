@@ -343,50 +343,6 @@ ready to implement.
 
 ---
 
-## X10. Interactive requests block on the workspace index lock during initial indexing
-
-**Impact: Medium · Effort: Medium**
-
-The full background index holds `workspace_index_lock` for its entire
-run. Any request that reaches `ensure_workspace_indexed` during that
-window parks on the lock until the whole workspace parse finishes
-(tens of seconds on large projects):
-
-- **Laravel string-key completion** (`config('`, `route('`, `view('`,
-  `__('`): the key enumerations call `user_file_symbol_maps()`, so
-  the first such completion during startup stalls instead of
-  returning what is already parsed. Same for the invalid-string-key
-  diagnostics pass on open files.
-- **Find References / Rename**: these need complete data, so waiting
-  is semantically right, but the user gets no signal that the wait is
-  the index (the request's own progress token stays at "Resolving…").
-- **Go to Implementation** (full strategy, index not yet ready):
-  blocks the same way.
-
-Core completion, hover, and go-to-definition are unaffected (they use
-lazy per-class loading and never touch the index lock), which is the
-main responsiveness guarantee to preserve.
-
-### Direction
-
-Completeness-critical consumers (references, rename, GTI) should keep
-waiting but report "waiting for workspace index" through their
-progress token. Best-effort consumers (string-key completion, the
-string-key diagnostics pass) should not call
-`ensure_workspace_indexed` while `full_index_in_progress` is set;
-they should serve partial results from the current `symbol_maps`
-snapshot and rely on the post-index `workspace/diagnostic/refresh`
-to correct anything that was missing. Additionally, the config /
-view / translation enumerations are directory-scoped (`config/`,
-`resources/views/`, `lang/`) and could be fed by targeted scans that
-do not depend on the full workspace parse at all.
-
-Related but separate: the deferred X2 priority-aware scheduling
-covers the CPU-contention side (index workers saturating all cores);
-this item covers the lock-blocking side.
-
----
-
 ## X9. Honor editor file excludes and PHP associations during indexing
 
 **Impact: Low-Medium · Effort: Medium**

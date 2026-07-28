@@ -2538,6 +2538,64 @@ fn request_progress_maps_indexing_into_lower_window() {
     assert_eq!(message, "Workspace index ready");
 }
 
+/// A request that arrives while the background full index holds
+/// `workspace_index_lock` still waits for a complete index, but it must
+/// not look stalled: it mirrors the in-flight index's own status into
+/// its progress sink until the lock frees up.
+#[test]
+fn blocked_request_reports_in_flight_index_status() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(
+        src.join("Target.php"),
+        "<?php\nnamespace App;\nclass Target {}\n",
+    )
+    .expect("target file");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    *backend.workspace_index_status.lock() =
+        Some((37, "Parsing workspace files (3/9)".to_string()));
+    let indexing = backend.workspace_index_lock.lock();
+
+    let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let waiter = {
+        let backend = backend.clone_for_blocking();
+        let reports = std::sync::Arc::clone(&reports);
+        std::thread::spawn(move || {
+            backend.ensure_workspace_indexed_with_progress(Some(&|percentage, message| {
+                reports
+                    .lock()
+                    .expect("reports lock")
+                    .push((percentage, message));
+            }));
+        })
+    };
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while reports.lock().expect("reports lock").is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "blocked request never reported the wait"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let (percentage, message) = reports.lock().expect("reports lock")[0].clone();
+    assert_eq!(percentage, 37);
+    assert_eq!(
+        message,
+        "Waiting for workspace index: Parsing workspace files (3/9)"
+    );
+
+    drop(indexing);
+    waiter.join().expect("waiter thread");
+
+    assert!(
+        backend.workspace_index_status.lock().is_none(),
+        "a finished indexing pass clears the shared status"
+    );
+}
+
 #[test]
 fn request_progress_reports_per_file_reference_scan() {
     let dir = tempfile::tempdir().expect("temp dir");

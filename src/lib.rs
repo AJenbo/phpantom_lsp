@@ -700,6 +700,16 @@ pub struct Backend {
     /// Prevents duplicate background full-index tasks when initialization and
     /// a request both race to parse the whole workspace.
     pub(crate) full_index_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    /// Latest `(percentage, message)` published by the indexing pass that
+    /// currently holds `workspace_index_lock`, or `None` when no pass is
+    /// running.
+    ///
+    /// Requests that need a complete index (find references, rename,
+    /// go-to-implementation, Laravel string keys) block on that lock while
+    /// the background full index runs. They mirror this status into their
+    /// own progress token so the wait reads as "the workspace is still
+    /// indexing" rather than a stalled request.
+    pub(crate) workspace_index_status: Arc<Mutex<Option<(u32, String)>>>,
     /// Progress sink for the currently executing long-running request
     /// (go-to-implementation, find-references, type hierarchy).
     ///
@@ -879,6 +889,7 @@ impl Backend {
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            workspace_index_status: Arc::new(Mutex::new(None)),
             request_progress: None,
             sync_ast_updates: false,
         }
@@ -961,6 +972,7 @@ impl Backend {
             workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace_index_lock: Arc::new(Mutex::new(())),
             full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            workspace_index_status: Arc::new(Mutex::new(None)),
             request_progress: None,
             sync_ast_updates: true,
         }
@@ -1569,6 +1581,7 @@ impl Backend {
             workspace_indexed: Arc::clone(&self.workspace_indexed),
             workspace_index_lock: Arc::clone(&self.workspace_index_lock),
             full_index_in_progress: Arc::clone(&self.full_index_in_progress),
+            workspace_index_status: Arc::clone(&self.workspace_index_status),
             // Deliberately not propagated: a request's progress sink is
             // attached explicitly to that request's own clone only.
             request_progress: None,

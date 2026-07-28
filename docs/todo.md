@@ -25,9 +25,6 @@ within the same impact tier.
 
 | #   | Item                                                                                                                  | Impact     | Effort |
 | --- | --------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| P36 | [Diagnostic-path call sites re-merge inheritance per call](todo/performance.md#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache)          | Medium      | Low         |
-| P33 | [Workspace diagnostics leaves the whole project fully resolved in memory](todo/performance.md#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory) | High        | Medium-High |
-| X10 | [Interactive requests block on the workspace index lock during initial indexing](todo/indexing.md#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing) | Medium      | Medium      |
 | L21 | [Tighten the supertype-where-subtype comparison escape hatch (blocked on resolver precision)](todo/laravel.md#l21-tighten-the-supertype-where-subtype-comparison-escape-hatch-blocked-on-resolver-precision) | Medium      | High        |
 | L18 | [`Macroable::mixin()` registrations](todo/laravel.md)                                                                          | Low         | Medium      |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-template-improvement)                                                                 | High        | High        |
