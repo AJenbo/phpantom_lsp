@@ -25,7 +25,7 @@ use crate::types::{ClassInfo, FileContext};
 
 use super::validation_rules::{
     ResolvedRules, RuleField, RulesSource, form_request_rules, inline_validate_rules,
-    is_form_request, is_request_like, rule_fields,
+    is_form_request, is_request_like, is_validated_input, rule_fields, safe_source_variable,
 };
 
 /// Request accessors whose *first* argument names a single input field.
@@ -216,14 +216,32 @@ pub(crate) fn request_fields_at_position(
     let receiver_class: &ClassInfo = if field_ctx.receiver == "$this" {
         current_class?
     } else {
-        loaded = resolve_variable_class(
+        let mut resolved = resolve_variable_class(
             &field_ctx.receiver,
             current_class,
             ctx,
             content,
             cursor_offset,
             &class_loader,
-        );
+        )?;
+        // `$safe = $request->safe()` narrows the request's own rules array,
+        // so follow the assignment back to the request: `ValidatedInput`
+        // itself has no `rules()` to read.
+        if is_validated_input(&resolved)
+            && let Some(source) =
+                safe_source_variable(content, cursor_offset as usize, &field_ctx.receiver)
+            && let Some(request) = resolve_variable_class(
+                &source,
+                current_class,
+                ctx,
+                content,
+                cursor_offset,
+                &class_loader,
+            )
+        {
+            resolved = request;
+        }
+        loaded = Some(resolved);
         loaded.as_deref()?
     };
 

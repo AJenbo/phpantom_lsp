@@ -424,6 +424,69 @@ class PostController {
 }
 
 #[tokio::test]
+async fn safe_held_in_a_variable_completes_field_names() {
+    let controller = "\
+<?php
+namespace App;
+use App\\Http\\Requests\\StorePostRequest;
+class PostController {
+    public function store(StorePostRequest $request) {
+        $safe = $request->safe();
+        $data = $safe->only(['titl§']);
+    }
+}
+";
+    let labels = complete_labels("src/PostController.php", controller).await;
+    assert_eq!(
+        labels,
+        vec!["title".to_string()],
+        "a ValidatedInput carries the rules of the request it came from"
+    );
+}
+
+#[tokio::test]
+async fn safe_variable_reassignment_follows_the_nearest_request() {
+    let controller = "\
+<?php
+namespace App;
+use App\\Http\\Requests\\StorePostRequest;
+use Illuminate\\Http\\Request;
+class PostController {
+    public function store(StorePostRequest $request, Request $other) {
+        $safe = $other->safe();
+        $safe = $request->safe();
+        $data = $safe->only(['titl§']);
+    }
+}
+";
+    let labels = complete_labels("src/PostController.php", controller).await;
+    assert_eq!(
+        labels,
+        vec!["title".to_string()],
+        "the last assignment before the cursor decides which request applies"
+    );
+}
+
+#[tokio::test]
+async fn safe_variable_without_a_traceable_request_completes_nothing() {
+    let controller = "\
+<?php
+namespace App;
+use Illuminate\\Support\\ValidatedInput;
+class PostController {
+    public function store(ValidatedInput $safe) {
+        $data = $safe->only(['titl§']);
+    }
+}
+";
+    let labels = complete_labels("src/PostController.php", controller).await;
+    assert!(
+        labels.is_empty(),
+        "a ValidatedInput with no request in sight has no known keys: {labels:?}"
+    );
+}
+
+#[tokio::test]
 async fn has_completes_field_names() {
     let controller = "\
 <?php

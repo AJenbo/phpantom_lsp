@@ -263,3 +263,107 @@ fn plain_dotted_keys_are_offered_whole_and_by_root() {
     assert_eq!(fields[0].rules, "required");
     assert!(fields[1].rules.is_empty());
 }
+
+// ─── `safe()` provenance ────────────────────────────────────────────────────
+
+#[test]
+fn traces_a_safe_variable_back_to_its_request() {
+    let content = "<?php
+class UserController {
+    public function store(StoreUserRequest $request) {
+        $safe = $request->safe();
+        $safe->only(['']);
+    }
+}
+";
+    let cursor = content.find("only(['").unwrap() + 7;
+    assert_eq!(
+        safe_source_variable(content, cursor, "$safe").as_deref(),
+        Some("$request")
+    );
+}
+
+#[test]
+fn safe_variable_takes_the_nearest_preceding_assignment() {
+    let content = "<?php
+class UserController {
+    public function store($first, $second) {
+        $safe = $first->safe();
+        $safe = $second->safe();
+        $safe->only(['']);
+    }
+}
+";
+    let cursor = content.find("only(['").unwrap() + 7;
+    assert_eq!(
+        safe_source_variable(content, cursor, "$safe").as_deref(),
+        Some("$second")
+    );
+}
+
+#[test]
+fn safe_assignment_after_the_cursor_is_ignored() {
+    let content = "<?php
+class UserController {
+    public function store($request) {
+        $safe->only(['']);
+        $safe = $request->safe();
+    }
+}
+";
+    let cursor = content.find("only(['").unwrap() + 7;
+    assert_eq!(safe_source_variable(content, cursor, "$safe"), None);
+}
+
+#[test]
+fn safe_assignment_in_a_sibling_method_is_ignored() {
+    let content = "<?php
+class UserController {
+    public function prepare($request) {
+        $safe = $request->safe();
+    }
+    public function store() {
+        $safe->only(['']);
+    }
+}
+";
+    let cursor = content.find("only(['").unwrap() + 7;
+    assert_eq!(safe_source_variable(content, cursor, "$safe"), None);
+}
+
+#[test]
+fn a_non_safe_assignment_is_not_traced() {
+    let content = "<?php
+class UserController {
+    public function store($request) {
+        $safe = $request->validated();
+        $safe->only(['']);
+    }
+}
+";
+    let cursor = content.find("only(['").unwrap() + 7;
+    assert_eq!(safe_source_variable(content, cursor, "$safe"), None);
+}
+
+// ─── Pre-filter ─────────────────────────────────────────────────────────────
+
+#[test]
+fn a_file_without_validation_is_not_parsed_for_rules() {
+    let content = "<?php
+class UserController {
+    public function store($request) {
+        $request->input('');
+    }
+}
+";
+    let cursor = content.find("input('").unwrap() + 7;
+    assert!(!mentions_validation(content));
+    assert!(inline_validate_rules(content, cursor).is_none());
+}
+
+#[test]
+fn the_pre_filter_admits_every_recognised_spelling() {
+    assert!(mentions_validation("$request->validate([]);"));
+    assert!(mentions_validation("$this->validateWithBag('b', []);"));
+    assert!(mentions_validation("Validator::make($data, []);"));
+}

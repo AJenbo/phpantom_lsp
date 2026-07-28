@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_span::HasSpan;
+use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
 use crate::Backend;
@@ -182,7 +182,92 @@ fn condense(text: &str) -> String {
     out
 }
 
+// ─── Scope walking ──────────────────────────────────────────────────────────
+
+/// Whether `span` covers `offset`, inclusive at both ends.
+fn covers(span: Span, offset: u32) -> bool {
+    offset >= span.start.offset && offset <= span.end.offset
+}
+
+/// The outermost function-like body containing `offset`.
+///
+/// Outermost rather than innermost so that a `validate()` call in a
+/// controller action still applies inside a closure nested in that action —
+/// "earlier in the same method" covers everything the method wraps.  A
+/// sibling method's body never contains the offset, so rules stay scoped to
+/// the one being edited.
+///
+/// Spans nest, so only the cursor's own ancestors are descended into: a
+/// subtree that does not cover the offset cannot hold the body that does.
+/// That keeps the search proportional to nesting depth rather than to file
+/// size.
+fn enclosing_body<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    offset: u32,
+) -> Option<Node<'ast, 'arena>> {
+    let body = match node {
+        Node::Method(m) => match &m.body {
+            MethodBody::Concrete(block) => Some(Node::Block(block)),
+            MethodBody::Abstract(_) => None,
+        },
+        Node::Function(f) => Some(Node::Block(&f.body)),
+        Node::Closure(c) => Some(Node::Block(&c.body)),
+        _ => None,
+    };
+    if let Some(body) = body
+        && covers(body.span(), offset)
+    {
+        return Some(body);
+    }
+
+    let mut found = None;
+    node.visit_children(|child| {
+        if found.is_none() && covers(child.span(), offset) {
+            found = enclosing_body(child, offset);
+        }
+    });
+    found
+}
+
+/// Hand every node of `node`'s subtree that starts before `cursor` to
+/// `visit`.
+///
+/// Callers are looking for a construct that *completes* before the cursor,
+/// and one cannot end before the cursor without starting before it, so
+/// subtrees that begin at or after the cursor are skipped rather than walked.
+fn walk_before_cursor<'ast, 'arena>(
+    node: Node<'ast, 'arena>,
+    cursor: u32,
+    visit: &mut impl FnMut(Node<'ast, 'arena>),
+) {
+    visit(node);
+    node.visit_children(|child| {
+        if child.span().start.offset < cursor {
+            walk_before_cursor(child, cursor, visit);
+        }
+    });
+}
+
+/// Whether a construct ending at `end` is a better candidate than the one
+/// already in `best`: it has to finish before the cursor, and later beats
+/// earlier so the nearest preceding construct wins.
+fn beats_best<T>(best: &Option<(u32, T)>, end: u32, cursor: u32) -> bool {
+    end <= cursor && best.as_ref().is_none_or(|(seen, _)| end >= *seen)
+}
+
 // ─── Inline `validate()` / `Validator::make()` ──────────────────────────────
+
+/// Cheap pre-filter for the shapes [`inline_validate_rules`] recognises.
+///
+/// `validate()`, `validateWithBag()` and `Validator::make()` all contain
+/// "validat" as written, so a file without it is not worth parsing.  PHP
+/// method names are case-insensitive, so an unconventional `VALIDATE(` is
+/// missed here; that costs suggestions rather than producing wrong ones.
+fn mentions_validation(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    memchr::memmem::find(bytes, b"validat").is_some()
+        || memchr::memmem::find(bytes, b"Validat").is_some()
+}
 
 /// Rules from the last `validate()` / `Validator::make()` call that completes
 /// before `offset` inside the same function body.
@@ -190,92 +275,39 @@ fn condense(text: &str) -> String {
 /// Returns `None` when the cursor is not inside a function body, or when no
 /// such call precedes it.
 pub(crate) fn inline_validate_rules(content: &str, offset: usize) -> Option<Vec<ValidationRule>> {
+    if !mentions_validation(content) {
+        return None;
+    }
+
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 
-    let (body_start, body_end) = enclosing_body_range(program, offset as u32)?;
+    let body = enclosing_body(Node::Program(program), offset as u32)?;
+    let cursor = offset as u32;
 
     let mut best: Option<(u32, Vec<ValidationRule>)> = None;
-    collect_validate_calls(
-        Node::Program(program),
-        content,
-        (body_start, body_end),
-        offset as u32,
-        &mut best,
-    );
-    best.map(|(_, rules)| rules).filter(|r| !r.is_empty())
-}
-
-/// The outermost function-like body span containing `offset`.
-///
-/// Outermost rather than innermost so that a `validate()` call in a
-/// controller action still applies inside a closure nested in that action —
-/// "earlier in the same method" covers everything the method wraps.  A
-/// sibling method's body never contains the offset, so rules stay scoped to
-/// the one being edited.
-fn enclosing_body_range(program: &Program<'_>, offset: u32) -> Option<(u32, u32)> {
-    let mut found: Option<(u32, u32)> = None;
-    walk_bodies(Node::Program(program), offset, &mut found);
-    found
-}
-
-fn walk_bodies(node: Node<'_, '_>, offset: u32, found: &mut Option<(u32, u32)>) {
-    if found.is_some() {
-        return;
-    }
-    let body_span = match node {
-        Node::Method(m) => match &m.body {
-            MethodBody::Concrete(block) => Some(block.span()),
-            MethodBody::Abstract(_) => None,
-        },
-        Node::Function(f) => Some(f.body.span()),
-        Node::Closure(c) => Some(c.body.span()),
-        _ => None,
-    };
-    if let Some(span) = body_span {
-        let (start, end) = (span.start.offset, span.end.offset);
-        if offset >= start && offset <= end {
-            *found = Some((start, end));
+    walk_before_cursor(body, cursor, &mut |node| {
+        let rules_arg = match node {
+            Node::MethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
+            Node::NullSafeMethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
+            Node::StaticMethodCall(smc) => static_rules_argument(smc),
+            _ => None,
+        };
+        let Some(arg) = rules_arg else {
+            return;
+        };
+        let end = node.span().end.offset;
+        if !beats_best(&best, end, cursor) {
             return;
         }
-    }
-    node.visit_children(|child| walk_bodies(child, offset, found));
-}
-
-/// Walk for `validate`-style calls inside `body`, keeping the last one that
-/// finishes before `cursor`.
-fn collect_validate_calls(
-    node: Node<'_, '_>,
-    content: &str,
-    body: (u32, u32),
-    cursor: u32,
-    best: &mut Option<(u32, Vec<ValidationRule>)>,
-) {
-    let rules_arg = match node {
-        Node::MethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
-        Node::NullSafeMethodCall(mc) => method_rules_argument(&mc.method, &mc.argument_list),
-        Node::StaticMethodCall(smc) => static_rules_argument(smc),
-        _ => None,
-    };
-
-    if let Some(arg) = rules_arg {
-        let span = node.span();
-        let (start, end) = (span.start.offset, span.end.offset);
-        if start >= body.0
-            && end <= body.1
-            && end <= cursor
-            && best.as_ref().is_none_or(|(be, _)| end >= *be)
-        {
-            let mut rules = Vec::new();
-            collect_rules_from_expr(arg, content, &mut rules);
-            if !rules.is_empty() {
-                *best = Some((end, rules));
-            }
+        let mut rules = Vec::new();
+        collect_rules_from_expr(arg, content, &mut rules);
+        if !rules.is_empty() {
+            best = Some((end, rules));
         }
-    }
-
-    node.visit_children(|child| collect_validate_calls(child, content, body, cursor, best));
+    });
+    best.map(|(_, rules)| rules)
 }
 
 /// The rules argument of `->validate([...])`, `->validate($request, [...])`,
@@ -335,6 +367,72 @@ fn is_array_literal(expr: &Expression<'_>) -> bool {
     }
 }
 
+// ─── `safe()` provenance ────────────────────────────────────────────────────
+
+/// The request variable a `ValidatedInput` was narrowed from, e.g.
+/// `"$request"` for `$safe = $request->safe();`.
+///
+/// `safe()` hands back the same rules array under a different type, so a
+/// validated-input variable completes against the request that produced it.
+/// Only the last assignment to `variable` before `offset` in the enclosing
+/// body counts, so a reassignment wins.
+///
+/// Returns `None` when no such assignment precedes the cursor, or when the
+/// object `safe()` was called on is not itself a plain variable.
+pub(crate) fn safe_source_variable(content: &str, offset: usize, variable: &str) -> Option<String> {
+    // Cheap pre-filter: without a `safe(` anywhere there is nothing to trace,
+    // so the file is not worth parsing.
+    memchr::memmem::find(content.as_bytes(), b"safe(")?;
+
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+
+    let body = enclosing_body(Node::Program(program), offset as u32)?;
+    let cursor = offset as u32;
+
+    let mut best: Option<(u32, String)> = None;
+    walk_before_cursor(body, cursor, &mut |node| {
+        let Node::Assignment(assignment) = node else {
+            return;
+        };
+        let Expression::Variable(Variable::Direct(target)) = assignment.lhs else {
+            return;
+        };
+        if bytes_to_str(target.name) != variable {
+            return;
+        }
+        let end = node.span().end.offset;
+        if !beats_best(&best, end, cursor) {
+            return;
+        }
+        if let Some(source) = safe_call_receiver(assignment.rhs) {
+            best = Some((end, source));
+        }
+    });
+    best.map(|(_, source)| source)
+}
+
+/// The receiver of a no-argument `->safe()` call, when it is a plain
+/// variable.
+fn safe_call_receiver(expr: &Expression<'_>) -> Option<String> {
+    let (object, method) = match expr {
+        Expression::Call(Call::Method(mc)) => (mc.object, &mc.method),
+        Expression::Call(Call::NullSafeMethod(mc)) => (mc.object, &mc.method),
+        _ => return None,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = method else {
+        return None;
+    };
+    if !bytes_to_str(ident.value).eq_ignore_ascii_case("safe") {
+        return None;
+    }
+    let Expression::Variable(Variable::Direct(var)) = object else {
+        return None;
+    };
+    Some(bytes_to_str(var.name).to_string())
+}
+
 // ─── `FormRequest::rules()` ─────────────────────────────────────────────────
 
 fn is_form_request_fqn(name: &str) -> bool {
@@ -367,6 +465,12 @@ pub(crate) fn is_request_like(
 ) -> bool {
     is_request_fqn(&class.fqn())
         || super::helpers::walks_parent_chain(class, class_loader, is_request_fqn)
+}
+
+/// Whether `class` is the `ValidatedInput` wrapper `Request::safe()` returns,
+/// which carries the request's rules but not its `rules()` method.
+pub(crate) fn is_validated_input(class: &ClassInfo) -> bool {
+    class.fqn() == VALIDATED_INPUT_FQN
 }
 
 /// The rules declared by `class`'s own `rules()` method, or the nearest

@@ -432,8 +432,12 @@ class Demo
         $request->input('notes');         // → root of 'notes.*.body'
         $request->input('owner.email');   // → 'owner.email' => 'required|email'
 
-        // safe() narrows the same rule set.
+        // safe() narrows the same rule set, whether it is chained straight
+        // through or parked in a variable first.
         $request->safe()->only(['name', 'apricot']);
+
+        $safe = $request->safe();
+        $safe->except(['dough_temp']);    // → still StoreBakeryRequest's keys
     }
 
 
