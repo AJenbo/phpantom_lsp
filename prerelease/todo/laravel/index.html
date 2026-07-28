@@ -1400,17 +1400,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l37-request-input-key-completion-from-validation-rules" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L37. Request input key completion from validation rules
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l38-typed-validated-array-shapes-from-rules" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2108,17 +2097,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L36. Container binding registrations from service providers
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l37-request-input-key-completion-from-validation-rules" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L37. Request input key completion from validation rules
       </span>
     </span>
   </a>
@@ -2996,19 +2974,6 @@ unknown names since the set is inherently open.</p>
 binding <code>bind(Gateway::class, StripeGateway::class)</code> does <strong>not</strong>
 retype <code>app(Gateway::class)</code> to the concrete — the contract is the
 interface.</p>
-<h4 id="l37-request-input-key-completion-from-validation-rules">L37. Request input key completion from validation rules<a class="headerlink" href="#l37-request-input-key-completion-from-validation-rules" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Inside a controller method or FormRequest, the keys of the validated
-input are statically known from the rules array: the <code>rules()</code> method
-of the <code>FormRequest</code> in the method's signature, or the <code>validate()</code> /
-<code>Validator::make()</code> call earlier in the same method. Offer those field
-names as string completion (with go-to-definition to the rule line)
-in: <code>$request-&gt;input()</code>, <code>query()</code>, <code>post()</code>, <code>string()</code>, <code>integer()</code>,
-<code>boolean()</code>, <code>date()</code>, <code>enum()</code>, <code>file()</code>, <code>has()</code>/<code>filled()</code>/
-<code>missing()</code>, <code>validated('key')</code>, <code>safe()-&gt;only([...])</code>/<code>except([...])</code>,
-and array access <code>$request['key']</code>. Dotted rule keys (<code>items.*.id</code>)
-complete their root segment. This reuses the rules parsing from L38 —
-implement the extraction once, feed both.</p>
 <h4 id="l38-typed-validated-array-shapes-from-rules">L38. Typed <code>validated()</code> array shapes from rules<a class="headerlink" href="#l38-typed-validated-array-shapes-from-rules" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Effort: Medium-High</strong></p>
 <p>No mainstream tool types <code>$request-&gt;validated()</code> beyond <code>array</code> — this
@@ -3033,8 +2998,11 @@ member type. <code>safe()</code> returns a <code>ValidatedInput</code> whose <co
 the moment any rule key or rule string is non-literal — a partial
 shape that claims completeness would produce false unknown-key
 diagnostics. Array-shape machinery (shapes, optional keys, <code>list&lt;&gt;</code>)
-already exists in the type engine; the work is the rules-to-shape
-translation and wiring it as a conditional return.</p>
+already exists in the type engine, and
+<code>virtual_members/laravel/validation_rules.rs</code> already recovers the
+literal <code>(key, rule)</code> pairs and locates the rules array in scope for a
+cursor; the work is the rules-to-shape translation and wiring it as a
+conditional return.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Effort: Medium</strong></p>
 <p>The reverse of L14: keys that are <em>declared</em> but never referenced. The
