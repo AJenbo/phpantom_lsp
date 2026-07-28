@@ -1549,17 +1549,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P33. Workspace diagnostics leaves the whole project fully resolved in memory
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p34-eager-class-population-is-single-threaded" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1575,28 +1564,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P35. Diagnostic passes reach only a fraction of available cores
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#memory-baseline-2026-07-28-refreshed-after-phptype-interning" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Memory baseline (2026-07-28, refreshed after <code>PhpType</code> interning)
       </span>
     </span>
   </a>
@@ -2317,17 +2284,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P33. Workspace diagnostics leaves the whole project fully resolved in memory
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#p34-eager-class-population-is-single-threaded" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2343,28 +2299,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P35. Diagnostic passes reach only a fraction of available cores
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#memory-baseline-2026-07-28-refreshed-after-phptype-interning" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Memory baseline (2026-07-28, refreshed after <code>PhpType</code> interning)
       </span>
     </span>
   </a>
@@ -3180,69 +3114,6 @@ thread the per-file origin through <code>scan_files_parallel_full</code> (e.g.
 scan <code>(PathBuf, origin)</code> pairs and emit origins alongside symbols)
 and delete the second pass entirely.</p>
 <hr />
-<h2 id="p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory">P33. Workspace diagnostics leaves the whole project fully resolved in memory<a class="headerlink" href="#p33-workspace-diagnostics-leaves-the-whole-project-fully-resolved-in-memory" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Effort: Medium-High</strong></p>
-<p>Enabling background workspace diagnostics raises resident memory
-several-fold over a full index alone. Measured on a mid-size Laravel
-project (~1,200 indexed user files, ~3,000 resolved classes) the live
-set after the pass is ~1.16 GB, of which the resolved-class cache is
-<strong>~748 MB — about 65%</strong>. Ranked by the RSS each structure releases
-when dropped: resolved-class cache ~748 MB, class indexes
-(<code>method_store</code> + <code>fqn_class_index</code> + <code>uri_classes_index</code>) ~99 MB,
-<code>symbol_maps</code> ~26 MB, <code>reference_index</code> ~14 MB. The cache
-holds ~247 KB per resolved class.</p>
-<p>Two compounding causes:</p>
-<ol>
-<li>
-<p><strong>Inheritance flattening stores a member slot per class.</strong> Each
-   fully-resolved class stores the complete flattened member set (own +
-   trait + parent + interface + mixin), so a project with ~3 K classes
-   at ~214 members each holds ~648 K method slots. The distinct
-   <em>allocations</em> behind those slots are now heavily shared for methods,
-   properties, and constants alike: a slot the merge does not rewrite
-   points back at its source <code>Arc&lt;MethodInfo&gt;</code>/<code>Arc&lt;PropertyInfo&gt;</code>/
-   <code>Arc&lt;ConstantInfo&gt;</code>, and the copies a merge does produce (template
-   substitution, trait / interface / enrichment merges, Eloquent Builder
-   and scope forwarding) are interned so value-identical results
-   collapse to one allocation with a shared parameter list. What remains
-   per class is the flattened <code>Vec&lt;Arc&lt;_&gt;&gt;</code> itself plus its
-   <code>method_index</code> — one pointer slot per visible member. Measured on a
-   full Laravel app (~2 K resolved classes) this residual is only
-   ~10 MB across the whole resolved-class cache; the member
-   <em>allocations</em> the vecs point at, not the pointer slots, are the bulk.
-   Bounding the cache (fix below) reclaims both; separating the pointer
-   slots on their own is not worth the rewrite.</p>
-</li>
-<li>
-<p><strong>The cache is retained for the whole session, unbounded.</strong> Eager
-   population plus lazy resolution during the pass fill the cache with
-   every class in the project, and nothing evicts it afterwards.
-   Interactive requests only ever touch a small working set, so the bulk
-   sits resident for nothing. (Disabling eager population does not help:
-   the per-file diagnostic pass refills the cache to the same size.)</p>
-</li>
-</ol>
-<p>Fix:</p>
-<ol>
-<li><strong>Bound the resolved-class cache.</strong> After the workspace pass, the
-   fully-flattened metadata for every project class does not need to stay
-   resident. Either drop the cache when the pass finishes (interactive
-   requests re-resolve lazily) or make it an LRU with a size cap. The
-   recursion-guard elimination made a wholesale clear safe: resolution
-   cycles are broken by the cache's in-flight set, which <code>clear()</code>
-   deliberately leaves untouched, so clearing mid-resolution cannot
-   resurrect unbounded recursion. <strong>Low-Medium.</strong></li>
-</ol>
-<p>Separating the per-class member vectors from a global member store
-(Mago's model, resolving members on demand instead of flattening a
-<code>Vec</code> of pointers) was the other candidate here, but measurement showed
-the residual pointer slots + <code>method_index</code> are only ~10 MB across the
-whole cache once member allocations are shared and interned. That is not
-worth moving substitution to query time (the transform-on-inherit model
-means an inherited member is not byte-identical to the declaring class's
-once template substitution or bare-<code>self</code> rewriting applies), so the
-lever is bounding the cache, not separating the metadata.</p>
-<hr />
 <h2 id="p34-eager-class-population-is-single-threaded">P34. Eager class population is single-threaded<a class="headerlink" href="#p34-eager-class-population-is-single-threaded" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Effort: Medium</strong></p>
 <p><code>populate_from_sorted</code> (<code>src/virtual_members/resolve.rs</code>) resolves the
@@ -3307,190 +3178,6 @@ eager population, and only then consider allocator-level fixes. The
 LSP workspace diagnostics pass uses the same collectors and has the
 same ceiling. Re-measure with <code>perf</code> (frame-pointer build) or the
 CPU-sampling loop in the Appendix after any change.</p>
-<hr />
-<h2 id="p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache">P36. Diagnostic-path call sites re-merge inheritance per call instead of reading the resolved-class cache<a class="headerlink" href="#p36-diagnostic-path-call-sites-re-merge-inheritance-per-call-instead-of-reading-the-resolved-class-cache" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Low</strong></p>
-<p>Six call sites on the diagnostic path call
-<code>resolve_class_with_inheritance</code> directly, re-running the full
-inheritance merge (traits, parent chain, generic substitution) on every
-call and discarding the result after reading a single member:</p>
-<ul>
-<li><code>src/diagnostics/undefined_variables/mod.rs</code> — by-reference parameter
-  positions for static, constructor, and instance calls (3 sites).</li>
-<li><code>src/diagnostics/type_errors/compatibility.rs</code> — the
-  Stringable/<code>__toString</code> acceptance check and the
-  <code>model-property&lt;Model&gt;</code> literal check (2 sites).</li>
-<li><code>src/class_lookup.rs</code> — the <code>model-property&lt;Model&gt;</code> literal subtype
-  check (1 site).</li>
-</ul>
-<p>Measured on a large Laravel project (release build, 32 threads): 25,676
-direct merge calls costing ~7 s of thread-CPU during the diagnostic
-pass, roughly 11% of the run's total CPU — while a resolved-class cache
-hit serves the same class in ~3 µs. The Stringable check is the likely
-hot one (it fires for every object-argument-to-string-parameter
-comparison).</p>
-<p>Route these through <code>resolve_class_fully_maybe_cached</code>; the
-resolved-class cache is active during diagnostic passes
-(<code>with_active_resolved_class_cache</code>), and <code>undefined_variables</code> has
-<code>self</code> (the <code>Backend</code>) in scope already. Note the cached result
-additionally includes interface members and virtual members. For these
-member-existence and parameter lookups that is a strict improvement
-(e.g. a <code>__toString</code> declared on an interface is currently missed), but
-verify the affected diagnostics against the fixture suites for
-unexpected acceptance changes.</p>
-<p>The provider-internal callers in <code>src/virtual_members/</code> and the
-interface merge inside <code>resolve_class_fully_inner</code> are intentional
-(they run <em>while</em> the cache entry is being built) and are out of scope.</p>
-<p><strong>Still worth doing, and orthogonal to the memory work below.</strong> This is
-a CPU fix (11% of diagnostic-pass CPU), not a memory one, but it is
-memory-neutral-to-positive: today each of the 25,676 calls builds a
-full inheritance-merged <code>ClassInfo</code> (its own methods/properties vecs)
-and immediately discards it — 25,676 transient allocations that
-straight-line CPU savings would remove as a side effect. Routing
-through the cache turns most of those into a hit against an entry the
-diagnostic pass populates anyway; it can only add a new persistent
-cache entry for a class that was otherwise <em>never</em> resolved in the
-pass, which is a narrow case bounded by the same fix as P33.</p>
-<hr />
-<h2 id="memory-baseline-2026-07-28-refreshed-after-phptype-interning">Memory baseline (2026-07-28, refreshed after <code>PhpType</code> interning)<a class="headerlink" href="#memory-baseline-2026-07-28-refreshed-after-phptype-interning" title="Permanent link">&para;</a></h2>
-<p>Measured with the <code>mem-audit</code> cargo feature, which installs a counting
-global allocator and prints a deep-size walk of every long-lived store
-at the end of <code>analyze</code> when <code>PHPANTOM_MEM_AUDIT</code> is set:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release<span class="w"> </span>--features<span class="w"> </span>mem-audit
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">PHPANTOM_MEM_AUDIT</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
-</code></pre></div>
-<p>The walk dedups shared <code>Arc</code>s by pointer, so a member reached from
-several classes is counted once. It reports both a field-level
-attribution and a drop-and-measure probe that clears each store and
-reads the exact allocator delta, which cross-checks the walk. Since
-which allocator is active changes the RSS/overhead figures, the audit
-labels its own build (<code>target … / … libc, allocator …</code>) —
-always check that line before comparing a new run to the table below.</p>
-<p>The byte/allocation figures (live heap, per-store bytes released,
-<code>PhpType</code> duplication) are allocator-independent — they come from
-<code>size_of</code>/<code>capacity()</code>, not from the allocator — and were cross-checked
-identical under both <code>System</code> and <code>mimalloc</code>. Only RSS and the
-"overhead" line are allocator-specific; those are reported here for
-mimalloc, since that is what every shipped Linux binary runs (see
-<code>docs/BUILDING.md</code> for reproducing that exact build locally):</p>
-<table>
-<thead>
-<tr>
-<th>Measure</th>
-<th>Mid-size Laravel app</th>
-<th>Large Laravel app</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Peak RSS (<code>VmHWM</code>)</td>
-<td>402 MB</td>
-<td>540 MB</td>
-</tr>
-<tr>
-<td>RSS after mimalloc collect</td>
-<td>370 MB</td>
-<td>510 MB</td>
-</tr>
-<tr>
-<td>Live heap (allocator-reported)</td>
-<td>245 MB</td>
-<td>358 MB</td>
-</tr>
-<tr>
-<td>Live allocations</td>
-<td>1.44 M</td>
-<td>2.21 M</td>
-</tr>
-<tr>
-<td>Allocator + page overhead</td>
-<td>125 MB (34% of RSS)</td>
-<td>152 MB (30%)</td>
-</tr>
-</tbody>
-</table>
-<p>The glibc figures below were taken against the original baseline (the
-one with a 64-byte <code>PhpType</code>, before it was shrunk and then interned)
-and have not been re-measured since; the relative picture they
-illustrate is unchanged. Under plain glibc
-<code>malloc</code> (no mimalloc) the same run peaked higher despite a <em>lower</em>
-overhead percentage: 622 MB / 855 MB peak, 100 MB (19%) / 133 MB (17%)
-overhead. mimalloc holds more
-allocator/page overhead in percentage terms but a smaller absolute
-peak, because PHPantom already tunes it (<code>configure_allocator</code>: a
-short purge delay plus a per-process THP opt-out) to return freed
-parse-burst memory promptly.</p>
-<p>The overhead percentage rose as later changes (P33 sharing, P38
-interning) cut the live-allocation count — evidence that this overhead
-tracks the size of mimalloc's retained free-page pool, not a flat
-per-allocation cost, and that pool is sized by the parse-burst peak
-rather than the steady-state live set. Reducing allocation count on
-its own is therefore not expected to move it further; a real
-reduction would have to target that peak instead.</p>
-<p>Bytes released per store (drop-and-measure, mid-size / large):</p>
-<table>
-<thead>
-<tr>
-<th>Store</th>
-<th>Released</th>
-<th>Allocations</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>resolved_class_cache</code></td>
-<td>101 MB / 165 MB</td>
-<td>719 K / 1.18 M</td>
-</tr>
-<tr>
-<td><code>symbol_maps</code></td>
-<td>30 MB / 47 MB</td>
-<td>159 K / 248 K</td>
-</tr>
-<tr>
-<td><code>uri_classes_index</code></td>
-<td>16 MB / 23 MB</td>
-<td>104 K / 149 K</td>
-</tr>
-<tr>
-<td><code>reference_index</code></td>
-<td>5.3 MB / 8.1 MB</td>
-<td>73 K / 112 K</td>
-</tr>
-<tr>
-<td><code>resolved_names</code></td>
-<td>4.6 MB / 6.7 MB</td>
-<td>53 K / 75 K</td>
-</tr>
-<tr>
-<td>everything else</td>
-<td>&lt; 6 MB each</td>
-<td>—</td>
-</tr>
-</tbody>
-</table>
-<p>Within the member data, the largest field-level groups on the large app
-are <code>MethodInfo</code> structs (78 MB across 232 K distinct methods at 336 B
-each), parameter vectors (36 MB across 191 K vectors holding 325 K
-parameters at 88 B each), member docblock text (13 MB), and
-<code>method_index</code> (12 MB). Type payloads no longer register: interning
-collapsed 856 K live type occurrences on that app to 51 K distinct
-nodes, so the whole type representation now costs under 4 MB.</p>
-<p>Two findings from the baseline are worth recording because they close
-off obvious-looking ideas:</p>
-<ul>
-<li><strong>Boxing the display-only docblock fields is a net loss.</strong> Only 9-10%
-  of methods have no description, <code>@return</code> text, links, <code>@see</code> refs, or
-  deprecation data, so moving the six fields behind one <code>Option&lt;Box&lt;…&gt;&gt;</code>
-  would add a pointer plus an allocation header to the other 90%. The
-  same holds for constants. Properties and parameters are mostly
-  doc-free but their doc fields are few, so the win there is ~2-8 MB and
-  not worth the indirection on its own.</li>
-<li><strong>A shared empty <code>SharedVec</code> saves under 1 MB.</strong> Only 13% of parameter
-  vectors are empty. Worth folding into another change that touches
-  <code>SharedVec</code>, not worth a commit by itself.</li>
-</ul>
 <hr />
 <h2 id="p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there">P42. Reference index is built during the headless <code>analyze</code> pipeline but never queried there<a class="headerlink" href="#p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>

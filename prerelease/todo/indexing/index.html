@@ -1218,34 +1218,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X10. Interactive requests block on the workspace index lock during initial indexing
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X10. Interactive requests block on the workspace index lock during initial indexing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#direction" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Direction
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1872,34 +1844,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        X10. Interactive requests block on the workspace index lock during initial indexing
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X10. Interactive requests block on the workspace index lock during initial indexing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#direction" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Direction
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2284,43 +2228,6 @@ ready to implement.</p>
    ordering.</p>
 </li>
 </ol>
-<hr />
-<h2 id="x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing">X10. Interactive requests block on the workspace index lock during initial indexing<a class="headerlink" href="#x10-interactive-requests-block-on-the-workspace-index-lock-during-initial-indexing" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>The full background index holds <code>workspace_index_lock</code> for its entire
-run. Any request that reaches <code>ensure_workspace_indexed</code> during that
-window parks on the lock until the whole workspace parse finishes
-(tens of seconds on large projects):</p>
-<ul>
-<li><strong>Laravel string-key completion</strong> (<code>config('</code>, <code>route('</code>, <code>view('</code>,
-  <code>__('</code>): the key enumerations call <code>user_file_symbol_maps()</code>, so
-  the first such completion during startup stalls instead of
-  returning what is already parsed. Same for the invalid-string-key
-  diagnostics pass on open files.</li>
-<li><strong>Find References / Rename</strong>: these need complete data, so waiting
-  is semantically right, but the user gets no signal that the wait is
-  the index (the request's own progress token stays at "Resolving…").</li>
-<li><strong>Go to Implementation</strong> (full strategy, index not yet ready):
-  blocks the same way.</li>
-</ul>
-<p>Core completion, hover, and go-to-definition are unaffected (they use
-lazy per-class loading and never touch the index lock), which is the
-main responsiveness guarantee to preserve.</p>
-<h3 id="direction">Direction<a class="headerlink" href="#direction" title="Permanent link">&para;</a></h3>
-<p>Completeness-critical consumers (references, rename, GTI) should keep
-waiting but report "waiting for workspace index" through their
-progress token. Best-effort consumers (string-key completion, the
-string-key diagnostics pass) should not call
-<code>ensure_workspace_indexed</code> while <code>full_index_in_progress</code> is set;
-they should serve partial results from the current <code>symbol_maps</code>
-snapshot and rely on the post-index <code>workspace/diagnostic/refresh</code>
-to correct anything that was missing. Additionally, the config /
-view / translation enumerations are directory-scoped (<code>config/</code>,
-<code>resources/views/</code>, <code>lang/</code>) and could be fed by targeted scans that
-do not depend on the full workspace parse at all.</p>
-<p>Related but separate: the deferred X2 priority-aware scheduling
-covers the CPU-contention side (index workers saturating all cores);
-this item covers the lock-blocking side.</p>
 <hr />
 <h2 id="x9-honor-editor-file-excludes-and-php-associations-during-indexing">X9. Honor editor file excludes and PHP associations during indexing<a class="headerlink" href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Medium</strong></p>
