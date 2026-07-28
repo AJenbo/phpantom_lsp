@@ -167,9 +167,11 @@ impl Backend {
                 let cls = self
                     .find_or_load_class(&fqn)
                     .or_else(|| self.find_or_load_class(class_name))?;
-                let merged = crate::inheritance::resolve_class_with_inheritance(&cls, &|name| {
-                    self.find_or_load_class(name)
-                });
+                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &cls,
+                    &|name| self.find_or_load_class(name),
+                    Some(&self.resolved_class_cache),
+                );
                 let method = merged.get_method(method_name)?;
                 let positions: Vec<usize> = method
                     .parameters
@@ -185,9 +187,11 @@ impl Backend {
                 let cls = self
                     .find_or_load_class(&fqn)
                     .or_else(|| self.find_or_load_class(class_name))?;
-                let merged = crate::inheritance::resolve_class_with_inheritance(&cls, &|name| {
-                    self.find_or_load_class(name)
-                });
+                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &cls,
+                    &|name| self.find_or_load_class(name),
+                    Some(&self.resolved_class_cache),
+                );
                 let ctor = merged.get_method("__construct")?;
                 let positions: Vec<usize> = ctor
                     .parameters
@@ -203,9 +207,11 @@ impl Backend {
                 let cls = self
                     .find_or_load_class(&fqn)
                     .or_else(|| self.find_or_load_class(class_name))?;
-                let merged = crate::inheritance::resolve_class_with_inheritance(&cls, &|name| {
-                    self.find_or_load_class(name)
-                });
+                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &cls,
+                    &|name| self.find_or_load_class(name),
+                    Some(&self.resolved_class_cache),
+                );
                 let method = merged.get_method(method_name)?;
                 let positions: Vec<usize> = method
                     .parameters

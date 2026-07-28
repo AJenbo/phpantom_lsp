@@ -459,7 +459,11 @@ pub(crate) fn is_subtype_of_typed(
         if let Some(model_name) = g.args[0].base_name()
             && let Some(cls) = class_loader(model_name)
         {
-            let resolved = crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
+            let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                &cls,
+                class_loader,
+                crate::virtual_members::active_resolved_class_cache(),
+            );
             return resolved.properties.iter().any(|p| &*p.name == prop_name)
                 || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
                     .iter()

@@ -289,7 +289,11 @@ pub(crate) fn is_type_compatible(
     if param_type.is_string_type() && arg_type.is_object_like() {
         if let Some(class_name) = arg_type.base_name() {
             if let Some(cls) = class_loader(class_name) {
-                let merged = crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
+                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &cls,
+                    class_loader,
+                    crate::virtual_members::active_resolved_class_cache(),
+                );
                 let implements_stringable =
                     crate::class_lookup::is_subtype_of(&cls, "Stringable", class_loader);
                 let has_to_string = merged.get_method_ci("__toString").is_some();
@@ -399,8 +403,11 @@ pub(crate) fn is_type_compatible(
             if let Some(model_name) = args[0].base_name()
                 && let Some(cls) = class_loader(model_name)
             {
-                let resolved =
-                    crate::inheritance::resolve_class_with_inheritance(&cls, class_loader);
+                let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    &cls,
+                    class_loader,
+                    crate::virtual_members::active_resolved_class_cache(),
+                );
                 let found = resolved.properties.iter().any(|p| &*p.name == prop_name)
                     || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
                         .iter()
