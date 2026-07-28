@@ -8,11 +8,11 @@
 
 namespace App;
 
+use App\Http\Requests\StoreBakeryRequest;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Review;
-use App\Http\Requests\StoreBakeryRequest;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;

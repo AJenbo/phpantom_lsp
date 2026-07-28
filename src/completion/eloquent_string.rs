@@ -136,37 +136,8 @@ pub(crate) fn detect_string_call_context(
     position: Position,
 ) -> Option<StringCallContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let bytes = content.as_bytes();
-
-    if cursor_offset == 0 || cursor_offset > bytes.len() {
-        return None;
-    }
-
-    let mut quote_pos = None;
-    let mut quote_char = '\'';
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                quote_char = ch as char;
-                break;
-            }
-        }
-        if ch == b'\n' {
-            return None;
-        }
-    }
-
-    let quote_pos = quote_pos?;
+    let (quote_pos, quote_char) =
+        crate::completion::source::helpers::find_open_quote(content, cursor_offset)?;
     let string_content_start = quote_pos + 1;
     let partial = content[string_content_start..cursor_offset].to_string();
 
