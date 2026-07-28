@@ -326,6 +326,23 @@ impl Backend {
                 return Ok(Some(response));
             }
 
+            // ── Request input key completion ────────────────────────
+            // `$request->input('|')`, `->has('|')`, `$request['|']`, …
+            // offer the field names the validation rules in scope define.
+            // Runs after the Eloquent strategies because `has()` is also a
+            // relation method: a Builder subject resolves there first, and
+            // only a request-typed subject falls through to here.
+            if is_laravel
+                && matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                )
+                && let Some(response) =
+                    self.try_request_input_key_completion(&uri, &content, position, &ctx)
+            {
+                return Ok(Some(response));
+            }
+
             // ── Laravel route controller method completion ─────────
             // Inside `Route::controller(X::class)->group(fn(){…})`,
             // the 2nd argument string of Route::get/post/patch/… is a

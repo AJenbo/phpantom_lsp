@@ -847,22 +847,6 @@ binding `bind(Gateway::class, StripeGateway::class)` does **not**
 retype `app(Gateway::class)` to the concrete — the contract is the
 interface.
 
-#### L37. Request input key completion from validation rules
-
-**Impact: Medium · Effort: Medium**
-
-Inside a controller method or FormRequest, the keys of the validated
-input are statically known from the rules array: the `rules()` method
-of the `FormRequest` in the method's signature, or the `validate()` /
-`Validator::make()` call earlier in the same method. Offer those field
-names as string completion (with go-to-definition to the rule line)
-in: `$request->input()`, `query()`, `post()`, `string()`, `integer()`,
-`boolean()`, `date()`, `enum()`, `file()`, `has()`/`filled()`/
-`missing()`, `validated('key')`, `safe()->only([...])`/`except([...])`,
-and array access `$request['key']`. Dotted rule keys (`items.*.id`)
-complete their root segment. This reuses the rules parsing from L38 —
-implement the extraction once, feed both.
-
 #### L38. Typed `validated()` array shapes from rules
 
 **Impact: Medium-High · Effort: Medium-High**
@@ -889,8 +873,11 @@ member type. `safe()` returns a `ValidatedInput` whose `only()`/
 the moment any rule key or rule string is non-literal — a partial
 shape that claims completeness would produce false unknown-key
 diagnostics. Array-shape machinery (shapes, optional keys, `list<>`)
-already exists in the type engine; the work is the rules-to-shape
-translation and wiring it as a conditional return.
+already exists in the type engine, and
+`virtual_members/laravel/validation_rules.rs` already recovers the
+literal `(key, rule)` pairs and locates the rules array in scope for a
+cursor; the work is the rules-to-shape translation and wiring it as a
+conditional return.
 
 #### L39. Unused view and translation key detection
 

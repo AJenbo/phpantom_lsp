@@ -122,41 +122,11 @@ impl Backend {
     }
 }
 
-/// Find the opening quote before the cursor and the prefix typed so far.
-/// Returns `(quote_pos, prefix)` or `None` when the cursor is not inside an
-/// unterminated single-line string.
-fn find_open_quote(content: &str, cursor_offset: usize) -> Option<(usize, String)> {
-    let bytes = content.as_bytes();
-    if cursor_offset == 0 || cursor_offset > bytes.len() {
-        return None;
-    }
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            // Count preceding backslashes to skip escaped quotes.
-            let mut bs = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                bs += 1;
-                j -= 1;
-            }
-            if bs % 2 == 0 {
-                let prefix = content[i + 1..cursor_offset].to_string();
-                return Some((i, prefix));
-            }
-        }
-        if ch == b'\n' {
-            return None;
-        }
-    }
-    None
-}
-
 fn detect_context(content: &str, position: Position) -> Option<DetectedContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let (quote_pos, prefix) = find_open_quote(content, cursor_offset)?;
+    let (quote_pos, _) =
+        crate::completion::source::helpers::find_open_quote(content, cursor_offset)?;
+    let prefix = content[quote_pos + 1..cursor_offset].to_string();
     let before_quote = content[..quote_pos].trim_end();
 
     // ── Own argument / option: `->argument('|')` / `->option('|')` ─────────

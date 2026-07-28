@@ -1,0 +1,97 @@
+use super::*;
+
+/// Place the cursor immediately after `needle` and detect the context there.
+fn detect_at(content: &str, needle: &str) -> Option<RequestFieldContext> {
+    let offset = content.find(needle).unwrap() + needle.len();
+    let position = crate::text_position::offset_to_position(content, offset);
+    detect_request_field_context(content, position)
+}
+
+#[test]
+fn detects_input_call() {
+    let content = "<?php\n$request->input('na');\n";
+    let ctx = detect_at(content, "input('na").expect("should detect input()");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "na");
+    assert_eq!(ctx.full_value(content), Some("na"));
+}
+
+#[test]
+fn detects_nullsafe_call() {
+    let content = "<?php\n$request?->string('');\n";
+    let ctx = detect_at(content, "string('").expect("should detect ?->string()");
+    assert_eq!(ctx.receiver, "$request");
+}
+
+#[test]
+fn detects_this_receiver() {
+    let content = "<?php\n$x = $this->validated('em');\n";
+    let ctx = detect_at(content, "validated('em").expect("should detect $this->validated()");
+    assert_eq!(ctx.receiver, "$this");
+    assert_eq!(ctx.prefix, "em");
+}
+
+#[test]
+fn detects_array_access() {
+    let content = "<?php\n$title = $request['ti'];\n";
+    let ctx = detect_at(content, "$request['ti").expect("should detect array access");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "ti");
+}
+
+#[test]
+fn detects_key_inside_an_array_argument() {
+    let content = "<?php\n$request->only(['name', 'ag']);\n";
+    let ctx = detect_at(content, "'ag").expect("should detect only([…]) key");
+    assert_eq!(ctx.receiver, "$request");
+    assert_eq!(ctx.prefix, "ag");
+}
+
+#[test]
+fn looks_through_safe_to_the_request() {
+    let content = "<?php\n$data = $request->safe()->only(['na']);\n";
+    let ctx = detect_at(content, "'na").expect("should detect safe()->only() key");
+    assert_eq!(ctx.receiver, "$request");
+}
+
+#[test]
+fn rejects_later_arguments_of_single_key_accessors() {
+    let content = "<?php\n$request->input('name', 'defau');\n";
+    assert!(detect_at(content, "'defau").is_none());
+}
+
+#[test]
+fn accepts_later_arguments_of_variadic_accessors() {
+    let content = "<?php\n$request->hasAny('name', 'em');\n";
+    let ctx = detect_at(content, "'em").expect("hasAny() takes any number of field names");
+    assert_eq!(ctx.receiver, "$request");
+}
+
+#[test]
+fn rejects_unrelated_methods() {
+    let content = "<?php\n$request->merge('na');\n";
+    assert!(detect_at(content, "'na").is_none());
+}
+
+#[test]
+fn rejects_static_calls() {
+    let content = "<?php\nRequest::input('na');\n";
+    assert!(detect_at(content, "'na").is_none());
+}
+
+#[test]
+fn full_value_stops_at_the_closing_quote() {
+    let content = "<?php\n$request->input('address.city');\n";
+    let offset = content.find("address").unwrap() + 3;
+    let position = crate::text_position::offset_to_position(content, offset);
+    let ctx = detect_request_field_context(content, position).unwrap();
+    assert_eq!(ctx.prefix, "add");
+    assert_eq!(ctx.full_value(content), Some("address.city"));
+}
+
+#[test]
+fn full_value_is_none_for_an_unterminated_string() {
+    let content = "<?php\n$request->input('na\n";
+    let ctx = detect_at(content, "'na").unwrap();
+    assert_eq!(ctx.full_value(content), None);
+}

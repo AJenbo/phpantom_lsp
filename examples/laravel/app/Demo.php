@@ -8,6 +8,7 @@
 
 namespace App;
 
+use App\Http\Requests\StoreBakeryRequest;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
@@ -410,6 +411,49 @@ class Demo
         auth('admin')->user()->isSuperAdmin();          // → Administrator method
         Auth::guard('admin')->user()->isSuperAdmin();   // → Administrator method
         $request->user('admin')->isSuperAdmin();        // → Administrator method
+    }
+
+
+    // ── Request input keys from validation rules ────────────────────────
+
+    public function requestInputKeys(StoreBakeryRequest $request): void
+    {
+        // StoreBakeryRequest::rules() names every input this request can
+        // carry, so the string arguments below complete to those keys and
+        // go-to-definition jumps to the rule that declares them.
+        $request->input('name');          // → 'name' => 'required|string|max:255'
+        $request->boolean('apricot');     // → 'apricot' => 'boolean'
+        $request->has('dough_temp');      // → 'dough_temp' => 'nullable|numeric'
+        $request->validated('name');      // → same keys, validated form
+        $request['name'];                 // → array access completes too
+
+        // A wildcard rule is only addressable through its root segment, so
+        // `notes.*.body` offers `notes`; a plain dotted key is offered whole.
+        $request->input('notes');         // → root of 'notes.*.body'
+        $request->input('owner.email');   // → 'owner.email' => 'required|email'
+
+        // safe() narrows the same rule set, whether it is chained straight
+        // through or parked in a variable first.
+        $request->safe()->only(['name', 'apricot']);
+
+        $safe = $request->safe();
+        $safe->except(['dough_temp']);    // → still StoreBakeryRequest's keys
+    }
+
+
+    // ── Request input keys from an inline validate() call ───────────────
+
+    public function inlineValidateKeys(Request $request): void
+    {
+        // A plain Request has no rules() to read, so the keys come from the
+        // validate() call earlier in this same method.
+        $request->validate([
+            'headline' => 'required|string',
+            'published_at' => 'nullable|date',
+        ]);
+
+        $request->input('headline');      // → from the validate() call above
+        $request->filled('published_at'); // → from the validate() call above
     }
 
 

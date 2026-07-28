@@ -95,10 +95,12 @@ pub(crate) mod patches;
 mod pivots;
 mod provider_resources;
 mod relationships;
+mod request_fields;
 mod route_names;
 mod scopes;
 mod string_keys;
 mod trans_keys;
+pub(crate) mod validation_rules;
 mod view_names;
 pub(crate) mod where_property;
 
@@ -122,6 +124,7 @@ pub(crate) use model_extraction::{
     extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
 };
 pub(crate) use provider_resources::{ProviderResources, extract_provider_resources};
+pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::enumerate_all_route_names;
 pub(crate) use trans_keys::collect_trans_declarations;
 

@@ -118,6 +118,12 @@ pub(crate) struct StringCallContext {
     pub is_static: bool,
     pub arg_index: usize,
     pub string_content_start: usize,
+    /// Byte offset of the `(` that opens the call's argument list.
+    ///
+    /// `subject` only captures a bare identifier or `$variable`; callers that
+    /// need the full receiver expression (e.g. `$request->safe()`) re-read it
+    /// from the source text preceding this offset.
+    pub call_open_paren: usize,
 }
 
 /// Detect a string-inside-call context at the cursor position.
@@ -130,37 +136,8 @@ pub(crate) fn detect_string_call_context(
     position: Position,
 ) -> Option<StringCallContext> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    let bytes = content.as_bytes();
-
-    if cursor_offset == 0 || cursor_offset > bytes.len() {
-        return None;
-    }
-
-    let mut quote_pos = None;
-    let mut quote_char = '\'';
-    let mut i = cursor_offset;
-    while i > 0 {
-        i -= 1;
-        let ch = bytes[i];
-        if ch == b'\'' || ch == b'"' {
-            let mut backslashes = 0;
-            let mut j = i;
-            while j > 0 && bytes[j - 1] == b'\\' {
-                backslashes += 1;
-                j -= 1;
-            }
-            if backslashes % 2 == 0 {
-                quote_pos = Some(i);
-                quote_char = ch as char;
-                break;
-            }
-        }
-        if ch == b'\n' {
-            return None;
-        }
-    }
-
-    let quote_pos = quote_pos?;
+    let (quote_pos, quote_char) =
+        crate::completion::source::helpers::find_open_quote(content, cursor_offset)?;
     let string_content_start = quote_pos + 1;
     let partial = content[string_content_start..cursor_offset].to_string();
 
@@ -195,6 +172,7 @@ pub(crate) fn detect_string_call_context(
         is_static,
         arg_index,
         string_content_start,
+        call_open_paren: paren_pos,
     })
 }
 
