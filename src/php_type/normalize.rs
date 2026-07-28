@@ -24,15 +24,15 @@ impl PhpType {
     /// - Nested unions are flattened (`(A|B)|C` → `A|B|C`).
     /// - Nested intersections are flattened (`(A&B)&C` → `A&B&C`).
     pub fn simplified(&self) -> PhpType {
-        match self {
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::Union(members) => {
                 // Recursively simplify members first.
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
                 for m in members {
                     let s = m.simplified();
                     // Flatten nested unions.
-                    if let PhpType::Union(inner) = s {
-                        simplified.extend(inner.into_vec());
+                    if let TypeKind::Union(inner) = s.kind() {
+                        simplified.extend(inner.iter().cloned());
                     } else {
                         simplified.push(s);
                     }
@@ -62,13 +62,13 @@ impl PhpType {
 
                 PhpType::union(simplified)
             }
-            PhpType::Intersection(members) => {
+            TypeKind::Intersection(members) => {
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
                 for m in members {
                     let s = m.simplified();
                     // Flatten nested intersections.
-                    if let PhpType::Intersection(inner) = s {
-                        simplified.extend(inner.into_vec());
+                    if let TypeKind::Intersection(inner) = s.kind() {
+                        simplified.extend(inner.iter().cloned());
                     } else {
                         simplified.push(s);
                     }
@@ -90,29 +90,29 @@ impl PhpType {
 
                 PhpType::intersection(simplified)
             }
-            PhpType::Nullable(inner) => {
+            TypeKind::Nullable(inner) => {
                 let s = inner.simplified();
                 if s.is_never() || s.is_null() {
                     PhpType::null()
                 } else if s.is_mixed() {
                     PhpType::mixed()
                 } else {
-                    PhpType::Nullable(Box::new(s))
+                    PhpType::nullable(s)
                 }
             }
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 let simplified_args: Vec<PhpType> = g.args.iter().map(|a| a.simplified()).collect();
                 PhpType::generic_atom(g.name, simplified_args)
             }
-            PhpType::Array(inner) => PhpType::Array(Box::new(inner.simplified())),
-            PhpType::ClassString(inner) => {
-                PhpType::ClassString(inner.as_ref().map(|i| Box::new(i.simplified())))
+            TypeKind::Array(inner) => PhpType::array_of(inner.simplified()),
+            TypeKind::ClassString(inner) => {
+                PhpType::class_string(inner.as_ref().map(|i| i.simplified()))
             }
-            PhpType::InterfaceString(inner) => {
-                PhpType::InterfaceString(inner.as_ref().map(|i| Box::new(i.simplified())))
+            TypeKind::InterfaceString(inner) => {
+                PhpType::interface_string(inner.as_ref().map(|i| i.simplified()))
             }
-            PhpType::KeyOf(inner) => PhpType::KeyOf(Box::new(inner.simplified())),
-            PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(inner.simplified())),
+            TypeKind::KeyOf(inner) => PhpType::key_of(inner.simplified()),
+            TypeKind::ValueOf(inner) => PhpType::value_of(inner.simplified()),
             // Leaf types are already simplified.
             _ => self.clone(),
         }
@@ -134,10 +134,12 @@ impl PhpType {
     /// If the type is not an intersection containing unions, returns
     /// a clone unchanged. The result is also simplified.
     pub fn distribute_intersection(&self) -> PhpType {
-        match self {
-            PhpType::Intersection(members) => {
+        match self.kind() {
+            TypeKind::Intersection(members) => {
                 // Check if any member is a union.
-                let has_union = members.iter().any(|m| matches!(m, PhpType::Union(_)));
+                let has_union = members
+                    .iter()
+                    .any(|m| matches!(m.kind(), TypeKind::Union(_)));
                 if !has_union {
                     return self.clone();
                 }
@@ -146,9 +148,9 @@ impl PhpType {
                 // Non-union members are singleton lists.
                 let alternatives: Vec<Vec<PhpType>> = members
                     .iter()
-                    .map(|m| match m {
-                        PhpType::Union(u) => u.to_vec(),
-                        other => vec![other.clone()],
+                    .map(|m| match m.kind() {
+                        TypeKind::Union(u) => u.to_vec(),
+                        _ => vec![m.clone()],
                     })
                     .collect();
 
@@ -206,14 +208,14 @@ pub(crate) fn dedup_types(types: &mut Vec<PhpType>) {
 pub(crate) fn simplify_bool_union(types: &mut Vec<PhpType>) {
     let has_true = types
         .iter()
-        .any(|t| matches!(t, PhpType::Named(s) if s.eq_ignore_ascii_case("true")));
+        .any(|t| matches!(t.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("true")));
     let has_false = types
         .iter()
-        .any(|t| matches!(t, PhpType::Named(s) if s.eq_ignore_ascii_case("false")));
+        .any(|t| matches!(t.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("false")));
 
     if has_true && has_false {
         types.retain(|t| {
-            !matches!(t, PhpType::Named(s)
+            !matches!(t.kind(), TypeKind::Named(s)
                 if matches!(s.to_ascii_lowercase().as_str(), "true" | "false"))
         });
         types.push(PhpType::bool());
@@ -229,7 +231,7 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
     let named_set: std::collections::HashSet<String> = types
         .iter()
         .filter_map(|t| {
-            if let PhpType::Named(s) = t {
+            if let TypeKind::Named(s) = t.kind() {
                 Some(s.to_ascii_lowercase())
             } else {
                 None
@@ -242,7 +244,7 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
     }
 
     types.retain(|t| {
-        if let PhpType::Named(s) = t {
+        if let TypeKind::Named(s) = t.kind() {
             let lower = s.to_ascii_lowercase();
             // Check if any OTHER type in the set is a proper supertype.
             for sup in &named_set {

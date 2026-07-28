@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use mago_syntax::cst::*;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ParameterInfo};
 
 /// Groups template-related context for conditional return type resolution.
@@ -149,8 +149,8 @@ pub fn resolve_conditional_with_text_args_and_defaults(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
-    match conditional {
-        PhpType::Conditional(cond) => {
+    match conditional.kind() {
+        TypeKind::Conditional(cond) => {
             let (param, negated, condition, then_type, else_type) = (
                 &cond.param,
                 &cond.negated,
@@ -189,7 +189,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             let arg_text_owned = bound_text.get(param_idx).cloned().flatten();
             let arg_text = arg_text_owned.as_deref();
 
-            if matches!(condition, PhpType::ClassString(_)) {
+            if matches!(condition.kind(), TypeKind::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
                 // When a bound is present AND resolves to a real class (not
                 // a template parameter like `T`), the conditional checks
@@ -215,9 +215,9 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // When they differ (e.g. condition=`class-string<FormFlowTypeInterface>`,
                 // then=`FormFlowInterface`), the bound is a concrete
                 // class and a subtype check is required.
-                let class_string_bound_name: Option<&str> = match condition {
-                    PhpType::ClassString(Some(inner)) => match inner.as_ref() {
-                        PhpType::Named(name) => Some(name.as_str()),
+                let class_string_bound_name: Option<&str> = match condition.kind() {
+                    TypeKind::ClassString(Some(inner)) => match inner.kind() {
+                        TypeKind::Named(name) => Some(name.as_str()),
                         _ => None,
                     },
                     _ => None,
@@ -344,12 +344,12 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
 
                         let ty = if class_names.len() == 1 {
-                            PhpType::Named(atom(&class_names.into_iter().next().unwrap()))
+                            PhpType::named(atom(&class_names.into_iter().next().unwrap()))
                         } else {
-                            PhpType::Union(
+                            PhpType::union(
                                 class_names
                                     .into_iter()
-                                    .map(|n| PhpType::Named(atom(n.as_ref())))
+                                    .map(|n| PhpType::named(atom(n.as_ref())))
                                     .collect(),
                             )
                         };
@@ -391,7 +391,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         return choose_branch(satisfies_bound(&resolved));
                     }
 
-                    return Some(substitute_bound(PhpType::Named(atom(&resolved))));
+                    return Some(substitute_bound(PhpType::named(atom(&resolved))));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -414,12 +414,12 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         }
 
                         let ty = if names.len() == 1 {
-                            PhpType::Named(atom(&names.into_iter().next().unwrap()))
+                            PhpType::named(atom(&names.into_iter().next().unwrap()))
                         } else {
-                            PhpType::Union(
+                            PhpType::union(
                                 names
                                     .into_iter()
-                                    .map(|n| PhpType::Named(atom(n.as_ref())))
+                                    .map(|n| PhpType::named(atom(n.as_ref())))
                                     .collect(),
                             )
                         };
@@ -469,7 +469,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                         tpl,
                     )
                 }
-            } else if let PhpType::Literal(lit) = condition {
+            } else if let TypeKind::Literal(lit) = condition.kind() {
                 let expected = lit
                     .string_content()
                     .map(ToOwned::to_owned)
@@ -599,19 +599,19 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             }
         }
         // Non-Conditional PhpType variant (replaces Concrete)
-        other => {
-            if other.is_uninformative_return() {
+        _ => {
+            if conditional.is_uninformative_return() {
                 return None;
             }
-            Some(other.clone())
+            Some(conditional.clone())
         }
     }
 }
 
 /// Checks whether a condition is a specific scalar type name.
 fn condition_is_scalar_type(condition: &PhpType, type_name: &str) -> bool {
-    match condition {
-        PhpType::Named(n) => n == type_name,
+    match condition.kind() {
+        TypeKind::Named(n) => n == type_name,
         _ => false,
     }
 }
@@ -704,8 +704,8 @@ fn text_condition_result(condition: &PhpType, form: &ArgForm) -> Option<bool> {
     if *form == ArgForm::Unknown {
         return None;
     }
-    match condition {
-        PhpType::Union(members) => {
+    match condition.kind() {
+        TypeKind::Union(members) => {
             let mut any_true = false;
             let mut all_false = true;
             for m in members {
@@ -746,7 +746,7 @@ fn type_category(t: &PhpType) -> Option<&'static str> {
         Some("null")
     } else if t.is_array_like() {
         Some("array")
-    } else if matches!(t, PhpType::Callable(_)) || t.base_name().is_some() {
+    } else if matches!(t.kind(), TypeKind::Callable(_)) || t.base_name().is_some() {
         // A closure/callable or any class instance — not a scalar or array.
         Some("object")
     } else {
@@ -789,7 +789,7 @@ fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> 
     }
     // Condition union (`array|string`): satisfied when any member matches,
     // refuted only when every member is refuted.
-    if let PhpType::Union(members) = condition {
+    if let TypeKind::Union(members) = condition.kind() {
         let mut any_true = false;
         let mut all_false = true;
         for m in members {
@@ -812,7 +812,7 @@ fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> 
     }
     // Argument union: satisfied only when every member matches, refuted only
     // when every member is refuted, otherwise indeterminate.
-    if let PhpType::Union(members) = arg_ty {
+    if let TypeKind::Union(members) = arg_ty.kind() {
         let results: Vec<Option<bool>> = members
             .iter()
             .map(|m| type_condition_result(m, condition))
@@ -835,17 +835,17 @@ fn type_condition_result(arg_ty: &PhpType, condition: &PhpType) -> Option<bool> 
 /// dropping duplicates and any uninformative branch.
 fn union_branch_types(a: Option<PhpType>, b: Option<PhpType>) -> Option<PhpType> {
     let mut members: Vec<PhpType> = Vec::new();
-    let mut push = |ty: PhpType| match ty {
-        PhpType::Union(inner) => {
+    let mut push = |ty: PhpType| match ty.kind() {
+        TypeKind::Union(inner) => {
             for m in inner {
-                if !members.contains(&m) {
-                    members.push(m);
+                if !members.contains(m) {
+                    members.push(m.clone());
                 }
             }
         }
-        other => {
-            if !members.contains(&other) {
-                members.push(other);
+        _ => {
+            if !members.contains(&ty) {
+                members.push(ty);
             }
         }
     };
@@ -862,7 +862,7 @@ fn union_branch_types(a: Option<PhpType>, b: Option<PhpType>) -> Option<PhpType>
     }
 }
 
-/// Recursively evaluate any nested [`PhpType::Conditional`] nodes inside a
+/// Recursively evaluate any nested [`TypeKind::Conditional`] nodes inside a
 /// type against textual call-site arguments, replacing each with the type of
 /// its winning branch.
 ///
@@ -897,8 +897,8 @@ pub fn evaluate_nested_conditionals_text(
             tpl,
         )
     };
-    match ty {
-        PhpType::Conditional(_) => {
+    match ty.kind() {
+        TypeKind::Conditional(_) => {
             let resolved = resolve_conditional_with_text_args_and_defaults(
                 ty,
                 params,
@@ -908,7 +908,7 @@ pub fn evaluate_nested_conditionals_text(
                 class_loader,
                 tpl,
             )
-            .unwrap_or_else(|| PhpType::Named(atom("mixed")));
+            .unwrap_or_else(|| PhpType::named(atom("mixed")));
             // Template-default resolution hands back the winning branch
             // without recursing into it, so the branch may itself be a
             // conditional (e.g. `TGroupKey is \UnitEnum ? … : (TGroupKey is
@@ -921,17 +921,17 @@ pub fn evaluate_nested_conditionals_text(
             } else if resolved != *ty {
                 recurse(&resolved)
             } else {
-                PhpType::Named(atom("mixed"))
+                PhpType::named(atom("mixed"))
             }
         }
-        PhpType::Generic(g) => PhpType::generic_atom(g.name, g.args.iter().map(recurse).collect()),
-        PhpType::Union(members) => PhpType::Union(members.iter().map(recurse).collect()),
-        PhpType::Intersection(members) => {
-            PhpType::Intersection(members.iter().map(recurse).collect())
+        TypeKind::Generic(g) => PhpType::generic_atom(g.name, g.args.iter().map(recurse).collect()),
+        TypeKind::Union(members) => PhpType::union(members.iter().map(recurse).collect()),
+        TypeKind::Intersection(members) => {
+            PhpType::intersection(members.iter().map(recurse).collect())
         }
-        PhpType::Nullable(inner) => PhpType::Nullable(Box::new(recurse(inner))),
-        PhpType::Array(inner) => PhpType::Array(Box::new(recurse(inner))),
-        PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+        TypeKind::Nullable(inner) => PhpType::nullable(recurse(inner)),
+        TypeKind::Array(inner) => PhpType::array_of(recurse(inner)),
+        TypeKind::ArrayShape(entries) => PhpType::array_shape(
             entries
                 .iter()
                 .map(|e| crate::php_type::ShapeEntry {
@@ -941,7 +941,7 @@ pub fn evaluate_nested_conditionals_text(
                 })
                 .collect(),
         ),
-        PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+        TypeKind::ObjectShape(entries) => PhpType::object_shape(
             entries
                 .iter()
                 .map(|e| crate::php_type::ShapeEntry {
@@ -951,7 +951,7 @@ pub fn evaluate_nested_conditionals_text(
                 })
                 .collect(),
         ),
-        other => other.clone(),
+        other => other.clone().into(),
     }
 }
 
@@ -961,8 +961,8 @@ fn condition_includes_array(condition: &PhpType) -> bool {
     if condition.is_array_like() {
         return true;
     }
-    match condition {
-        PhpType::Union(members) => members.iter().any(condition_includes_array),
+    match condition.kind() {
+        TypeKind::Union(members) => members.iter().any(condition_includes_array),
         _ => false,
     }
 }
@@ -1072,9 +1072,9 @@ fn extract_class_name_from_text(text: &str) -> Option<String> {
 /// `int-mask-of<Foo::*>`) and the `::class` pseudo-constant are not real
 /// class constants and return `None`.
 fn class_const_condition_parts(condition: &PhpType) -> Option<(&str, &str)> {
-    let raw = match condition {
-        PhpType::Raw(s) => s,
-        PhpType::Named(s) => s.as_str(),
+    let raw = match condition.kind() {
+        TypeKind::Raw(s) => s,
+        TypeKind::Named(s) => s.as_str(),
         _ => return None,
     };
     let (class, member) = raw.rsplit_once("::")?;
@@ -1175,8 +1175,8 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     tpl: &TemplateContext<'_>,
 ) -> Option<PhpType> {
-    match conditional {
-        PhpType::Conditional(cond) => {
+    match conditional.kind() {
+        TypeKind::Conditional(cond) => {
             let (param, negated, condition, then_type, else_type) = (
                 &cond.param,
                 &cond.negated,
@@ -1213,13 +1213,13 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                     .copied()
                     .flatten();
 
-            if matches!(condition, PhpType::ClassString(_)) {
+            if matches!(condition.kind(), TypeKind::ClassString(_)) {
                 // Extract the bound from `class-string<Bound>` and determine
                 // whether it is a template parameter or a concrete class.
                 // Mirrors the logic in resolve_conditional_with_text_args_and_defaults.
-                let class_string_bound_name: Option<&str> = match condition {
-                    PhpType::ClassString(Some(inner)) => match inner.as_ref() {
-                        PhpType::Named(name) => Some(name.as_str()),
+                let class_string_bound_name: Option<&str> = match condition.kind() {
+                    TypeKind::ClassString(Some(inner)) => match inner.kind() {
+                        TypeKind::Named(name) => Some(name.as_str()),
                         _ => None,
                     },
                     _ => None,
@@ -1302,7 +1302,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         return choose_branch(satisfies_bound(&resolved));
                     }
 
-                    return Some(substitute_bound(PhpType::Named(atom(&resolved))));
+                    return Some(substitute_bound(PhpType::named(atom(&resolved))));
                 }
                 // Check if the argument is a variable holding class-string
                 // value(s) (e.g. from a match expression).
@@ -1322,12 +1322,12 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         }
 
                         let ty = if names.len() == 1 {
-                            PhpType::Named(atom(&names.into_iter().next().unwrap()))
+                            PhpType::named(atom(&names.into_iter().next().unwrap()))
                         } else {
-                            PhpType::Union(
+                            PhpType::union(
                                 names
                                     .into_iter()
-                                    .map(|n| PhpType::Named(atom(n.as_ref())))
+                                    .map(|n| PhpType::named(atom(n.as_ref())))
                                     .collect(),
                             )
                         };
@@ -1375,7 +1375,7 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
                         tpl,
                     )
                 }
-            } else if let PhpType::Literal(lit) = condition {
+            } else if let TypeKind::Literal(lit) = condition.kind() {
                 let expected = lit
                     .string_content()
                     .map(ToOwned::to_owned)
@@ -1524,11 +1524,11 @@ pub fn resolve_conditional_with_args_and_defaults<'b>(
             }
         }
         // Non-Conditional PhpType variant (replaces Concrete)
-        other => {
-            if other.is_uninformative_return() {
+        _ => {
+            if conditional.is_uninformative_return() {
                 return None;
             }
-            Some(other.clone())
+            Some(conditional.clone())
         }
     }
 }
@@ -1558,8 +1558,8 @@ pub fn resolve_conditional_without_args_and_defaults(
     params: &[ParameterInfo],
     template_defaults: Option<&HashMap<String, PhpType>>,
 ) -> Option<PhpType> {
-    match conditional {
-        PhpType::Conditional(cond) => {
+    match conditional.kind() {
+        TypeKind::Conditional(cond) => {
             let (param, negated, condition, then_type, else_type) = (
                 &cond.param,
                 &cond.negated,
@@ -1596,11 +1596,11 @@ pub fn resolve_conditional_without_args_and_defaults(
             }
         }
         // Non-Conditional PhpType variant (replaces Concrete)
-        other => {
-            if other.is_uninformative_return() {
+        _ => {
+            if conditional.is_uninformative_return() {
                 return None;
             }
-            Some(other.clone())
+            Some(conditional.clone())
         }
     }
 }
@@ -1642,24 +1642,24 @@ fn try_resolve_with_template_default(
         default_value.is_string_literal()
     } else if condition.is_int() {
         default_value.is_int_literal()
-    } else if let PhpType::Literal(lit) = condition {
+    } else if let TypeKind::Literal(lit) = condition.kind() {
         let expected = lit
             .string_content()
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| lit.as_raw());
-        match default_value {
-            PhpType::Literal(dv) => {
+        match default_value.kind() {
+            TypeKind::Literal(dv) => {
                 dv.string_content()
                     .map(ToOwned::to_owned)
                     .unwrap_or_else(|| dv.as_raw())
                     == expected
             }
-            PhpType::Named(dv) => dv == &expected,
+            TypeKind::Named(dv) => dv == &expected,
             _ => false,
         }
-    } else if let PhpType::Named(s) = condition {
-        match default_value {
-            PhpType::Named(dv) => dv == s,
+    } else if let TypeKind::Named(s) = condition.kind() {
+        match default_value.kind() {
+            TypeKind::Named(dv) => dv == s,
             _ => false,
         }
     } else {
@@ -1697,7 +1697,7 @@ pub fn resolve_conditional_from_values(
     conditional: &PhpType,
     values: &HashMap<String, PhpType>,
 ) -> Option<PhpType> {
-    if let PhpType::Conditional(cond) = conditional
+    if let TypeKind::Conditional(cond) = conditional.kind()
         && !cond.param.starts_with('$')
     {
         return try_resolve_with_template_default(
@@ -1821,11 +1821,11 @@ mod tests {
 
     #[test]
     fn class_const_condition_parts_rejects_non_constants() {
-        assert!(class_const_condition_parts(&PhpType::Named(atom("string"))).is_none());
-        assert!(class_const_condition_parts(&PhpType::Raw("Foo::*".into())).is_none());
-        assert!(class_const_condition_parts(&PhpType::Raw("Foo::class".into())).is_none());
+        assert!(class_const_condition_parts(&PhpType::named(atom("string"))).is_none());
+        assert!(class_const_condition_parts(&PhpType::raw("Foo::*")).is_none());
+        assert!(class_const_condition_parts(&PhpType::raw("Foo::class")).is_none());
         assert_eq!(
-            class_const_condition_parts(&PhpType::Raw("PDO::FETCH_OBJ".into())),
+            class_const_condition_parts(&PhpType::raw("PDO::FETCH_OBJ")),
             Some(("PDO", "FETCH_OBJ"))
         );
     }
@@ -1855,7 +1855,7 @@ mod tests {
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
         let resolver = |t: &str| {
             if t == "$obj->toHtml()" {
-                Some(PhpType::Named(atom("string")))
+                Some(PhpType::named(atom("string")))
             } else {
                 None
             }
@@ -1916,7 +1916,7 @@ mod tests {
         let cond = PhpType::parse("($groupBy is (array|string) ? array-key : Value)");
         let params = [param("$groupBy")];
         let loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>> = &|_| None;
-        let resolver = |_: &str| Some(PhpType::Named(atom("Closure")));
+        let resolver = |_: &str| Some(PhpType::named(atom("Closure")));
         let tpl = TemplateContext {
             defaults: None,
             params: &[],
@@ -1994,13 +1994,13 @@ mod tests {
         defaults.insert(
             "T".to_string(),
             PhpType::union(vec![
-                PhpType::Named(atom("string")),
-                PhpType::Named(atom("null")),
+                PhpType::named(atom("string")),
+                PhpType::named(atom("null")),
             ]),
         );
         let ty = ty.substitute(&defaults);
         assert!(ty.contains_conditional());
-        let resolver = |_: &str| Some(PhpType::Named(atom("Closure")));
+        let resolver = |_: &str| Some(PhpType::named(atom("Closure")));
         let tpl = TemplateContext {
             defaults: Some(&defaults),
             params: &[crate::atom::atom("T")],

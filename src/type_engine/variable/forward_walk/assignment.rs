@@ -6,7 +6,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::{PhpType, ShapeEntry};
+use crate::php_type::{PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
@@ -630,7 +630,7 @@ pub(crate) fn process_increment_decrement<'b>(
     let is_numeric_like = {
         let lower = current_type.to_string().to_ascii_lowercase();
         lower == "numeric" || lower == "numeric-string"
-    } || current_type.is_subtype_of(&PhpType::Named(atom("numeric-string")));
+    } || current_type.is_subtype_of(&PhpType::named(atom("numeric-string")));
     if is_numeric_like {
         scope.set(
             &var_name,
@@ -1138,7 +1138,7 @@ pub(crate) fn process_assignment_expr<'b>(
             if unquoted.parse::<i64>().is_ok() || unquoted.parse::<f64>().is_ok() {
                 for rt in &mut rhs_types {
                     if rt.type_string.is_subtype_of(&PhpType::string()) {
-                        rt.type_string = PhpType::Named(atom("numeric-string"));
+                        rt.type_string = PhpType::named(atom("numeric-string"));
                     }
                 }
             }
@@ -1234,7 +1234,7 @@ pub(crate) fn process_compound_assignment<'b>(
                 .chain(rhs_types.iter())
                 .any(|rt| rt.type_string.is_array_like());
             if either_is_array {
-                PhpType::Named(atom("array"))
+                PhpType::named(atom("array"))
             } else {
                 infer_arithmetic_result_type(&lhs_types, &rhs_types, false)
             }
@@ -1302,8 +1302,8 @@ pub(crate) fn classify_php_type(
     saw_float: &mut bool,
     saw_int: &mut bool,
 ) -> Option<()> {
-    match ty {
-        PhpType::Named(n) => {
+    match ty.kind() {
+        TypeKind::Named(n) => {
             let lower = n.to_ascii_lowercase();
             if lower == "float" || lower == "double" || lower == "real" {
                 *saw_float = true;
@@ -1326,13 +1326,13 @@ pub(crate) fn classify_php_type(
             }
             Some(())
         }
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             for member in members {
                 classify_php_type(member, saw_float, saw_int)?;
             }
             Some(())
         }
-        PhpType::Nullable(inner) => {
+        TypeKind::Nullable(inner) => {
             // ?T is T|null — classify the inner type, ignore null.
             classify_php_type(inner, saw_float, saw_int)
         }
@@ -1426,7 +1426,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                     .chain(rhs_types.iter())
                     .any(|rt| rt.type_string.is_array_like());
                 if either_is_array {
-                    Some(PhpType::Named(atom("array")))
+                    Some(PhpType::named(atom("array")))
                 } else {
                     Some(infer_arithmetic_result_type(&lhs_types, &rhs_types, false))
                 }
@@ -1503,9 +1503,9 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             // Resolve the class so we can store a proper ResolvedType
             // with class_info.  This allows `new $var` to work.
             let class_string_type =
-                PhpType::ClassString(Some(Box::new(PhpType::Named(atom(resolved_name)))));
+                PhpType::class_string(Some(PhpType::named(atom(resolved_name))));
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &PhpType::Named(atom(resolved_name)),
+                &PhpType::named(atom(resolved_name)),
                 &ctx.current_class.name,
                 ctx.all_classes,
                 ctx.class_loader,
@@ -1548,31 +1548,44 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                 // - otherwise → stdClass
                 let operand_types = resolve_rhs_with_scope(prefix.operand, scope, ctx);
                 let inner = operand_types.first().map(|rt| &rt.type_string).cloned();
-                let obj_type = match inner {
-                    Some(PhpType::ArrayShape(entries)) => {
+                let obj_type = match inner.as_ref().map(PhpType::kind) {
+                    Some(TypeKind::ArrayShape(entries)) => {
                         // Widen literal types to their base types:
                         // PHP (object) cast doesn't preserve literal precision.
                         let widened = entries
-                            .into_iter()
-                            .map(|mut e| {
-                                e.value_type = widen_literal(&e.value_type);
-                                e
+                            .iter()
+                            .map(|e| ShapeEntry {
+                                key: e.key.clone(),
+                                value_type: widen_literal(&e.value_type),
+                                optional: e.optional,
                             })
                             .collect();
-                        PhpType::ObjectShape(widened)
+                        PhpType::object_shape(widened)
                     }
-                    Some(ref ty) if matches!(ty, PhpType::Named(s) if matches!(s.to_ascii_lowercase().as_str(), "int" | "integer" | "string" | "float" | "double" | "real" | "bool" | "boolean")) => {
+                    Some(TypeKind::Named(s))
+                        if matches!(
+                            s.to_ascii_lowercase().as_str(),
+                            "int"
+                                | "integer"
+                                | "string"
+                                | "float"
+                                | "double"
+                                | "real"
+                                | "bool"
+                                | "boolean"
+                        ) =>
+                    {
                         PhpType::object_shape(vec![ShapeEntry {
                             key: Some("scalar".to_string()),
-                            value_type: ty.clone(),
+                            value_type: PhpType::named(*s),
                             optional: false,
                         }])
                     }
-                    _ => PhpType::Named(atom("stdClass")),
+                    _ => PhpType::named(atom("stdClass")),
                 };
                 Some(obj_type)
             }
-            UnaryPrefixOperator::UnsetCast(..) => Some(PhpType::Named(atom("null"))),
+            UnaryPrefixOperator::UnsetCast(..) => Some(PhpType::named(atom("null"))),
             UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => {
                 // Unary +/- preserves int or float; conservatively
                 // return int|float.
@@ -1662,7 +1675,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         return vec![ResolvedType::from_type_string(PhpType::bool())];
     }
     if matches!(rhs, Expression::Literal(Literal::Null(_))) {
-        return vec![ResolvedType::from_type_string(PhpType::Named(
+        return vec![ResolvedType::from_type_string(PhpType::named(
             "null".into(),
         ))];
     }
@@ -1705,7 +1718,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                 .chain(rhs_types.iter())
                 .any(|rt| rt.type_string.is_array_like());
             if either_is_array {
-                return vec![ResolvedType::from_type_string(PhpType::Named(atom(
+                return vec![ResolvedType::from_type_string(PhpType::named(atom(
                     "array",
                 )))];
             }
@@ -2176,7 +2189,7 @@ pub(crate) fn process_pass_by_ref<'b>(
 /// PHP makes these available in every scope without
 /// an explicit `global` declaration.
 pub(crate) fn seed_superglobals(scope: &mut ScopeState) {
-    let array_type = vec![ResolvedType::from_type_string(PhpType::Named(atom(
+    let array_type = vec![ResolvedType::from_type_string(PhpType::named(atom(
         "array",
     )))];
     for name in [
@@ -2421,7 +2434,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 // to the backward scanner.
                 scope.set(
                     &var_name,
-                    vec![ResolvedType::from_type_string(PhpType::Named(atom(
+                    vec![ResolvedType::from_type_string(PhpType::named(atom(
                         "array",
                     )))],
                 );
@@ -2493,7 +2506,7 @@ pub(crate) fn process_assert_narrowing<'b>(
                 };
                 if let Some(name) = class_name {
                     let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        &PhpType::Named(atom(&name)),
+                        &PhpType::named(atom(&name)),
                         &ctx.current_class.name,
                         ctx.all_classes,
                         ctx.class_loader,
@@ -2503,13 +2516,13 @@ pub(crate) fn process_assert_narrowing<'b>(
                             &var_name,
                             ResolvedType::from_classes_with_hint(
                                 resolved,
-                                PhpType::Named(atom(&name)),
+                                PhpType::named(atom(&name)),
                             ),
                         );
                     } else {
                         scope.set(
                             &var_name,
-                            vec![ResolvedType::from_type_string(PhpType::Named(atom(&name)))],
+                            vec![ResolvedType::from_type_string(PhpType::named(atom(&name)))],
                         );
                     }
                 }

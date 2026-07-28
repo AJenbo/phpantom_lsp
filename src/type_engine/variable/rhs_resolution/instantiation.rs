@@ -8,7 +8,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -38,9 +38,9 @@ pub(super) fn resolve_rhs_instantiation(
             ),
         };
         let parsed_name = if name == "static" {
-            PhpType::StaticType(atom(&fqn))
+            PhpType::static_type(atom(&fqn))
         } else {
-            PhpType::Named(atom(&fqn))
+            PhpType::named(atom(&fqn))
         };
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
@@ -137,15 +137,15 @@ pub(super) fn resolve_rhs_instantiation(
                         for (bound_param, bound_type) in cls.template_param_bounds.iter() {
                             let bound_param_str: &str = bound_param.as_ref();
                             if let Some(concrete) = subs.get(bound_param_str).cloned()
-                                && let PhpType::Generic(bound) = bound_type
+                                && let TypeKind::Generic(bound) = bound_type.kind()
                             {
-                                let concrete_args = match &concrete {
-                                    PhpType::Generic(g) => Some(g.args.as_slice()),
+                                let concrete_args = match &concrete.kind() {
+                                    TypeKind::Generic(g) => Some(g.args.as_slice()),
                                     _ => None,
                                 };
                                 if let Some(concrete_args) = concrete_args {
                                     for (i, bound_arg) in bound.args.iter().enumerate() {
-                                        if let PhpType::Named(tpl_name) = bound_arg
+                                        if let TypeKind::Named(tpl_name) = bound_arg.kind()
                                             && cls
                                                 .template_params
                                                 .iter()
@@ -168,7 +168,7 @@ pub(super) fn resolve_rhs_instantiation(
                                     // Use the declared upper bound or `mixed`
                                     // instead of the raw template name so that
                                     // downstream consumers never see
-                                    // `PhpType::Named("TValue")`.
+                                    // `PhpType::named("TValue")`.
                                     cls.template_param_bounds
                                         .get(p)
                                         .cloned()
@@ -283,16 +283,18 @@ pub(super) fn resolve_rhs_instantiation(
 /// of resolved types.  Handles `class-string<T>`, `?class-string<T>`,
 /// and unions containing `class-string<T>`.
 pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<String> {
-    resolved.iter().find_map(|rt| match &rt.type_string {
-        PhpType::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
-        PhpType::Nullable(inner) => match inner.as_ref() {
-            PhpType::ClassString(Some(cs_inner)) => cs_inner.base_name().map(|s| s.to_string()),
+    resolved.iter().find_map(|rt| match &rt.type_string.kind() {
+        TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
+        TypeKind::Nullable(inner) => match inner.kind() {
+            TypeKind::ClassString(Some(cs_inner)) => cs_inner.base_name().map(|s| s.to_string()),
             _ => None,
         },
-        PhpType::Union(members) => members.iter().find_map(|m| match m {
-            PhpType::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
-            PhpType::Nullable(inner) => match inner.as_ref() {
-                PhpType::ClassString(Some(cs_inner)) => cs_inner.base_name().map(|s| s.to_string()),
+        TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
+            TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
+            TypeKind::Nullable(inner) => match inner.kind() {
+                TypeKind::ClassString(Some(cs_inner)) => {
+                    cs_inner.base_name().map(|s| s.to_string())
+                }
                 _ => None,
             },
             _ => None,
@@ -317,15 +319,15 @@ pub(super) fn extract_generic_arg_from_ancestor(
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     // Get the class name from the argument type.
-    let class_name = match arg_type {
-        PhpType::Named(n) => n.as_str(),
-        PhpType::Generic(g) => g.name.as_str(),
+    let class_name = match arg_type.kind() {
+        TypeKind::Named(n) => n.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
         _ => return None,
     };
 
     // If the arg type itself is already generic with the wrapper name,
     // extract directly.  E.g. argument type is `Container<Foo>`.
-    if let PhpType::Generic(g) = arg_type {
+    if let TypeKind::Generic(g) = arg_type.kind() {
         let n_short = crate::util::short_name(&g.name);
         let wrapper_short = crate::util::short_name(wrapper_name);
         if n_short.eq_ignore_ascii_case(wrapper_short) {
@@ -437,7 +439,7 @@ pub(crate) fn remap_inherited_ctor_subs(
     let mut ancestor_to_child: HashMap<String, PhpType> = child
         .template_params
         .iter()
-        .map(|p| (p.to_string(), PhpType::Named(atom(p.as_ref()))))
+        .map(|p| (p.to_string(), PhpType::named(atom(p.as_ref()))))
         .collect();
 
     // Track the current node's extends info as owned data so we don't
@@ -491,9 +493,9 @@ pub(crate) fn remap_inherited_ctor_subs(
     let mut result = HashMap::new();
     for (ancestor_param, inferred_type) in raw_subs {
         if let Some(child_type) = ancestor_to_child.get(ancestor_param) {
-            // child_type is typically PhpType::Named("V") — extract the name.
-            match child_type {
-                PhpType::Named(child_param) => {
+            // child_type is typically PhpType::named("V") — extract the name.
+            match child_type.kind() {
+                TypeKind::Named(child_param) => {
                     result.insert(child_param.to_string(), inferred_type.clone());
                 }
                 _ => {
@@ -734,9 +736,9 @@ pub(crate) fn classify_template_binding(
 /// Recursively classify how a template parameter name appears in a parsed
 /// [`PhpType`].
 pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBindingMode {
-    match ty {
-        PhpType::Nullable(inner) => classify_from_php_type(tpl_name, inner),
-        PhpType::Union(members) => {
+    match ty.kind() {
+        TypeKind::Nullable(inner) => classify_from_php_type(tpl_name, inner),
+        TypeKind::Union(members) => {
             let mut fallback: Option<TemplateBindingMode> = None;
             let mut has_direct = false;
             let mut has_class_string_inner = false;
@@ -774,8 +776,8 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             }
             fallback.unwrap_or(TemplateBindingMode::Direct)
         }
-        PhpType::Array(inner) => {
-            if inner.as_ref().is_named(tpl_name) {
+        TypeKind::Array(inner) => {
+            if inner.is_named(tpl_name) {
                 return TemplateBindingMode::ArrayElement;
             }
             // `(class-string<T>|T)[]` — detect a class-string<T>
@@ -789,8 +791,8 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             }
             TemplateBindingMode::Direct
         }
-        PhpType::Named(n) if n == tpl_name => TemplateBindingMode::Direct,
-        PhpType::Generic(g) => {
+        TypeKind::Named(n) if n == tpl_name => TemplateBindingMode::Direct,
+        TypeKind::Generic(g) => {
             let (wrapper_name, args) = (&g.name, &g.args);
             // `array<T>` (single arg) should be treated as ArrayElement,
             // not GenericWrapper — "array" is not a real class that can
@@ -826,7 +828,7 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             }
             TemplateBindingMode::Direct
         }
-        PhpType::Callable(c) => {
+        TypeKind::Callable(c) => {
             if let Some(rt) = &c.return_type
                 && type_contains_name(rt, tpl_name)
             {
@@ -839,8 +841,8 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
             }
             TemplateBindingMode::Direct
         }
-        PhpType::ClassString(Some(inner)) | PhpType::InterfaceString(Some(inner)) => {
-            if inner.as_ref().is_named(tpl_name) {
+        TypeKind::ClassString(Some(inner)) | TypeKind::InterfaceString(Some(inner)) => {
+            if inner.is_named(tpl_name) {
                 return TemplateBindingMode::ClassStringInner;
             }
             TemplateBindingMode::Direct
@@ -849,17 +851,17 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
     }
 }
 
-/// Check whether a [`PhpType`] tree contains a [`PhpType::Named`] with the
+/// Check whether a [`PhpType`] tree contains a [`TypeKind::Named`] with the
 /// given name anywhere in its structure.
 pub(crate) fn type_contains_name(ty: &PhpType, name: &str) -> bool {
-    match ty {
-        PhpType::Named(n) => n == name,
-        PhpType::Nullable(inner) | PhpType::Array(inner) => type_contains_name(inner, name),
-        PhpType::Union(members) | PhpType::Intersection(members) => {
+    match ty.kind() {
+        TypeKind::Named(n) => n == name,
+        TypeKind::Nullable(inner) | TypeKind::Array(inner) => type_contains_name(inner, name),
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
             members.iter().any(|m| type_contains_name(m, name))
         }
-        PhpType::Generic(g) => g.args.iter().any(|a| type_contains_name(a, name)),
-        PhpType::Callable(c) => {
+        TypeKind::Generic(g) => g.args.iter().any(|a| type_contains_name(a, name)),
+        TypeKind::Callable(c) => {
             c.params
                 .iter()
                 .any(|p| type_contains_name(&p.type_hint, name))
@@ -867,10 +869,10 @@ pub(crate) fn type_contains_name(ty: &PhpType, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|rt| type_contains_name(rt, name))
         }
-        PhpType::ClassString(Some(inner))
-        | PhpType::InterfaceString(Some(inner))
-        | PhpType::KeyOf(inner)
-        | PhpType::ValueOf(inner) => type_contains_name(inner, name),
+        TypeKind::ClassString(Some(inner))
+        | TypeKind::InterfaceString(Some(inner))
+        | TypeKind::KeyOf(inner)
+        | TypeKind::ValueOf(inner) => type_contains_name(inner, name),
         _ => false,
     }
 }
@@ -998,7 +1000,7 @@ pub(super) fn resolve_array_literal_generic(
         match tpl_position {
             0 => {
                 // Implicit integer keys.
-                Some(PhpType::Named(atom("int")))
+                Some(PhpType::named(atom("int")))
             }
             1 => {
                 // Element type from first element.
@@ -1013,10 +1015,10 @@ pub(super) fn resolve_array_literal_generic(
 ///
 /// For `array<int, string>` with position 0 → `int`, position 1 → `string`.
 /// For `list<User>` with position 0 → `User`.
-/// Also handles `PhpType::Array(inner)` as a single-arg generic.
+/// Also handles `PhpType::array_of(inner)` as a single-arg generic.
 pub(super) fn extract_generic_arg_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
-    match ty {
-        PhpType::Generic(g) => {
+    match ty.kind() {
+        TypeKind::Generic(g) => {
             // `list<T>` has a single arg (the value type).  When the
             // binding expects position 1 (value position of `array<K, V>`),
             // map it to position 0 of the list.  Position 0 of a list
@@ -1034,7 +1036,7 @@ pub(super) fn extract_generic_arg_at_position(ty: &PhpType, position: usize) -> 
             }
             g.args.get(position).cloned()
         }
-        PhpType::Array(inner) if position == 0 => Some(inner.as_ref().clone()),
+        TypeKind::Array(inner) if position == 0 => Some(inner.clone()),
         _ => None,
     }
 }
@@ -1143,7 +1145,7 @@ mod tests {
 
     #[test]
     fn type_contains_name_simple() {
-        let ty = PhpType::Named(atom("Foo"));
+        let ty = PhpType::named(atom("Foo"));
         assert!(type_contains_name(&ty, "Foo"));
         assert!(!type_contains_name(&ty, "Bar"));
     }

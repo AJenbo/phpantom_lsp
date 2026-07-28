@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::atom::{atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 
 use mago_syntax::cst::*;
@@ -24,10 +24,10 @@ pub(in crate::type_engine) fn resolve_extraction_to_fqn(
     extraction: &mut InstanceofExtraction,
     class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
 ) {
-    if let PhpType::Named(ref name) = extraction.class_type {
+    if let TypeKind::Named(name) = extraction.class_type.kind() {
         let resolved = crate::util::resolve_name_via_loader(name, class_loader);
         if resolved != *name {
-            extraction.class_type = PhpType::Named(atom(&resolved));
+            extraction.class_type = PhpType::named(atom(&resolved));
         }
     }
 }

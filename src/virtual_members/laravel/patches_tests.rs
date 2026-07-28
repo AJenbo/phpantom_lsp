@@ -88,8 +88,8 @@ fn builder_call_no_return_type_is_not_patched() {
 fn conditionable_when_union_with_template_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
@@ -113,8 +113,8 @@ fn conditionable_when_union_with_template_becomes_this() {
 fn conditionable_unless_union_with_template_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("TUnlessReturnType")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("TUnlessReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed("unless", Some(return_type)))].into();
 
@@ -137,7 +137,7 @@ fn conditionable_unless_union_with_template_becomes_this() {
 #[test]
 fn conditionable_bare_template_return_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Named(atom("TWhenReturnType"));
+    let return_type = PhpType::named(atom("TWhenReturnType"));
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
     apply_laravel_patches(&mut class, CONDITIONABLE_FQN);
@@ -161,7 +161,7 @@ fn conditionable_static_union_with_template_becomes_this() {
     let mut class = make_class(CONDITIONABLE_FQN);
     let return_type = PhpType::union(vec![
         PhpType::static_(),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
@@ -184,7 +184,7 @@ fn conditionable_static_union_with_template_becomes_this() {
 #[test]
 fn conditionable_self_return_is_not_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::Named(atom("$this"));
+    let return_type = PhpType::named(atom("$this"));
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
     apply_laravel_patches(&mut class, CONDITIONABLE_FQN);
@@ -244,8 +244,8 @@ fn conditionable_no_return_type_is_not_patched() {
 fn conditionable_other_method_is_not_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed(
         "doSomething",
@@ -277,8 +277,8 @@ fn class_using_conditionable_trait_gets_when_patched() {
     let mut class = make_class("App\\Services\\Pipeline");
     class.used_traits = vec![atom(CONDITIONABLE_FQN)];
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
@@ -303,8 +303,8 @@ fn class_using_conditionable_short_name_gets_patched() {
     let mut class = make_class("App\\Services\\Pipeline");
     class.used_traits = vec![atom("Conditionable")];
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
@@ -329,8 +329,8 @@ fn class_without_conditionable_is_not_patched() {
     let mut class = make_class("App\\Services\\Pipeline");
     class.used_traits = vec![atom("SomeTrait")];
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed(
         "when",
@@ -365,15 +365,15 @@ fn builder_gets_both_call_and_when_patches() {
         Arc::new(make_method_typed(
             "when",
             Some(PhpType::union(vec![
-                PhpType::Named(atom("$this")),
-                PhpType::Named(atom("TWhenReturnType")),
+                PhpType::named(atom("$this")),
+                PhpType::named(atom("TWhenReturnType")),
             ])),
         )),
         Arc::new(make_method_typed(
             "unless",
             Some(PhpType::union(vec![
-                PhpType::Named(atom("$this")),
-                PhpType::Named(atom("TUnlessReturnType")),
+                PhpType::named(atom("$this")),
+                PhpType::named(atom("TUnlessReturnType")),
             ])),
         )),
     ]
@@ -402,9 +402,9 @@ fn builder_gets_both_call_and_when_patches() {
 fn union_with_null_and_template_is_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
+        PhpType::named(atom("$this")),
         PhpType::null(),
-        PhpType::Named(atom("TWhenReturnType")),
+        PhpType::named(atom("TWhenReturnType")),
     ]);
     class.methods = vec![Arc::new(make_method_typed("when", Some(return_type)))].into();
 
@@ -427,7 +427,7 @@ fn union_with_null_and_template_is_patched() {
 #[test]
 fn union_of_only_self_types_is_not_patched() {
     let mut class = make_class(CONDITIONABLE_FQN);
-    let return_type = PhpType::union(vec![PhpType::Named(atom("$this")), PhpType::static_()]);
+    let return_type = PhpType::union(vec![PhpType::named(atom("$this")), PhpType::static_()]);
     class.methods = vec![Arc::new(make_method_typed(
         "when",
         Some(return_type.clone()),
@@ -666,8 +666,8 @@ fn db_other_method_is_not_patched() {
 fn fqn_in_return_type_is_not_treated_as_template() {
     let mut class = make_class(CONDITIONABLE_FQN);
     let return_type = PhpType::union(vec![
-        PhpType::Named(atom("$this")),
-        PhpType::Named(atom("App\\Models\\User")),
+        PhpType::named(atom("$this")),
+        PhpType::named(atom("App\\Models\\User")),
     ]);
     class.methods = vec![Arc::new(make_method_typed(
         "when",
@@ -758,19 +758,19 @@ fn builder_paginate_gets_parameterised() {
     class.methods = vec![
         Arc::new(make_method_typed(
             "paginate",
-            Some(PhpType::Named(atom(
+            Some(PhpType::named(atom(
                 "Illuminate\\Pagination\\LengthAwarePaginator",
             ))),
         )),
         Arc::new(make_method_typed(
             "simplePaginate",
-            Some(PhpType::Named(atom(
+            Some(PhpType::named(atom(
                 "Illuminate\\Contracts\\Pagination\\Paginator",
             ))),
         )),
         Arc::new(make_method_typed(
             "cursorPaginate",
-            Some(PhpType::Named(atom(
+            Some(PhpType::named(atom(
                 "Illuminate\\Contracts\\Pagination\\CursorPaginator",
             ))),
         )),
@@ -799,7 +799,7 @@ fn builder_paginate_already_generic_is_not_patched() {
     let mut class = make_class(ELOQUENT_BUILDER_FQN);
     let original = PhpType::generic(
         "Illuminate\\Pagination\\LengthAwarePaginator",
-        vec![PhpType::int(), PhpType::Named(atom("App\\Models\\User"))],
+        vec![PhpType::int(), PhpType::named(atom("App\\Models\\User"))],
     );
     class.methods = vec![Arc::new(make_method_typed(
         "paginate",
@@ -832,13 +832,13 @@ fn storage_fake_contract_becomes_adapter() {
     class.methods = vec![
         Arc::new(make_method_typed(
             "fake",
-            Some(PhpType::Named(atom(
+            Some(PhpType::named(atom(
                 "Illuminate\\Contracts\\Filesystem\\Filesystem",
             ))),
         )),
         Arc::new(make_method_typed(
             "persistentFake",
-            Some(PhpType::Named(atom(
+            Some(PhpType::named(atom(
                 "\\Illuminate\\Contracts\\Filesystem\\Filesystem",
             ))),
         )),
@@ -862,7 +862,7 @@ fn storage_fake_contract_becomes_adapter() {
 #[test]
 fn storage_fake_non_contract_return_is_not_patched() {
     let mut class = make_class(STORAGE_FACADE_FQN);
-    let original = PhpType::Named(atom("Illuminate\\Filesystem\\FilesystemAdapter"));
+    let original = PhpType::named(atom("Illuminate\\Filesystem\\FilesystemAdapter"));
     class.methods = vec![Arc::new(make_method_typed("fake", Some(original.clone())))].into();
 
     apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
@@ -885,7 +885,7 @@ fn storage_fake_non_contract_return_is_not_patched() {
 #[test]
 fn storage_other_method_is_not_patched() {
     let mut class = make_class(STORAGE_FACADE_FQN);
-    let original = PhpType::Named(atom("Illuminate\\Contracts\\Filesystem\\Filesystem"));
+    let original = PhpType::named(atom("Illuminate\\Contracts\\Filesystem\\Filesystem"));
     class.methods = vec![Arc::new(make_method_typed("disk", Some(original.clone())))].into();
 
     apply_laravel_patches(&mut class, STORAGE_FACADE_FQN);
@@ -942,7 +942,7 @@ fn cache_facade_non_callback_method_untouched() {
 /// tag.
 fn make_testing_mock(name: &str) -> MethodInfo {
     MethodInfo {
-        return_type: Some(PhpType::Named(atom("Mockery\\MockInterface"))),
+        return_type: Some(PhpType::named(atom("Mockery\\MockInterface"))),
         parameters: vec![
             crate::test_fixtures::make_param("$abstract", Some("string"), true),
             crate::test_fixtures::make_param("$mock", Some("\\Closure|null"), false),
@@ -1005,8 +1005,8 @@ fn testing_mock_helper_with_concrete_return_is_untouched() {
     // A hand-written override that already carries the mocked class must
     // not be rewritten.
     let concrete = PhpType::intersection(vec![
-        PhpType::Named(atom("App\\Contracts\\Storage")),
-        PhpType::Named(atom("Mockery\\MockInterface")),
+        PhpType::named(atom("App\\Contracts\\Storage")),
+        PhpType::named(atom("Mockery\\MockInterface")),
     ]);
     let mut class = make_class("Tests\\Feature\\ExampleTest");
     class.methods = vec![Arc::new(MethodInfo {
@@ -1085,7 +1085,7 @@ fn mockery_verification_methods_lose_the_self_return() {
 #[test]
 fn mockery_verification_method_with_concrete_return_is_untouched() {
     let mut class = make_class(LEGACY_MOCK_INTERFACE_FQN);
-    let concrete = PhpType::Named(atom("Mockery\\VerificationDirector"));
+    let concrete = PhpType::named(atom("Mockery\\VerificationDirector"));
     class.methods = vec![Arc::new(make_method_typed(
         "shouldHaveReceived",
         Some(concrete.clone()),

@@ -20,11 +20,11 @@ fn test_find_throw_statements_basic() {
     assert_eq!(throws.len(), 2);
     assert_eq!(
         throws[0].type_name,
-        PhpType::Named(atom("InvalidArgumentException"))
+        PhpType::named(atom("InvalidArgumentException"))
     );
     assert_eq!(
         throws[1].type_name,
-        PhpType::Named(atom("\\RuntimeException"))
+        PhpType::named(atom("\\RuntimeException"))
     );
 }
 
@@ -36,7 +36,7 @@ fn test_find_throw_statements_skips_strings() {
     "#;
     let throws = find_throw_statements(body);
     assert_eq!(throws.len(), 1);
-    assert_eq!(throws[0].type_name, PhpType::Named(atom("RealException")));
+    assert_eq!(throws[0].type_name, PhpType::named(atom("RealException")));
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_find_throw_statements_skips_comments() {
     "#;
     let throws = find_throw_statements(body);
     assert_eq!(throws.len(), 1);
-    assert_eq!(throws[0].type_name, PhpType::Named(atom("RealException")));
+    assert_eq!(throws[0].type_name, PhpType::named(atom("RealException")));
 }
 
 #[test]
@@ -65,8 +65,8 @@ public function doSomething(): void {
     assert_eq!(
         tags,
         vec![
-            PhpType::Named(atom("InvalidArgumentException")),
-            PhpType::Named(atom("RuntimeException"))
+            PhpType::named(atom("InvalidArgumentException")),
+            PhpType::named(atom("RuntimeException"))
         ]
     );
 }
@@ -81,7 +81,7 @@ private static function doSomething(): void {
 }
     "#;
     let tags = find_method_throws_tags(content, "doSomething");
-    assert_eq!(tags, vec![PhpType::Named(atom("InvalidArgumentException"))]);
+    assert_eq!(tags, vec![PhpType::named(atom("InvalidArgumentException"))]);
 }
 
 #[test]
@@ -91,7 +91,7 @@ public function createException(): RuntimeException {
 }
     "#;
     let ret = find_method_return_type(content, "createException");
-    assert_eq!(ret, Some(PhpType::Named(atom("RuntimeException"))));
+    assert_eq!(ret, Some(PhpType::named(atom("RuntimeException"))));
 }
 
 #[test]
@@ -104,7 +104,7 @@ public function createException() {
 }
     "#;
     let ret = find_method_return_type(content, "createException");
-    assert_eq!(ret, Some(PhpType::Named(atom("RuntimeException"))));
+    assert_eq!(ret, Some(PhpType::named(atom("RuntimeException"))));
 }
 
 #[test]
@@ -172,7 +172,7 @@ public function caller(): void {
     let body = "throw $this->createException();";
     let types = find_throw_expression_types(body, file_content);
     assert_eq!(types.len(), 1);
-    assert_eq!(types[0].type_name, PhpType::Named(atom("RuntimeException")));
+    assert_eq!(types[0].type_name, PhpType::named(atom("RuntimeException")));
 }
 
 #[test]
@@ -195,7 +195,7 @@ public function createException(array $opts = array()): RuntimeException {
 }
     "#;
     let ret = find_method_return_type(content, "createException");
-    assert_eq!(ret, Some(PhpType::Named(atom("RuntimeException"))));
+    assert_eq!(ret, Some(PhpType::named(atom("RuntimeException"))));
 }
 
 // ── High-level analysis tests ───────────────────────────────────────
@@ -257,7 +257,7 @@ fn test_find_catch_blocks_basic() {
     assert_eq!(catches.len(), 1);
     assert_eq!(
         catches[0].type_names,
-        vec![PhpType::Named(atom("InvalidArgumentException"))]
+        vec![PhpType::named(atom("InvalidArgumentException"))]
     );
 }
 
@@ -275,8 +275,8 @@ fn test_find_catch_blocks_multi_catch() {
     assert_eq!(
         catches[0].type_names,
         vec![
-            PhpType::Named(atom("InvalidArgumentException")),
-            PhpType::Named(atom("RuntimeException"))
+            PhpType::named(atom("InvalidArgumentException")),
+            PhpType::named(atom("RuntimeException"))
         ]
     );
 }
@@ -286,7 +286,7 @@ fn test_parse_catch_types_basic() {
     let (types, var) = parse_catch_types("InvalidArgumentException $e");
     assert_eq!(
         types,
-        vec![PhpType::Named(atom("InvalidArgumentException"))]
+        vec![PhpType::named(atom("InvalidArgumentException"))]
     );
     assert_eq!(var.as_deref(), Some("$e"));
 }
@@ -299,8 +299,8 @@ fn test_parse_catch_types_multi() {
     assert_eq!(
         types,
         vec![
-            PhpType::Named(atom("\\InvalidArgumentException")),
-            PhpType::Named(atom("\\RuntimeException"))
+            PhpType::named(atom("\\InvalidArgumentException")),
+            PhpType::named(atom("\\RuntimeException"))
         ]
     );
     assert_eq!(var.as_deref(), Some("$e"));
@@ -347,7 +347,7 @@ fn test_find_uncaught_throw_types_uncaught() {
         character: 5,
     };
     let uncaught = find_uncaught_throw_types(content, pos);
-    assert_eq!(uncaught, vec![PhpType::Named(atom("RuntimeException"))]);
+    assert_eq!(uncaught, vec![PhpType::named(atom("RuntimeException"))]);
 }
 
 #[test]
@@ -372,7 +372,7 @@ fn test_find_uncaught_throw_types_mixed() {
         character: 5,
     };
     let uncaught = find_uncaught_throw_types(content, pos);
-    assert_eq!(uncaught, vec![PhpType::Named(atom("RuntimeException"))]);
+    assert_eq!(uncaught, vec![PhpType::named(atom("RuntimeException"))]);
 }
 
 #[test]
@@ -430,7 +430,7 @@ fn test_find_uncaught_throw_types_inline_annotation_partially_caught() {
     let uncaught = find_uncaught_throw_types(content, pos);
     assert_eq!(
         uncaught,
-        vec![PhpType::Named(atom("RuntimeException"))],
+        vec![PhpType::named(atom("RuntimeException"))],
         "only the uncaught inline @throws should remain"
     );
 }
@@ -461,7 +461,7 @@ fn test_find_uncaught_throw_variable_from_catch() {
     let uncaught = find_uncaught_throw_types(content, pos);
     assert_eq!(
         uncaught,
-        vec![PhpType::Named(atom("ValidationException"))],
+        vec![PhpType::named(atom("ValidationException"))],
         "re-thrown catch variable should appear in uncaught list"
     );
 }
@@ -520,12 +520,12 @@ fn test_find_uncaught_throw_variable_multiple_catches() {
     };
     let uncaught = find_uncaught_throw_types(content, pos);
     assert!(
-        uncaught.contains(&PhpType::Named(atom("ValidationException"))),
+        uncaught.contains(&PhpType::named(atom("ValidationException"))),
         "should contain ValidationException, got: {:?}",
         uncaught
     );
     assert!(
-        uncaught.contains(&PhpType::Named(atom("NotFoundException"))),
+        uncaught.contains(&PhpType::named(atom("NotFoundException"))),
         "should contain NotFoundException, got: {:?}",
         uncaught
     );
@@ -547,7 +547,7 @@ public function caller(): void {
     let body = "throw makeException();";
     let types = find_throw_expression_types(body, file_content);
     assert_eq!(types.len(), 1, "should resolve bare function call");
-    assert_eq!(types[0].type_name, PhpType::Named(atom("RuntimeException")));
+    assert_eq!(types[0].type_name, PhpType::named(atom("RuntimeException")));
 }
 
 #[test]
@@ -573,7 +573,7 @@ fn test_find_uncaught_throw_bare_function_call() {
     let uncaught = find_uncaught_throw_types(content, pos);
     assert_eq!(
         uncaught,
-        vec![PhpType::Named(atom("RuntimeException"))],
+        vec![PhpType::named(atom("RuntimeException"))],
         "bare function call return type should appear in uncaught"
     );
 }
@@ -670,7 +670,7 @@ fn test_parse_param_type_map_basic() {
         map,
         vec![(
             "$service".to_string(),
-            PhpType::Named(atom("BusinessCentralService"))
+            PhpType::named(atom("BusinessCentralService"))
         )]
     );
 }
@@ -684,10 +684,10 @@ fn test_parse_param_type_map_multiple_params() {
         vec![
             (
                 "$service".to_string(),
-                PhpType::Named(atom("BusinessCentralService"))
+                PhpType::named(atom("BusinessCentralService"))
             ),
-            ("$count".to_string(), PhpType::Named(atom("int"))),
-            ("$name".to_string(), PhpType::Named(atom("string"))),
+            ("$count".to_string(), PhpType::named(atom("int"))),
+            ("$name".to_string(), PhpType::named(atom("string"))),
         ]
     );
 }
@@ -698,7 +698,7 @@ fn test_parse_param_type_map_nullable() {
     let map = parse_param_type_map(sig);
     assert_eq!(
         map,
-        vec![("$model".to_string(), PhpType::Named(atom("Model")))]
+        vec![("$model".to_string(), PhpType::named(atom("Model")))]
     );
 }
 
@@ -710,7 +710,7 @@ fn test_parse_param_type_map_fqn() {
         map,
         vec![(
             "$service".to_string(),
-            PhpType::Named(atom("App\\Services\\BusinessCentralService"))
+            PhpType::named(atom("App\\Services\\BusinessCentralService"))
         ),]
     );
 }
@@ -729,8 +729,8 @@ fn test_parse_param_type_map_with_defaults() {
     assert_eq!(
         map,
         vec![
-            ("$name".to_string(), PhpType::Named(atom("string"))),
-            ("$count".to_string(), PhpType::Named(atom("int"))),
+            ("$name".to_string(), PhpType::named(atom("string"))),
+            ("$count".to_string(), PhpType::named(atom("int"))),
         ]
     );
 }
@@ -741,7 +741,7 @@ fn test_parse_param_type_map_variadic() {
     let map = parse_param_type_map(sig);
     assert_eq!(
         map,
-        vec![("$names".to_string(), PhpType::Named(atom("string")))]
+        vec![("$names".to_string(), PhpType::named(atom("string")))]
     );
 }
 
@@ -751,7 +751,7 @@ fn test_parse_param_type_map_reference() {
     let map = parse_param_type_map(sig);
     assert_eq!(
         map,
-        vec![("$items".to_string(), PhpType::Named(atom("array")))]
+        vec![("$items".to_string(), PhpType::named(atom("array")))]
     );
 }
 
@@ -761,7 +761,7 @@ fn test_parse_param_type_map_promoted_property() {
     let map = parse_param_type_map(sig);
     assert_eq!(
         map,
-        vec![("$name".to_string(), PhpType::Named(atom("string")))]
+        vec![("$name".to_string(), PhpType::named(atom("string")))]
     );
 }
 
@@ -1387,13 +1387,13 @@ fn test_find_uncaught_with_class_loader_catches_cross_file() {
     assert!(
         !uncaught
             .iter()
-            .any(|t| t == &PhpType::Named(atom("RuntimeException"))),
+            .any(|t| t == &PhpType::named(atom("RuntimeException"))),
         "RuntimeException should be caught"
     );
     assert!(
         uncaught
             .iter()
-            .any(|t| t == &PhpType::Named(atom("ConvertException"))),
+            .any(|t| t == &PhpType::named(atom("ConvertException"))),
         "ConvertException should be uncaught, got: {:?}",
         uncaught
     );

@@ -8,6 +8,7 @@
 //! resolution and the completion/diagnostics pipelines both call into.
 
 use crate::atom::atom;
+use crate::php_type::TypeKind;
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
@@ -264,7 +265,7 @@ pub(crate) fn is_subtype_of(
 /// class names instead of pre-constructed [`crate::php_type::PhpType`] values.
 ///
 /// This avoids the boilerplate of wrapping each name in
-/// `PhpType::Named(atom(name.as_ref()))` at call sites that already have
+/// `PhpType::named(atom(name.as_ref()))` at call sites that already have
 /// `&str` class names.
 pub(crate) fn is_subtype_of_names(
     subtype_name: &str,
@@ -273,14 +274,14 @@ pub(crate) fn is_subtype_of_names(
 ) -> bool {
     use crate::php_type::PhpType;
     is_subtype_of_typed(
-        &PhpType::Named(atom(subtype_name)),
-        &PhpType::Named(atom(supertype_name)),
+        &PhpType::named(atom(subtype_name)),
+        &PhpType::named(atom(supertype_name)),
         class_loader,
     )
 }
 
 /// Like [`is_subtype_of_typed`] but accepts a `&str` for the supertype,
-/// avoiding `PhpType::Named` wrapping at call sites that already have a
+/// avoiding `TypeKind::Named` wrapping at call sites that already have a
 /// `&PhpType` subtype and a bare class name as supertype.
 pub(crate) fn is_subtype_of_named(
     subtype: &crate::php_type::PhpType,
@@ -288,7 +289,7 @@ pub(crate) fn is_subtype_of_named(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
     use crate::php_type::PhpType;
-    is_subtype_of_typed(subtype, &PhpType::Named(atom(supertype_name)), class_loader)
+    is_subtype_of_typed(subtype, &PhpType::named(atom(supertype_name)), class_loader)
 }
 
 /// Check whether `subtype` is a subtype of `supertype`, combining
@@ -322,26 +323,26 @@ pub(crate) fn is_subtype_of_typed(
     }
 
     // ── Union subtype: every member must be a subtype ───────────
-    if let PhpType::Union(members) = subtype {
+    if let TypeKind::Union(members) = subtype.kind() {
         return members
             .iter()
             .all(|m| is_subtype_of_typed(m, supertype, class_loader));
     }
 
     // ── Union supertype: at least one member must accept subtype ─
-    if let PhpType::Union(members) = supertype {
+    if let TypeKind::Union(members) = supertype.kind() {
         return members
             .iter()
             .any(|m| is_subtype_of_typed(subtype, m, class_loader));
     }
 
     // ── Nullable normalisation ──────────────────────────────────
-    if let PhpType::Nullable(inner) = subtype {
-        let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
+    if let TypeKind::Nullable(inner) = subtype.kind() {
+        let as_union = PhpType::union(vec![inner.clone(), PhpType::null()]);
         return is_subtype_of_typed(&as_union, supertype, class_loader);
     }
-    if let PhpType::Nullable(inner) = supertype {
-        let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
+    if let TypeKind::Nullable(inner) = supertype.kind() {
+        let as_union = PhpType::union(vec![inner.clone(), PhpType::null()]);
         return is_subtype_of_typed(subtype, &as_union, class_loader);
     }
 
@@ -352,14 +353,14 @@ pub(crate) fn is_subtype_of_typed(
     // *some* subtype member.  Handling the subtype first would instead
     // demand that a single member satisfy the whole supertype, wrongly
     // rejecting a narrower intersection that carries extra constraints.
-    if let PhpType::Intersection(members) = supertype {
+    if let TypeKind::Intersection(members) = supertype.kind() {
         return members
             .iter()
             .all(|m| is_subtype_of_typed(subtype, m, class_loader));
     }
 
     // ── Intersection subtype: at least one member suffices ──────
-    if let PhpType::Intersection(members) = subtype {
+    if let TypeKind::Intersection(members) = subtype.kind() {
         return members
             .iter()
             .any(|m| is_subtype_of_typed(m, supertype, class_loader));
@@ -371,7 +372,7 @@ pub(crate) fn is_subtype_of_typed(
     // namespace-qualified name and the other uses a short name
     // (e.g. `list<Pen>` vs `list<Demo\Pen>`).  Re-check with the
     // class loader so nominal hierarchy applies to inner params.
-    if let (PhpType::Generic(sub), PhpType::Generic(sup)) = (subtype, supertype) {
+    if let (TypeKind::Generic(sub), TypeKind::Generic(sup)) = (subtype.kind(), supertype.kind()) {
         let (name_sub, args_sub) = (&sub.name, &sub.args);
         let (name_sup, args_sup) = (&sup.name, &sup.args);
         let base_sub = name_sub.to_ascii_lowercase();
@@ -406,7 +407,8 @@ pub(crate) fn is_subtype_of_typed(
     // subclass relationships (e.g. `Cat[]` <: `Animal[]` where
     // `Cat extends Animal`).  Re-check with the class loader so
     // the hierarchy walk applies to inner types.
-    if let (PhpType::Array(inner_sub), PhpType::Array(inner_sup)) = (subtype, supertype)
+    if let (TypeKind::Array(inner_sub), TypeKind::Array(inner_sup)) =
+        (subtype.kind(), supertype.kind())
         && is_subtype_of_typed(inner_sub, inner_sup, class_loader)
     {
         return true;
@@ -416,7 +418,7 @@ pub(crate) fn is_subtype_of_typed(
     // A `Closure(int): string` is a Closure instance, which is an
     // object.  The structural check only handles `callable` as
     // the named supertype; extend to `Closure` and `object`.
-    if matches!(subtype, PhpType::Callable { .. })
+    if matches!(subtype.kind(), TypeKind::Callable { .. })
         && let Some(sup) = supertype.base_name()
         && (sup.eq_ignore_ascii_case("Closure") || sup.eq_ignore_ascii_case("object"))
     {
@@ -432,11 +434,12 @@ pub(crate) fn is_subtype_of_typed(
     // is treated as `class-string<object>`, so it satisfies
     // `class-string<object>` (and its `mixed` equivalent) — any class
     // name is a class-string of some object.
-    if let (PhpType::ClassString(sub_inner), PhpType::ClassString(sup_inner)) = (subtype, supertype)
+    if let (TypeKind::ClassString(sub_inner), TypeKind::ClassString(sup_inner)) =
+        (subtype.kind(), supertype.kind())
     {
-        let object_bound = PhpType::Named(atom("object"));
-        let sub = sub_inner.as_deref().unwrap_or(&object_bound);
-        let sup = sup_inner.as_deref().unwrap_or(&object_bound);
+        let object_bound = PhpType::named(atom("object"));
+        let sub = sub_inner.as_ref().unwrap_or(&object_bound);
+        let sup = sup_inner.as_ref().unwrap_or(&object_bound);
         return is_subtype_of_typed(sub, sup, class_loader);
     }
 
@@ -446,9 +449,9 @@ pub(crate) fn is_subtype_of_typed(
     // string literal is a subtype only if it names a known
     // property.  When the model class cannot be loaded, stay
     // permissive (return true) to avoid false positives.
-    if let PhpType::Literal(lit) = subtype
+    if let TypeKind::Literal(lit) = subtype.kind()
         && lit.string_content().is_some()
-        && let PhpType::Generic(g) = supertype
+        && let TypeKind::Generic(g) = supertype.kind()
         && g.name.eq_ignore_ascii_case("model-property")
         && g.args.len() == 1
     {
@@ -475,11 +478,11 @@ pub(crate) fn is_subtype_of_typed(
     // class provably fails to satisfy the bound.
     if let Some(crate::php_type::LiteralValue::String(_)) = subtype.as_literal()
         && matches!(
-            supertype,
-            PhpType::ClassString(_) | PhpType::InterfaceString(_)
+            supertype.kind(),
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_)
         )
     {
-        let PhpType::Literal(lit) = subtype else {
+        let TypeKind::Literal(lit) = subtype.kind() else {
             unreachable!()
         };
         let Some(class_name) = lit.string_content() else {
@@ -488,8 +491,8 @@ pub(crate) fn is_subtype_of_typed(
         let Some(cls) = class_loader(class_name) else {
             return true;
         };
-        return match supertype {
-            PhpType::ClassString(Some(bound)) | PhpType::InterfaceString(Some(bound)) => {
+        return match supertype.kind() {
+            TypeKind::ClassString(Some(bound)) | TypeKind::InterfaceString(Some(bound)) => {
                 match bound.base_name() {
                     Some(bound_name) => is_subtype_of(&cls, bound_name, class_loader),
                     None => true,

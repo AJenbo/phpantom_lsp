@@ -16,7 +16,7 @@ use mago_syntax::cst::*;
 use crate::atom::{atom, bytes_to_str, last_segment};
 use crate::docblock;
 use crate::parser::{extract_hint_type, with_parsed_program};
-use crate::php_type::{PhpType, ShapeEntry, is_keyword_type};
+use crate::php_type::{PhpType, ShapeEntry, TypeKind, is_keyword_type};
 use crate::types::{ClassInfo, ParameterInfo, ResolvedType};
 
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
@@ -49,7 +49,7 @@ pub(in crate::type_engine) fn build_var_resolver_from_ctx<'a>(
 ///
 /// When `type_str` resolves to `Builder` (the Eloquent Builder, without
 /// generic parameters) and the enclosing method is a scope on a class
-/// that extends Eloquent Model, returns a `PhpType::Generic` wrapping
+/// that extends Eloquent Model, returns a `TypeKind::Generic` wrapping
 /// the builder name and the enclosing model.  Otherwise returns `None`,
 /// meaning the caller should use the original type.
 ///
@@ -85,8 +85,8 @@ pub(super) fn enrich_builder_type_in_scope(
     if type_hint.has_type_structure() {
         return None;
     }
-    let type_name = match type_hint {
-        PhpType::Named(n) => n.as_str(),
+    let type_name = match type_hint.kind() {
+        TypeKind::Named(n) => n.as_str(),
         _ => return None,
     };
     let is_eloquent_builder = type_name == ELOQUENT_BUILDER_FQN || type_name == "Builder";
@@ -97,7 +97,7 @@ pub(super) fn enrich_builder_type_in_scope(
     // Build the enriched type with the enclosing model as the generic arg.
     Some(PhpType::generic(
         type_name,
-        vec![PhpType::Named(atom(current_class.name.as_ref()))],
+        vec![PhpType::named(atom(current_class.name.as_ref()))],
     ))
 }
 
@@ -1257,16 +1257,16 @@ pub(super) fn substitute_template_param_bounds(
 /// or pseudo-type.  This is a cheap pre-filter so that we only parse the
 /// docblock when there is a realistic chance of finding a substitution.
 fn type_may_contain_template_param(ty: &PhpType) -> bool {
-    match ty {
-        PhpType::Named(name) => {
+    match ty.kind() {
+        TypeKind::Named(name) => {
             // Well-known scalars/pseudo-types are never template params.
             !is_keyword_type(name)
         }
-        PhpType::Union(members) | PhpType::Intersection(members) => {
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
             members.iter().any(type_may_contain_template_param)
         }
-        PhpType::Nullable(inner) => type_may_contain_template_param(inner),
-        PhpType::Generic(g) => {
+        TypeKind::Nullable(inner) => type_may_contain_template_param(inner),
+        TypeKind::Generic(g) => {
             !crate::php_type::is_keyword_type(&g.name)
                 || g.args.iter().any(type_may_contain_template_param)
         }
@@ -1288,9 +1288,9 @@ pub(super) fn substitute_class_string_template_bounds(
 ) -> PhpType {
     // Only act on class-string<T> where the inner type is a simple name
     // (i.e. a potential template parameter).
-    let inner_name = match &ty {
-        PhpType::ClassString(Some(inner)) => match inner.as_ref() {
-            PhpType::Named(name) => Some(*name),
+    let inner_name = match &ty.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => Some(*name),
             _ => None,
         },
         _ => None,
@@ -1315,7 +1315,7 @@ pub(super) fn substitute_class_string_template_bounds(
         if name == tpl_name
             && let Some(bound_type) = bound
         {
-            return PhpType::ClassString(Some(Box::new(bound_type)));
+            return PhpType::class_string(Some(bound_type));
         }
     }
 
@@ -1362,10 +1362,10 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.class_loader,
                 );
-                Some(PhpType::Named(atom(&fqn)))
+                Some(PhpType::named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
-            Expression::Static(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Self_(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Static(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
             _ => None,
         },
         // Function / method calls → look up the return type.
@@ -1593,7 +1593,7 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
 /// If `base` is already an `ArrayShape`, the key is added or updated.
 /// Otherwise a new shape is created with just the given key.
 ///
-/// Returns `PhpType::ArrayShape(entries)` with the merged entries.
+/// Returns `PhpType::array_shape(entries)` with the merged entries.
 fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
     let mut entries: Vec<ShapeEntry> = Vec::new();
 
@@ -1625,7 +1625,7 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
 /// Otherwise, produces `list<value_type>`.
 ///
 /// Returns `PhpType::list(elem_type)` or
-/// `PhpType::Named("array")` when no element types are available.
+/// `PhpType::named("array")` when no element types are available.
 pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
     let mut elem_types: Vec<PhpType> = Vec::new();
 
@@ -1670,7 +1670,7 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
 ///
 /// Returns `PhpType::generic_array(key, val)`,
 /// `PhpType::generic_array_val(val)` when no key types are
-/// available, or `PhpType::Named("array")` when no element types
+/// available, or `PhpType::named("array")` when no element types
 /// are available.
 pub(super) fn merge_keyed_type(
     base: &PhpType,
@@ -1787,8 +1787,8 @@ fn is_array_key_type(ty: &PhpType) -> bool {
     if ty.is_array_key() {
         return true;
     }
-    match ty {
-        PhpType::Union(members) if members.len() == 2 => {
+    match ty.kind() {
+        TypeKind::Union(members) if members.len() == 2 => {
             let has_int = members.iter().any(|m| m.is_int());
             let has_string = members.iter().any(|m| m.is_string_type());
             has_int && has_string

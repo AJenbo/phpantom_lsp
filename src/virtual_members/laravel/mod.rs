@@ -296,7 +296,7 @@ pub struct LaravelModelProvider;
 
 /// Laravel date type used for date-related virtual properties.
 fn carbon_type() -> PhpType {
-    PhpType::Named(atom(CONFIGURED_DATE_CLASS_FQN))
+    PhpType::named(atom(CONFIGURED_DATE_CLASS_FQN))
 }
 
 fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {

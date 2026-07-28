@@ -28,7 +28,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
-use crate::php_type::{PhpType, is_array_like_name};
+use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::{ClassInfo, ResolvedCallableTarget};
@@ -199,14 +199,14 @@ fn narrow_literal_type(expr: &Expression<'_>) -> Option<PhpType> {
 /// Extract the model name from a `model-property<Model>` type that
 /// appears as a generic argument of an array/list type.
 fn extract_model_property_from_array_type(ty: &PhpType) -> Option<String> {
-    let PhpType::Generic(g) = ty else {
+    let TypeKind::Generic(g) = ty.kind() else {
         return None;
     };
     if !is_array_like_name(&g.name) && !g.name.eq_ignore_ascii_case("list") {
         return None;
     }
     for arg in &g.args {
-        if let PhpType::Generic(inner) = arg
+        if let TypeKind::Generic(inner) = arg.kind()
             && inner.name.eq_ignore_ascii_case("model-property")
             && inner.args.len() == 1
         {
@@ -664,7 +664,7 @@ impl Backend {
                 // Skip unresolved / empty / Raw("") sentinel types.
                 if arg_type.is_untyped()
                     || arg_type.is_empty()
-                    || matches!(arg_type, PhpType::Raw(s) if s.is_empty())
+                    || matches!(arg_type.kind(), TypeKind::Raw(s) if s.is_empty())
                 {
                     continue;
                 }

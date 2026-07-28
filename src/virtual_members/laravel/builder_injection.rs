@@ -304,7 +304,7 @@ fn inject_model_virtual_methods(
     // `Builder<static>`), so substituting `static` → model name
     // produces `Builder<Customer>`.  Using `Builder<Model>` here
     // would double-wrap to `Builder<Builder<Customer>>`.
-    let model_type = PhpType::Named(atom(model_name));
+    let model_type = PhpType::named(atom(model_name));
     let subs = self_ref_subs(model_type);
 
     // The transform depends only on the model (via `subs`), so the

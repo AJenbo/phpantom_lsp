@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::{Atom, AtomSet, atom};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, Visibility};
 use crate::virtual_members::{
     TransformFingerprint, intern_transformed_method, intern_transformed_property,
@@ -252,7 +252,7 @@ pub(crate) fn resolve_class_with_inheritance(
                 && class_loader(&model_fqn).is_some()
             {
                 for param in &parent.template_params {
-                    level_subs.insert(param.to_string(), PhpType::Named(atom(&model_fqn)));
+                    level_subs.insert(param.to_string(), PhpType::named(atom(&model_fqn)));
                 }
             }
         }
@@ -517,8 +517,8 @@ pub(crate) fn resolve_class_with_inheritance(
     // and diagnostics see `string` or `int` instead of `int|string`.
     if let Some(ref backed) = merged.backed_type {
         let specific_type = match backed {
-            crate::types::BackedEnumType::String => PhpType::Named(atom("string")),
-            crate::types::BackedEnumType::Int => PhpType::Named(atom("int")),
+            crate::types::BackedEnumType::String => PhpType::named(atom("string")),
+            crate::types::BackedEnumType::Int => PhpType::named(atom("int")),
         };
         if let Some(prop) = merged
             .properties
@@ -537,7 +537,7 @@ pub(crate) fn resolve_class_with_inheritance(
     // replace the bare `array` with `list<EnumName>` (using the FQN so
     // the element resolves regardless of the call site's namespace).
     if merged.kind == crate::types::ClassLikeKind::Enum {
-        let element = PhpType::Named(merged.fqn());
+        let element = PhpType::named(merged.fqn());
         let list_type = PhpType::list(element);
         if let Some(cases) = merged
             .methods
@@ -702,7 +702,7 @@ fn resolve_magic_get_return_type(class: &ClassInfo, prop_name: &str) -> Option<P
 
     // Only return if the substitution actually resolved to something
     // concrete (not still an IndexAccess with an unresolved key).
-    if matches!(&resolved, PhpType::IndexAccess(_, _)) {
+    if matches!(&resolved.kind(), TypeKind::IndexAccess(_, _)) {
         return None;
     }
 

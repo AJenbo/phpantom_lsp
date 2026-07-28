@@ -4,7 +4,7 @@
 //! types, and resolves `throw $variable` statements to the type caught
 //! by the enclosing `catch` clause.
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 
 use super::scanning::ThrowInfo;
 
@@ -285,9 +285,10 @@ pub(crate) fn parse_catch_types(paren_content: &str) -> (Vec<PhpType>, Option<St
     // both of which strip any leading `\`, so no normalization is needed here.
     let type_list = without_var.trim();
     if !type_list.is_empty() {
-        match PhpType::parse(type_list) {
-            PhpType::Union(members) => types.extend(members),
-            single => types.push(single),
+        let parsed = PhpType::parse(type_list);
+        match parsed.kind() {
+            TypeKind::Union(members) => types.extend(members.iter().cloned()),
+            _ => types.push(parsed),
         }
     }
 

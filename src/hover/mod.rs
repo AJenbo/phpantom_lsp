@@ -28,7 +28,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::*;
@@ -631,7 +631,7 @@ impl Backend {
                 && let Some(date_class) = self
                     .find_or_load_class(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
             {
-                let date_type = crate::php_type::PhpType::Named(date_class.fqn());
+                let date_type = crate::php_type::PhpType::named(date_class.fqn());
                 func.return_type = Some(date_type);
                 inferred_date_return = true;
             }
@@ -761,17 +761,17 @@ fn hover_command_own_param(
 /// Extract a model name from a `model-property<Model>` type, including
 /// when nested inside array/list generic arguments.
 pub(crate) fn extract_model_name_from_model_property_type(ty: &PhpType) -> Option<String> {
-    if let PhpType::Generic(g) = ty
+    if let TypeKind::Generic(g) = ty.kind()
         && g.name.eq_ignore_ascii_case("model-property")
         && g.args.len() == 1
     {
         return g.args[0].base_name().map(|s| s.to_string());
     }
-    if let PhpType::Generic(g) = ty
+    if let TypeKind::Generic(g) = ty.kind()
         && (crate::php_type::is_array_like_name(&g.name) || g.name.eq_ignore_ascii_case("list"))
     {
         for arg in &g.args {
-            if let PhpType::Generic(inner) = arg
+            if let TypeKind::Generic(inner) = arg.kind()
                 && inner.name.eq_ignore_ascii_case("model-property")
                 && inner.args.len() == 1
             {

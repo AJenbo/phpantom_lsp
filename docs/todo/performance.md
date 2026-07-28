@@ -404,9 +404,10 @@ so this fast-path would apply to the majority of checks.
    `HashMap<(Atom, Atom), bool>` that caches the result of
    "is type A a subtype of type B?" lookups. Clear the map at the
    start of each completion/hover/diagnostic request. Class names
-   are interned now (`PhpType::Named` carries an `Atom`, `ClassInfo`
+   are interned now (`TypeKind::Named` carries an `Atom`, `ClassInfo`
    caches its FQN as an `Atom`), so the keys are `Copy` and
-   identity-hashed.
+   identity-hashed. Whole types are interned too, so a `(PhpType,
+   PhpType)` key would work as well and hash just as cheaply.
 
 2. Add a `has_template_params: bool` flag (or equivalent) to
    `ClassInfo` or type representations. Set it during parsing when
@@ -1036,16 +1037,16 @@ interface merge inside `resolve_class_fully_inner` are intentional
 a CPU fix (11% of diagnostic-pass CPU), not a memory one, but it is
 memory-neutral-to-positive: today each of the 25,676 calls builds a
 full inheritance-merged `ClassInfo` (its own methods/properties vecs)
-and immediately discards it, which is 25,676 transient allocations of
-exactly the kind P41 cares about. Routing through the cache turns most
-of those into a hit against an entry the diagnostic pass populates
-anyway; it can only add a new persistent cache entry for a class that
-was otherwise *never* resolved in the pass, which is a narrow case
-bounded by the same fix as P33.
+and immediately discards it — 25,676 transient allocations that
+straight-line CPU savings would remove as a side effect. Routing
+through the cache turns most of those into a hit against an entry the
+diagnostic pass populates anyway; it can only add a new persistent
+cache entry for a class that was otherwise *never* resolved in the
+pass, which is a narrow case bounded by the same fix as P33.
 
 ---
 
-## Memory baseline (2026-07-26, refreshed after the `PhpType` shrink)
+## Memory baseline (2026-07-28, refreshed after `PhpType` interning)
 
 Measured with the `mem-audit` cargo feature, which installs a counting
 global allocator and prints a deep-size walk of every long-lived store
@@ -1061,8 +1062,8 @@ The walk dedups shared `Arc`s by pointer, so a member reached from
 several classes is counted once. It reports both a field-level
 attribution and a drop-and-measure probe that clears each store and
 reads the exact allocator delta, which cross-checks the walk. Since
-which allocator is active changes the RSS/overhead figures (see P41),
-the audit labels its own build (`target … / … libc, allocator …`) —
+which allocator is active changes the RSS/overhead figures, the audit
+labels its own build (`target … / … libc, allocator …`) —
 always check that line before comparing a new run to the table below.
 
 The byte/allocation figures (live heap, per-store bytes released,
@@ -1075,39 +1076,50 @@ mimalloc, since that is what every shipped Linux binary runs (see
 
 | Measure                       | Mid-size Laravel app | Large Laravel app |
 | ----------------------------- | -------------------- | ----------------- |
-| Peak RSS (`VmHWM`)            | 505 MB               | 706 MB            |
-| RSS after mimalloc collect    | 477 MB               | 686 MB            |
-| Live heap (allocator-reported)| 344 MB               | 514 MB            |
-| Live allocations              | 2.45 M               | 3.81 M            |
-| Allocator + page overhead     | 133 MB (28% of RSS)  | 172 MB (25%)      |
+| Peak RSS (`VmHWM`)            | 402 MB               | 540 MB            |
+| RSS after mimalloc collect    | 370 MB               | 510 MB            |
+| Live heap (allocator-reported)| 245 MB               | 358 MB            |
+| Live allocations              | 1.44 M               | 2.21 M            |
+| Allocator + page overhead     | 125 MB (34% of RSS)  | 152 MB (30%)      |
 
 The glibc figures below were taken against the original baseline (the
-one with a 64-byte `PhpType`) and have not been re-measured since; the
-relative picture they illustrate is unchanged. Under plain glibc
+one with a 64-byte `PhpType`, before it was shrunk and then interned)
+and have not been re-measured since; the relative picture they
+illustrate is unchanged. Under plain glibc
 `malloc` (no mimalloc) the same run peaked higher despite a *lower*
 overhead percentage: 622 MB / 855 MB peak, 100 MB (19%) / 133 MB (17%)
 overhead. mimalloc holds more
 allocator/page overhead in percentage terms but a smaller absolute
 peak, because PHPantom already tunes it (`configure_allocator`: a
 short purge delay plus a per-process THP opt-out) to return freed
-parse-burst memory promptly. See P41 for what's left after that tuning.
+parse-burst memory promptly.
+
+The overhead percentage rose as later changes (P33 sharing, P38
+interning) cut the live-allocation count — evidence that this overhead
+tracks the size of mimalloc's retained free-page pool, not a flat
+per-allocation cost, and that pool is sized by the parse-burst peak
+rather than the steady-state live set. Reducing allocation count on
+its own is therefore not expected to move it further; a real
+reduction would have to target that peak instead.
 
 Bytes released per store (drop-and-measure, mid-size / large):
 
 | Store                  | Released         | Allocations     |
 | ---------------------- | ---------------- | --------------- |
-| `resolved_class_cache` | 143 MB / 237 MB  | 1.17 M / 1.94 M |
-| `symbol_maps`          | 40 MB / 64 MB    | 367 K / 602 K   |
-| `reference_index`      | 26 MB / 43 MB    | 204 K / 330 K   |
-| `uri_classes_index`    | 25 MB / 27 MB    | 122 K / 171 K   |
+| `resolved_class_cache` | 101 MB / 165 MB  | 719 K / 1.18 M  |
+| `symbol_maps`          | 30 MB / 47 MB    | 159 K / 248 K   |
+| `uri_classes_index`    | 16 MB / 23 MB    | 104 K / 149 K   |
+| `reference_index`      | 5.3 MB / 8.1 MB  | 73 K / 112 K    |
 | `resolved_names`       | 4.6 MB / 6.7 MB  | 53 K / 75 K     |
 | everything else        | < 6 MB each      | —               |
 
 Within the member data, the largest field-level groups on the large app
-are `MethodInfo` structs (92 MB across 232 K distinct methods at 400 B
-each), parameter vectors (51 MB across 191 K vectors holding 325 K
-parameters at 136 B each), `PhpType` heap payloads (~33 MB), and
-`method_index` (21 MB).
+are `MethodInfo` structs (78 MB across 232 K distinct methods at 336 B
+each), parameter vectors (36 MB across 191 K vectors holding 325 K
+parameters at 88 B each), member docblock text (13 MB), and
+`method_index` (12 MB). Type payloads no longer register: interning
+collapsed 856 K live type occurrences on that app to 51 K distinct
+nodes, so the whole type representation now costs under 4 MB.
 
 Two findings from the baseline are worth recording because they close
 off obvious-looking ideas:
@@ -1122,116 +1134,6 @@ off obvious-looking ideas:
 - **A shared empty `SharedVec` saves under 1 MB.** Only 13% of parameter
   vectors are empty. Worth folding into another change that touches
   `SharedVec`, not worth a commit by itself.
-
----
-
-## P38. Resolved type values are duplicated ~34x
-
-**Impact: High · Effort: High**
-
-The memory audit renders every live `PhpType` and counts distinct
-forms: **1.76 M values collapse to 51,272 distinct rendered types** on
-the large Laravel app, and 1.07 M to 31,074 on the mid-size one. Both
-are almost exactly **34x duplication**. Every `string`, `?Carbon`,
-`Collection<User>`, and `Builder<TModel>` is re-allocated per method,
-per parameter, per class that inherits it.
-
-Interning types the way `Atom` interns names would collapse both halves
-of the remaining cost at once: each slot becomes a pointer-or-index
-handle (24 B down to 8 B, worth another ~24 MB of slot bytes on the
-large app on its own), and each distinct type is allocated once instead
-of ~34 times. The audit's "PhpType 24→16 B" projection covers only the
-slot half; the duplicate payloads are the larger share.
-
-This is a much larger change than the slot shrink that preceded it:
-`PhpType` is a value that substitution paths mutate in place, so
-interning means moving fully to a construct-and-intern API (the
-`PhpType::union(...)` / `PhpType::generic(...)` constructors added by
-the slot shrink are the beginning of that surface) and auditing every
-site that builds or rewrites a type.
-
-Take care not to feed the interner unbounded text: `Raw` holds
-free-text parse fallbacks and `Literal` holds source literals, so those
-should keep owned payloads or use a separate bounded cache.
-
----
-
-## P41. 3.8 M live allocations cost ~170 MB in allocator overhead
-
-**Impact: Medium · Effort: Medium**
-
-Independent of what we store, *how many* allocations we hold costs
-real memory. On the large Laravel app, mimalloc (the allocator every
-shipped Linux binary runs — see the "Memory baseline" note above)
-reports 514 MB live across 3.81 M allocations (average 142 B), while
-peak RSS is 706 MB. The 172 MB difference (25% of RSS; 28% on the
-mid-size app) is mimalloc's per-size-class page and slot rounding —
-roughly 45 B per live allocation.
-
-This is *after* the existing `configure_allocator` tuning (a short
-purge delay plus a per-process transparent-huge-pages opt-out — see
-`src/lib.rs`), which already earns back real RSS: the same run under
-plain glibc `malloc` peaks *higher* (622 MB / 855 MB) despite a lower
-overhead percentage (19% / 17%), because glibc holds freed arena
-pages far more readily than mimalloc does once tuned. So the
-allocator swap this item used to propose is already done — mimalloc is
-the shipped allocator and it is outperforming the alternative on
-absolute peak RSS. `MALLOC_ARENA_MAX` capping under plain glibc moves
-peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
-trimmed live figure, confirming arena count was never the lever.
-
-What is left is allocation *count* itself: at ~45 B of overhead per
-live allocation, each allocation avoided is worth more than its own
-`size_of`. P39 removed hundreds of thousands of allocations as a side
-effect (interning `SymbolKind` strings).
-
-**2026-07-27 re-measurement.** With P39 landed, re-running the
-`mem-audit` walk turned up a genuine leak in the assertion-narrowing
-path (`src/type_engine/types/narrowing/assertions.rs`): every
-`@phpstan-assert`/`@psalm-assert` call-site evaluation `Box::leak`ed a
-cloned `FunctionInfo` or `MethodInfo` to get a stable reference for
-`CallAssertionInfo`, and neither clone was ever freed. Narrowing runs
-on every conditional the forward walker visits, so this leaked once
-per asserting call touched during a pass, for the life of the
-process — worse in a long-running LSP session (re-run on every
-keystroke) than in one-shot `analyze`. Fixed by having
-`CallAssertionInfo` own the four fields it actually needs (an
-`Arc`-shared parameter vector plus three small `Vec`s) instead of
-leaking the whole clone.
-
-Re-measured on four real projects (one small, two mid-size, one
-large) with the fixed build: live allocations dropped 7-12% on the
-three larger projects and 53% on the small one, which spends
-proportionally more of its pass time in narrowing relative to its
-total symbol count. Live bytes dropped correspondingly (tens of MB on
-the larger projects). The allocator-overhead *percentage* barely
-moved — mimalloc's rounding overhead per allocation is roughly
-constant regardless of which allocations are removed, so cutting
-count shrinks both the overhead and the total footprint by a similar
-proportion. This confirms the mechanism above without yet closing the
-gap enough to retire this item.
-
-While re-measuring, the audit's drop-and-measure probes (`src/mem_audit.rs`)
-were extended to cover every remaining `Backend` store (the phar
-archive cache, autoload/stub indexes, workspace PSR-4/vendor paths,
-diagnostic pull-model caches, and more). Previously 18-26% of live
-heap was an unattributed gap between the field-level walk and the
-allocator's own count; the probes now account for nearly all of it, so
-future passes on this item measure against a real residual (dominated
-by the `ustr` name interner and short-lived per-request state) instead
-of an unexplained shortfall. One find from the newly-covered stores:
-`phar_archives` (raw phar bytes plus a byte-offset index, kept for lazy
-re-extraction of phar-embedded PHP files such as vendor-shipped
-PHPStan) held on the order of 25 MB on projects with a phar-shaped
-dependency, previously invisible to the audit.
-
-If a meaningful gap remains once other in-flight allocation-count
-reductions land, the next lever is arena-allocating the member
-metadata (bump-allocate `MethodInfo`/`PropertyInfo`/`ParameterInfo` per
-resolved class instead of one `Box`/`Arc` per member) — a much larger
-change than anything else in this list, and today's re-measurement
-does not yet show the overhead percentage moving enough to justify it
-on its own.
 
 ---
 

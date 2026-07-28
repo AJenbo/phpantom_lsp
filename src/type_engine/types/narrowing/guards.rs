@@ -3,7 +3,7 @@
 //! narrowing, and guard-clause (early-return) narrowing.
 
 use crate::atom::bytes_to_str;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ResolvedType};
 
 use mago_syntax::cst::*;
@@ -570,7 +570,7 @@ fn type_matches_guard(ty: &PhpType, kind: TypeGuardKind) -> bool {
         // `is_float()` returns false for integers at runtime, so use
         // exact type identity instead of `is_subtype_of` (which treats
         // `int` as a subtype of `float` due to PHP's type coercion).
-        TypeGuardKind::Float => matches!(ty, PhpType::Named(n) if {
+        TypeGuardKind::Float => matches!(ty.kind(), TypeKind::Named(n) if {
             let lower = n.to_ascii_lowercase();
             lower == "float" || lower == "double" || lower == "real"
         }),
@@ -660,8 +660,8 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
         return Some(narrow_to_numeric_inclusive(ty));
     }
 
-    match ty {
-        PhpType::Union(members) => {
+    match ty.kind() {
+        TypeKind::Union(members) => {
             let filtered: Vec<PhpType> = members
                 .iter()
                 .filter(|m| type_matches_guard(m, kind) == keep_matching)
@@ -678,7 +678,7 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
                 Some(PhpType::union(filtered))
             }
         }
-        PhpType::Nullable(inner) => {
+        TypeKind::Nullable(inner) => {
             // `?T` is `T|null`.  For `is_array`, null doesn't match,
             // so we keep only the inner type (if it matches) or only
             // null (if it doesn't).
@@ -689,19 +689,19 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
                 null_matches == keep_matching,
             ) {
                 (true, true) => None, // keep both → no change
-                (true, false) => Some(inner.as_ref().clone()),
+                (true, false) => Some(inner.clone()),
                 (false, true) => Some(PhpType::null()),
                 (false, false) => Some(PhpType::empty_sentinel()),
             }
         }
-        other => {
+        _ => {
             // `mixed` includes all types.  When narrowing in the
             // then-body (`keep_matching = true`), replace `mixed`
             // with the canonical type for the guard kind (e.g.
             // `is_object($mixed)` → `object`).  In the else-body
             // (`keep_matching = false`), `mixed` minus one kind is
             // still effectively `mixed`, so leave it unchanged.
-            if other.is_mixed() {
+            if ty.is_mixed() {
                 return if keep_matching {
                     Some(guard_kind_to_narrowed_type(kind))
                 } else {
@@ -709,7 +709,7 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
                 };
             }
             // Non-union type: if it matches the predicate, keep it.
-            if type_matches_guard(other, kind) == keep_matching {
+            if type_matches_guard(ty, kind) == keep_matching {
                 None // no change needed
             } else {
                 Some(PhpType::empty_sentinel())
@@ -725,8 +725,8 @@ fn filter_type_by_guard(ty: &PhpType, kind: TypeGuardKind, keep_matching: bool) 
 /// - `scalar` → `int|float|string|bool`
 /// - `numeric` / `number` → `int|float`
 fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
-    let name = match ty {
-        PhpType::Named(n) => n.to_ascii_lowercase(),
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.to_ascii_lowercase(),
         _ => return None,
     };
     match name.as_str() {
@@ -746,8 +746,8 @@ fn expand_pseudo_type_for_guard(ty: &PhpType) -> Option<PhpType> {
 /// members within `numeric-string` rather than widening them to `int|float`
 /// or dropping them.
 fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
-    match ty {
-        PhpType::Union(members) => {
+    match ty.kind() {
+        TypeKind::Union(members) => {
             let narrowed: Vec<PhpType> = members
                 .iter()
                 .filter_map(narrow_single_type_to_numeric)
@@ -759,10 +759,10 @@ fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
             }
         }
         // `null` never satisfies `is_numeric()`; narrow the inner type only.
-        PhpType::Nullable(inner) => {
+        TypeKind::Nullable(inner) => {
             narrow_single_type_to_numeric(inner).unwrap_or_else(PhpType::empty_sentinel)
         }
-        other => narrow_single_type_to_numeric(other).unwrap_or_else(PhpType::empty_sentinel),
+        _ => narrow_single_type_to_numeric(ty).unwrap_or_else(PhpType::empty_sentinel),
     }
 }
 

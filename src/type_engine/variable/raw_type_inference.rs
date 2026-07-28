@@ -110,7 +110,7 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
                 optional: false,
             })
             .collect();
-        return Some(PhpType::ArrayShape(entries));
+        return Some(PhpType::array_shape(entries));
     }
 
     let elem_type = if types.len() == 1 {
@@ -167,10 +167,10 @@ fn infer_element_type<'b>(
                     ctx.current_class.file_namespace.as_deref(),
                     ctx.class_loader,
                 );
-                Some(PhpType::Named(atom(&fqn)))
+                Some(PhpType::named(atom(&fqn)))
             }
-            Expression::Self_(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
-            Expression::Static(_) => Some(PhpType::Named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Self_(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
+            Expression::Static(_) => Some(PhpType::named(atom(ctx.current_class.name.as_ref()))),
             _ => None,
         },
         Expression::Call(_) => {

@@ -31,7 +31,7 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::*;
 
 use crate::atom::{atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, RELATION_QUERY_METHODS, extends_eloquent_model, resolve_relation_chain,
@@ -679,14 +679,14 @@ fn resolve_closure_this_type(
 /// `Illuminate\Support\Collection<int, Customer>`.
 fn inferred_type_is_more_specific(explicit_hint: &PhpType, inferred: &PhpType) -> bool {
     // The explicit hint must be a bare class name (no generic args).
-    let explicit_base = match explicit_hint {
-        PhpType::Named(name) => name.as_str(),
+    let explicit_base = match explicit_hint.kind() {
+        TypeKind::Named(name) => name.as_str(),
         _ => return false,
     };
 
     // The inferred type must be a generic type (carries generic args).
-    let inferred_base = match inferred {
-        PhpType::Generic(g) => g.name.as_str(),
+    let inferred_base = match inferred.kind() {
+        TypeKind::Generic(g) => g.name.as_str(),
         _ => return false,
     };
 
@@ -737,7 +737,7 @@ fn try_relation_query_override(
     // Return `Builder<RelatedModel>` as the closure parameter type.
     let builder_type = PhpType::generic(
         ELOQUENT_BUILDER_FQN,
-        vec![PhpType::Named(atom(&related_fqn))],
+        vec![PhpType::named(atom(&related_fqn))],
     );
 
     Some(vec![builder_type])
@@ -752,13 +752,13 @@ fn try_relation_query_override(
 /// Build a `PhpType` representing the receiver class for `$this`/`static`
 /// replacement in callable parameter inference.
 ///
-/// For most classes this returns `PhpType::Named(fqn)`.  For classes
+/// For most classes this returns `PhpType::named(fqn)`.  For classes
 /// whose template parameters have been concretely substituted (detected
 /// by scanning method return types for generic signatures), the full
 /// generic type is reconstructed.  For example, an Eloquent
 /// `Builder<Product>` receiver produces
-/// `PhpType::Generic("Illuminate\\Database\\Eloquent\\Builder", [Named("App\\Product")])`
-/// instead of a bare `PhpType::Named("Illuminate\\Database\\Eloquent\\Builder")`.
+/// `TypeKind::Generic("Illuminate\\Database\\Eloquent\\Builder", [Named("App\\Product")])`
+/// instead of a bare `PhpType::named("Illuminate\\Database\\Eloquent\\Builder")`.
 ///
 /// This preserves generic args through callable param inference so that
 /// `callable($this)` on `Builder<Product>` infers `Builder<Product>`,
@@ -772,7 +772,7 @@ fn build_receiver_self_type(
     // Only attempt reconstruction when the class declares template
     // params — otherwise there are no generic args to recover.
     if receiver.template_params.is_empty() {
-        return PhpType::Named(atom(fqn.as_ref()));
+        return PhpType::named(atom(fqn.as_ref()));
     }
 
     // For Eloquent Builder, extract the model name from method return
@@ -799,7 +799,7 @@ fn build_receiver_self_type(
         for (_, args) in &receiver.extends_generics {
             if let Some(first_arg) = args.first() {
                 // Skip raw template param names that weren't substituted.
-                let is_unsubstituted = if let PhpType::Named(name) = first_arg {
+                let is_unsubstituted = if let TypeKind::Named(name) = first_arg.kind() {
                     receiver.template_params.iter().any(|p| p.as_str() == name)
                 } else {
                     false
@@ -811,7 +811,7 @@ fn build_receiver_self_type(
         }
     }
 
-    PhpType::Named(atom(fqn.as_ref()))
+    PhpType::named(atom(fqn.as_ref()))
 }
 
 /// Try to extract concrete generic args from a class's own methods.
@@ -822,13 +822,13 @@ fn build_receiver_self_type(
 fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Option<Vec<PhpType>> {
     let class_short = crate::util::short_name(class_fqn);
     for method in &class.methods {
-        if let Some(PhpType::Generic(g)) = &method.return_type {
+        if let Some(TypeKind::Generic(g)) = method.return_type.as_deref() {
             let (base, args) = (&g.name, &g.args);
             let base_short = crate::util::short_name(base);
             if (base == class_fqn || base_short.eq_ignore_ascii_case(class_short))
                 && !args.is_empty()
                 && args.iter().all(|a| {
-                    if let PhpType::Named(n) = a {
+                    if let TypeKind::Named(n) = a.kind() {
                         !class.template_params.iter().any(|p| p.as_str() == n)
                     } else {
                         true
@@ -873,7 +873,7 @@ fn find_model_from_receivers(
 fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
     for method in &builder.methods {
         if let Some(ref ret) = method.return_type
-            && let PhpType::Generic(g) = ret
+            && let TypeKind::Generic(g) = ret.kind()
             && !g.args.is_empty()
             && (g.name == ELOQUENT_BUILDER_FQN || g.name == "Builder")
         {

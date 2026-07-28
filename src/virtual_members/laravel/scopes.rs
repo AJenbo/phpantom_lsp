@@ -9,7 +9,7 @@
 use crate::atom::atom;
 use std::sync::Arc;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo};
 use crate::util::short_name;
 
@@ -169,7 +169,7 @@ pub fn build_scope_methods_for_builder(
     // The default scope return type is `\...\Builder<static>` where
     // `static` means the model, so substituting `static` → `User`
     // produces `\...\Builder<User>`, keeping the chain on the builder.
-    let model_type = PhpType::Named(atom(model_name));
+    let model_type = PhpType::named(atom(model_name));
     let subs = super::self_ref_subs(model_type);
 
     let mut methods = Vec::new();
@@ -211,7 +211,7 @@ pub fn build_scope_methods_for_builder(
                 if is_bare_builder_type(ret) {
                     *ret = PhpType::generic(
                         ELOQUENT_BUILDER_FQN,
-                        vec![PhpType::Named(atom(model_name))],
+                        vec![PhpType::named(atom(model_name))],
                     );
                 }
             }
@@ -231,8 +231,8 @@ pub fn build_scope_methods_for_builder(
 /// the short name (`Builder`) since scope methods in user code
 /// typically use the imported short name.
 fn is_bare_builder_type(ty: &PhpType) -> bool {
-    match ty {
-        PhpType::Named(name) => name == ELOQUENT_BUILDER_FQN || short_name(name) == "Builder",
+    match ty.kind() {
+        TypeKind::Named(name) => name == ELOQUENT_BUILDER_FQN || short_name(name) == "Builder",
         _ => false,
     }
 }

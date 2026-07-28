@@ -43,7 +43,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
@@ -150,10 +150,10 @@ fn extract_match_arm_narrowings(
         if let Some((var_name, mut class_type)) = extract_instanceof_pair(condition) {
             // Resolve the short class name to FQN so that downstream
             // comparisons and ResolvedType hints carry the fully-qualified name.
-            if let PhpType::Named(ref name) = class_type
+            if let TypeKind::Named(name) = class_type.kind()
                 && let Some(cls) = (ctx.class_loader)(name)
             {
-                class_type = PhpType::Named(cls.fqn());
+                class_type = PhpType::named(cls.fqn());
             }
             let resolved = type_resolution::type_hint_to_classes_typed(
                 &class_type,
@@ -189,10 +189,10 @@ fn extract_instanceof_pair(expr: &Expression<'_>) -> Option<(String, PhpType)> {
         };
         // RHS: the class name
         let class_type = match bin.rhs {
-            Expression::Identifier(ident) => PhpType::Named(atom(bytes_to_str(ident.value()))),
-            Expression::Self_(_) => PhpType::Named(atom("self")),
-            Expression::Static(_) => PhpType::Named(atom("static")),
-            Expression::Parent(_) => PhpType::Named(atom("parent")),
+            Expression::Identifier(ident) => PhpType::named(atom(bytes_to_str(ident.value()))),
+            Expression::Self_(_) => PhpType::named(atom("self")),
+            Expression::Static(_) => PhpType::named(atom("static")),
+            Expression::Parent(_) => PhpType::named(atom("parent")),
             _ => return None,
         };
         Some((var_name, class_type))
@@ -515,7 +515,7 @@ fn resolve_rhs_expression_inner<'b>(
             // Closures produce a `Closure` instance at runtime, but when we
             // can infer their body return type (explicit `: T`, generator
             // yields, or arrow-body expression), preserve it in the
-            // `PhpType::Callable` so callers like template binding can use
+            // `TypeKind::Callable` so callers like template binding can use
             // it through `$closure` variables.
             let closure_ty = infer_closure_literal_type(expr, ctx);
             // Always resolve against the plain Closure class so that
@@ -855,16 +855,16 @@ fn match_type_pattern(
     template_bounds: &AtomMap<PhpType>,
     subs: &mut HashMap<String, PhpType>,
 ) {
-    match (pattern, concrete) {
+    match (pattern.kind(), concrete.kind()) {
         // A named type that is a template parameter — bind it.
-        (PhpType::Named(name), _)
+        (TypeKind::Named(name), _)
             if template_params.iter().any(|t| t.as_str() == name.as_str()) =>
         {
             subs.entry(name.to_string())
                 .or_insert_with(|| concrete.clone());
         }
         // Generic types with matching base names — recurse into args.
-        (PhpType::Generic(p), PhpType::Generic(c))
+        (TypeKind::Generic(p), TypeKind::Generic(c))
             if p.name == c.name && p.args.len() == c.args.len() =>
         {
             for (p_arg, c_arg) in p.args.iter().zip(c.args.iter()) {
@@ -874,9 +874,9 @@ fn match_type_pattern(
         // Union types — match pattern members against concrete members
         // by trying to pair each template pattern member with a concrete
         // member whose base name matches the template's bound.
-        (PhpType::Union(p_members), PhpType::Union(c_members)) => {
+        (TypeKind::Union(p_members), TypeKind::Union(c_members)) => {
             for p_m in p_members {
-                if let PhpType::Named(name) = p_m {
+                if let TypeKind::Named(name) = p_m.kind() {
                     if template_params.iter().any(|t| t.as_str() == name.as_str()) {
                         // This pattern member is a template param in a union.
                         // Find the concrete union member whose base name
@@ -910,7 +910,7 @@ fn match_type_pattern(
             }
         }
         // Nullable patterns.
-        (PhpType::Nullable(p_inner), PhpType::Nullable(c_inner)) => {
+        (TypeKind::Nullable(p_inner), TypeKind::Nullable(c_inner)) => {
             match_type_pattern(p_inner, c_inner, template_params, template_bounds, subs);
         }
         _ => {}

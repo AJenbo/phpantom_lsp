@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 
@@ -500,15 +500,15 @@ pub(crate) fn format_params(
 /// conditional types, template variables, etc.) must not be emitted as
 /// native hints in generated method stubs.
 fn is_valid_native_hint(ty: &PhpType) -> bool {
-    match ty {
+    match ty.kind() {
         // Plain named types and their nullable wrappers are always valid.
-        PhpType::Named(_) => true,
-        PhpType::Nullable(inner) => is_valid_native_hint(inner),
+        TypeKind::Named(_) => true,
+        TypeKind::Nullable(inner) => is_valid_native_hint(inner),
         // Union types are valid only when every member is valid (PHP 8+
         // union return types like `int|string|null` are legal).
-        PhpType::Union(members) => members.iter().all(is_valid_native_hint),
+        TypeKind::Union(members) => members.iter().all(is_valid_native_hint),
         // Intersection types (`A&B`) are valid PHP 8.1+ hints.
-        PhpType::Intersection(members) => members.iter().all(is_valid_native_hint),
+        TypeKind::Intersection(members) => members.iter().all(is_valid_native_hint),
         // Everything else is a docblock-only construct and must not be
         // used as a native return type hint.
         _ => false,

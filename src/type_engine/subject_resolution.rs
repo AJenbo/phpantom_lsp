@@ -47,25 +47,25 @@ pub(crate) fn resolve_subject_type(
     match trimmed {
         "self" => {
             let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
-            Some(PhpType::Named(atom(&fqn)))
+            Some(PhpType::named(atom(&fqn)))
         }
         "static" => {
             let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
-            Some(PhpType::StaticType(atom(&fqn)))
+            Some(PhpType::static_type(atom(&fqn)))
         }
         "$this" => {
             let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
-            Some(PhpType::ThisType(atom(&fqn)))
+            Some(PhpType::this_type(atom(&fqn)))
         }
         "parent" => {
             let cls = find_class_at_offset(ctx.local_classes, access_offset)?;
             let parent = cls.parent_class.as_ref()?;
             let fqn = resolve_to_fqn(parent, ctx.use_map, ctx.namespace);
-            Some(PhpType::Named(atom(&fqn)))
+            Some(PhpType::named(atom(&fqn)))
         }
         _ if is_static && !trimmed.starts_with('$') => {
             let fqn = resolve_to_fqn(trimmed, ctx.use_map, ctx.namespace);
-            Some(PhpType::Named(atom(&fqn)))
+            Some(PhpType::named(atom(&fqn)))
         }
         _ if trimmed.starts_with('$') => {
             let current_class = find_class_at_offset(ctx.local_classes, access_offset);

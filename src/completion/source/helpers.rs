@@ -23,7 +23,7 @@
 use crate::atom::atom;
 use std::sync::Arc;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{BracketSegment, ClassInfo};
 
 use crate::type_engine::resolver::ResolutionCtx;
@@ -509,8 +509,8 @@ fn infer_type_from_simple_expr(expr: &str) -> Option<PhpType> {
             "int" | "integer" => return Some(PhpType::int()),
             "float" | "double" | "real" => return Some(PhpType::float()),
             "bool" | "boolean" => return Some(PhpType::bool()),
-            "array" => return Some(PhpType::Named(atom("array"))),
-            "object" => return Some(PhpType::Named(atom("object"))),
+            "array" => return Some(PhpType::named(atom("array"))),
+            "object" => return Some(PhpType::named(atom("object"))),
             _ => {} // might be a parenthesized expression, not a cast
         }
     }
@@ -723,10 +723,10 @@ pub(crate) fn resolve_first_class_callable_return_type(
                 if classes.is_empty() {
                     None
                 } else if classes.len() == 1 {
-                    Some(PhpType::Named(classes[0].fqn()))
+                    Some(PhpType::named(classes[0].fqn()))
                 } else {
-                    Some(PhpType::Union(
-                        classes.iter().map(|c| PhpType::Named(c.fqn())).collect(),
+                    Some(PhpType::union(
+                        classes.iter().map(|c| PhpType::named(c.fqn())).collect(),
                     ))
                 }
             })
@@ -792,7 +792,7 @@ fn walk_array_segments_and_resolve(
     // be an alias name like `UserData` that resolves to
     // `array{name: string, pen: Pen}`.  Without expansion the
     // segment walk would fail to extract shape values.
-    let mut current = if let PhpType::Named(_) = base_type {
+    let mut current = if let TypeKind::Named(_) = base_type.kind() {
         if let Some(expanded) = crate::type_engine::type_resolution::resolve_type_alias_typed(
             base_type,
             current_class_name,
@@ -1103,8 +1103,9 @@ mod tests {
 
     /// Extract the `<TKey, TValue>` args from an inferred `Generator` type.
     fn generator_args(text: &str) -> Vec<PhpType> {
-        match infer_generator_type_from_closure_yields(text) {
-            Some(PhpType::Generic(g)) if g.name == "Generator" => g.args,
+        let inferred = infer_generator_type_from_closure_yields(text);
+        match inferred.as_ref().map(PhpType::kind) {
+            Some(TypeKind::Generic(g)) if g.name == "Generator" => g.args.clone(),
             other => panic!("expected Generator<...>, got {other:?}"),
         }
     }

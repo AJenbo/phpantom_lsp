@@ -151,7 +151,8 @@ project for PHP parsing and type representation:
 | `mago-names`       | Use-statement and namespace resolution                 |
 | `mago-type-syntax` | PHPStan/Psalm type expression parsing into `PhpType`   |
 
-`PhpType` (`src/php_type.rs`) is an owned enum that wraps the borrowed
+`PhpType` (`src/php_type/`) is a pointer-sized handle to an interned
+`TypeKind` node, itself built from the borrowed
 `mago_type_syntax::cst::Type` AST. Every type-carrying field in the
 data model (`type_hint`, `return_type`, `native_type_hint`,
 `native_return_type`, `asserted_type`, `template_param_bounds` values,
@@ -159,6 +160,20 @@ generics type arguments, `ResolvedType::type_string`) uses `PhpType`.
 The substitution engine in `inheritance.rs` operates on
 `HashMap<String, PhpType>` so that template parameter replacement
 never re-parses type strings.
+
+Types are hash-consed: every constructor routes through the interner in
+`php_type/intern.rs`, so two structurally equal types always share one
+allocation. That is what lets a type occurrence cost 8 bytes rather
+than 24 plus a private copy of its payload on a workload that repeats
+the same few thousand forms everywhere, and it makes `PartialEq` a
+pointer comparison instead of a structural walk. Match on
+`PhpType::kind()` to inspect a node, and build new ones through the
+constructors (`PhpType::named`, `PhpType::nullable`, `PhpType::union`,
+…) rather than by constructing a `TypeKind` directly, so the pointer
+and structural notions of equality never drift apart. The table holds
+weak references, so forms nothing refers to any more are reclaimed:
+`TypeKind::Raw` and `TypeKind::Literal` carry free text, which would
+otherwise grow without bound in a long-running server.
 
 Several other Mago crates were evaluated and ruled out:
 

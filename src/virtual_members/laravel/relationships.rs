@@ -10,7 +10,7 @@
 use crate::atom::atom;
 use std::sync::Arc;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN};
 use crate::util::{short_name, strip_fqn_prefix};
 
@@ -163,13 +163,13 @@ pub(crate) fn classify_relationship_typed(return_type: &PhpType) -> Option<Relat
 /// Extract the `TRelated` type from a relationship return type's
 /// generic parameters.
 ///
-/// Given `HasMany<Post, $this>`, returns `Some(&PhpType::Named("Post"))`.
+/// Given `HasMany<Post, $this>`, returns `Some(&PhpType::named("Post"))`.
 /// Given `HasOne<\App\Models\Profile, $this>`, returns
-/// `Some(&PhpType::Named("\App\Models\Profile"))`.
+/// `Some(&PhpType::named("\App\Models\Profile"))`.
 ///
 /// Returns `None` if no generic parameters are present.
 pub(super) fn extract_related_type_typed(return_type: &PhpType) -> Option<&PhpType> {
-    if let PhpType::Generic(g) = return_type {
+    if let TypeKind::Generic(g) = return_type.kind() {
         let first = g.args.first()?;
         if first.is_empty() {
             return None;
@@ -215,12 +215,12 @@ pub(crate) fn class_declares_pivot_relationship(class: &ClassInfo) -> bool {
 /// `BelongsToMany<TRelatedModel, TDeclaringModel, TPivotModel, TAccessor>`,
 /// so the custom pivot class is the **third** generic argument. Given
 /// `BelongsToMany<Permission, $this, PermissionRole>` this returns
-/// `Some(&PhpType::Named("PermissionRole"))`.
+/// `Some(&PhpType::named("PermissionRole"))`.
 ///
 /// Returns `None` when there is no third argument, it is empty, or it is a
 /// `$this`/`static`/`self` self-reference (the default `Pivot`).
 pub(crate) fn extract_pivot_type_typed(return_type: &PhpType) -> Option<&PhpType> {
-    if let PhpType::Generic(g) = return_type {
+    if let TypeKind::Generic(g) = return_type.kind() {
         let pivot = g.args.get(2)?;
         if pivot.is_empty() || pivot.is_self_ref() {
             return None;
@@ -232,7 +232,7 @@ pub(crate) fn extract_pivot_type_typed(return_type: &PhpType) -> Option<&PhpType
 
 /// Pre-built `Illuminate\Database\Eloquent\Model` type for fallback related types.
 fn eloquent_model_type() -> PhpType {
-    PhpType::Named(atom("Illuminate\\Database\\Eloquent\\Model"))
+    PhpType::named(atom("Illuminate\\Database\\Eloquent\\Model"))
 }
 
 /// Build the property type string for a relationship.
@@ -330,7 +330,7 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         // `resolve_name` will strip the leading `\` back to canonical
         // form during the resolution pass.
         if method_name == "morphTo" {
-            return Some(PhpType::Named(atom(&format!("\\{fqn}"))));
+            return Some(PhpType::named(atom(&format!("\\{fqn}"))));
         }
 
         // Extract the first argument from the call.  We look for
@@ -341,14 +341,14 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
         if let Some(class_arg) = extract_class_argument(after_paren) {
             return Some(PhpType::generic(
                 format!("\\{fqn}"),
-                vec![PhpType::Named(atom(&class_arg))],
+                vec![PhpType::named(atom(&class_arg))],
             ));
         }
 
         // No `::class` argument found — return the bare relationship
         // name without generics.  The provider will handle it the same
         // way it handles annotated relationships without generics.
-        return Some(PhpType::Named(atom(&format!("\\{fqn}"))));
+        return Some(PhpType::named(atom(&format!("\\{fqn}"))));
     }
 
     None
@@ -526,7 +526,7 @@ fn extract_related_type_for_chain(
     // Check the first generic arg directly as a PhpType before
     // stringifying, so we can use the `is_self_ref()` predicate
     // instead of comparing raw strings.
-    if let PhpType::Generic(g) = return_type {
+    if let TypeKind::Generic(g) = return_type.kind() {
         let first = g.args.first()?;
         if first.is_self_ref() {
             return Some(declaring_class.fqn().to_string());

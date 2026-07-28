@@ -12,11 +12,11 @@ fn model_resolver(name: &str) -> Option<String> {
 }
 
 fn named(fqn: &str) -> PhpType {
-    PhpType::Named(atom(fqn))
+    PhpType::named(atom(fqn))
 }
 
 fn contract() -> PhpType {
-    PhpType::Named(atom(AUTHENTICATABLE_FQN))
+    PhpType::named(atom(AUTHENTICATABLE_FQN))
 }
 
 /// Resolve with no known implementors, so an uncertain branch falls back to

@@ -385,7 +385,7 @@ pub(crate) struct TemplateParamDef {
     pub name_offset: u32,
     /// Template parameter name (e.g. `"TKey"`, `"TModel"`).
     pub name: String,
-    /// Upper bound from the `of` clause (e.g. `PhpType::Named("array-key")`
+    /// Upper bound from the `of` clause (e.g. `PhpType::named("array-key")`
     /// for `@template TKey of array-key`), or `None` when unbounded.
     pub bound: Option<PhpType>,
     /// Variance annotation from the `@template` tag.

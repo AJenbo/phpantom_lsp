@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, SharedVec, TypeAssertion};
 
 use mago_span::HasSpan;
@@ -265,14 +265,14 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
 /// `iterable`, `resource`, and `null` (the last handled separately by the
 /// not-null path) — so those fall through to the class-based narrowing.
 fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
-    match ty {
-        PhpType::Array(_) | PhpType::ArrayShape(_) => Some(TypeGuardKind::Array),
-        PhpType::Generic(g) if crate::php_type::is_array_like_name(&g.name) => {
+    match ty.kind() {
+        TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some(TypeGuardKind::Array),
+        TypeKind::Generic(g) if crate::php_type::is_array_like_name(&g.name) => {
             // `iterable` is array-like by name but has no `is_iterable` guard
             // kind, so it must not map to the array guard.
             (!g.name.eq_ignore_ascii_case("iterable")).then_some(TypeGuardKind::Array)
         }
-        PhpType::Named(n) => match n.to_ascii_lowercase().as_str() {
+        TypeKind::Named(n) => match n.to_ascii_lowercase().as_str() {
             "array" | "list" | "non-empty-array" | "non-empty-list" => Some(TypeGuardKind::Array),
             "string" => Some(TypeGuardKind::String),
             "int" | "integer" => Some(TypeGuardKind::Int),
@@ -345,7 +345,7 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
             // so defer to the caller's `object` narrowing instead of
             // clearing the subject's prior type.
             if !assertion.negated
-                && matches!(&effective_type, PhpType::Named(n) if info.template_params.iter().any(|t| t == n))
+                && matches!(&effective_type.kind(), TypeKind::Named(n) if info.template_params.iter().any(|t| t == n))
             {
                 *type_guard = Some((TypeGuardKind::Object, false));
                 continue;
@@ -506,8 +506,8 @@ fn resolve_assertion_template_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
     // Check if the asserted type is a template parameter.
-    let tpl_name = match asserted_type {
-        PhpType::Named(n) if info.template_params.iter().any(|t| t == n) => n.as_str(),
+    let tpl_name = match asserted_type.kind() {
+        TypeKind::Named(n) if info.template_params.iter().any(|t| t == n) => n.as_str(),
         _ => return asserted_type.clone(),
     };
 
@@ -539,7 +539,7 @@ fn resolve_assertion_template_type(
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
         let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
-        return PhpType::Named(atom(&fqn));
+        return PhpType::named(atom(&fqn));
     }
 
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
@@ -555,9 +555,12 @@ fn resolve_assertion_template_type(
         // special-purpose walk that only recognizes direct assignments.
         if let Some(scope_resolver) = ctx.scope_var_resolver {
             for resolved in scope_resolver(&var_name) {
-                if let Some(PhpType::Named(name)) = resolved.type_string.unwrap_class_string_inner()
+                if let Some(TypeKind::Named(name)) = resolved
+                    .type_string
+                    .unwrap_class_string_inner()
+                    .map(PhpType::kind)
                 {
-                    return PhpType::Named(*name);
+                    return PhpType::named(*name);
                 }
             }
         }
@@ -580,7 +583,7 @@ fn resolve_assertion_template_type(
                 ctx.class_loader,
             );
         if let Some(first) = targets.into_iter().next() {
-            return PhpType::Named(atom(first.name.as_ref()));
+            return PhpType::named(atom(first.name.as_ref()));
         }
     }
 

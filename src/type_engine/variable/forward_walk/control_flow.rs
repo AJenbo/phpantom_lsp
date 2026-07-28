@@ -6,7 +6,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::parser::extract_hint_type;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::ResolvedType;
 
 // ─── Control flow handling ──────────────────────────────────────────────────
@@ -1114,7 +1114,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 /// This is the forward walker's equivalent of the backward scanner's
 /// `resolve_foreach_expression_to_classes`.  It extracts the expression
 /// text, calls `resolve_target_classes` to get `ClassInfo` objects, and
-/// constructs a `PhpType::Named` from the first resolved class.
+/// constructs a `TypeKind::Named` from the first resolved class.
 pub(crate) fn resolve_foreach_expr_via_subject<'b>(
     expression: &'b Expression<'b>,
     scope: &ScopeState,
@@ -1168,7 +1168,7 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
 
     // Fall back to the class name — `bind_foreach_value` Strategy 2
     // will resolve it through inheritance to find element types.
-    // Use `fqn()` (not `name`) so that the returned `PhpType::Named`
+    // Use `fqn()` (not `name`) so that the returned `TypeKind::Named`
     // carries the fully-qualified class name.  `ClassInfo.name` is
     // always the short name (e.g. `OrderProductCollection`), while
     // `fqn()` combines namespace + name into the FQN that the class
@@ -1180,7 +1180,7 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
         .map(|c| c.fqn().to_string())
         .or_else(|| first.type_string.base_name().map(|s| s.to_string()))?;
 
-    Some(PhpType::Named(atom(&name)))
+    Some(PhpType::named(atom(&name)))
 }
 
 /// Bind a foreach value variable from the iterable's element type.
@@ -1261,7 +1261,7 @@ pub(crate) fn bind_foreach_value<'b>(
             // neither `extract_value_type` nor `resolve_iterable_element_via_class`
             // works on the union as a whole.  Walk each member and use the
             // first one that yields an element type.
-            if let PhpType::Union(members) = it {
+            if let TypeKind::Union(members) = it.kind() {
                 for member in members {
                     // Try extract_value_type on each member (handles generic collections).
                     if let Some(vt) = member.extract_value_type(false) {
@@ -1339,7 +1339,7 @@ pub(crate) fn bind_foreach_value<'b>(
                 return Some(et);
             }
             // Try union members individually.
-            if let PhpType::Union(members) = it {
+            if let TypeKind::Union(members) = it.kind() {
                 for member in members {
                     if let Some(vt) = member.extract_value_type(false) {
                         return Some(vt.clone());
@@ -1468,8 +1468,8 @@ pub(crate) fn extract_foreach_destr_key(key_expr: &Expression<'_>) -> Option<Str
 /// types whose name starts with `T` followed by an uppercase letter
 /// and are not known PHP built-in types.
 pub(crate) fn is_unsubstituted_template_param(ty: &PhpType) -> bool {
-    let name = match ty {
-        PhpType::Named(n) => n.as_str(),
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
         _ => return false,
     };
     let bytes = name.as_bytes();
@@ -1579,7 +1579,7 @@ pub(crate) fn bind_foreach_key<'b>(
             }
 
             // Strategy 2: class-based fallback for bare collection names.
-            // When the iterable is `PhpType::Named("Finder")` (no generics),
+            // When the iterable is `PhpType::named("Finder")` (no generics),
             // look at the class's implements_generics / extends_generics to
             // find the key type (e.g. IteratorAggregate<non-empty-string, SplFileInfo>).
             if let Some(key_type) = resolve_iterable_key_via_class(it, ctx)

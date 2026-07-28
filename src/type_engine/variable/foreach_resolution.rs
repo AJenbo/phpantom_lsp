@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 use crate::util::short_name;
 
@@ -196,7 +196,7 @@ fn resolve_own_template_arg(value: &PhpType, class: &ClassInfo) -> PhpType {
 /// placeholder as a "found" element type would shadow the more precise
 /// `current()`/`key()` fallback below.
 fn is_unbounded_template_placeholder(ty: &PhpType) -> bool {
-    matches!(ty, PhpType::Named(name) if name.eq_ignore_ascii_case("mixed"))
+    matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("mixed"))
 }
 
 /// Check whether `class`, or an ancestor reached by walking the `extends`

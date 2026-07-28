@@ -13,9 +13,12 @@
 //! variants fall back to `Raw`.
 //!
 //! `PhpType::parse()` never fails. If the input cannot be parsed or mapped,
-//! it returns `PhpType::Raw(input)`.
+//! it returns `PhpType::raw(input)`.
 
 use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
+use std::sync::Arc;
 
 use mago_allocator::{Arena, LocalArena};
 use mago_database::file::FileId;
@@ -25,12 +28,15 @@ use mago_type_syntax::cst;
 use crate::atom::{Atom, atom, bytes_to_str};
 
 mod display;
+mod intern;
 mod keywords;
 mod normalize;
 mod parse;
 mod subtype;
 mod transform;
 
+#[cfg(any(test, feature = "mem-audit"))]
+pub(crate) use intern::interned_len;
 pub(crate) use keywords::*;
 pub(crate) use normalize::*;
 pub(crate) use parse::*;
@@ -40,21 +46,92 @@ pub(crate) use subtype::*;
 // Data types
 // ---------------------------------------------------------------------------
 
-/// A structured, owned representation of a PHP type expression.
+/// A structured PHP type expression: a pointer-sized handle to a shared,
+/// interned [`TypeKind`] node.
+///
+/// # Interning
+///
+/// Every value is built through the constructors below, which hash-cons the
+/// node: two structurally equal types always share one allocation. That is
+/// what makes a type occurrence cost 8 bytes rather than 24 plus a private
+/// copy of its payload, on a workload where the same handful of forms
+/// (`string`, `?Carbon`, `Collection<User>`) recur tens of thousands of
+/// times. It also makes [`PartialEq`] a pointer comparison instead of a
+/// structural walk, and [`Clone`] a refcount bump instead of a deep copy.
+///
+/// The tuple field is private for exactly that reason: a `PhpType` that did
+/// not come from the interner would silently compare unequal to its own
+/// structural twin. Match on [`kind`](PhpType::kind) to inspect the node.
+///
+/// See `php_type/intern.rs` for why the table is refcounted rather than
+/// leaked the way [`Atom`] is.
+#[derive(Clone)]
+pub struct PhpType(Arc<TypeKind>);
+
+impl PhpType {
+    /// The interned node this handle points at.
+    #[inline]
+    pub fn kind(&self) -> &TypeKind {
+        &self.0
+    }
+}
+
+impl Deref for PhpType {
+    type Target = TypeKind;
+
+    #[inline]
+    fn deref(&self) -> &TypeKind {
+        &self.0
+    }
+}
+
+/// Pointer equality. Sound because the interner guarantees that structurally
+/// equal types share one allocation.
+impl PartialEq for PhpType {
+    #[inline]
+    fn eq(&self, other: &PhpType) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for PhpType {}
+
+impl Hash for PhpType {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_usize(Arc::as_ptr(&self.0) as usize);
+    }
+}
+
+/// Renders as the node itself, so the handle is invisible in test output and
+/// `{:?}` logging.
+impl fmt::Debug for PhpType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&*self.0, f)
+    }
+}
+
+impl From<TypeKind> for PhpType {
+    #[inline]
+    fn from(kind: TypeKind) -> PhpType {
+        intern::intern(kind)
+    }
+}
+
+/// The shape of a PHP type expression: the payload behind a [`PhpType`]
+/// handle.
 ///
 /// # Size
 ///
-/// This enum is embedded millions of times over a large project — once per
-/// parameter type, return type, property type, and every nested position
-/// inside those. Its size is therefore kept to 24 bytes (two pointers plus a
-/// discriminant) by giving every variant a payload of at most 16 bytes: the
-/// rare shapes that would otherwise dominate (`Generic`, `Callable`,
-/// `Conditional`, `Literal`) hold a single `Box` to an out-of-line payload
-/// struct, and the collection variants hold `Box<[T]>` rather than `Vec<T>`.
-/// The common `Named` case stays inline, so the hot path gains no
-/// indirection. See the `php_type_size_is_bounded` test.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PhpType {
+/// One node exists per *distinct* type rather than per occurrence, so this is
+/// no longer duplicated millions of times. It is still kept to 24 bytes (two
+/// pointers plus a discriminant) so that the interner's own table stays
+/// small: the rare shapes that would otherwise dominate (`Generic`,
+/// `Callable`, `Conditional`, `Literal`) hold a single `Box` to an
+/// out-of-line payload struct, and the collection variants hold `Box<[T]>`
+/// rather than `Vec<T>`. See the `php_type_size_is_bounded` test.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeKind {
     /// A named type: keywords (`int`, `string`, `mixed`, `void`, …),
     /// class references (`Foo\Bar`), or special names (`self`, `static`,
     /// `parent`). Also used for PHPDoc variable references (`$this`).
@@ -63,7 +140,7 @@ pub enum PhpType {
     /// (class names, keywords, template parameters, `$this`), compared
     /// frequently, and cloned throughout the substitution hot path, so
     /// pointer-sized equality and free cloning pay off here. Literal scalar
-    /// values live in [`PhpType::Literal`], not here, so the interner is
+    /// values live in [`TypeKind::Literal`], not here, so the interner is
     /// never fed unbounded free text.
     Named(Atom),
 
@@ -71,7 +148,7 @@ pub enum PhpType {
     ///
     /// Represents `static` or `$this` resolved in the context of a class:
     /// "the runtime class, which is at least `bound`."  Unlike
-    /// [`Named`](PhpType::Named) with the class FQN, this preserves the
+    /// [`Named`](TypeKind::Named) with the class FQN, this preserves the
     /// polymorphic semantics of `static` — a `StaticType("Base")` is a
     /// subtype of `Base` but is not the same as `Named("Base")` because it
     /// could be any subclass at runtime.
@@ -83,7 +160,7 @@ pub enum PhpType {
 
     /// The `$this` type with a known lower bound.
     ///
-    /// More specific than [`StaticType`](PhpType::StaticType): represents
+    /// More specific than [`StaticType`](TypeKind::StaticType): represents
     /// the exact runtime instance, not just "this class or a subclass."
     /// `ThisType("Foo") <: StaticType("Foo") <: Named("Foo")`.
     ///
@@ -92,7 +169,7 @@ pub enum PhpType {
     ThisType(Atom),
 
     /// Nullable type: `?T`.
-    Nullable(Box<PhpType>),
+    Nullable(PhpType),
 
     /// Union type: `T|U|V`. Always contains two or more members.
     Union(Box<[PhpType]>),
@@ -105,7 +182,7 @@ pub enum PhpType {
     Generic(Box<GenericType>),
 
     /// The `T[]` slice syntax (sugar for `array<int, T>`).
-    Array(Box<PhpType>),
+    Array(PhpType),
 
     /// Array shape: `array{key: string, age?: int}`.
     ArrayShape(Box<[ShapeEntry]>),
@@ -122,16 +199,16 @@ pub enum PhpType {
     Conditional(Box<ConditionalType>),
 
     /// `class-string<T>` or bare `class-string`.
-    ClassString(Option<Box<PhpType>>),
+    ClassString(Option<PhpType>),
 
     /// `interface-string<T>` or bare `interface-string`.
-    InterfaceString(Option<Box<PhpType>>),
+    InterfaceString(Option<PhpType>),
 
     /// `key-of<T>`.
-    KeyOf(Box<PhpType>),
+    KeyOf(PhpType),
 
     /// `value-of<T>`.
-    ValueOf(Box<PhpType>),
+    ValueOf(PhpType),
 
     /// `int<min, max>` range type.
     ///
@@ -141,7 +218,7 @@ pub enum PhpType {
     IntRange(Atom, Atom),
 
     /// Index access type: `T[K]`.
-    IndexAccess(Box<PhpType>, Box<PhpType>),
+    IndexAccess(PhpType, PhpType),
 
     /// A literal scalar type with preserved kind and source text.
     Literal(Box<LiteralValue>),
@@ -150,8 +227,8 @@ pub enum PhpType {
     Raw(Box<str>),
 }
 
-/// Payload of [`PhpType::Generic`].
-#[derive(Debug, Clone, PartialEq)]
+/// Payload of [`TypeKind::Generic`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GenericType {
     /// The base name: a class reference (`Collection`) or a parameterisable
     /// keyword (`array`, `list`, `iterable`, `class-string`).
@@ -160,8 +237,8 @@ pub struct GenericType {
     pub args: Vec<PhpType>,
 }
 
-/// Payload of [`PhpType::Callable`].
-#[derive(Debug, Clone, PartialEq)]
+/// Payload of [`TypeKind::Callable`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableType {
     /// One of `callable`, `Closure`, `pure-callable`, `pure-Closure`.
     pub kind: Atom,
@@ -171,8 +248,8 @@ pub struct CallableType {
     pub return_type: Option<PhpType>,
 }
 
-/// Payload of [`PhpType::Conditional`].
-#[derive(Debug, Clone, PartialEq)]
+/// Payload of [`TypeKind::Conditional`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConditionalType {
     /// The subject (typically a variable like `$this`).
     pub param: Atom,
@@ -186,7 +263,7 @@ pub struct ConditionalType {
     pub else_type: PhpType,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LiteralValue {
     Int(Box<str>),
     Float(Box<str>),
@@ -267,7 +344,7 @@ impl fmt::Display for LiteralValue {
 }
 
 /// A single field in an array or object shape.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ShapeEntry {
     /// The key name or integer index. `None` for positional (unkeyed) entries.
     pub key: Option<String>,
@@ -278,7 +355,7 @@ pub struct ShapeEntry {
 }
 
 /// A single parameter in a callable type specification.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableParam {
     /// The type of this parameter.
     pub type_hint: PhpType,
@@ -289,32 +366,133 @@ pub struct CallableParam {
 }
 
 // ---------------------------------------------------------------------------
-// Convenience constructors for common keyword types
+// Constructors
 // ---------------------------------------------------------------------------
 
-impl PhpType {
+/// Define keyword-type constructors that intern once and then hand out
+/// clones.
+///
+/// Keyword types are by far the most-constructed forms, and interning them
+/// on every call would pay a hash and a shard lock for an answer that never
+/// changes. Holding the handle in a static also keeps these permanently
+/// resident, which is where they belong: no analysis run is without `int`.
+macro_rules! keyword_types {
+    ($($(#[$doc:meta])* $name:ident => $text:literal,)*) => {
+        impl PhpType {
+            $(
+                $(#[$doc])*
+                pub fn $name() -> PhpType {
+                    static CACHED: std::sync::LazyLock<PhpType> =
+                        std::sync::LazyLock::new(|| PhpType::named(atom($text)));
+                    CACHED.clone()
+                }
+            )*
+        }
+    };
+}
+
+keyword_types! {
     /// `int` type.
-    pub fn int() -> PhpType {
-        PhpType::Named(atom("int"))
-    }
-
+    int => "int",
     /// `string` type.
-    pub fn string() -> PhpType {
-        PhpType::Named(atom("string"))
-    }
-
+    string => "string",
     /// `float` type.
-    pub fn float() -> PhpType {
-        PhpType::Named(atom("float"))
-    }
-
+    float => "float",
     /// `bool` type.
-    pub fn bool() -> PhpType {
-        PhpType::Named(atom("bool"))
+    bool => "bool",
+    /// `true` type.
+    true_ => "true",
+    /// `false` type.
+    false_ => "false",
+    /// `null` type.
+    null => "null",
+    /// `void` type.
+    void => "void",
+    /// `mixed` type.
+    mixed => "mixed",
+    /// `never` type.
+    never => "never",
+    /// `array` type (bare, unparameterised).
+    array => "array",
+    /// `object` type.
+    object => "object",
+    /// `callable` type.
+    callable => "callable",
+    /// `\Closure` type (fully-qualified).
+    closure => "Closure",
+    /// `iterable` type.
+    iterable => "iterable",
+    /// `self` type.
+    self_ => "self",
+    /// `static` type.
+    static_ => "static",
+    /// `$this` type.
+    this => "$this",
+    /// `parent` type.
+    parent_ => "parent",
+    /// `numeric` pseudo-type.
+    numeric => "numeric",
+    /// Internal `__empty` sentinel used during type narrowing to represent
+    /// a fully-filtered-out union member.
+    empty_sentinel => "__empty",
+}
+
+impl PhpType {
+    /// Named type: a keyword, a class reference, or a template parameter.
+    pub fn named(name: Atom) -> PhpType {
+        TypeKind::Named(name).into()
     }
 
-    pub fn literal(value: LiteralValue) -> PhpType {
-        PhpType::Literal(Box::new(value))
+    /// `static` resolved against a class context: the runtime class, known
+    /// to be at least `bound`.
+    pub fn static_type(bound: Atom) -> PhpType {
+        TypeKind::StaticType(bound).into()
+    }
+
+    /// `$this` resolved against a class context.
+    pub fn this_type(bound: Atom) -> PhpType {
+        TypeKind::ThisType(bound).into()
+    }
+
+    /// Nullable wrapper (`?T`).
+    pub fn nullable(inner: PhpType) -> PhpType {
+        TypeKind::Nullable(inner).into()
+    }
+
+    /// The `T[]` slice syntax.
+    pub fn array_of(elem: PhpType) -> PhpType {
+        TypeKind::Array(elem).into()
+    }
+
+    /// `key-of<T>`.
+    pub fn key_of(inner: PhpType) -> PhpType {
+        TypeKind::KeyOf(inner).into()
+    }
+
+    /// `value-of<T>`.
+    pub fn value_of(inner: PhpType) -> PhpType {
+        TypeKind::ValueOf(inner).into()
+    }
+
+    /// `class-string<T>`, or bare `class-string` when `inner` is `None`.
+    pub fn class_string(inner: Option<PhpType>) -> PhpType {
+        TypeKind::ClassString(inner).into()
+    }
+
+    /// `interface-string<T>`, or bare `interface-string` when `inner` is
+    /// `None`.
+    pub fn interface_string(inner: Option<PhpType>) -> PhpType {
+        TypeKind::InterfaceString(inner).into()
+    }
+
+    /// Index access (`T[K]`).
+    pub fn index_access(target: PhpType, index: PhpType) -> PhpType {
+        TypeKind::IndexAccess(target, index).into()
+    }
+
+    /// A literal scalar (`42`, `'draft'`).
+    pub fn literal(value: impl Into<Box<LiteralValue>>) -> PhpType {
+        TypeKind::Literal(value.into()).into()
     }
 
     pub fn literal_int(raw: impl Into<Box<str>>) -> PhpType {
@@ -333,126 +511,41 @@ impl PhpType {
         PhpType::literal(LiteralValue::string_value(value))
     }
 
-    /// `true` type.
-    pub fn true_() -> PhpType {
-        PhpType::Named(atom("true"))
-    }
-
-    /// `false` type.
-    pub fn false_() -> PhpType {
-        PhpType::Named(atom("false"))
-    }
-
-    /// `null` type.
-    pub fn null() -> PhpType {
-        PhpType::Named(atom("null"))
-    }
-
-    /// `void` type.
-    pub fn void() -> PhpType {
-        PhpType::Named(atom("void"))
-    }
-
-    /// `mixed` type.
-    pub fn mixed() -> PhpType {
-        PhpType::Named(atom("mixed"))
-    }
-
-    /// `never` type.
-    pub fn never() -> PhpType {
-        PhpType::Named(atom("never"))
-    }
-
-    /// `array` type (bare, unparameterised).
-    pub fn array() -> PhpType {
-        PhpType::Named(atom("array"))
-    }
-
-    /// `object` type.
-    pub fn object() -> PhpType {
-        PhpType::Named(atom("object"))
-    }
-
-    /// `callable` type.
-    pub fn callable() -> PhpType {
-        PhpType::Named(atom("callable"))
-    }
-
-    /// `\Closure` type (fully-qualified).
-    pub fn closure() -> PhpType {
-        PhpType::Named(atom("Closure"))
-    }
-
-    /// `iterable` type.
-    pub fn iterable() -> PhpType {
-        PhpType::Named(atom("iterable"))
-    }
-
-    /// `self` type.
-    pub fn self_() -> PhpType {
-        PhpType::Named(atom("self"))
-    }
-
-    /// `static` type.
-    pub fn static_() -> PhpType {
-        PhpType::Named(atom("static"))
-    }
-
-    /// `$this` type.
-    pub fn this() -> PhpType {
-        PhpType::Named(atom("$this"))
-    }
-
-    /// `parent` type.
-    pub fn parent_() -> PhpType {
-        PhpType::Named(atom("parent"))
-    }
-
-    /// `numeric` pseudo-type.
-    pub fn numeric() -> PhpType {
-        PhpType::Named(atom("numeric"))
-    }
-
-    /// Internal `__empty` sentinel used during type narrowing to represent
-    /// a fully-filtered-out union member.
-    pub fn empty_sentinel() -> PhpType {
-        PhpType::Named(atom("__empty"))
-    }
-
     /// Convenience constructor for the "no type information" sentinel.
     ///
     /// Uses an empty `Raw` under the hood.  Prefer this over a bare
     /// `PhpType::raw("")` so the intent ("absence of type") is
     /// distinguishable from "unparseable input" at a glance.
     pub fn untyped() -> PhpType {
-        PhpType::Raw(Box::default())
+        static CACHED: std::sync::LazyLock<PhpType> = std::sync::LazyLock::new(|| PhpType::raw(""));
+        CACHED.clone()
     }
 
     /// Fallback constructor for text we could not parse into a structured
     /// type.  Use [`untyped`](PhpType::untyped) for "no type given".
     pub fn raw(text: impl Into<Box<str>>) -> PhpType {
-        PhpType::Raw(text.into())
+        TypeKind::Raw(text.into()).into()
     }
 
     /// Union of two or more members.  Does not normalise — see
     /// [`simplified`](PhpType::simplified).
     pub fn union(members: Vec<PhpType>) -> PhpType {
-        PhpType::Union(members.into())
+        TypeKind::Union(members.into()).into()
     }
 
     /// Intersection of two or more members.
     pub fn intersection(members: Vec<PhpType>) -> PhpType {
-        PhpType::Intersection(members.into())
+        TypeKind::Intersection(members.into()).into()
     }
 
     /// Array shape (`array{…}`).
     pub fn array_shape(entries: Vec<ShapeEntry>) -> PhpType {
-        PhpType::ArrayShape(entries.into())
+        TypeKind::ArrayShape(entries.into()).into()
     }
 
     /// Object shape (`object{…}`).
     pub fn object_shape(entries: Vec<ShapeEntry>) -> PhpType {
-        PhpType::ObjectShape(entries.into())
+        TypeKind::ObjectShape(entries.into()).into()
     }
 
     /// Parameterised type (`Collection<int, User>`).
@@ -462,7 +555,7 @@ impl PhpType {
 
     /// Parameterised type from an already-interned base name.
     pub fn generic_atom(name: Atom, args: Vec<PhpType>) -> PhpType {
-        PhpType::Generic(Box::new(GenericType { name, args }))
+        TypeKind::Generic(Box::new(GenericType { name, args })).into()
     }
 
     /// Callable specification (`callable(int): string`).
@@ -471,11 +564,16 @@ impl PhpType {
         params: Vec<CallableParam>,
         return_type: Option<PhpType>,
     ) -> PhpType {
-        PhpType::Callable(Box::new(CallableType {
+        PhpType::callable_type(CallableType {
             kind: atom(kind.as_ref()),
             params,
             return_type,
-        }))
+        })
+    }
+
+    /// Callable specification from a prepared payload.
+    pub fn callable_type(callable: CallableType) -> PhpType {
+        TypeKind::Callable(Box::new(callable)).into()
     }
 
     /// Conditional type (`$x is T ? U : V`).
@@ -486,24 +584,29 @@ impl PhpType {
         then_type: PhpType,
         else_type: PhpType,
     ) -> PhpType {
-        PhpType::Conditional(Box::new(ConditionalType {
+        PhpType::conditional_type(ConditionalType {
             param: atom(param.as_ref()),
             negated,
             condition,
             then_type,
             else_type,
-        }))
+        })
+    }
+
+    /// Conditional type from a prepared payload.
+    pub fn conditional_type(conditional: ConditionalType) -> PhpType {
+        TypeKind::Conditional(Box::new(conditional)).into()
     }
 
     /// Integer range (`int<0, max>`).
     pub fn int_range(min: impl AsRef<str>, max: impl AsRef<str>) -> PhpType {
-        PhpType::IntRange(atom(min.as_ref()), atom(max.as_ref()))
+        TypeKind::IntRange(atom(min.as_ref()), atom(max.as_ref())).into()
     }
 
     /// Returns `true` when this value represents the "no type" sentinel
     /// produced by [`PhpType::untyped()`].
     pub fn is_untyped(&self) -> bool {
-        matches!(self, PhpType::Raw(s) if s.is_empty())
+        matches!(self.kind(), TypeKind::Raw(s) if s.is_empty())
     }
 
     /// `list<T>` generic type.
@@ -529,14 +632,14 @@ impl PhpType {
     /// This avoids the `.to_string().is_empty()` round-trip when callers
     /// only need to know whether a `PhpType` carries meaningful content.
     pub fn is_empty(&self) -> bool {
-        matches!(self, PhpType::Raw(s) if s.is_empty())
-            || matches!(self, PhpType::Named(s) if s.is_empty())
+        matches!(self.kind(), TypeKind::Raw(s) if s.is_empty())
+            || matches!(self.kind(), TypeKind::Named(s) if s.is_empty())
     }
 
     /// Whether this type is the internal `__empty` sentinel used during
     /// type narrowing to represent a fully-filtered-out union member.
     pub fn is_empty_sentinel(&self) -> bool {
-        matches!(self, PhpType::Named(s) if s == "__empty")
+        matches!(self.kind(), TypeKind::Named(s) if s == "__empty")
     }
 
     /// Whether this type is a primitive scalar / built-in type that
@@ -551,23 +654,23 @@ impl PhpType {
     /// `class-string`, `self`, `static`, `parent`, or other PHPDoc
     /// pseudo-types on which member access may be valid.
     pub fn is_primitive_scalar(&self) -> bool {
-        match self {
-            PhpType::Named(s) => is_primitive_scalar_name(s),
-            PhpType::Nullable(inner) => inner.is_primitive_scalar(),
-            PhpType::Generic(g) => is_primitive_scalar_name(&g.name),
-            PhpType::Array(_) => true,
-            PhpType::ArrayShape(_) => true,
-            PhpType::Callable(_) => true,
-            PhpType::IntRange(_, _) => true,
-            PhpType::Literal(_) => true,
-            PhpType::Raw(_) => false,
+        match self.kind() {
+            TypeKind::Named(s) => is_primitive_scalar_name(s),
+            TypeKind::Nullable(inner) => inner.is_primitive_scalar(),
+            TypeKind::Generic(g) => is_primitive_scalar_name(&g.name),
+            TypeKind::Array(_) => true,
+            TypeKind::ArrayShape(_) => true,
+            TypeKind::Callable(_) => true,
+            TypeKind::IntRange(_, _) => true,
+            TypeKind::Literal(_) => true,
+            TypeKind::Raw(_) => false,
             _ => false,
         }
     }
 
     /// Whether this type is a bare, unparameterised primitive scalar name.
     ///
-    /// Returns `true` only for simple `PhpType::Named` values whose name
+    /// Returns `true` only for simple `TypeKind::Named` values whose name
     /// is a primitive scalar keyword: `int`, `string`, `bool`, `void`,
     /// `null`, `array`, `callable`, `iterable`, `resource` (and aliases
     /// like `integer`, `double`, `boolean`).
@@ -581,7 +684,7 @@ impl PhpType {
     /// Use this when you need to detect that a docblock type is just a
     /// bare keyword that carries no extra information over a native hint.
     pub fn is_bare_primitive_scalar(&self) -> bool {
-        matches!(self, PhpType::Named(s) if is_primitive_scalar_name(s))
+        matches!(self.kind(), TypeKind::Named(s) if is_primitive_scalar_name(s))
     }
 
     /// Whether this type admits `null` as a value.
@@ -590,10 +693,10 @@ impl PhpType {
     /// and any union that contains a null member. Returns `false` for
     /// non-nullable types.
     pub fn accepts_null(&self) -> bool {
-        match self {
-            PhpType::Nullable(_) => true,
-            PhpType::Union(members) => members.iter().any(|m| m.accepts_null()),
-            PhpType::Named(s) => s.eq_ignore_ascii_case("null") || s.eq_ignore_ascii_case("mixed"),
+        match self.kind() {
+            TypeKind::Nullable(_) => true,
+            TypeKind::Union(members) => members.iter().any(|m| m.accepts_null()),
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("null") || s.eq_ignore_ascii_case("mixed"),
             _ => false,
         }
     }
@@ -609,13 +712,13 @@ impl PhpType {
         if self.accepts_null() {
             return self;
         }
-        match self {
-            PhpType::Union(members) => {
-                let mut members = members.into_vec();
+        match self.kind() {
+            TypeKind::Union(members) => {
+                let mut members = members.to_vec();
                 members.push(PhpType::null());
                 PhpType::union(members)
             }
-            other => PhpType::Nullable(Box::new(other)),
+            _ => PhpType::nullable(self),
         }
     }
 
@@ -624,10 +727,10 @@ impl PhpType {
     ///
     /// Returns `true` when this type is exactly `null`.
     pub fn is_null(&self) -> bool {
-        matches!(self, PhpType::Named(s) if s.eq_ignore_ascii_case("null"))
+        matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("null"))
     }
 
-    /// Whether a [`PhpType::Conditional`] appears anywhere in this type tree.
+    /// Whether a [`TypeKind::Conditional`] appears anywhere in this type tree.
     ///
     /// Used as a cheap guard before running the (cloning) nested-conditional
     /// evaluator over a method's resolved return type: conditionals embedded
@@ -635,28 +738,28 @@ impl PhpType {
     /// need to be collapsed against the call arguments, but the vast majority
     /// of return types contain no conditional and can be left untouched.
     pub fn contains_conditional(&self) -> bool {
-        match self {
-            PhpType::Conditional(_) => true,
-            PhpType::Nullable(inner)
-            | PhpType::Array(inner)
-            | PhpType::ClassString(Some(inner))
-            | PhpType::InterfaceString(Some(inner))
-            | PhpType::KeyOf(inner)
-            | PhpType::ValueOf(inner) => inner.contains_conditional(),
-            PhpType::Union(members) | PhpType::Intersection(members) => {
+        match self.kind() {
+            TypeKind::Conditional(_) => true,
+            TypeKind::Nullable(inner)
+            | TypeKind::Array(inner)
+            | TypeKind::ClassString(Some(inner))
+            | TypeKind::InterfaceString(Some(inner))
+            | TypeKind::KeyOf(inner)
+            | TypeKind::ValueOf(inner) => inner.contains_conditional(),
+            TypeKind::Union(members) | TypeKind::Intersection(members) => {
                 members.iter().any(|m| m.contains_conditional())
             }
-            PhpType::Generic(g) => g.args.iter().any(|m| m.contains_conditional()),
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+            TypeKind::Generic(g) => g.args.iter().any(|m| m.contains_conditional()),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 entries.iter().any(|e| e.value_type.contains_conditional())
             }
-            PhpType::Callable(c) => {
+            TypeKind::Callable(c) => {
                 c.params.iter().any(|p| p.type_hint.contains_conditional())
                     || c.return_type
                         .as_ref()
                         .is_some_and(|r| r.contains_conditional())
             }
-            PhpType::IndexAccess(base, index) => {
+            TypeKind::IndexAccess(base, index) => {
                 base.contains_conditional() || index.contains_conditional()
             }
             _ => false,
@@ -667,9 +770,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?bool` (nullable wrapper).
     pub fn is_bool(&self) -> bool {
-        match self {
-            PhpType::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "bool" | "boolean"),
-            PhpType::Nullable(inner) => inner.is_bool(),
+        match self.kind() {
+            TypeKind::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "bool" | "boolean"),
+            TypeKind::Nullable(inner) => inner.is_bool(),
             _ => false,
         }
     }
@@ -678,9 +781,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?true` (nullable wrapper).
     pub fn is_true(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("true"),
-            PhpType::Nullable(inner) => inner.is_true(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("true"),
+            TypeKind::Nullable(inner) => inner.is_true(),
             _ => false,
         }
     }
@@ -689,9 +792,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?false` (nullable wrapper).
     pub fn is_false(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("false"),
-            PhpType::Nullable(inner) => inner.is_false(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("false"),
+            TypeKind::Nullable(inner) => inner.is_false(),
             _ => false,
         }
     }
@@ -700,9 +803,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?int` (nullable wrapper).
     pub fn is_int(&self) -> bool {
-        match self {
-            PhpType::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "int" | "integer"),
-            PhpType::Nullable(inner) => inner.is_int(),
+        match self.kind() {
+            TypeKind::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "int" | "integer"),
+            TypeKind::Nullable(inner) => inner.is_int(),
             _ => false,
         }
     }
@@ -711,9 +814,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?string` (nullable wrapper).
     pub fn is_string_type(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("string"),
-            PhpType::Nullable(inner) => inner.is_string_type(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("string"),
+            TypeKind::Nullable(inner) => inner.is_string_type(),
             _ => false,
         }
     }
@@ -722,17 +825,17 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?float` (nullable wrapper).
     pub fn is_float(&self) -> bool {
-        match self {
-            PhpType::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "float" | "double"),
-            PhpType::Nullable(inner) => inner.is_float(),
+        match self.kind() {
+            TypeKind::Named(s) => matches!(s.to_ascii_lowercase().as_str(), "float" | "double"),
+            TypeKind::Nullable(inner) => inner.is_float(),
             _ => false,
         }
     }
 
-    /// The literal payload, if this is a [`PhpType::Literal`].
+    /// The literal payload, if this is a [`TypeKind::Literal`].
     pub fn as_literal(&self) -> Option<&LiteralValue> {
-        match self {
-            PhpType::Literal(value) => Some(value),
+        match self.kind() {
+            TypeKind::Literal(value) => Some(value),
             _ => None,
         }
     }
@@ -754,8 +857,8 @@ impl PhpType {
     /// `interface-string`, `lowercase-string`, `non-falsy-string`,
     /// `ClassString(…)`, `InterfaceString(…)`, and string literals.
     pub fn is_string_subtype(&self) -> bool {
-        match self {
-            PhpType::Named(s) => matches!(
+        match self.kind() {
+            TypeKind::Named(s) => matches!(
                 s.to_ascii_lowercase().as_str(),
                 "string"
                     | "non-empty-string"
@@ -768,14 +871,14 @@ impl PhpType {
                     | "lowercase-string"
                     | "non-falsy-string"
             ),
-            PhpType::ClassString(_) | PhpType::InterfaceString(_) => true,
-            PhpType::Literal(l) => matches!(**l, LiteralValue::String(_)),
-            PhpType::Nullable(inner) => inner.is_string_subtype(),
-            PhpType::Generic(g) => matches!(
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
+            TypeKind::Literal(l) => matches!(**l, LiteralValue::String(_)),
+            TypeKind::Nullable(inner) => inner.is_string_subtype(),
+            TypeKind::Generic(g) => matches!(
                 g.name.to_ascii_lowercase().as_str(),
                 "class-string" | "interface-string" | "model-property"
             ),
-            PhpType::Union(members) => {
+            TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
             }
             _ => false,
@@ -788,8 +891,8 @@ impl PhpType {
     /// `non-negative-int`, `non-positive-int`, `non-zero-int`, `IntRange(…)`,
     /// and integer literals.
     pub fn is_int_subtype(&self) -> bool {
-        match self {
-            PhpType::Named(s) => matches!(
+        match self.kind() {
+            TypeKind::Named(s) => matches!(
                 s.to_ascii_lowercase().as_str(),
                 "int"
                     | "integer"
@@ -799,10 +902,10 @@ impl PhpType {
                     | "non-positive-int"
                     | "non-zero-int"
             ),
-            PhpType::IntRange(_, _) => true,
-            PhpType::Literal(l) => matches!(**l, LiteralValue::Int(_)),
-            PhpType::Nullable(inner) => inner.is_int_subtype(),
-            PhpType::Union(members) => {
+            TypeKind::IntRange(_, _) => true,
+            TypeKind::Literal(l) => matches!(**l, LiteralValue::Int(_)),
+            TypeKind::Nullable(inner) => inner.is_int_subtype(),
+            TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_int_subtype())
             }
             _ => false,
@@ -815,9 +918,9 @@ impl PhpType {
     /// Extends [`is_float`] with literal and union handling for
     /// symmetry with [`is_string_subtype`] and [`is_int_subtype`].
     pub fn is_float_subtype(&self) -> bool {
-        match self {
-            PhpType::Literal(l) => matches!(**l, LiteralValue::Float(_)),
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::Literal(l) => matches!(**l, LiteralValue::Float(_)),
+            TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_float_subtype())
             }
             _ => self.is_float(),
@@ -828,9 +931,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?object` (nullable wrapper).
     pub fn is_object(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("object"),
-            PhpType::Nullable(inner) => inner.is_object(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("object"),
+            TypeKind::Nullable(inner) => inner.is_object(),
             _ => false,
         }
     }
@@ -839,9 +942,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?array-key` (nullable wrapper).
     pub fn is_array_key(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("array-key"),
-            PhpType::Nullable(inner) => inner.is_array_key(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("array-key"),
+            TypeKind::Nullable(inner) => inner.is_array_key(),
             _ => false,
         }
     }
@@ -852,13 +955,13 @@ impl PhpType {
     /// Also returns `true` when the type is `?callable` (nullable wrapper)
     /// or a `Callable { .. }` variant.
     pub fn is_callable(&self) -> bool {
-        match self {
-            PhpType::Named(s) => {
+        match self.kind() {
+            TypeKind::Named(s) => {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("callable") || trimmed.eq_ignore_ascii_case("Closure")
             }
-            PhpType::Callable(_) => true,
-            PhpType::Nullable(inner) => inner.is_callable(),
+            TypeKind::Callable(_) => true,
+            TypeKind::Nullable(inner) => inner.is_callable(),
             _ => false,
         }
     }
@@ -867,9 +970,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?iterable` (nullable wrapper).
     pub fn is_iterable(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("iterable"),
-            PhpType::Nullable(inner) => inner.is_iterable(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("iterable"),
+            TypeKind::Nullable(inner) => inner.is_iterable(),
             _ => false,
         }
     }
@@ -883,13 +986,13 @@ impl PhpType {
     /// Unlike [`is_callable`], this does **not** match the bare `callable`
     /// keyword — only `Closure` and its callable-specification variants.
     pub fn is_closure(&self) -> bool {
-        match self {
-            PhpType::Named(s) => {
+        match self.kind() {
+            TypeKind::Named(s) => {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("Closure")
             }
-            PhpType::Callable(c) => c.kind.eq_ignore_ascii_case("Closure"),
-            PhpType::Nullable(inner) => inner.is_closure(),
+            TypeKind::Callable(c) => c.kind.eq_ignore_ascii_case("Closure"),
+            TypeKind::Nullable(inner) => inner.is_closure(),
             _ => false,
         }
     }
@@ -898,9 +1001,9 @@ impl PhpType {
     ///
     /// Also returns `true` when the type is `?resource` (nullable wrapper).
     pub fn is_resource(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("resource"),
-            PhpType::Nullable(inner) => inner.is_resource(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("resource"),
+            TypeKind::Nullable(inner) => inner.is_resource(),
             _ => false,
         }
     }
@@ -908,26 +1011,26 @@ impl PhpType {
     /// Whether this type is a `Named` variant whose name equals `name`
     /// (case-sensitive comparison).
     ///
-    /// Replaces the common `matches!(ty, PhpType::Named(n) if n == name)`
+    /// Replaces the common `matches!(ty.kind(), TypeKind::Named(n) if n == name)`
     /// pattern used for template parameter identity checks.
     pub fn is_named(&self, name: &str) -> bool {
-        matches!(self, PhpType::Named(n) if n == name)
+        matches!(self.kind(), TypeKind::Named(n) if n == name)
     }
 
     /// Whether this type is a `Named` variant whose name equals `name`
     /// (case-insensitive comparison).
     ///
-    /// Replaces `matches!(ty, PhpType::Named(n) if n.eq_ignore_ascii_case(name))`
+    /// Replaces `matches!(ty.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case(name))`
     /// patterns.
     pub fn is_named_ci(&self, name: &str) -> bool {
-        matches!(self, PhpType::Named(n) if n.eq_ignore_ascii_case(name))
+        matches!(self.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case(name))
     }
 
     /// Returns `true` when this type is always coerced to `int` when
     /// used as an array key (int subtypes, float, bool, null).
     pub fn is_int_coercible_key(&self) -> bool {
-        match self {
-            PhpType::Named(s) => matches!(
+        match self.kind() {
+            TypeKind::Named(s) => matches!(
                 s.to_ascii_lowercase().as_str(),
                 "int"
                     | "integer"
@@ -953,7 +1056,7 @@ impl PhpType {
     /// scalars (`int`, `string`, …), keywords (`mixed`, `void`, …),
     /// and non-`Named` variants.
     pub fn class_name(&self) -> Option<&str> {
-        if let PhpType::Named(name) = self
+        if let TypeKind::Named(name) = self.kind()
             && is_class_like_name(name)
         {
             return Some(name.as_str());
@@ -967,12 +1070,12 @@ impl PhpType {
     ///
     /// Unlike [`is_self_like`], this does **not** match `parent` and
     /// does **not** recurse into `Nullable` or `Union` wrappers.  It
-    /// returns `true` only for a bare `PhpType::Named("self")` (and
+    /// returns `true` only for a bare `PhpType::named("self")` (and
     /// the other two variants).  Use this when you need to detect
     /// exactly the names that [`replace_self`] would rewrite, without
     /// unwrapping nullable/union layers.
     pub fn is_self_ref(&self) -> bool {
-        matches!(self, PhpType::Named(s) if is_self_ref_name(s))
+        matches!(self.kind(), TypeKind::Named(s) if is_self_ref_name(s))
     }
 
     /// Whether this type is one of the self-referencing keywords:
@@ -982,11 +1085,11 @@ impl PhpType {
     /// Returns `true` when this type refers to the `parent` keyword
     /// (bare, nullable, or in a union with null).
     pub fn is_parent_ref(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("parent"),
-            PhpType::Generic(g) => g.name.eq_ignore_ascii_case("parent"),
-            PhpType::Nullable(inner) => inner.is_parent_ref(),
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("parent"),
+            TypeKind::Generic(g) => g.name.eq_ignore_ascii_case("parent"),
+            TypeKind::Nullable(inner) => inner.is_parent_ref(),
+            TypeKind::Union(members) => {
                 let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
                 !non_null.is_empty() && non_null.iter().all(|m| m.is_parent_ref())
             }
@@ -995,16 +1098,16 @@ impl PhpType {
     }
 
     pub fn is_self_like(&self) -> bool {
-        match self {
-            PhpType::Named(s) => self.is_self_ref() || s.eq_ignore_ascii_case("parent"),
-            PhpType::Generic(g) => {
+        match self.kind() {
+            TypeKind::Named(s) => self.is_self_ref() || s.eq_ignore_ascii_case("parent"),
+            TypeKind::Generic(g) => {
                 // e.g. `self<RuleError>`, `static<T>` — check the generic base name directly.
                 // Cannot use `base_name()` here because it filters out self-like
                 // names via `is_scalar_name`.
                 is_self_ref_name(&g.name) || g.name.eq_ignore_ascii_case("parent")
             }
-            PhpType::Nullable(inner) => inner.is_self_like(),
-            PhpType::Union(members) => {
+            TypeKind::Nullable(inner) => inner.is_self_like(),
+            TypeKind::Union(members) => {
                 // `static|null` — every non-null member is self-like.
                 let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
                 !non_null.is_empty() && non_null.iter().all(|m| m.is_self_like())
@@ -1014,7 +1117,7 @@ impl PhpType {
     }
 
     /// Returns `true` when this type is exactly the bare, unparameterised
-    /// `array` keyword — i.e. `PhpType::Named("array")`.
+    /// `array` keyword — i.e. `PhpType::named("array")`.
     ///
     /// Returns `false` for parameterised arrays (`array<int, string>`),
     /// array shapes (`array{key: string}`), slice syntax (`T[]`), `list`,
@@ -1023,7 +1126,7 @@ impl PhpType {
     /// Use this when you need to distinguish a plain `array` return type
     /// (which carries no element-type information) from richer array types.
     pub fn is_bare_array(&self) -> bool {
-        matches!(self, PhpType::Named(s) if s.eq_ignore_ascii_case("array"))
+        matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("array"))
     }
 
     /// Returns `true` when this type represents an array-like PHP type.
@@ -1035,23 +1138,23 @@ impl PhpType {
     ///   - Array shapes: `array{key: string, ...}`
     ///   - Nullable wrappers around any of the above
     pub fn is_array_like(&self) -> bool {
-        match self {
-            PhpType::Named(s) => is_array_like_name(s),
-            PhpType::Generic(g) => is_array_like_name(&g.name),
-            PhpType::Array(_) => true,
-            PhpType::ArrayShape(_) => true,
-            PhpType::Nullable(inner) => inner.is_array_like(),
+        match self.kind() {
+            TypeKind::Named(s) => is_array_like_name(s),
+            TypeKind::Generic(g) => is_array_like_name(&g.name),
+            TypeKind::Array(_) => true,
+            TypeKind::ArrayShape(_) => true,
+            TypeKind::Nullable(inner) => inner.is_array_like(),
             _ => false,
         }
     }
 
     /// Returns true when this type represents an object (class instance, object keyword, or object shape).
     pub fn is_object_like(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("object") || !is_scalar_name(s),
-            PhpType::Generic(g) => !is_scalar_name(&g.name),
-            PhpType::ObjectShape(_) => true,
-            PhpType::Nullable(inner) => inner.is_object_like(),
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("object") || !is_scalar_name(s),
+            TypeKind::Generic(g) => !is_scalar_name(&g.name),
+            TypeKind::ObjectShape(_) => true,
+            TypeKind::Nullable(inner) => inner.is_object_like(),
             _ => false,
         }
     }
@@ -1059,21 +1162,21 @@ impl PhpType {
     /// Matches built-in PHP types and common PHPDoc pseudo-types like
     /// `mixed`, `class-string`, etc.
     pub fn is_scalar(&self) -> bool {
-        match self {
-            PhpType::Named(s) => is_scalar_name(s),
-            PhpType::Nullable(inner) => inner.is_scalar(),
-            PhpType::Generic(g) => is_scalar_name(&g.name),
-            PhpType::Array(_) => true,
-            PhpType::ArrayShape(_) => true,
-            PhpType::ObjectShape(_) => true,
-            PhpType::Callable(_) => true,
-            PhpType::ClassString(_) => true,
-            PhpType::InterfaceString(_) => true,
-            PhpType::KeyOf(_) => true,
-            PhpType::ValueOf(_) => true,
-            PhpType::IntRange(_, _) => true,
-            PhpType::Literal(_) => true,
-            PhpType::Raw(_) => false,
+        match self.kind() {
+            TypeKind::Named(s) => is_scalar_name(s),
+            TypeKind::Nullable(inner) => inner.is_scalar(),
+            TypeKind::Generic(g) => is_scalar_name(&g.name),
+            TypeKind::Array(_) => true,
+            TypeKind::ArrayShape(_) => true,
+            TypeKind::ObjectShape(_) => true,
+            TypeKind::Callable(_) => true,
+            TypeKind::ClassString(_) => true,
+            TypeKind::InterfaceString(_) => true,
+            TypeKind::KeyOf(_) => true,
+            TypeKind::ValueOf(_) => true,
+            TypeKind::IntRange(_, _) => true,
+            TypeKind::Literal(_) => true,
+            TypeKind::Raw(_) => false,
             // Union, Intersection, Conditional, IndexAccess are
             // composite — not scalar by themselves.
             _ => false,
@@ -1087,16 +1190,16 @@ impl PhpType {
     /// an element type: `array<int, list<Rule>>` should still yield
     /// `list<Rule>` even with `skip_scalar=true`.
     pub fn is_scalar_leaf(&self) -> bool {
-        match self {
-            PhpType::Generic(g) => {
+        match self.kind() {
+            TypeKind::Generic(g) => {
                 is_scalar_name(&g.name) && g.args.iter().all(|a| a.is_scalar_leaf())
             }
-            PhpType::Array(inner) => inner.is_scalar_leaf(),
-            PhpType::Nullable(inner) => inner.is_scalar_leaf(),
+            TypeKind::Array(inner) => inner.is_scalar_leaf(),
+            TypeKind::Nullable(inner) => inner.is_scalar_leaf(),
             // A shape is only a scalar leaf when every entry value is;
             // `array{price: Decimal}` yields the non-scalar `Decimal`
             // when indexed or iterated.
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 entries.iter().all(|e| e.value_type.is_scalar_leaf())
             }
             _ => self.is_scalar(),
@@ -1110,17 +1213,17 @@ impl PhpType {
     /// `?User`, etc. Returns `None` for unions, intersections, scalars,
     /// callables, shapes, and other non-class types.
     pub fn base_name(&self) -> Option<&str> {
-        match self {
-            PhpType::Named(s) if !is_scalar_name(s) => {
+        match self.kind() {
+            TypeKind::Named(s) if !is_scalar_name(s) => {
                 Some(s.strip_prefix('\\').unwrap_or(s.as_str()))
             }
-            PhpType::StaticType(s) | PhpType::ThisType(s) => {
+            TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 Some(s.strip_prefix('\\').unwrap_or(s.as_str()))
             }
-            PhpType::Generic(g) if !is_scalar_name(&g.name) => {
+            TypeKind::Generic(g) if !is_scalar_name(&g.name) => {
                 Some(g.name.strip_prefix('\\').unwrap_or(g.name.as_str()))
             }
-            PhpType::Nullable(inner) => inner.base_name(),
+            TypeKind::Nullable(inner) => inner.base_name(),
             _ => None,
         }
     }
@@ -1143,19 +1246,19 @@ impl PhpType {
     /// - Unions/intersections of native types are preserved
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
-        match self {
-            PhpType::Named(s) | PhpType::StaticType(s) | PhpType::ThisType(s) => {
+        match self.kind() {
+            TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| n.to_string())
             }
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
                 native_scalar_name(&g.name)
                     .map(|n| n.to_string())
                     .or_else(|| Some(g.name.to_string()))
             }
-            PhpType::Nullable(inner) => inner.to_native_hint().map(|n| format!("?{}", n)),
-            PhpType::Union(members) => {
+            TypeKind::Nullable(inner) => inner.to_native_hint().map(|n| format!("?{}", n)),
+            TypeKind::Union(members) => {
                 let native: Vec<String> =
                     members.iter().filter_map(|m| m.to_native_hint()).collect();
                 if native.len() != members.len() {
@@ -1167,7 +1270,7 @@ impl PhpType {
                 deduped.dedup();
                 Some(deduped.join("|"))
             }
-            PhpType::Intersection(members) => {
+            TypeKind::Intersection(members) => {
                 let native: Vec<String> =
                     members.iter().filter_map(|m| m.to_native_hint()).collect();
                 if native.len() != members.len() {
@@ -1175,10 +1278,10 @@ impl PhpType {
                 }
                 Some(native.join("&"))
             }
-            PhpType::Array(_) | PhpType::ArrayShape(_) => Some("array".to_string()),
-            PhpType::ClassString(_) | PhpType::InterfaceString(_) => Some("string".to_string()),
-            PhpType::IntRange(_, _) => Some("int".to_string()),
-            PhpType::Literal(l) => Some(
+            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some("array".to_string()),
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some("string".to_string()),
+            TypeKind::IntRange(_, _) => Some("int".to_string()),
+            TypeKind::Literal(l) => Some(
                 match **l {
                     LiteralValue::String(_) => "string",
                     LiteralValue::Int(_) => "int",
@@ -1186,36 +1289,34 @@ impl PhpType {
                 }
                 .to_string(),
             ),
-            PhpType::ObjectShape(_) => Some("object".to_string()),
-            PhpType::Callable(c) => Some(c.kind.to_string()),
+            TypeKind::ObjectShape(_) => Some("object".to_string()),
+            TypeKind::Callable(c) => Some(c.kind.to_string()),
             // Conditionals, key-of, value-of, index-access, and raw
             // types have no native form.
-            PhpType::Conditional(_)
-            | PhpType::KeyOf(_)
-            | PhpType::ValueOf(_)
-            | PhpType::IndexAccess(_, _)
-            | PhpType::Raw(_) => None,
+            TypeKind::Conditional(_)
+            | TypeKind::KeyOf(_)
+            | TypeKind::ValueOf(_)
+            | TypeKind::IndexAccess(_, _)
+            | TypeKind::Raw(_) => None,
         }
     }
 
     /// Like [`to_native_hint`] but returns a structured [`PhpType`] instead of a string,
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
-        match self {
-            PhpType::Named(s) | PhpType::StaticType(s) | PhpType::ThisType(s) => {
-                native_scalar_name(s).map(|n| PhpType::Named(atom(n)))
+        match self.kind() {
+            TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
+                native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 // Generic classes: strip the generic params.
                 // `array<K,V>` → `array`, `Collection<T>` → `Collection`
                 native_scalar_name(&g.name)
-                    .map(|n| PhpType::Named(atom(n)))
-                    .or(Some(PhpType::Named(g.name)))
+                    .map(|n| PhpType::named(atom(n)))
+                    .or_else(|| Some(PhpType::named(g.name)))
             }
-            PhpType::Nullable(inner) => inner
-                .to_native_hint_typed()
-                .map(|n| PhpType::Nullable(Box::new(n))),
-            PhpType::Union(members) => {
+            TypeKind::Nullable(inner) => inner.to_native_hint_typed().map(PhpType::nullable),
+            TypeKind::Union(members) => {
                 let native: Vec<PhpType> = members
                     .iter()
                     .filter_map(|m| m.to_native_hint_typed())
@@ -1239,7 +1340,7 @@ impl PhpType {
                     Some(PhpType::union(deduped))
                 }
             }
-            PhpType::Intersection(members) => {
+            TypeKind::Intersection(members) => {
                 let native: Vec<PhpType> = members
                     .iter()
                     .filter_map(|m| m.to_native_hint_typed())
@@ -1263,21 +1364,21 @@ impl PhpType {
                     Some(PhpType::intersection(deduped))
                 }
             }
-            PhpType::Array(_) | PhpType::ArrayShape(_) => Some(PhpType::array()),
-            PhpType::ClassString(_) | PhpType::InterfaceString(_) => Some(PhpType::string()),
-            PhpType::IntRange(_, _) => Some(PhpType::int()),
-            PhpType::Literal(l) => Some(match **l {
+            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some(PhpType::array()),
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(PhpType::string()),
+            TypeKind::IntRange(_, _) => Some(PhpType::int()),
+            TypeKind::Literal(l) => Some(match **l {
                 LiteralValue::String(_) => PhpType::string(),
                 LiteralValue::Int(_) => PhpType::int(),
                 LiteralValue::Float(_) => PhpType::float(),
             }),
-            PhpType::ObjectShape(_) => Some(PhpType::object()),
-            PhpType::Callable(c) => Some(PhpType::Named(c.kind)),
-            PhpType::Conditional(_)
-            | PhpType::KeyOf(_)
-            | PhpType::ValueOf(_)
-            | PhpType::IndexAccess(_, _)
-            | PhpType::Raw(_) => None,
+            TypeKind::ObjectShape(_) => Some(PhpType::object()),
+            TypeKind::Callable(c) => Some(PhpType::named(c.kind)),
+            TypeKind::Conditional(_)
+            | TypeKind::KeyOf(_)
+            | TypeKind::ValueOf(_)
+            | TypeKind::IndexAccess(_, _)
+            | TypeKind::Raw(_) => None,
         }
     }
 
@@ -1286,18 +1387,18 @@ impl PhpType {
     ///
     /// This replaces `split_top_level_union` for structured types.
     pub fn union_members(&self) -> Vec<&PhpType> {
-        match self {
-            PhpType::Union(members) => members.iter().collect(),
-            other => vec![other],
+        match self.kind() {
+            TypeKind::Union(members) => members.iter().collect(),
+            _ => vec![self],
         }
     }
 
     /// Return the top-level intersection members if this is an intersection
     /// type, or a single-element slice containing `self` otherwise.
     pub fn intersection_members(&self) -> Vec<&PhpType> {
-        match self {
-            PhpType::Intersection(members) => members.iter().collect(),
-            other => vec![other],
+        match self.kind() {
+            TypeKind::Intersection(members) => members.iter().collect(),
+            _ => vec![self],
         }
     }
 
@@ -1316,15 +1417,15 @@ impl PhpType {
     /// is a scalar (for class-based completion). When false, returns any
     /// element type (matching `extract_iterable_element_type` behaviour).
     pub fn extract_value_type(&self, skip_scalar: bool) -> Option<&PhpType> {
-        match self {
-            PhpType::Array(inner) => {
+        match self.kind() {
+            TypeKind::Array(inner) => {
                 if skip_scalar && inner.is_scalar() {
                     None
                 } else {
-                    Some(inner.as_ref())
+                    Some(inner)
                 }
             }
-            PhpType::Generic(g) if !g.args.is_empty() => {
+            TypeKind::Generic(g) if !g.args.is_empty() => {
                 let args = &g.args;
                 // Iterables follow the `<TKey, TValue>` convention: the value
                 // is the *second* generic argument whenever two or more are
@@ -1345,8 +1446,8 @@ impl PhpType {
                     None => None,
                 }
             }
-            PhpType::Nullable(inner) => inner.extract_value_type(skip_scalar),
-            PhpType::Union(members) => members
+            TypeKind::Nullable(inner) => inner.extract_value_type(skip_scalar),
+            TypeKind::Union(members) => members
                 .iter()
                 .find_map(|m| m.extract_value_type(skip_scalar)),
             _ => None,
@@ -1364,8 +1465,8 @@ impl PhpType {
     /// When `skip_scalar` is true, returns `None` if the key type is
     /// scalar.
     pub fn extract_key_type(&self, skip_scalar: bool) -> Option<&PhpType> {
-        match self {
-            PhpType::Generic(g) if g.args.len() >= 2 => {
+        match self.kind() {
+            TypeKind::Generic(g) if g.args.len() >= 2 => {
                 let key = &g.args[0];
                 if skip_scalar && key.is_scalar() {
                     None
@@ -1373,8 +1474,10 @@ impl PhpType {
                     Some(key)
                 }
             }
-            PhpType::Nullable(inner) => inner.extract_key_type(skip_scalar),
-            PhpType::Union(members) => members.iter().find_map(|m| m.extract_key_type(skip_scalar)),
+            TypeKind::Nullable(inner) => inner.extract_key_type(skip_scalar),
+            TypeKind::Union(members) => {
+                members.iter().find_map(|m| m.extract_key_type(skip_scalar))
+            }
             _ => None,
         }
     }
@@ -1397,8 +1500,8 @@ impl PhpType {
     /// `extract_value_type(false)`, so generic collections (`list<User>`,
     /// `array<int, Order>`) behave exactly as before.
     pub fn iterable_element_type(&self) -> Option<PhpType> {
-        match self {
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+        match self.kind() {
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 let mut values: Vec<PhpType> = Vec::new();
                 for entry in entries {
                     if !values.contains(&entry.value_type) {
@@ -1411,8 +1514,8 @@ impl PhpType {
                     _ => Some(PhpType::union(values)),
                 }
             }
-            PhpType::Nullable(inner) => inner.iterable_element_type(),
-            PhpType::Union(members) => members.iter().find_map(|m| m.iterable_element_type()),
+            TypeKind::Nullable(inner) => inner.iterable_element_type(),
+            TypeKind::Union(members) => members.iter().find_map(|m| m.iterable_element_type()),
             _ => self.extract_value_type(false).cloned(),
         }
     }
@@ -1420,7 +1523,7 @@ impl PhpType {
     /// Look up the value type for a specific key in an array shape.
     ///
     /// Given a parsed `array{name: string, user: User}` and key `"user"`,
-    /// returns `Some(&PhpType::Named("User"))`.
+    /// returns `Some(&PhpType::named("User"))`.
     ///
     /// For positional (unkeyed) entries like `array{User, Address}`, a
     /// numeric string key (e.g. `"0"`, `"1"`) matches the entry at that
@@ -1432,8 +1535,8 @@ impl PhpType {
     ///
     /// Returns `None` if this is not an array shape or the key is not found.
     pub fn shape_value_type(&self, key: &str) -> Option<&PhpType> {
-        match self {
-            PhpType::ArrayShape(entries) => {
+        match self.kind() {
+            TypeKind::ArrayShape(entries) => {
                 // First try an exact key match (handles named and explicit
                 // numeric keys like `array{0: User, 1: Address}`).
                 if let Some(entry) = entries.iter().find(|e| e.key.as_deref() == Some(key)) {
@@ -1456,8 +1559,8 @@ impl PhpType {
                 }
                 None
             }
-            PhpType::Nullable(inner) => inner.shape_value_type(key),
-            PhpType::Union(members) => members.iter().find_map(|m| m.shape_value_type(key)),
+            TypeKind::Nullable(inner) => inner.shape_value_type(key),
+            TypeKind::Union(members) => members.iter().find_map(|m| m.shape_value_type(key)),
             _ => None,
         }
     }
@@ -1474,11 +1577,11 @@ impl PhpType {
     /// Returns `None` if this is not an array shape or the key is not
     /// found.
     pub fn extract_shape_key_type(&self, key: &str) -> Option<PhpType> {
-        match self {
-            PhpType::ArrayShape(entries) => {
+        match self.kind() {
+            TypeKind::ArrayShape(entries) => {
                 if let Some(entry) = entries.iter().find(|e| e.key.as_deref() == Some(key)) {
                     return if entry.optional {
-                        Some(PhpType::Nullable(Box::new(entry.value_type.clone())))
+                        Some(PhpType::nullable(entry.value_type.clone()))
                     } else {
                         Some(entry.value_type.clone())
                     };
@@ -1489,7 +1592,7 @@ impl PhpType {
                         if entry.key.is_none() {
                             if positional_idx == idx {
                                 return if entry.optional {
-                                    Some(PhpType::Nullable(Box::new(entry.value_type.clone())))
+                                    Some(PhpType::nullable(entry.value_type.clone()))
                                 } else {
                                     Some(entry.value_type.clone())
                                 };
@@ -1500,8 +1603,8 @@ impl PhpType {
                 }
                 None
             }
-            PhpType::Nullable(inner) => inner.extract_shape_key_type(key),
-            PhpType::Union(members) => members.iter().find_map(|m| m.extract_shape_key_type(key)),
+            TypeKind::Nullable(inner) => inner.extract_shape_key_type(key),
+            TypeKind::Union(members) => members.iter().find_map(|m| m.extract_shape_key_type(key)),
             _ => None,
         }
     }
@@ -1511,10 +1614,10 @@ impl PhpType {
     /// Also handles nullable shapes by delegating to the inner type.
     /// Returns `None` for all other variants.
     pub fn shape_entries(&self) -> Option<&[ShapeEntry]> {
-        match self {
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => Some(entries),
-            PhpType::Nullable(inner) => inner.shape_entries(),
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => Some(entries),
+            TypeKind::Nullable(inner) => inner.shape_entries(),
+            TypeKind::Union(members) => {
                 // Find the first array/object shape member in the union.
                 members.iter().find_map(|m| m.shape_entries())
             }
@@ -1526,9 +1629,9 @@ impl PhpType {
     ///
     /// Also returns `true` for `?array{…}`.
     pub fn is_array_shape(&self) -> bool {
-        match self {
-            PhpType::ArrayShape(_) => true,
-            PhpType::Nullable(inner) => inner.is_array_shape(),
+        match self.kind() {
+            TypeKind::ArrayShape(_) => true,
+            TypeKind::Nullable(inner) => inner.is_array_shape(),
             _ => false,
         }
     }
@@ -1537,9 +1640,9 @@ impl PhpType {
     ///
     /// Also returns `true` for `?object{…}`.
     pub fn is_object_shape(&self) -> bool {
-        match self {
-            PhpType::ObjectShape(_) => true,
-            PhpType::Nullable(inner) => inner.is_object_shape(),
+        match self.kind() {
+            TypeKind::ObjectShape(_) => true,
+            TypeKind::Nullable(inner) => inner.is_object_shape(),
             _ => false,
         }
     }
@@ -1570,18 +1673,18 @@ impl PhpType {
     /// array shape or contains positional (unkeyed) entries — those are
     /// list-style shapes where a per-key join is not meaningful.
     pub fn join_shapes(&self, other: &PhpType) -> Option<PhpType> {
-        match (self, other) {
-            (PhpType::ArrayShape(a), PhpType::ArrayShape(b)) => {
+        match (self.kind(), other.kind()) {
+            (TypeKind::ArrayShape(a), TypeKind::ArrayShape(b)) => {
                 Some(PhpType::array_shape(Self::join_shape_entries(a, b)?))
             }
-            (PhpType::Nullable(a), PhpType::Nullable(b)) => {
-                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            (TypeKind::Nullable(a), TypeKind::Nullable(b)) => {
+                Some(PhpType::nullable(a.join_shapes(b)?))
             }
-            (PhpType::Nullable(a), b @ PhpType::ArrayShape(_)) => {
-                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            (TypeKind::Nullable(a), TypeKind::ArrayShape(_)) => {
+                Some(PhpType::nullable(a.join_shapes(other)?))
             }
-            (a @ PhpType::ArrayShape(_), PhpType::Nullable(b)) => {
-                Some(PhpType::Nullable(Box::new(a.join_shapes(b)?)))
+            (TypeKind::ArrayShape(_), TypeKind::Nullable(b)) => {
+                Some(PhpType::nullable(self.join_shapes(b)?))
             }
             _ => None,
         }
@@ -1657,19 +1760,19 @@ impl PhpType {
     /// Look up the value type for a specific property in an object shape.
     ///
     /// Given a parsed `object{name: string, user: User}` and key `"user"`,
-    /// returns `Some(&PhpType::Named("User"))`.
+    /// returns `Some(&PhpType::named("User"))`.
     ///
     /// Also handles nullable object shapes (`?object{…}`).
     ///
     /// Returns `None` if this is not an object shape or the property
     /// is not found.
     pub fn object_shape_property_type(&self, prop: &str) -> Option<&PhpType> {
-        match self {
-            PhpType::ObjectShape(entries) => entries
+        match self.kind() {
+            TypeKind::ObjectShape(entries) => entries
                 .iter()
                 .find(|e| e.key.as_deref() == Some(prop))
                 .map(|e| &e.value_type),
-            PhpType::Nullable(inner) => inner.object_shape_property_type(prop),
+            TypeKind::Nullable(inner) => inner.object_shape_property_type(prop),
             _ => None,
         }
     }
@@ -1684,10 +1787,10 @@ impl PhpType {
     ///   - `Closure(int)|null`           → `Some(&[CallableParam { .. }])`
     ///   - `int`                         → `None`
     pub fn callable_param_types(&self) -> Option<&[CallableParam]> {
-        match self {
-            PhpType::Callable(c) => Some(c.params.as_slice()),
-            PhpType::Nullable(inner) => inner.callable_param_types(),
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::Callable(c) => Some(c.params.as_slice()),
+            TypeKind::Nullable(inner) => inner.callable_param_types(),
+            TypeKind::Union(members) => {
                 for member in members {
                     if let Some(params) = member.callable_param_types() {
                         return Some(params);
@@ -1710,10 +1813,10 @@ impl PhpType {
     ///   - `callable`             → `None` (no return type specified)
     ///   - `int`                  → `None`
     pub fn callable_return_type(&self) -> Option<&PhpType> {
-        match self {
-            PhpType::Callable(c) => c.return_type.as_ref(),
-            PhpType::Nullable(inner) => inner.callable_return_type(),
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::Callable(c) => c.return_type.as_ref(),
+            TypeKind::Nullable(inner) => inner.callable_return_type(),
+            TypeKind::Union(members) => {
                 for member in members {
                     if let Some(ret) = member.callable_return_type() {
                         return Some(ret);
@@ -1738,15 +1841,15 @@ impl PhpType {
     /// When `skip_scalar` is true, returns `None` if the send type is
     /// scalar (matching the pattern used by `extract_value_type`).
     pub fn generator_send_type(&self, skip_scalar: bool) -> Option<&PhpType> {
-        match self {
-            PhpType::Generic(g) if Self::short_name_of(&g.name) == "Generator" => {
+        match self.kind() {
+            TypeKind::Generic(g) if Self::short_name_of(&g.name) == "Generator" => {
                 match g.args.get(2) {
                     Some(send) if skip_scalar && send.is_scalar() => None,
                     Some(send) => Some(send),
                     None => None,
                 }
             }
-            PhpType::Nullable(inner) => inner.generator_send_type(skip_scalar),
+            TypeKind::Nullable(inner) => inner.generator_send_type(skip_scalar),
             _ => None,
         }
     }
@@ -1760,9 +1863,9 @@ impl PhpType {
     ///
     /// This extracts the non-null part from a union type.
     pub fn non_null_type(&self) -> Option<PhpType> {
-        match self {
-            PhpType::Nullable(inner) => Some(inner.as_ref().clone()),
-            PhpType::Union(members) => {
+        match self.kind() {
+            TypeKind::Nullable(inner) => Some(inner.clone()),
+            TypeKind::Union(members) => {
                 let non_null: Vec<&PhpType> = members.iter().filter(|m| !m.is_null()).collect();
                 match non_null.len() {
                     0 => None,
@@ -1781,8 +1884,8 @@ impl PhpType {
     /// This is a cheap, borrowing alternative to [`non_null_type`] which
     /// returns an owned `PhpType` and also handles union-with-null.
     pub fn unwrap_nullable(&self) -> &PhpType {
-        match self {
-            PhpType::Nullable(inner) => inner.as_ref(),
+        match self.kind() {
+            TypeKind::Nullable(inner) => inner,
             _ => self,
         }
     }
@@ -1813,10 +1916,10 @@ impl PhpType {
     /// `Foo|Bar|null` → `[Foo, Bar, null]`, `?Foo` → `[Foo, null]`,
     /// `Foo` → `[Foo]`.
     fn atomic_members(&self) -> Vec<PhpType> {
-        match self {
-            PhpType::Union(members) => members.to_vec(),
-            PhpType::Nullable(inner) => {
-                vec![inner.as_ref().clone(), PhpType::null()]
+        match self.kind() {
+            TypeKind::Union(members) => members.to_vec(),
+            TypeKind::Nullable(inner) => {
+                vec![inner.clone(), PhpType::null()]
             }
             _ => vec![self.clone()],
         }
@@ -1831,20 +1934,20 @@ impl PhpType {
     ///
     /// Checks whether a type is purely scalar.
     pub fn all_members_scalar(&self) -> bool {
-        match self {
-            PhpType::Union(members) => members
+        match self.kind() {
+            TypeKind::Union(members) => members
                 .iter()
                 .filter(|m| !m.is_null())
                 .all(|m| m.is_scalar()),
-            PhpType::Nullable(inner) => inner.is_scalar(),
-            other => other.is_scalar(),
+            TypeKind::Nullable(inner) => inner.is_scalar(),
+            _ => self.is_scalar(),
         }
     }
 
     /// If this is a `class-string<T>`, returns `Some(&T)`. Otherwise, returns `None`.
     pub fn unwrap_class_string_inner(&self) -> Option<&PhpType> {
-        match self {
-            PhpType::ClassString(Some(inner)) => Some(inner.as_ref()),
+        match self.kind() {
+            TypeKind::ClassString(Some(inner)) => Some(inner),
             _ => None,
         }
     }
@@ -1859,13 +1962,13 @@ impl PhpType {
     ///
     /// Checks whether all members are primitive scalar types.
     pub fn all_members_primitive_scalar(&self) -> bool {
-        match self {
-            PhpType::Union(members) => members
+        match self.kind() {
+            TypeKind::Union(members) => members
                 .iter()
                 .filter(|m| !m.is_null())
                 .all(|m| m.is_primitive_scalar()),
-            PhpType::Nullable(inner) => inner.is_primitive_scalar(),
-            other => other.is_primitive_scalar(),
+            TypeKind::Nullable(inner) => inner.is_primitive_scalar(),
+            _ => self.is_primitive_scalar(),
         }
     }
 
@@ -1888,11 +1991,11 @@ impl PhpType {
     /// `foreach_resolution.rs` and the string-based checks like
     /// `.contains('<')` scattered across the codebase.
     pub fn has_type_structure(&self) -> bool {
-        match self {
-            PhpType::Named(_) | PhpType::Raw(_) => false,
-            PhpType::Nullable(inner) => inner.has_type_structure(),
-            PhpType::Union(members) => members.iter().any(|m| m.has_type_structure()),
-            PhpType::Intersection(members) => members.iter().any(|m| m.has_type_structure()),
+        match self.kind() {
+            TypeKind::Named(_) | TypeKind::Raw(_) => false,
+            TypeKind::Nullable(inner) => inner.has_type_structure(),
+            TypeKind::Union(members) => members.iter().any(|m| m.has_type_structure()),
+            TypeKind::Intersection(members) => members.iter().any(|m| m.has_type_structure()),
             _ => true,
         }
     }
@@ -1913,14 +2016,14 @@ impl PhpType {
     /// `rhs_resolution.rs`, avoiding a parse→check round-trip when the
     /// caller already has a `PhpType`.
     pub fn is_informative(&self) -> bool {
-        match self {
-            PhpType::Generic(..) => true,
-            PhpType::ArrayShape(..) | PhpType::ObjectShape(..) => true,
-            PhpType::Array(..) => true,
-            PhpType::Union(members) => members.iter().any(|m| m.is_informative()),
-            PhpType::Nullable(inner) => inner.is_informative(),
-            PhpType::Intersection(members) => members.iter().any(|m| m.is_informative()),
-            PhpType::Named(_) => {
+        match self.kind() {
+            TypeKind::Generic(..) => true,
+            TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
+            TypeKind::Array(..) => true,
+            TypeKind::Union(members) => members.iter().any(|m| m.is_informative()),
+            TypeKind::Nullable(inner) => inner.is_informative(),
+            TypeKind::Intersection(members) => members.iter().any(|m| m.is_informative()),
+            TypeKind::Named(_) => {
                 !(self.is_bare_array()
                     || self.is_mixed()
                     || self.is_object()
@@ -1928,15 +2031,15 @@ impl PhpType {
                     || self.is_null()
                     || self.is_self_like())
             }
-            PhpType::Callable(..) => true,
-            PhpType::ClassString(..) | PhpType::InterfaceString(..) => true,
-            PhpType::KeyOf(..) | PhpType::ValueOf(..) => true,
-            PhpType::IndexAccess(..) => true,
-            PhpType::Conditional(..) => true,
-            PhpType::IntRange(..) => true,
-            PhpType::Literal(..) => true,
-            PhpType::StaticType(_) | PhpType::ThisType(_) => true,
-            PhpType::Raw(s) => s.contains('<') || s.contains('{') || s.ends_with("[]"),
+            TypeKind::Callable(..) => true,
+            TypeKind::ClassString(..) | TypeKind::InterfaceString(..) => true,
+            TypeKind::KeyOf(..) | TypeKind::ValueOf(..) => true,
+            TypeKind::IndexAccess(..) => true,
+            TypeKind::Conditional(..) => true,
+            TypeKind::IntRange(..) => true,
+            TypeKind::Literal(..) => true,
+            TypeKind::StaticType(_) | TypeKind::ThisType(_) => true,
+            TypeKind::Raw(s) => s.contains('<') || s.contains('{') || s.ends_with("[]"),
         }
     }
 
@@ -1950,11 +2053,11 @@ impl PhpType {
     /// This replaces the `.contains('<')` string heuristic with a
     /// structured check.
     pub fn has_type_parameters(&self) -> bool {
-        match self {
-            PhpType::Generic(..) => true,
-            PhpType::Array(..) => true,
-            PhpType::Nullable(inner) => inner.has_type_parameters(),
-            PhpType::Union(members) | PhpType::Intersection(members) => {
+        match self.kind() {
+            TypeKind::Generic(..) => true,
+            TypeKind::Array(..) => true,
+            TypeKind::Nullable(inner) => inner.has_type_parameters(),
+            TypeKind::Union(members) | TypeKind::Intersection(members) => {
                 members.iter().any(|m| m.has_type_parameters())
             }
             _ => false,
@@ -1972,13 +2075,13 @@ impl PhpType {
         if template_params.is_empty() {
             return false;
         }
-        match self {
-            PhpType::Named(name) => template_params.iter().any(|p| p == name),
-            PhpType::Nullable(inner) => inner.references_any_template_param(template_params),
-            PhpType::Union(members) | PhpType::Intersection(members) => members
+        match self.kind() {
+            TypeKind::Named(name) => template_params.iter().any(|p| p == name),
+            TypeKind::Nullable(inner) => inner.references_any_template_param(template_params),
+            TypeKind::Union(members) | TypeKind::Intersection(members) => members
                 .iter()
                 .any(|m| m.references_any_template_param(template_params)),
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 template_params
                     .iter()
                     .any(|p| p.as_str() == g.name.as_str())
@@ -1986,19 +2089,19 @@ impl PhpType {
                         .iter()
                         .any(|a| a.references_any_template_param(template_params))
             }
-            PhpType::Array(inner) => inner.references_any_template_param(template_params),
-            PhpType::ClassString(Some(inner)) | PhpType::InterfaceString(Some(inner)) => {
+            TypeKind::Array(inner) => inner.references_any_template_param(template_params),
+            TypeKind::ClassString(Some(inner)) | TypeKind::InterfaceString(Some(inner)) => {
                 inner.references_any_template_param(template_params)
             }
-            PhpType::KeyOf(inner) | PhpType::ValueOf(inner) => {
+            TypeKind::KeyOf(inner) | TypeKind::ValueOf(inner) => {
                 inner.references_any_template_param(template_params)
             }
-            PhpType::Conditional(c) => {
+            TypeKind::Conditional(c) => {
                 c.condition.references_any_template_param(template_params)
                     || c.then_type.references_any_template_param(template_params)
                     || c.else_type.references_any_template_param(template_params)
             }
-            PhpType::Callable(c) => {
+            TypeKind::Callable(c) => {
                 c.params
                     .iter()
                     .any(|p| p.type_hint.references_any_template_param(template_params))
@@ -2006,20 +2109,20 @@ impl PhpType {
                         .as_ref()
                         .is_some_and(|r| r.references_any_template_param(template_params))
             }
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => entries
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
                 .iter()
                 .any(|e| e.value_type.references_any_template_param(template_params)),
-            PhpType::IndexAccess(base, index) => {
+            TypeKind::IndexAccess(base, index) => {
                 base.references_any_template_param(template_params)
                     || index.references_any_template_param(template_params)
             }
-            PhpType::ClassString(None)
-            | PhpType::InterfaceString(None)
-            | PhpType::IntRange(..)
-            | PhpType::Literal(..)
-            | PhpType::StaticType(_)
-            | PhpType::ThisType(_)
-            | PhpType::Raw(..) => false,
+            TypeKind::ClassString(None)
+            | TypeKind::InterfaceString(None)
+            | TypeKind::IntRange(..)
+            | TypeKind::Literal(..)
+            | TypeKind::StaticType(_)
+            | TypeKind::ThisType(_)
+            | TypeKind::Raw(..) => false,
         }
     }
 
@@ -2029,7 +2132,7 @@ impl PhpType {
 
     /// Whether this type is `never` (bottom type).
     pub fn is_never(&self) -> bool {
-        matches!(self, PhpType::Named(s)
+        matches!(self.kind(), TypeKind::Named(s)
             if matches!(s.to_ascii_lowercase().as_str(),
                 "never" | "no-return" | "noreturn" | "never-return" | "never-returns"
             )
@@ -2038,12 +2141,12 @@ impl PhpType {
 
     /// Whether this type is `mixed` (top type).
     pub fn is_mixed(&self) -> bool {
-        matches!(self, PhpType::Named(s) if s.eq_ignore_ascii_case("mixed"))
+        matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("mixed"))
     }
 
     /// Whether this type is `void`.
     pub fn is_void(&self) -> bool {
-        matches!(self, PhpType::Named(s) if s.eq_ignore_ascii_case("void"))
+        matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("void"))
     }
 
     /// Whether this type conveys no useful return type information.
@@ -2072,8 +2175,8 @@ impl PhpType {
     /// this method when you already have a `PhpType` to avoid stringifying
     /// just to check whether it's a keyword.
     pub fn is_keyword(&self) -> bool {
-        match self {
-            PhpType::Named(name) => is_keyword_type(name),
+        match self.kind() {
+            TypeKind::Named(name) => is_keyword_type(name),
             _ => false,
         }
     }

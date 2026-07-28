@@ -10,7 +10,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::call_resolution::MethodReturnCtx;
@@ -643,7 +643,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         if let Some(ref ret) = method_ret
                             && ret.contains_self_ref()
                         {
-                            return vec![ResolvedType::from_type_string(PhpType::StaticType(
+                            return vec![ResolvedType::from_type_string(PhpType::static_type(
                                 ctx.current_class.fqn(),
                             ))];
                         }
@@ -698,7 +698,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         if let Some(ref ret) = method_ret
                             && ret.contains_self_ref()
                         {
-                            return vec![ResolvedType::from_type_string(PhpType::ThisType(
+                            return vec![ResolvedType::from_type_string(PhpType::this_type(
                                 ctx.current_class.fqn(),
                             ))];
                         }
@@ -1010,7 +1010,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
 
         // 2. Resolve the variable's own type.  Closures, arrow functions,
         //    and first-class callables are all inferred by
-        //    `resolve_rhs_expression` as a `PhpType::Callable` (see
+        //    `resolve_rhs_expression` as a `TypeKind::Callable` (see
         //    `infer_closure_literal_type`), so `$fn`'s embedded return
         //    type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
         //    and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
@@ -1226,8 +1226,8 @@ pub(super) fn resolve_rhs_method_call_inner<'b>(
         let class_level_subs: HashMap<String, PhpType> = receiver_resolved
             .get(idx)
             .or_else(|| receiver_resolved.first())
-            .and_then(|rt| match &rt.type_string {
-                PhpType::Generic(g)
+            .and_then(|rt| match &rt.type_string.kind() {
+                TypeKind::Generic(g)
                     if !g.args.is_empty()
                         && !owner.template_params.is_empty()
                         && !g.args.iter().any(|a| a.is_self_like()) =>
@@ -1344,8 +1344,8 @@ pub(super) fn expand_union_generic_owners(
         return (owner_classes, receiver_resolved);
     }
     let rt = &receiver_resolved[0];
-    let union_members = match &rt.type_string {
-        PhpType::Union(members) => members,
+    let union_members = match &rt.type_string.kind() {
+        TypeKind::Union(members) => members,
         _ => return (owner_classes, receiver_resolved),
     };
 
@@ -1365,7 +1365,7 @@ pub(super) fn expand_union_generic_owners(
     };
     let generic_branches: Vec<&PhpType> = union_members
         .iter()
-        .filter(|m| matches!(m, PhpType::Generic(g) if is_same_base(&g.name)))
+        .filter(|m| matches!(m.kind(), TypeKind::Generic(g) if is_same_base(&g.name)))
         .collect();
     if generic_branches.len() < 2 {
         return (owner_classes, receiver_resolved);
@@ -1377,8 +1377,8 @@ pub(super) fn expand_union_generic_owners(
     let mut expanded_resolved: Vec<ResolvedType> = Vec::new();
 
     for member in union_members {
-        match member {
-            PhpType::Generic(g) if is_same_base(&g.name) => {
+        match member.kind() {
+            TypeKind::Generic(g) if is_same_base(&g.name) => {
                 let arc = crate::virtual_members::resolve_class_fully_with_type_args(
                     base_cls,
                     ctx.class_loader,
@@ -1395,7 +1395,7 @@ pub(super) fn expand_union_generic_owners(
             // are kept as type-string-only entries in receiver_resolved
             // but don't contribute an owner class.
             other => {
-                expanded_resolved.push(ResolvedType::from_type_string(other.clone()));
+                expanded_resolved.push(ResolvedType::from_type_string(other.clone().into()));
             }
         }
     }
@@ -1426,7 +1426,7 @@ pub(super) fn receiver_type_for_owner(
         let Some(ci) = rt.class_info.as_ref() else {
             continue;
         };
-        if !matches!(rt.type_string, PhpType::Generic(_)) {
+        if !matches!(rt.type_string.kind(), TypeKind::Generic(_)) {
             continue;
         }
         if ci.fqn().as_str() == owner_name || ci.name.as_str() == owner_name {
@@ -1638,7 +1638,7 @@ pub(super) fn resolve_owner_method_call(
             owner
                 .parent_class
                 .as_ref()
-                .map(|p| PhpType::Named(atom(p.as_ref())))
+                .map(|p| PhpType::named(atom(p.as_ref())))
                 .unwrap_or(substituted)
         } else {
             substituted
@@ -1866,7 +1866,7 @@ pub(super) fn resolve_rhs_static_call(
                             );
                             for r in results {
                                 union_classes.push(ResolvedType::from_both_arc(
-                                    PhpType::Named(atom(r.name.as_ref())),
+                                    PhpType::named(atom(r.name.as_ref())),
                                     r,
                                 ));
                             }
@@ -1910,22 +1910,22 @@ pub(super) fn resolve_rhs_static_call(
                 let resolved = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
                 resolved
                     .iter()
-                    .find_map(|rt| match &rt.type_string {
-                        PhpType::ClassString(Some(inner)) => {
+                    .find_map(|rt| match &rt.type_string.kind() {
+                        TypeKind::ClassString(Some(inner)) => {
                             inner.base_name().map(|s| s.to_string())
                         }
-                        PhpType::Nullable(inner) => match inner.as_ref() {
-                            PhpType::ClassString(Some(cs_inner)) => {
+                        TypeKind::Nullable(inner) => match inner.kind() {
+                            TypeKind::ClassString(Some(cs_inner)) => {
                                 cs_inner.base_name().map(|s| s.to_string())
                             }
                             _ => None,
                         },
-                        PhpType::Union(members) => members.iter().find_map(|m| match m {
-                            PhpType::ClassString(Some(inner)) => {
+                        TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
+                            TypeKind::ClassString(Some(inner)) => {
                                 inner.base_name().map(|s| s.to_string())
                             }
-                            PhpType::Nullable(inner) => match inner.as_ref() {
-                                PhpType::ClassString(Some(cs_inner)) => {
+                            TypeKind::Nullable(inner) => match inner.kind() {
+                                TypeKind::ClassString(Some(cs_inner)) => {
                                     cs_inner.base_name().map(|s| s.to_string())
                                 }
                                 _ => None,
@@ -2117,9 +2117,9 @@ fn try_resolve_config_method_type(
 }
 
 fn facade_accessor_class_name(ty: &PhpType) -> Option<String> {
-    match ty {
-        PhpType::ClassString(Some(inner)) => inner.base_name().map(ToString::to_string),
-        PhpType::Named(name) => Some(name.to_string()),
+    match ty.kind() {
+        TypeKind::ClassString(Some(inner)) => inner.base_name().map(ToString::to_string),
+        TypeKind::Named(name) => Some(name.to_string()),
         _ => None,
     }
 }

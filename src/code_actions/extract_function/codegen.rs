@@ -1,4 +1,5 @@
 use super::*;
+use crate::php_type::TypeKind;
 
 // ─── Code generation ────────────────────────────────────────────────────────
 
@@ -484,9 +485,9 @@ pub(crate) fn build_return_type(info: &ExtractionInfo) -> String {
             if let Some(cleaned) = clean_type_for_signature_typed(&info.trailing_return_type)
                 && !cleaned.is_null()
                 && !cleaned.is_mixed()
-                && !matches!(cleaned, PhpType::Nullable(_))
+                && !matches!(cleaned.kind(), TypeKind::Nullable(_))
             {
-                return PhpType::Nullable(Box::new(cleaned)).to_string();
+                return PhpType::nullable(cleaned).to_string();
             }
             // Can't determine a useful nullable type.
             String::new()
@@ -498,9 +499,9 @@ pub(crate) fn build_return_type(info: &ExtractionInfo) -> String {
                 if let Some(cleaned) = clean_type_for_signature_typed(type_hint) {
                     if !cleaned.is_null()
                         && !cleaned.is_mixed()
-                        && !matches!(cleaned, PhpType::Nullable(_))
+                        && !matches!(cleaned.kind(), TypeKind::Nullable(_))
                     {
-                        return PhpType::Nullable(Box::new(cleaned)).to_string();
+                        return PhpType::nullable(cleaned).to_string();
                     }
                     // Already nullable or mixed — use as-is.
                     return cleaned.to_string();

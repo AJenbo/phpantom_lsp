@@ -79,7 +79,7 @@
 //! own annotations produce the same result.
 
 use crate::atom::atom;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, FunctionInfo};
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -183,7 +183,7 @@ fn patch_range(func: &mut FunctionInfo) {
     func.conditional_return = Some(PhpType::conditional(
         "$start",
         false,
-        PhpType::Named(atom("string")),
+        PhpType::named(atom("string")),
         PhpType::list(PhpType::string()),
         PhpType::list(PhpType::union(vec![PhpType::int(), PhpType::float()])),
     ));
@@ -216,10 +216,10 @@ fn patch_stream_bucket_make_writeable(func: &mut FunctionInfo) {
 /// Whether `ty` is the pre-8.4 `object|null` (or bare `object`) shape,
 /// as opposed to the real `StreamBucket|null` type used from 8.4 on.
 fn is_pre_84_object_type(ty: &PhpType) -> bool {
-    match ty {
-        PhpType::Named(name) => name.eq_ignore_ascii_case("object"),
-        PhpType::Nullable(inner) => is_pre_84_object_type(inner),
-        PhpType::Union(members) => members.iter().any(is_pre_84_object_type),
+    match ty.kind() {
+        TypeKind::Named(name) => name.eq_ignore_ascii_case("object"),
+        TypeKind::Nullable(inner) => is_pre_84_object_type(inner),
+        TypeKind::Union(members) => members.iter().any(is_pre_84_object_type),
         _ => false,
     }
 }
@@ -283,7 +283,7 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
         .or_insert_with(|| {
             PhpType::generic(
                 "Traversable",
-                vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
+                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
             )
         });
     add_implements_generics(class, "OuterIterator", &["TKey", "TValue"]);
@@ -296,8 +296,8 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
     // Patch current() → TValue and key() → TKey.
     // phpstorm-stubs declare `current(): mixed` and `key(): mixed` which
     // hides the generic type.  PHPStan's stubs override these.
-    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
-    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
+    patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
 
     // Patch the constructor: add template binding TIterator → $iterator
     // so that `new IteratorIterator(new Subject())` infers TIterator = Subject.
@@ -319,7 +319,7 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
             .iter_mut()
             .find(|p| p.name == "$iterator")
         {
-            param.type_hint = Some(PhpType::Named(atom("TIterator")));
+            param.type_hint = Some(PhpType::named(atom("TIterator")));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
@@ -336,8 +336,8 @@ fn patch_filter_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
-    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
+    patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
 }
 
 /// Patch `NoRewindIterator` with template params inherited from `IteratorIterator`.
@@ -362,8 +362,8 @@ fn patch_caching_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
-    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
+    patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
     patch_constructor_iterator_binding(class);
 }
 
@@ -386,8 +386,8 @@ fn patch_limit_iterator(class: &mut ClassInfo) {
         return;
     }
     patch_iterator_iterator_subclass(class, "IteratorIterator");
-    patch_method_return_type(class, "current", PhpType::Named(atom("TValue")));
-    patch_method_return_type(class, "key", PhpType::Named(atom("TKey")));
+    patch_method_return_type(class, "current", PhpType::named(atom("TValue")));
+    patch_method_return_type(class, "key", PhpType::named(atom("TKey")));
     patch_constructor_iterator_binding(class);
 }
 
@@ -435,7 +435,7 @@ fn patch_array_iterator(class: &mut ClassInfo) {
         {
             param.type_hint = Some(PhpType::generic(
                 "array",
-                vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
+                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
             ));
         }
 
@@ -458,7 +458,7 @@ fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
         .or_insert_with(|| {
             PhpType::generic(
                 "Traversable",
-                vec![PhpType::Named(atom("TKey")), PhpType::Named(atom("TValue"))],
+                vec![PhpType::named(atom("TKey")), PhpType::named(atom("TValue"))],
             )
         });
     let parent_atom = atom(parent);
@@ -470,9 +470,9 @@ fn patch_iterator_iterator_subclass(class: &mut ClassInfo, parent: &str) {
         class.extends_generics.push((
             parent_atom,
             vec![
-                PhpType::Named(atom("TKey")),
-                PhpType::Named(atom("TValue")),
-                PhpType::Named(atom("TIterator")),
+                PhpType::named(atom("TKey")),
+                PhpType::named(atom("TValue")),
+                PhpType::named(atom("TIterator")),
             ],
         ));
     }
@@ -497,7 +497,7 @@ fn patch_constructor_iterator_binding(class: &mut ClassInfo) {
             .iter_mut()
             .find(|p| p.name == "$iterator")
         {
-            param.type_hint = Some(PhpType::Named(atom("TIterator")));
+            param.type_hint = Some(PhpType::named(atom("TIterator")));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
@@ -545,7 +545,7 @@ fn add_templates(class: &mut ClassInfo, templates: &[(&str, Option<&str>)]) {
 /// Add an `@implements InterfaceName<Param1, Param2, ...>` entry where
 /// all type arguments are template parameter names (the common case).
 fn add_implements_generics(class: &mut ClassInfo, iface_name: &str, params: &[&str]) {
-    let args: Vec<PhpType> = params.iter().map(|p| PhpType::Named(atom(p))).collect();
+    let args: Vec<PhpType> = params.iter().map(|p| PhpType::named(atom(p))).collect();
     add_implements_generics_typed(class, iface_name, &args);
 }
 
@@ -614,8 +614,8 @@ mod tests {
                 .iter()
                 .any(|(n, args)| n.as_str() == "ArrayAccess"
                     && args.len() == 2
-                    && args[0] == PhpType::Named(atom("TKey"))
-                    && args[1] == PhpType::Named(atom("TValue"))),
+                    && args[0] == PhpType::named(atom("TKey"))
+                    && args[1] == PhpType::named(atom("TValue"))),
             "Should have @implements ArrayAccess<TKey, TValue>"
         );
     }

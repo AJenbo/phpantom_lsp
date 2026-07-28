@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use crate::atom::Atom;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
 use crate::util::short_name;
 
@@ -454,9 +454,9 @@ pub(crate) fn right_align_offset(
 /// used by [`apply_generic_args`] to right-align generic arguments
 /// when fewer arguments than template parameters are provided.
 fn is_key_like_bound(bound: &PhpType) -> bool {
-    match bound {
-        PhpType::Named(_) => bound.is_array_key() || bound.is_int() || bound.is_string_type(),
-        PhpType::Union(members) => {
+    match bound.kind() {
+        TypeKind::Named(_) => bound.is_array_key() || bound.is_int() || bound.is_string_type(),
+        TypeKind::Union(members) => {
             // `int|string` is equivalent to `array-key`.
             !members.is_empty() && members.iter().all(|m| m.is_int() || m.is_string_type())
         }

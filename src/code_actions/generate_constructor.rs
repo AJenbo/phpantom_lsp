@@ -26,7 +26,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::offset_to_position;
 
 // ── Data types ──────────────────────────────────────────────────────────────
@@ -302,11 +302,11 @@ fn collect_qualifying_properties<'a>(
 /// Accepts `Named` and `Nullable(Named)` types; rejects unions,
 /// intersections, array shapes, generics, etc.
 fn is_simple_php_type(ty: &PhpType) -> bool {
-    match ty {
-        PhpType::Named(_) | PhpType::StaticType(_) | PhpType::ThisType(_) => true,
-        PhpType::Nullable(inner) => matches!(
-            inner.as_ref(),
-            PhpType::Named(_) | PhpType::StaticType(_) | PhpType::ThisType(_)
+    match ty.kind() {
+        TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_) => true,
+        TypeKind::Nullable(inner) => matches!(
+            inner.kind(),
+            TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_)
         ),
         _ => false,
     }

@@ -142,7 +142,7 @@ impl ConfigValue {
             ConfigValue::Bool => PhpType::bool(),
             ConfigValue::Null => PhpType::null(),
             ConfigValue::ClassString(name) => {
-                PhpType::ClassString(Some(Box::new(PhpType::Named(atom(name)))))
+                PhpType::class_string(Some(PhpType::named(atom(name))))
             }
             ConfigValue::OneOf(arms) => {
                 let mut members: Vec<PhpType> = Vec::new();

@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use crate::inheritance::apply_substitution_to_conditional;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     ClassInfo, ELOQUENT_COLLECTION_FQN, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility,
 };
@@ -33,8 +33,8 @@ pub(super) fn replace_eloquent_collection_typed(ty: &PhpType, custom_collection:
 /// Recursively walk a `PhpType` tree and replace any `Generic` whose
 /// base name is the Eloquent Collection FQN with `custom_collection`.
 fn replace_collection_in_type(ty: &PhpType, custom_collection: &str) -> PhpType {
-    match ty {
-        PhpType::Generic(g) if g.name == ELOQUENT_COLLECTION_FQN => {
+    match ty.kind() {
+        TypeKind::Generic(g) if g.name == ELOQUENT_COLLECTION_FQN => {
             let new_args = g
                 .args
                 .iter()
@@ -42,7 +42,7 @@ fn replace_collection_in_type(ty: &PhpType, custom_collection: &str) -> PhpType 
                 .collect();
             PhpType::generic(custom_collection, new_args)
         }
-        PhpType::Generic(g) => {
+        TypeKind::Generic(g) => {
             let new_args = g
                 .args
                 .iter()
@@ -50,28 +50,26 @@ fn replace_collection_in_type(ty: &PhpType, custom_collection: &str) -> PhpType 
                 .collect();
             PhpType::generic_atom(g.name, new_args)
         }
-        PhpType::Union(members) => PhpType::Union(
+        TypeKind::Union(members) => PhpType::union(
             members
                 .iter()
                 .map(|m| replace_collection_in_type(m, custom_collection))
                 .collect(),
         ),
-        PhpType::Intersection(members) => PhpType::Intersection(
+        TypeKind::Intersection(members) => PhpType::intersection(
             members
                 .iter()
                 .map(|m| replace_collection_in_type(m, custom_collection))
                 .collect(),
         ),
-        PhpType::Nullable(inner) => PhpType::Nullable(Box::new(replace_collection_in_type(
-            inner,
-            custom_collection,
-        ))),
-        PhpType::Array(inner) => PhpType::Array(Box::new(replace_collection_in_type(
-            inner,
-            custom_collection,
-        ))),
+        TypeKind::Nullable(inner) => {
+            PhpType::nullable(replace_collection_in_type(inner, custom_collection))
+        }
+        TypeKind::Array(inner) => {
+            PhpType::array_of(replace_collection_in_type(inner, custom_collection))
+        }
         // Named types, scalars, etc. — no collection to replace.
-        other => other.clone(),
+        other => other.clone().into(),
     }
 }
 
@@ -147,7 +145,7 @@ pub(super) fn build_builder_forwarded_methods(
 
     // Build a substitution map: TModel → concrete model class name,
     // and static/$this/self → Builder<ConcreteModel>.
-    let builder_self_type = PhpType::generic(&builder_fqn, vec![PhpType::Named(class.fqn())]);
+    let builder_self_type = PhpType::generic(&builder_fqn, vec![PhpType::named(class.fqn())]);
     let mut subs = super::self_ref_subs(builder_self_type.clone());
     insert_builder_template_substitutions(
         &mut subs,
@@ -332,7 +330,7 @@ fn insert_builder_template_substitutions(
     builder_fqn: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
-    let model_type = PhpType::Named(model_class.fqn());
+    let model_type = PhpType::named(model_class.fqn());
     for param in &builder_class.template_params {
         subs.insert(param.to_string(), model_type.clone());
     }

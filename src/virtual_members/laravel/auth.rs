@@ -88,7 +88,7 @@ pub(crate) fn patch_auth_user_class(backend: &Backend, loaded: Arc<ClassInfo>) -
             .as_ref()
             .is_none_or(|rt| rt.accepts_null());
         method.return_type = Some(if nullable {
-            PhpType::Nullable(Box::new(model_type.clone()))
+            PhpType::nullable(model_type.clone())
         } else {
             model_type.clone()
         });
@@ -272,7 +272,7 @@ pub(crate) fn resolve_auth_user_model(
         return None;
     }
 
-    let mut members = models.into_iter().map(|n| PhpType::Named(atom(n.as_ref())));
+    let mut members = models.into_iter().map(|n| PhpType::named(atom(n.as_ref())));
     let first = members.next()?;
     match members.next() {
         None => Some(first),

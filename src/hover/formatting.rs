@@ -7,7 +7,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::docblock::parser::{DocblockInfo, parse_docblock_for_tags};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::SymbolSpan;
 use crate::text_position::offset_to_position;
 use crate::types::*;
@@ -554,7 +554,7 @@ pub(crate) fn shorten_type_string(ty: &str) -> String {
     use crate::php_type::PhpType;
 
     let parsed = PhpType::parse(ty);
-    if matches!(parsed, PhpType::Raw(_)) {
+    if matches!(parsed.kind(), TypeKind::Raw(_)) {
         // Fallback: if mago couldn't parse the type, apply
         // the old segment-based shortening so we still shorten
         // namespace-qualified names in unparseable type strings.
@@ -576,7 +576,7 @@ pub(crate) fn shorten_php_type(ty: &PhpType) -> String {
     // unparseable strings.  The guard remains so that future callers that
     // might pass `Raw` values still get reasonable short names instead of
     // fully-qualified namespace paths.
-    if matches!(ty, PhpType::Raw(_)) {
+    if matches!(ty.kind(), TypeKind::Raw(_)) {
         return shorten_type_string_fallback(&ty.to_string());
     }
     let shortened = ty.shorten().to_string();

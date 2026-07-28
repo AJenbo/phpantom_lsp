@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::{find_class_at_offset, resolve_class_keyword};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
@@ -55,8 +55,8 @@ impl Backend {
             // string (e.g. `Collection<User>` → `[User]`) so we can
             // substitute class-level template parameters in the
             // method's parameter and return types.
-            let generic_args: Vec<PhpType> = match &rt.type_string {
-                PhpType::Generic(g) => g.args.clone(),
+            let generic_args: Vec<PhpType> = match &rt.type_string.kind() {
+                TypeKind::Generic(g) => g.args.clone(),
                 _ => {
                     // When the resolved type has no generic annotation
                     // but the class declares template parameters (e.g.
@@ -662,15 +662,15 @@ impl Backend {
 /// Used when a function/method returns a callable type and that return
 /// value is immediately invoked: `makeCallable('1', '2')('test')`.
 ///
-/// - `PhpType::Callable { params, return_type, .. }` (typed callable like
+/// - `TypeKind::Callable { params, return_type, .. }` (typed callable like
 ///   `callable(string): string`) -> params are converted to `ParameterInfo`.
-/// - `PhpType::Named("callable")` or `PhpType::Named("Closure")` (bare
+/// - `PhpType::named("callable")` or `PhpType::named("Closure")` (bare
 ///   callable without parameter specification) -> returns a target with
 ///   `accepts_any_args: true` so diagnostics are suppressed.
 /// - Other types -> returns `None` (not a callable).
 fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarget> {
-    match return_type {
-        PhpType::Callable(c) => {
+    match return_type.kind() {
+        TypeKind::Callable(c) => {
             let (params, return_type) = (&c.params, &c.return_type);
             let parameters: Vec<ParameterInfo> = params
                 .iter()
@@ -694,7 +694,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 ..Default::default()
             })
         }
-        PhpType::Named(name)
+        TypeKind::Named(name)
             if name.eq_ignore_ascii_case("callable") || name.eq_ignore_ascii_case("Closure") =>
         {
             Some(ResolvedCallableTarget {
@@ -704,7 +704,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                 ..Default::default()
             })
         }
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             for member in members {
                 if let Some(target) = callable_type_as_target(member) {
                     return Some(target);
@@ -712,7 +712,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
             }
             None
         }
-        PhpType::Nullable(inner) => callable_type_as_target(inner),
+        TypeKind::Nullable(inner) => callable_type_as_target(inner),
         _ => None,
     }
 }

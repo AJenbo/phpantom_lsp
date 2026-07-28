@@ -117,28 +117,28 @@ impl Backend {
 
             SymbolKind::SelfStaticParent(ssp_kind) => match ssp_kind {
                 SelfStaticParentKind::Self_ | SelfStaticParentKind::Static => current_class
-                    .map(|cc| vec![PhpType::Named(atom(cc.name.as_ref()))])
+                    .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
                     .unwrap_or_default(),
                 SelfStaticParentKind::This => {
                     if let Some(override_cls) =
                         self.resolve_closure_this_override(uri, content, offset)
                     {
-                        vec![PhpType::Named(override_cls.fqn())]
+                        vec![PhpType::named(override_cls.fqn())]
                     } else {
                         current_class
-                            .map(|cc| vec![PhpType::Named(atom(cc.name.as_ref()))])
+                            .map(|cc| vec![PhpType::named(atom(cc.name.as_ref()))])
                             .unwrap_or_default()
                     }
                 }
                 SelfStaticParentKind::Parent => current_class
                     .and_then(|cc| cc.parent_class.as_ref())
-                    .map(|p| vec![PhpType::Named(atom(p.as_ref()))])
+                    .map(|p| vec![PhpType::named(atom(p.as_ref()))])
                     .unwrap_or_default(),
             },
 
             SymbolKind::ClassReference { name, .. } => {
                 // The type *is* the class itself.
-                vec![PhpType::Named(atom(name))]
+                vec![PhpType::named(atom(name))]
             }
 
             SymbolKind::FunctionCall { name, .. } => self
@@ -305,7 +305,7 @@ fn resolve_variable_type_names(
 ) -> Option<PhpType> {
     // $this resolves to the enclosing class.
     if name == "this" {
-        return current_class.map(|cc| PhpType::Named(atom(cc.name.as_ref())));
+        return current_class.map(|cc| PhpType::named(atom(cc.name.as_ref())));
     }
 
     // Delegate to the unified pipeline.

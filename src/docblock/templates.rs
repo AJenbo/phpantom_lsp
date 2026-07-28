@@ -12,7 +12,7 @@ use mago_docblock::document::TagKind;
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
 use super::type_strings::split_type_token;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{TemplateVariance, TypeAliasDef};
 use crate::util::strip_fqn_prefix;
 
@@ -283,35 +283,35 @@ pub(crate) fn collect_template_bindings(
     param_name: &str,
     results: &mut Vec<(String, String)>,
 ) {
-    match ty {
-        PhpType::Named(name) => {
+    match ty.kind() {
+        TypeKind::Named(name) => {
             if let Some(t) = template_params.iter().find(|t| t.as_str() == name) {
                 results.push((t.to_string(), param_name.to_string()));
             }
         }
-        PhpType::Nullable(inner) => {
+        TypeKind::Nullable(inner) => {
             collect_template_bindings(inner, template_params, param_name, results);
         }
-        PhpType::Union(members) | PhpType::Intersection(members) => {
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
             for member in members {
                 collect_template_bindings(member, template_params, param_name, results);
             }
         }
-        PhpType::Array(inner) => {
+        TypeKind::Array(inner) => {
             collect_template_bindings(inner, template_params, param_name, results);
         }
-        PhpType::Generic(g) => {
+        TypeKind::Generic(g) => {
             for arg in &g.args {
                 collect_template_bindings(arg, template_params, param_name, results);
             }
         }
-        PhpType::ClassString(Some(inner))
-        | PhpType::InterfaceString(Some(inner))
-        | PhpType::KeyOf(inner)
-        | PhpType::ValueOf(inner) => {
+        TypeKind::ClassString(Some(inner))
+        | TypeKind::InterfaceString(Some(inner))
+        | TypeKind::KeyOf(inner)
+        | TypeKind::ValueOf(inner) => {
             collect_template_bindings(inner, template_params, param_name, results);
         }
-        PhpType::Callable(c) => {
+        TypeKind::Callable(c) => {
             for p in &c.params {
                 collect_template_bindings(&p.type_hint, template_params, param_name, results);
             }
@@ -319,16 +319,16 @@ pub(crate) fn collect_template_bindings(
                 collect_template_bindings(rt, template_params, param_name, results);
             }
         }
-        PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+        TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
             for entry in entries {
                 collect_template_bindings(&entry.value_type, template_params, param_name, results);
             }
         }
-        PhpType::IndexAccess(target, index) => {
+        TypeKind::IndexAccess(target, index) => {
             collect_template_bindings(target, template_params, param_name, results);
             collect_template_bindings(index, template_params, param_name, results);
         }
-        PhpType::Conditional(c) => {
+        TypeKind::Conditional(c) => {
             collect_template_bindings(&c.condition, template_params, param_name, results);
             collect_template_bindings(&c.then_type, template_params, param_name, results);
             collect_template_bindings(&c.else_type, template_params, param_name, results);
@@ -404,13 +404,13 @@ fn parse_generics_from_description(desc: &str) -> Option<(String, Vec<PhpType>)>
 
     // Parse the type token and extract base name + generic arguments.
     let parsed = PhpType::parse(type_token);
-    match parsed {
-        PhpType::Generic(g) if !g.args.is_empty() => {
+    match parsed.kind() {
+        TypeKind::Generic(g) if !g.args.is_empty() => {
             let base_name = strip_fqn_prefix(&g.name).to_string();
             if base_name.is_empty() {
                 return None;
             }
-            Some((base_name, g.args))
+            Some((base_name, g.args.clone()))
         }
         _ => None,
     }
@@ -556,7 +556,7 @@ fn parse_import_type_alias(rest: &str) -> Option<(String, TypeAliasDef)> {
 /// an instance of whatever class name is passed as that argument.
 ///
 /// This function detects that pattern and produces a
-/// [`PhpType::Conditional`] so that the resolver can substitute the
+/// [`TypeKind::Conditional`] so that the resolver can substitute the
 /// concrete class at call sites.
 ///
 /// Returns `None` if the pattern is not detected, or if
@@ -596,15 +596,15 @@ pub fn synthesize_template_conditional_from_info(
     let ret = return_type?;
 
     // Strip nullable wrapper so that `?T` matches template param `T`.
-    let stripped_name = match ret {
-        PhpType::Nullable(inner) => {
-            if let PhpType::Named(n) = inner.as_ref() {
+    let stripped_name = match ret.kind() {
+        TypeKind::Nullable(inner) => {
+            if let TypeKind::Named(n) = inner.kind() {
                 n.as_str()
             } else {
                 return None;
             }
         }
-        PhpType::Named(n) => n.as_str(),
+        TypeKind::Named(n) => n.as_str(),
         _ => return None,
     };
 
@@ -631,7 +631,7 @@ pub fn synthesize_template_conditional_from_info(
     Some(PhpType::conditional(
         format!("${param_name}"),
         false,
-        PhpType::ClassString(None),
+        PhpType::class_string(None),
         PhpType::mixed(),
         PhpType::mixed(),
     ))
@@ -681,16 +681,16 @@ fn find_all_class_string_param_names_from_info(
 /// Recursively unwraps nullable and union types so that `?class-string<T>`,
 /// `class-string<T>|null`, and `class-string<T>|string` are all matched.
 fn contains_class_string_of(ty: &PhpType, template_name: &str) -> bool {
-    match ty {
-        PhpType::ClassString(Some(inner)) => {
+    match ty.kind() {
+        TypeKind::ClassString(Some(inner)) => {
             // Check if the inner type is exactly the template name.
-            matches!(inner.as_ref(), PhpType::Named(name) if name == template_name)
+            matches!(inner.kind(), TypeKind::Named(name) if name == template_name)
         }
-        PhpType::Nullable(inner) => contains_class_string_of(inner, template_name),
-        PhpType::Union(members) => members
+        TypeKind::Nullable(inner) => contains_class_string_of(inner, template_name),
+        TypeKind::Union(members) => members
             .iter()
             .any(|m| contains_class_string_of(m, template_name)),
-        PhpType::Intersection(members) => members
+        TypeKind::Intersection(members) => members
             .iter()
             .any(|m| contains_class_string_of(m, template_name)),
         _ => false,

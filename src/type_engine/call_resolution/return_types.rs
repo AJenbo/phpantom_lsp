@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::Backend;
 use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::{is_self_or_static, resolve_class_keyword};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 use crate::types::ClassLikeKind;
@@ -190,13 +190,14 @@ fn first_string_literal_arg(args_text: &str) -> Option<String> {
 }
 
 fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option<PhpType> {
-    match ty {
-        PhpType::Named(name) => (name.trim_start_matches('\\')
+    match ty.kind() {
+        TypeKind::Named(name) => (name.trim_start_matches('\\')
             == crate::virtual_members::laravel::SUPPORT_CARBON_FQN)
-            .then(|| PhpType::Named(atom(configured_class))),
-        PhpType::Nullable(inner) => replace_support_carbon_return(inner, configured_class)
-            .map(|inner| PhpType::Nullable(Box::new(inner))),
-        PhpType::Union(members) => {
+            .then(|| PhpType::named(atom(configured_class))),
+        TypeKind::Nullable(inner) => {
+            replace_support_carbon_return(inner, configured_class).map(PhpType::nullable)
+        }
+        TypeKind::Union(members) => {
             let mut replaced = false;
             let members = members
                 .iter()
@@ -210,7 +211,7 @@ fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option
                     },
                 )
                 .collect();
-            replaced.then_some(PhpType::Union(members))
+            replaced.then_some(PhpType::union(members))
         }
         _ => None,
     }
@@ -311,8 +312,8 @@ impl Backend {
                     // Skip self-like args ($this, self, static) because
                     // they refer to the caller's class context which is
                     // not available here.
-                    let class_level_subs: HashMap<String, PhpType> = match &rt.type_string {
-                        PhpType::Generic(g)
+                    let class_level_subs: HashMap<String, PhpType> = match &rt.type_string.kind() {
+                        TypeKind::Generic(g)
                             if !g.args.is_empty()
                                 && !owner.template_params.is_empty()
                                 && !g.args.iter().any(|a| a.is_self_like()) =>
@@ -370,11 +371,11 @@ impl Backend {
                                     owner
                                         .parent_class
                                         .as_ref()
-                                        .map(|p| PhpType::Named(atom(p.as_ref())))
+                                        .map(|p| PhpType::named(atom(p.as_ref())))
                                         .unwrap_or(substituted)
                                 } else if substituted.contains_self_ref() {
-                                    match &rt.type_string {
-                                        PhpType::Generic(_) => {
+                                    match &rt.type_string.kind() {
+                                        TypeKind::Generic(_) => {
                                             substituted.replace_self_with_type(&rt.type_string)
                                         }
                                         _ => substituted.replace_self(&owner.fqn()),
@@ -499,10 +500,10 @@ impl Backend {
                             merged
                                 .parent_class
                                 .as_ref()
-                                .map(|p| PhpType::Named(atom(p.as_ref())))
+                                .map(|p| PhpType::named(atom(p.as_ref())))
                                 .unwrap_or_else(|| ret.clone())
                         } else if ret.is_self_like() {
-                            PhpType::Named(merged.fqn())
+                            PhpType::named(merged.fqn())
                         } else {
                             ret.clone()
                         };
@@ -731,7 +732,7 @@ impl Backend {
 
                 // 2. Resolve the variable's own type.  Closures, arrow
                 //    functions, and first-class callables are all
-                //    inferred as a `PhpType::Callable` (see
+                //    inferred as a `TypeKind::Callable` (see
                 //    `infer_closure_literal_type`), so `$fn`'s embedded
                 //    return type covers `$fn = function(): T {}`,
                 //    `$fn = fn(): T => …`, and `$fn = strlen(...)` /
@@ -888,9 +889,9 @@ impl Backend {
                                     if let Some(resolved_type) =
                                         Backend::resolve_arg_text_to_type(arg_text, ctx)
                                     {
-                                        let unwrapped = match resolved_type {
-                                            PhpType::ClassString(Some(inner)) => *inner,
-                                            _ => resolved_type,
+                                        let unwrapped = match resolved_type.kind() {
+                                            TypeKind::ClassString(Some(inner)) => inner.clone(),
+                                            _ => resolved_type.clone(),
                                         };
                                         crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), unwrapped);
                                     }
@@ -1152,7 +1153,7 @@ impl Backend {
                     if let Some(ref parent_name) = class_info.parent_class {
                         let classes =
                             crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                &PhpType::Named(atom(parent_name.as_ref())),
+                                &PhpType::named(atom(parent_name.as_ref())),
                                 &class_info.fqn(),
                                 all_classes,
                                 class_loader,
@@ -1560,7 +1561,7 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
 
     // Enums: any `EnumName::Case` resolves to the enum type itself.
     if cls.kind == ClassLikeKind::Enum {
-        return Some(PhpType::Named(cls.fqn()));
+        return Some(PhpType::named(cls.fqn()));
     }
 
     // Class constants: look up the constant and use its type hint
@@ -1605,14 +1606,14 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
         || text.starts_with("function(")
         || text.starts_with("function (")
     {
-        return Some(PhpType::Named(atom("Closure")));
+        return Some(PhpType::named(atom("Closure")));
     }
 
     // String literals: "…" or '…'
     if (text.starts_with('"') && text.ends_with('"'))
         || (text.starts_with('\'') && text.ends_with('\''))
     {
-        return Some(PhpType::Named(atom("string")));
+        return Some(PhpType::named(atom("string")));
     }
 
     // null
@@ -1634,7 +1635,7 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
     if (text.starts_with('[') && text.ends_with(']'))
         || (text.starts_with("array(") && text.ends_with(')'))
     {
-        return Some(PhpType::Named(atom("array")));
+        return Some(PhpType::named(atom("array")));
     }
 
     // Numeric literals — try int first, then float.
@@ -1644,7 +1645,7 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
         && numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_')
         && numeric.bytes().any(|b| b.is_ascii_digit())
     {
-        return Some(PhpType::Named(atom("int")));
+        return Some(PhpType::named(atom("int")));
     }
     if !numeric.is_empty()
         && numeric
@@ -1653,7 +1654,7 @@ pub(super) fn resolve_literal_type(text: &str) -> Option<PhpType> {
         && numeric.bytes().filter(|&b| b == b'.').count() == 1
         && numeric.bytes().any(|b| b.is_ascii_digit())
     {
-        return Some(PhpType::Named(atom("float")));
+        return Some(PhpType::named(atom("float")));
     }
 
     None

@@ -11,7 +11,7 @@
 //! Each public function accepts `&PhpType` directly, avoiding a
 //! redundant re-parse when the caller already has a parsed type.
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 
 /// Resolve implicit positional keys in shape entries.
 ///
@@ -46,9 +46,9 @@ fn resolve_shape_keys(entries: &[crate::php_type::ShapeEntry]) -> Vec<crate::php
 /// Returns the shape entries if the (possibly nullable) type is an
 /// array shape, or `None` otherwise.
 fn unwrap_array_shape(ty: &PhpType) -> Option<&[crate::php_type::ShapeEntry]> {
-    match ty {
-        PhpType::ArrayShape(entries) => Some(entries),
-        PhpType::Nullable(inner) => unwrap_array_shape(inner),
+    match ty.kind() {
+        TypeKind::ArrayShape(entries) => Some(entries),
+        TypeKind::Nullable(inner) => unwrap_array_shape(inner),
         _ => None,
     }
 }
@@ -58,12 +58,12 @@ fn unwrap_array_shape(ty: &PhpType) -> Option<&[crate::php_type::ShapeEntry]> {
 /// Returns the shape entries if the (possibly nullable or intersected)
 /// type contains an object shape, or `None` otherwise.
 fn unwrap_object_shape(ty: &PhpType) -> Option<&[crate::php_type::ShapeEntry]> {
-    match ty {
-        PhpType::ObjectShape(entries) => Some(entries),
-        PhpType::Nullable(inner) => unwrap_object_shape(inner),
+    match ty.kind() {
+        TypeKind::ObjectShape(entries) => Some(entries),
+        TypeKind::Nullable(inner) => unwrap_object_shape(inner),
         // `object{foo: int, bar: string}&\stdClass` parses as an
         // intersection; check each member.
-        PhpType::Intersection(members) => members.iter().find_map(|m| unwrap_object_shape(m)),
+        TypeKind::Intersection(members) => members.iter().find_map(|m| unwrap_object_shape(m)),
         _ => None,
     }
 }

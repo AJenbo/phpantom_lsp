@@ -25,26 +25,26 @@ impl PhpType {
     /// // → Generic("App\\Collection", [Named("int"), Named("App\\User")]) | Named("null")
     /// ```
     pub fn resolve_names(&self, resolver: &dyn Fn(&str) -> String) -> PhpType {
-        match self {
-            PhpType::Named(s) => {
+        match self.kind() {
+            TypeKind::Named(s) => {
                 if is_keyword_type(s) {
-                    PhpType::Named(*s)
+                    PhpType::named(*s)
                 } else {
-                    PhpType::Named(atom(&resolver(s)))
+                    PhpType::named(atom(&resolver(s)))
                 }
             }
 
-            PhpType::Nullable(inner) => PhpType::Nullable(Box::new(inner.resolve_names(resolver))),
+            TypeKind::Nullable(inner) => PhpType::nullable(inner.resolve_names(resolver)),
 
-            PhpType::Union(types) => {
-                PhpType::Union(types.iter().map(|t| t.resolve_names(resolver)).collect())
+            TypeKind::Union(types) => {
+                PhpType::union(types.iter().map(|t| t.resolve_names(resolver)).collect())
             }
 
-            PhpType::Intersection(types) => {
-                PhpType::Intersection(types.iter().map(|t| t.resolve_names(resolver)).collect())
+            TypeKind::Intersection(types) => {
+                PhpType::intersection(types.iter().map(|t| t.resolve_names(resolver)).collect())
             }
 
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 let resolved_name = if is_keyword_type(&g.name) {
                     g.name
                 } else {
@@ -56,9 +56,9 @@ impl PhpType {
                 )
             }
 
-            PhpType::Array(inner) => PhpType::Array(Box::new(inner.resolve_names(resolver))),
+            TypeKind::Array(inner) => PhpType::array_of(inner.resolve_names(resolver)),
 
-            PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -69,7 +69,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -80,7 +80,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
                 kind: if is_keyword_type(&c.kind) {
                     c.kind
                 } else {
@@ -96,40 +96,40 @@ impl PhpType {
                     })
                     .collect(),
                 return_type: c.return_type.as_ref().map(|rt| rt.resolve_names(resolver)),
-            })),
+            }),
 
-            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+            TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
                 param: c.param,
                 negated: c.negated,
                 condition: c.condition.resolve_names(resolver),
                 then_type: c.then_type.resolve_names(resolver),
                 else_type: c.else_type.resolve_names(resolver),
-            })),
+            }),
 
-            PhpType::ClassString(inner) => {
-                PhpType::ClassString(inner.as_ref().map(|i| Box::new(i.resolve_names(resolver))))
+            TypeKind::ClassString(inner) => {
+                PhpType::class_string(inner.as_ref().map(|i| i.resolve_names(resolver)))
             }
 
-            PhpType::InterfaceString(inner) => PhpType::InterfaceString(
-                inner.as_ref().map(|i| Box::new(i.resolve_names(resolver))),
-            ),
+            TypeKind::InterfaceString(inner) => {
+                PhpType::interface_string(inner.as_ref().map(|i| i.resolve_names(resolver)))
+            }
 
-            PhpType::KeyOf(inner) => PhpType::KeyOf(Box::new(inner.resolve_names(resolver))),
+            TypeKind::KeyOf(inner) => PhpType::key_of(inner.resolve_names(resolver)),
 
-            PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(inner.resolve_names(resolver))),
+            TypeKind::ValueOf(inner) => PhpType::value_of(inner.resolve_names(resolver)),
 
-            PhpType::IntRange(..) => self.clone(),
+            TypeKind::IntRange(..) => self.clone(),
 
-            PhpType::IndexAccess(target, index) => PhpType::IndexAccess(
-                Box::new(target.resolve_names(resolver)),
-                Box::new(index.resolve_names(resolver)),
+            TypeKind::IndexAccess(target, index) => PhpType::index_access(
+                target.resolve_names(resolver),
+                index.resolve_names(resolver),
             ),
 
             // Literals and raw types can't be structurally resolved.
-            PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
+            TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
 
-            PhpType::StaticType(s) => PhpType::StaticType(atom(&resolver(s))),
-            PhpType::ThisType(s) => PhpType::ThisType(atom(&resolver(s))),
+            TypeKind::StaticType(s) => PhpType::static_type(atom(&resolver(s))),
+            TypeKind::ThisType(s) => PhpType::this_type(atom(&resolver(s))),
         }
     }
 
@@ -146,25 +146,25 @@ impl PhpType {
     /// For example, `App\Models\User|null` becomes `User|null`, and
     /// `array<int, App\Models\User>` becomes `array<int, User>`.
     pub fn shorten(&self) -> PhpType {
-        match self {
-            PhpType::Named(s) => PhpType::Named(atom(Self::short_name_of(s))),
+        match self.kind() {
+            TypeKind::Named(s) => PhpType::named(atom(Self::short_name_of(s))),
 
-            PhpType::Nullable(inner) => PhpType::Nullable(Box::new(inner.shorten())),
+            TypeKind::Nullable(inner) => PhpType::nullable(inner.shorten()),
 
-            PhpType::Union(types) => PhpType::Union(types.iter().map(|t| t.shorten()).collect()),
+            TypeKind::Union(types) => PhpType::union(types.iter().map(|t| t.shorten()).collect()),
 
-            PhpType::Intersection(types) => {
-                PhpType::Intersection(types.iter().map(|t| t.shorten()).collect())
+            TypeKind::Intersection(types) => {
+                PhpType::intersection(types.iter().map(|t| t.shorten()).collect())
             }
 
-            PhpType::Generic(g) => PhpType::generic(
+            TypeKind::Generic(g) => PhpType::generic(
                 Self::short_name_of(&g.name),
                 g.args.iter().map(|a| a.shorten()).collect(),
             ),
 
-            PhpType::Array(inner) => PhpType::Array(Box::new(inner.shorten())),
+            TypeKind::Array(inner) => PhpType::array_of(inner.shorten()),
 
-            PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -175,7 +175,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -186,7 +186,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
                 kind: atom(Self::short_name_of(&c.kind)),
                 params: c
                     .params
@@ -198,40 +198,40 @@ impl PhpType {
                     })
                     .collect(),
                 return_type: c.return_type.as_ref().map(|rt| rt.shorten()),
-            })),
+            }),
 
-            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+            TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
                 param: c.param,
                 negated: c.negated,
                 condition: c.condition.shorten(),
                 then_type: c.then_type.shorten(),
                 else_type: c.else_type.shorten(),
-            })),
+            }),
 
-            PhpType::ClassString(inner) => {
-                PhpType::ClassString(inner.as_ref().map(|i| Box::new(i.shorten())))
+            TypeKind::ClassString(inner) => {
+                PhpType::class_string(inner.as_ref().map(|i| i.shorten()))
             }
 
-            PhpType::InterfaceString(inner) => {
-                PhpType::InterfaceString(inner.as_ref().map(|i| Box::new(i.shorten())))
+            TypeKind::InterfaceString(inner) => {
+                PhpType::interface_string(inner.as_ref().map(|i| i.shorten()))
             }
 
-            PhpType::KeyOf(inner) => PhpType::KeyOf(Box::new(inner.shorten())),
+            TypeKind::KeyOf(inner) => PhpType::key_of(inner.shorten()),
 
-            PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(inner.shorten())),
+            TypeKind::ValueOf(inner) => PhpType::value_of(inner.shorten()),
 
-            PhpType::IntRange(..) => self.clone(),
+            TypeKind::IntRange(..) => self.clone(),
 
-            PhpType::IndexAccess(target, index) => {
-                PhpType::IndexAccess(Box::new(target.shorten()), Box::new(index.shorten()))
+            TypeKind::IndexAccess(target, index) => {
+                PhpType::index_access(target.shorten(), index.shorten())
             }
 
             // Literals carry no class name; raw types cannot be
             // structurally shortened.
-            PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
+            TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
 
-            PhpType::StaticType(s) => PhpType::StaticType(atom(Self::short_name_of(s))),
-            PhpType::ThisType(s) => PhpType::ThisType(atom(Self::short_name_of(s))),
+            TypeKind::StaticType(s) => PhpType::static_type(atom(Self::short_name_of(s))),
+            TypeKind::ThisType(s) => PhpType::this_type(atom(Self::short_name_of(s))),
         }
     }
 
@@ -250,7 +250,7 @@ impl PhpType {
     /// assert_eq!(replaced.to_string(), "App\\User | null");
     /// ```
     pub fn replace_self(&self, class_name: &str) -> PhpType {
-        self.replace_self_with_type(&PhpType::Named(atom(class_name)))
+        self.replace_self_with_type(&PhpType::named(atom(class_name)))
     }
 
     /// Resolve relative class-reference keywords to concrete class names,
@@ -269,10 +269,10 @@ impl PhpType {
     }
 
     /// Like [`resolve_self_refs`] but produces bounded static types:
-    /// `static` → [`StaticType(bound)`](PhpType::StaticType),
-    /// `$this` → [`ThisType(bound)`](PhpType::ThisType),
-    /// `self` → [`Named(class_name)`](PhpType::Named),
-    /// `parent` → [`Named(parent_class)`](PhpType::Named).
+    /// `static` → [`StaticType(bound)`](TypeKind::StaticType),
+    /// `$this` → [`ThisType(bound)`](TypeKind::ThisType),
+    /// `self` → [`Named(class_name)`](TypeKind::Named),
+    /// `parent` → [`Named(parent_class)`](TypeKind::Named).
     ///
     /// Use this when the caller needs to preserve the late-static-binding
     /// distinction rather than flattening everything to a concrete class.
@@ -281,43 +281,43 @@ impl PhpType {
         class_name: &str,
         parent_class: Option<&str>,
     ) -> PhpType {
-        match self {
-            PhpType::Named(s) if is_self_ref_name(s) || s.eq_ignore_ascii_case("parent") => {
+        match self.kind() {
+            TypeKind::Named(s) if is_self_ref_name(s) || s.eq_ignore_ascii_case("parent") => {
                 if s.eq_ignore_ascii_case("static") {
-                    PhpType::StaticType(atom(class_name))
+                    PhpType::static_type(atom(class_name))
                 } else if s.eq_ignore_ascii_case("$this") {
-                    PhpType::ThisType(atom(class_name))
+                    PhpType::this_type(atom(class_name))
                 } else if s.eq_ignore_ascii_case("parent") {
                     match parent_class {
-                        Some(p) => PhpType::Named(atom(p)),
+                        Some(p) => PhpType::named(atom(p)),
                         None => self.clone(),
                     }
                 } else {
-                    PhpType::Named(atom(class_name))
+                    PhpType::named(atom(class_name))
                 }
             }
-            PhpType::Named(_)
-            | PhpType::StaticType(_)
-            | PhpType::ThisType(_)
-            | PhpType::Literal(_)
-            | PhpType::Raw(_)
-            | PhpType::IntRange(..) => self.clone(),
-            PhpType::Nullable(inner) => PhpType::Nullable(Box::new(
-                inner.resolve_self_refs_bounded(class_name, parent_class),
-            )),
-            PhpType::Union(types) => PhpType::Union(
+            TypeKind::Named(_)
+            | TypeKind::StaticType(_)
+            | TypeKind::ThisType(_)
+            | TypeKind::Literal(_)
+            | TypeKind::Raw(_)
+            | TypeKind::IntRange(..) => self.clone(),
+            TypeKind::Nullable(inner) => {
+                PhpType::nullable(inner.resolve_self_refs_bounded(class_name, parent_class))
+            }
+            TypeKind::Union(types) => PhpType::union(
                 types
                     .iter()
                     .map(|t| t.resolve_self_refs_bounded(class_name, parent_class))
                     .collect(),
             ),
-            PhpType::Intersection(types) => PhpType::Intersection(
+            TypeKind::Intersection(types) => PhpType::intersection(
                 types
                     .iter()
                     .map(|t| t.resolve_self_refs_bounded(class_name, parent_class))
                     .collect(),
             ),
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 let resolved_name = if is_self_ref_name(&g.name) {
                     atom(class_name)
                 } else if g.name.eq_ignore_ascii_case("parent") {
@@ -333,20 +333,20 @@ impl PhpType {
                         .collect(),
                 )
             }
-            PhpType::Array(inner) => PhpType::Array(Box::new(
-                inner.resolve_self_refs_bounded(class_name, parent_class),
-            )),
-            PhpType::ClassString(inner) => PhpType::ClassString(
+            TypeKind::Array(inner) => {
+                PhpType::array_of(inner.resolve_self_refs_bounded(class_name, parent_class))
+            }
+            TypeKind::ClassString(inner) => PhpType::class_string(
                 inner
                     .as_ref()
-                    .map(|t| Box::new(t.resolve_self_refs_bounded(class_name, parent_class))),
+                    .map(|t| t.resolve_self_refs_bounded(class_name, parent_class)),
             ),
-            PhpType::InterfaceString(inner) => PhpType::InterfaceString(
+            TypeKind::InterfaceString(inner) => PhpType::interface_string(
                 inner
                     .as_ref()
-                    .map(|t| Box::new(t.resolve_self_refs_bounded(class_name, parent_class))),
+                    .map(|t| t.resolve_self_refs_bounded(class_name, parent_class)),
             ),
-            PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
                 entries
                     .iter()
                     .map(|e| super::ShapeEntry {
@@ -358,7 +358,7 @@ impl PhpType {
                     })
                     .collect(),
             ),
-            PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
                 entries
                     .iter()
                     .map(|e| super::ShapeEntry {
@@ -370,7 +370,7 @@ impl PhpType {
                     })
                     .collect(),
             ),
-            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
                 kind: c.kind,
                 params: c
                     .params
@@ -387,8 +387,8 @@ impl PhpType {
                     .return_type
                     .as_ref()
                     .map(|r| r.resolve_self_refs_bounded(class_name, parent_class)),
-            })),
-            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+            }),
+            TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
                 param: c.param,
                 negated: c.negated,
                 condition: c
@@ -400,16 +400,16 @@ impl PhpType {
                 else_type: c
                     .else_type
                     .resolve_self_refs_bounded(class_name, parent_class),
-            })),
-            PhpType::KeyOf(inner) => PhpType::KeyOf(Box::new(
-                inner.resolve_self_refs_bounded(class_name, parent_class),
-            )),
-            PhpType::ValueOf(inner) => PhpType::ValueOf(Box::new(
-                inner.resolve_self_refs_bounded(class_name, parent_class),
-            )),
-            PhpType::IndexAccess(base, index) => PhpType::IndexAccess(
-                Box::new(base.resolve_self_refs_bounded(class_name, parent_class)),
-                Box::new(index.resolve_self_refs_bounded(class_name, parent_class)),
+            }),
+            TypeKind::KeyOf(inner) => {
+                PhpType::key_of(inner.resolve_self_refs_bounded(class_name, parent_class))
+            }
+            TypeKind::ValueOf(inner) => {
+                PhpType::value_of(inner.resolve_self_refs_bounded(class_name, parent_class))
+            }
+            TypeKind::IndexAccess(base, index) => PhpType::index_access(
+                base.resolve_self_refs_bounded(class_name, parent_class),
+                index.resolve_self_refs_bounded(class_name, parent_class),
             ),
         }
     }
@@ -419,25 +419,25 @@ impl PhpType {
     /// inherited methods carry the declaring class's identity for `self`
     /// while preserving `static` for late-static-binding resolution.
     pub fn replace_bare_self(&self, class_name: &str) -> PhpType {
-        match self {
-            PhpType::Named(s) if s.eq_ignore_ascii_case("self") => PhpType::Named(atom(class_name)),
-            PhpType::Named(_) | PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
-            PhpType::Nullable(inner) => {
-                PhpType::Nullable(Box::new(inner.replace_bare_self(class_name)))
+        match self.kind() {
+            TypeKind::Named(s) if s.eq_ignore_ascii_case("self") => {
+                PhpType::named(atom(class_name))
             }
-            PhpType::Union(types) => PhpType::Union(
+            TypeKind::Named(_) | TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
+            TypeKind::Nullable(inner) => PhpType::nullable(inner.replace_bare_self(class_name)),
+            TypeKind::Union(types) => PhpType::union(
                 types
                     .iter()
                     .map(|t| t.replace_bare_self(class_name))
                     .collect(),
             ),
-            PhpType::Intersection(types) => PhpType::Intersection(
+            TypeKind::Intersection(types) => PhpType::intersection(
                 types
                     .iter()
                     .map(|t| t.replace_bare_self(class_name))
                     .collect(),
             ),
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 let resolved_name = if g.name.eq_ignore_ascii_case("self") {
                     atom(class_name)
                 } else {
@@ -451,7 +451,7 @@ impl PhpType {
                         .collect(),
                 )
             }
-            PhpType::Array(inner) => PhpType::Array(Box::new(inner.replace_bare_self(class_name))),
+            TypeKind::Array(inner) => PhpType::array_of(inner.replace_bare_self(class_name)),
             _ => self.clone(),
         }
     }
@@ -459,16 +459,16 @@ impl PhpType {
     /// Returns `true` when this type contains the bare `self` keyword
     /// (not `static` or `$this`).
     pub fn contains_bare_self(&self) -> bool {
-        match self {
-            PhpType::Named(s) => s.eq_ignore_ascii_case("self"),
-            PhpType::Nullable(inner) => inner.contains_bare_self(),
-            PhpType::Union(types) | PhpType::Intersection(types) => {
+        match self.kind() {
+            TypeKind::Named(s) => s.eq_ignore_ascii_case("self"),
+            TypeKind::Nullable(inner) => inner.contains_bare_self(),
+            TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 types.iter().any(|t| t.contains_bare_self())
             }
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 g.name.eq_ignore_ascii_case("self") || g.args.iter().any(|a| a.contains_bare_self())
             }
-            PhpType::Array(inner) => inner.contains_bare_self(),
+            TypeKind::Array(inner) => inner.contains_bare_self(),
             _ => false,
         }
     }
@@ -477,39 +477,39 @@ impl PhpType {
     /// `$this` references that [`replace_self`] / [`replace_self_with_type`]
     /// would replace.
     pub fn contains_self_ref(&self) -> bool {
-        match self {
-            PhpType::Named(_) => self.is_self_ref(),
-            PhpType::Nullable(inner) => inner.contains_self_ref(),
-            PhpType::Union(types) | PhpType::Intersection(types) => {
+        match self.kind() {
+            TypeKind::Named(_) => self.is_self_ref(),
+            TypeKind::Nullable(inner) => inner.contains_self_ref(),
+            TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 types.iter().any(|t| t.contains_self_ref())
             }
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 is_self_ref_name(&g.name) || g.args.iter().any(|a| a.contains_self_ref())
             }
-            PhpType::Array(inner) => inner.contains_self_ref(),
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+            TypeKind::Array(inner) => inner.contains_self_ref(),
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 entries.iter().any(|e| e.value_type.contains_self_ref())
             }
-            PhpType::Callable(c) => {
+            TypeKind::Callable(c) => {
                 c.params.iter().any(|p| p.type_hint.contains_self_ref())
                     || c.return_type
                         .as_ref()
                         .is_some_and(|r| r.contains_self_ref())
             }
-            PhpType::Conditional(c) => {
+            TypeKind::Conditional(c) => {
                 c.condition.contains_self_ref()
                     || c.then_type.contains_self_ref()
                     || c.else_type.contains_self_ref()
             }
-            PhpType::ClassString(inner) | PhpType::InterfaceString(inner) => {
+            TypeKind::ClassString(inner) | TypeKind::InterfaceString(inner) => {
                 inner.as_ref().is_some_and(|t| t.contains_self_ref())
             }
-            PhpType::KeyOf(inner) | PhpType::ValueOf(inner) => inner.contains_self_ref(),
-            PhpType::IndexAccess(base, index) => {
+            TypeKind::KeyOf(inner) | TypeKind::ValueOf(inner) => inner.contains_self_ref(),
+            TypeKind::IndexAccess(base, index) => {
                 base.contains_self_ref() || index.contains_self_ref()
             }
-            PhpType::StaticType(_) | PhpType::ThisType(_) => false,
-            PhpType::Literal(_) | PhpType::Raw(_) | PhpType::IntRange(_, _) => false,
+            TypeKind::StaticType(_) | TypeKind::ThisType(_) => false,
+            TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => false,
         }
     }
 
@@ -517,12 +517,12 @@ impl PhpType {
     /// with the given [`PhpType`].
     ///
     /// This is the structured counterpart of [`replace_self`]: instead of
-    /// replacing with a bare class name (`PhpType::Named(name)`), it
+    /// replacing with a bare class name (`PhpType::named(name)`), it
     /// substitutes a full type expression.  This preserves generic
     /// parameters when the receiver is a generic type like
     /// `Builder<Article>`.
     ///
-    /// When `replacement` is `PhpType::Generic("Builder", [Named("Article")])`
+    /// When `replacement` is `TypeKind::Generic("Builder", [Named("Article")])`
     /// and the return type is `Named("static")`, the result is the full
     /// generic type.  When the return type is `Generic("static", [args])`,
     /// the replacement's base name is used and the return type's own args
@@ -530,18 +530,18 @@ impl PhpType {
     pub fn replace_self_with_type(&self, replacement: &PhpType) -> PhpType {
         // Extract the base class name from the replacement for use in
         // Generic nodes where only the name part is replaced.
-        let replacement_name = match replacement {
-            PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => n.as_str(),
-            PhpType::Generic(g) => g.name.as_str(),
+        let replacement_name = match replacement.kind() {
+            TypeKind::Named(n) | TypeKind::StaticType(n) | TypeKind::ThisType(n) => n.as_str(),
+            TypeKind::Generic(g) => g.name.as_str(),
             _ => "",
         };
-        match self {
-            PhpType::Named(s) if self.is_self_ref() => {
-                if let PhpType::Named(name) = replacement {
+        match self.kind() {
+            TypeKind::Named(s) if self.is_self_ref() => {
+                if let TypeKind::Named(name) = replacement.kind() {
                     if s.eq_ignore_ascii_case("static") {
-                        PhpType::StaticType(*name)
+                        PhpType::static_type(*name)
                     } else if s.eq_ignore_ascii_case("$this") {
-                        PhpType::ThisType(*name)
+                        PhpType::this_type(*name)
                     } else {
                         replacement.clone()
                     }
@@ -550,27 +550,27 @@ impl PhpType {
                 }
             }
 
-            PhpType::Named(_) | PhpType::Literal(_) | PhpType::Raw(_) => self.clone(),
+            TypeKind::Named(_) | TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
 
-            PhpType::Nullable(inner) => {
-                PhpType::Nullable(Box::new(inner.replace_self_with_type(replacement)))
+            TypeKind::Nullable(inner) => {
+                PhpType::nullable(inner.replace_self_with_type(replacement))
             }
 
-            PhpType::Union(types) => PhpType::Union(
+            TypeKind::Union(types) => PhpType::union(
                 types
                     .iter()
                     .map(|t| t.replace_self_with_type(replacement))
                     .collect(),
             ),
 
-            PhpType::Intersection(types) => PhpType::Intersection(
+            TypeKind::Intersection(types) => PhpType::intersection(
                 types
                     .iter()
                     .map(|t| t.replace_self_with_type(replacement))
                     .collect(),
             ),
 
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 let resolved_name = if is_self_ref_name(&g.name) {
                     atom(replacement_name)
                 } else {
@@ -585,11 +585,9 @@ impl PhpType {
                 )
             }
 
-            PhpType::Array(inner) => {
-                PhpType::Array(Box::new(inner.replace_self_with_type(replacement)))
-            }
+            TypeKind::Array(inner) => PhpType::array_of(inner.replace_self_with_type(replacement)),
 
-            PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -600,7 +598,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -611,7 +609,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
                 kind: c.kind,
                 params: c
                     .params
@@ -626,44 +624,42 @@ impl PhpType {
                     .return_type
                     .as_ref()
                     .map(|r| r.replace_self_with_type(replacement)),
-            })),
+            }),
 
-            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+            TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
                 param: c.param,
                 negated: c.negated,
                 condition: c.condition.replace_self_with_type(replacement),
                 then_type: c.then_type.replace_self_with_type(replacement),
                 else_type: c.else_type.replace_self_with_type(replacement),
-            })),
+            }),
 
-            PhpType::ClassString(inner) => PhpType::ClassString(
+            TypeKind::ClassString(inner) => PhpType::class_string(
                 inner
                     .as_ref()
-                    .map(|t| Box::new(t.replace_self_with_type(replacement))),
+                    .map(|t| t.replace_self_with_type(replacement)),
             ),
 
-            PhpType::InterfaceString(inner) => PhpType::InterfaceString(
+            TypeKind::InterfaceString(inner) => PhpType::interface_string(
                 inner
                     .as_ref()
-                    .map(|t| Box::new(t.replace_self_with_type(replacement))),
+                    .map(|t| t.replace_self_with_type(replacement)),
             ),
 
-            PhpType::KeyOf(inner) => {
-                PhpType::KeyOf(Box::new(inner.replace_self_with_type(replacement)))
+            TypeKind::KeyOf(inner) => PhpType::key_of(inner.replace_self_with_type(replacement)),
+
+            TypeKind::ValueOf(inner) => {
+                PhpType::value_of(inner.replace_self_with_type(replacement))
             }
 
-            PhpType::ValueOf(inner) => {
-                PhpType::ValueOf(Box::new(inner.replace_self_with_type(replacement)))
-            }
+            TypeKind::IntRange(..) => self.clone(),
 
-            PhpType::IntRange(..) => self.clone(),
-
-            PhpType::IndexAccess(base, index) => PhpType::IndexAccess(
-                Box::new(base.replace_self_with_type(replacement)),
-                Box::new(index.replace_self_with_type(replacement)),
+            TypeKind::IndexAccess(base, index) => PhpType::index_access(
+                base.replace_self_with_type(replacement),
+                index.replace_self_with_type(replacement),
             ),
 
-            PhpType::StaticType(_) | PhpType::ThisType(_) => self.clone(),
+            TypeKind::StaticType(_) | TypeKind::ThisType(_) => self.clone(),
         }
     }
 
@@ -692,8 +688,8 @@ impl PhpType {
         if subs.is_empty() {
             return self.clone();
         }
-        match self {
-            PhpType::Named(s) => {
+        match self.kind() {
+            TypeKind::Named(s) => {
                 if let Some(replacement) = subs.get(s.as_str()) {
                     replacement.clone()
                 } else {
@@ -701,38 +697,37 @@ impl PhpType {
                 }
             }
 
-            PhpType::Literal(_) | PhpType::Raw(_) | PhpType::IntRange(_, _) => self.clone(),
+            TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => self.clone(),
 
-            PhpType::StaticType(_) | PhpType::ThisType(_) => self.clone(),
+            TypeKind::StaticType(_) | TypeKind::ThisType(_) => self.clone(),
 
-            PhpType::Nullable(inner) => {
+            TypeKind::Nullable(inner) => {
                 let resolved = inner.substitute(subs);
                 // If the substitution produced a union or nullable,
                 // don't double-wrap.
-                match &resolved {
-                    PhpType::Nullable(_) => resolved,
-                    PhpType::Union(members) => {
+                match &resolved.kind() {
+                    TypeKind::Nullable(_) => resolved,
+                    TypeKind::Union(members) => {
                         // Already nullable if it contains null
                         if members.iter().any(
-                            |m| matches!(m, PhpType::Named(n) if n.eq_ignore_ascii_case("null")),
+                            |m| matches!(m.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case("null")),
                         ) {
                             resolved
                         } else {
-                            PhpType::Nullable(Box::new(resolved))
-                        }
+                            PhpType::nullable(resolved)               }
                     }
-                    _ => PhpType::Nullable(Box::new(resolved)),
+                    _ => PhpType::nullable(resolved),
                 }
             }
 
-            PhpType::Union(types) => {
+            TypeKind::Union(types) => {
                 let resolved: Vec<PhpType> = types.iter().map(|t| t.substitute(subs)).collect();
                 // Flatten any nested unions produced by substitution.
                 let mut flat = Vec::with_capacity(resolved.len());
                 for t in resolved {
-                    match t {
-                        PhpType::Union(inner) => flat.extend(inner.into_vec()),
-                        other => flat.push(other),
+                    match t.kind() {
+                        TypeKind::Union(inner) => flat.extend(inner.iter().cloned()),
+                        _ => flat.push(t),
                     }
                 }
                 if flat.len() == 1 {
@@ -742,13 +737,13 @@ impl PhpType {
                 }
             }
 
-            PhpType::Intersection(types) => {
+            TypeKind::Intersection(types) => {
                 let resolved: Vec<PhpType> = types.iter().map(|t| t.substitute(subs)).collect();
                 let mut flat = Vec::with_capacity(resolved.len());
                 for t in resolved {
-                    match t {
-                        PhpType::Intersection(inner) => flat.extend(inner.into_vec()),
-                        other => flat.push(other),
+                    match t.kind() {
+                        TypeKind::Intersection(inner) => flat.extend(inner.iter().cloned()),
+                        _ => flat.push(t),
                     }
                 }
                 if flat.len() == 1 {
@@ -758,11 +753,11 @@ impl PhpType {
                 }
             }
 
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 // The base name might itself be a template parameter.
                 if let Some(replacement) = subs.get(g.name.as_str()) {
-                    match replacement {
-                        PhpType::Named(n) => PhpType::generic_atom(
+                    match replacement.kind() {
+                        TypeKind::Named(n) => PhpType::generic_atom(
                             *n,
                             g.args.iter().map(|a| a.substitute(subs)).collect(),
                         ),
@@ -770,7 +765,7 @@ impl PhpType {
                         // original generic args (substituted).  The
                         // replacement's own args are discarded because
                         // the source type provides its own parameters.
-                        PhpType::Generic(base) => PhpType::generic_atom(
+                        TypeKind::Generic(base) => PhpType::generic_atom(
                             base.name,
                             g.args.iter().map(|a| a.substitute(subs)).collect(),
                         ),
@@ -787,9 +782,9 @@ impl PhpType {
                 }
             }
 
-            PhpType::Array(inner) => PhpType::Array(Box::new(inner.substitute(subs))),
+            TypeKind::Array(inner) => PhpType::array_of(inner.substitute(subs)),
 
-            PhpType::ArrayShape(entries) => PhpType::ArrayShape(
+            TypeKind::ArrayShape(entries) => PhpType::array_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -800,7 +795,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::ObjectShape(entries) => PhpType::ObjectShape(
+            TypeKind::ObjectShape(entries) => PhpType::object_shape(
                 entries
                     .iter()
                     .map(|e| ShapeEntry {
@@ -811,7 +806,7 @@ impl PhpType {
                     .collect(),
             ),
 
-            PhpType::Callable(c) => PhpType::Callable(Box::new(CallableType {
+            TypeKind::Callable(c) => PhpType::callable_type(CallableType {
                 kind: c.kind,
                 params: c
                     .params
@@ -823,35 +818,35 @@ impl PhpType {
                     })
                     .collect(),
                 return_type: c.return_type.as_ref().map(|r| r.substitute(subs)),
-            })),
+            }),
 
-            PhpType::Conditional(c) => PhpType::Conditional(Box::new(ConditionalType {
+            TypeKind::Conditional(c) => PhpType::conditional_type(ConditionalType {
                 param: c.param,
                 negated: c.negated,
                 condition: c.condition.substitute(subs),
                 then_type: c.then_type.substitute(subs),
                 else_type: c.else_type.substitute(subs),
-            })),
+            }),
 
-            PhpType::ClassString(inner) => {
-                PhpType::ClassString(inner.as_ref().map(|t| Box::new(t.substitute(subs))))
+            TypeKind::ClassString(inner) => {
+                PhpType::class_string(inner.as_ref().map(|t| t.substitute(subs)))
             }
 
-            PhpType::InterfaceString(inner) => {
-                PhpType::InterfaceString(inner.as_ref().map(|t| Box::new(t.substitute(subs))))
+            TypeKind::InterfaceString(inner) => {
+                PhpType::interface_string(inner.as_ref().map(|t| t.substitute(subs)))
             }
 
-            PhpType::KeyOf(inner) => {
+            TypeKind::KeyOf(inner) => {
                 let resolved = inner.substitute(subs);
                 evaluate_key_of(&resolved)
             }
 
-            PhpType::ValueOf(inner) => {
+            TypeKind::ValueOf(inner) => {
                 let resolved = inner.substitute(subs);
                 evaluate_value_of(&resolved)
             }
 
-            PhpType::IndexAccess(base, index) => {
+            TypeKind::IndexAccess(base, index) => {
                 let resolved_base = base.substitute(subs);
                 let resolved_index = index.substitute(subs);
                 evaluate_index_access(&resolved_base, &resolved_index)
@@ -900,22 +895,22 @@ impl PhpType {
 
     /// Recursive helper for [`extract_class_names`].
     fn collect_class_names(&self, names: &mut Vec<String>) {
-        match self {
-            PhpType::Named(s) => {
+        match self.kind() {
+            TypeKind::Named(s) => {
                 if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
                     names.push(s.to_string());
                 }
             }
 
-            PhpType::Nullable(inner) => inner.collect_class_names(names),
+            TypeKind::Nullable(inner) => inner.collect_class_names(names),
 
-            PhpType::Union(types) | PhpType::Intersection(types) => {
+            TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 for t in types {
                     t.collect_class_names(names);
                 }
             }
 
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 if !is_keyword_type(&g.name)
                     && !g.name.is_empty()
                     && !names.iter().any(|n| n == g.name.as_str())
@@ -927,15 +922,15 @@ impl PhpType {
                 }
             }
 
-            PhpType::Array(inner) => inner.collect_class_names(names),
+            TypeKind::Array(inner) => inner.collect_class_names(names),
 
-            PhpType::ArrayShape(entries) | PhpType::ObjectShape(entries) => {
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => {
                 for e in entries {
                     e.value_type.collect_class_names(names);
                 }
             }
 
-            PhpType::Callable(c) => {
+            TypeKind::Callable(c) => {
                 for p in &c.params {
                     p.type_hint.collect_class_names(names);
                 }
@@ -944,40 +939,40 @@ impl PhpType {
                 }
             }
 
-            PhpType::ClassString(inner) => {
+            TypeKind::ClassString(inner) => {
                 if let Some(t) = inner {
                     t.collect_class_names(names);
                 }
             }
 
-            PhpType::InterfaceString(inner) => {
+            TypeKind::InterfaceString(inner) => {
                 if let Some(t) = inner {
                     t.collect_class_names(names);
                 }
             }
 
-            PhpType::KeyOf(inner) | PhpType::ValueOf(inner) => {
+            TypeKind::KeyOf(inner) | TypeKind::ValueOf(inner) => {
                 inner.collect_class_names(names);
             }
 
-            PhpType::IndexAccess(base, index) => {
+            TypeKind::IndexAccess(base, index) => {
                 base.collect_class_names(names);
                 index.collect_class_names(names);
             }
 
-            PhpType::Conditional(c) => {
+            TypeKind::Conditional(c) => {
                 c.condition.collect_class_names(names);
                 c.then_type.collect_class_names(names);
                 c.else_type.collect_class_names(names);
             }
 
-            PhpType::StaticType(s) | PhpType::ThisType(s) => {
+            TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 if !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
                     names.push(s.to_string());
                 }
             }
 
-            PhpType::Literal(_) | PhpType::Raw(_) | PhpType::IntRange(_, _) => {}
+            TypeKind::Literal(_) | TypeKind::Raw(_) | TypeKind::IntRange(_, _) => {}
         }
     }
 
@@ -987,8 +982,8 @@ impl PhpType {
     /// wrappers. Does not recurse into generic args, callable
     /// params/return, shapes, class-string inner types, etc.
     fn collect_top_level_class_names(&self, names: &mut Vec<String>) {
-        match self {
-            PhpType::Named(s)
+        match self.kind() {
+            TypeKind::Named(s)
                 if !is_keyword_type(s)
                     && !s.is_empty()
                     && !names.iter().any(|n| n == s.as_str()) =>
@@ -996,9 +991,9 @@ impl PhpType {
                 names.push(s.to_string());
             }
 
-            PhpType::Nullable(inner) => inner.collect_top_level_class_names(names),
+            TypeKind::Nullable(inner) => inner.collect_top_level_class_names(names),
 
-            PhpType::Union(types) | PhpType::Intersection(types) => {
+            TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 for t in types {
                     t.collect_top_level_class_names(names);
                 }
@@ -1006,7 +1001,7 @@ impl PhpType {
 
             // For generics, only the base name is top-level.
             // `Collection<int, User>` → `["Collection"]`.
-            PhpType::Generic(g)
+            TypeKind::Generic(g)
                 if !is_keyword_type(&g.name)
                     && !g.name.is_empty()
                     && !names.iter().any(|n| n == g.name.as_str()) =>
@@ -1014,14 +1009,14 @@ impl PhpType {
                 names.push(g.name.to_string());
             }
 
-            PhpType::StaticType(s) | PhpType::ThisType(s)
+            TypeKind::StaticType(s) | TypeKind::ThisType(s)
                 if !s.is_empty() && !names.iter().any(|n| n == s.as_str()) =>
             {
                 names.push(s.to_string());
             }
 
             // `User[]` — the inner type is the top-level class.
-            PhpType::Array(inner) => inner.collect_top_level_class_names(names),
+            TypeKind::Array(inner) => inner.collect_top_level_class_names(names),
 
             // Shapes, callables, class-string, key-of, value-of,
             // conditionals, literals, int-ranges — no navigable

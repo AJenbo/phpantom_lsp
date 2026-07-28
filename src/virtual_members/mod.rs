@@ -69,7 +69,7 @@ pub use resolve::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ConstantInfo, MethodInfo, PropertyInfo};
 
 /// Members synthesized by a provider.
@@ -255,13 +255,13 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
 /// specificity score wins.  Equal scores preserve the existing property
 /// (first-writer-wins within the same specificity tier).
 fn type_specificity(hint: &Option<PhpType>) -> u8 {
-    match hint {
-        None => 0,
-        Some(t) if t.is_mixed() => 0,
-        Some(PhpType::Raw(s)) if s.trim().is_empty() => 0,
-        Some(t) if t.has_type_structure() => 2,
-        Some(_) => 1,
+    let Some(hint) = hint else {
+        return 0;
+    };
+    if hint.is_mixed() || matches!(hint.kind(), TypeKind::Raw(s) if s.trim().is_empty()) {
+        return 0;
     }
+    if hint.has_type_structure() { 2 } else { 1 }
 }
 
 /// Score a property's type by how specific it is, considering both

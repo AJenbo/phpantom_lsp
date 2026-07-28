@@ -28,7 +28,7 @@ use crate::atom::{atom, bytes_to_str, last_segment};
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::*;
 use crate::util::strip_fqn_prefix;
 
@@ -346,7 +346,7 @@ pub(crate) fn extract_language_level_type_for_param(
 /// phpstorm-stubs annotate functions and methods with
 /// `#[ArrayShape(["key" => "type", ...])]` to declare the structure of
 /// their array return values.  This function extracts that information
-/// and returns it as a `PhpType::ArrayShape`.
+/// and returns it as a `TypeKind::ArrayShape`.
 pub(crate) fn extract_array_shape_type(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     ctx: &DocblockCtx<'_>,
@@ -410,23 +410,23 @@ pub(crate) fn apply_array_shape_override(
         return ty;
     };
 
-    match &ty {
+    match &ty.kind() {
         // Exact `array` → replace with shape.
-        PhpType::Named(n) if n == "array" => shape,
+        TypeKind::Named(n) if n == "array" => shape,
         // `?array` → `?array{...}`
-        PhpType::Nullable(inner) => {
-            if matches!(inner.as_ref(), PhpType::Named(n) if n == "array") {
-                PhpType::Nullable(Box::new(shape))
+        TypeKind::Nullable(inner) => {
+            if matches!(inner.kind(), TypeKind::Named(n) if n == "array") {
+                PhpType::nullable(shape)
             } else {
                 ty
             }
         }
         // `array|false` or other unions containing bare `array`.
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             let new_members: Vec<PhpType> = members
                 .iter()
                 .map(|m| {
-                    if matches!(m, PhpType::Named(n) if n == "array") {
+                    if matches!(m.kind(), TypeKind::Named(n) if n == "array") {
                         shape.clone()
                     } else {
                         m.clone()
@@ -963,8 +963,8 @@ pub(crate) fn with_parsed_program<T: Default>(
 /// generics, shapes, or callables), the mapping is straightforward.
 pub(crate) fn extract_hint_type(hint: &Hint) -> PhpType {
     match hint {
-        Hint::Identifier(ident) => PhpType::Named(atom(bytes_to_str(ident.value()))),
-        Hint::Nullable(nullable) => PhpType::Nullable(Box::new(extract_hint_type(nullable.hint))),
+        Hint::Identifier(ident) => PhpType::named(atom(bytes_to_str(ident.value()))),
+        Hint::Nullable(nullable) => PhpType::nullable(extract_hint_type(nullable.hint)),
         Hint::Union(union) => {
             let mut members = Vec::new();
             collect_union_members(union.left, &mut members);

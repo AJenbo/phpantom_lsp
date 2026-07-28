@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::Hover;
 
 use crate::Backend;
 use crate::docblock::extract_template_params_full;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo};
 
 use super::formatting::make_hover;
@@ -29,8 +29,8 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<String> {
         // Only bare named types can be template params.
-        let name = match ty {
-            PhpType::Named(n) if is_bare_identifier(n) => n.as_str(),
+        let name = match ty.kind() {
+            TypeKind::Named(n) if is_bare_identifier(n) => n.as_str(),
             _ => return None,
         };
 
@@ -101,8 +101,8 @@ pub(super) fn find_template_info_in_method_or_class(
 /// `"**template** \`T\` of \`Model\`"`, or `None` when the type is
 /// not a method-level template param.
 fn find_template_info_in_method(ty: &PhpType, method: &MethodInfo) -> Option<String> {
-    let name = match ty {
-        PhpType::Named(n) => n.as_str(),
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
         _ => return None,
     };
 
@@ -126,8 +126,8 @@ fn find_template_info_in_method(ty: &PhpType, method: &MethodInfo) -> Option<Str
 /// `"**template-covariant** \`TNode\` of \`AstNode\`"`, or `None`
 /// when the type is not a template param on the class.
 pub(super) fn find_template_info_in_class(ty: &PhpType, owner: &ClassInfo) -> Option<String> {
-    let name = match ty {
-        PhpType::Named(n) => n.as_str(),
+    let name = match ty.kind() {
+        TypeKind::Named(n) => n.as_str(),
         _ => return None,
     };
 
@@ -153,7 +153,7 @@ pub(super) fn find_template_info_in_class(ty: &PhpType, owner: &ClassInfo) -> Op
 
 /// Returns `true` when `s` is a simple, unqualified identifier (no
 /// namespace separator).  The caller guarantees that `s` came from a
-/// [`PhpType::Named`] match, so we only need to check for `\`.
+/// [`TypeKind::Named`] match, so we only need to check for `\`.
 fn is_bare_identifier(s: &str) -> bool {
     !s.is_empty() && !s.contains('\\')
 }

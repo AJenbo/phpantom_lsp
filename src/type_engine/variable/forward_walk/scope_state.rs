@@ -663,8 +663,8 @@ pub(crate) fn resolve_param_type(
     if resolved_from_class_string_inner && param_results.len() > 1 {
         for rt in &mut param_results {
             if let Some(ci) = rt.class_info.as_ref() {
-                let inner = PhpType::Named(ci.fqn());
-                rt.type_string = PhpType::ClassString(Some(Box::new(inner)));
+                let inner = PhpType::named(ci.fqn());
+                rt.type_string = PhpType::class_string(Some(inner));
             }
         }
     }

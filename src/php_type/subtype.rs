@@ -7,21 +7,21 @@ impl PhpType {
         if self == other {
             return true;
         }
-        match (self, other) {
-            (PhpType::Named(a), PhpType::Named(b)) => {
+        match (self.kind(), other.kind()) {
+            (TypeKind::Named(a), TypeKind::Named(b)) => {
                 Self::short_name_of(a) == Self::short_name_of(b)
             }
-            (PhpType::Nullable(a), PhpType::Nullable(b)) => a.equivalent(b),
+            (TypeKind::Nullable(a), TypeKind::Nullable(b)) => a.equivalent(b),
             // `?X` is equivalent to `X|null` — normalise Nullable to a
             // two-element Union before comparing so that both notations
             // are treated as identical.
-            (PhpType::Nullable(inner), PhpType::Union(members))
-            | (PhpType::Union(members), PhpType::Nullable(inner)) => {
-                let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
-                as_union.equivalent(&PhpType::Union(members.clone()))
+            (TypeKind::Nullable(inner), TypeKind::Union(members))
+            | (TypeKind::Union(members), TypeKind::Nullable(inner)) => {
+                let as_union = PhpType::union(vec![inner.clone(), PhpType::null()]);
+                as_union.equivalent(&PhpType::union(members.to_vec()))
             }
-            (PhpType::Union(a), PhpType::Union(b))
-            | (PhpType::Intersection(a), PhpType::Intersection(b)) => {
+            (TypeKind::Union(a), TypeKind::Union(b))
+            | (TypeKind::Intersection(a), TypeKind::Intersection(b)) => {
                 if a.len() != b.len() {
                     return false;
                 }
@@ -33,7 +33,7 @@ impl PhpType {
                 sb.sort_unstable();
                 sa == sb
             }
-            (PhpType::Generic(a), PhpType::Generic(b)) => {
+            (TypeKind::Generic(a), TypeKind::Generic(b)) => {
                 Self::short_name_of(&a.name) == Self::short_name_of(&b.name)
                     && a.args.len() == b.args.len()
                     && a.args
@@ -41,7 +41,7 @@ impl PhpType {
                         .zip(b.args.iter())
                         .all(|(x, y)| x.equivalent(y))
             }
-            (PhpType::Array(a), PhpType::Array(b)) => a.equivalent(b),
+            (TypeKind::Array(a), TypeKind::Array(b)) => a.equivalent(b),
             _ => false,
         }
     }
@@ -97,12 +97,12 @@ impl PhpType {
 
         // ── Nullable normalisation ──────────────────────────────────
         // Treat `?T` as `T|null` for uniform handling.
-        if let PhpType::Nullable(inner) = self {
-            let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
+        if let TypeKind::Nullable(inner) = self.kind() {
+            let as_union = PhpType::union(vec![inner.clone(), PhpType::null()]);
             return as_union.is_subtype_of(supertype);
         }
-        if let PhpType::Nullable(inner) = supertype {
-            let as_union = PhpType::union(vec![inner.as_ref().clone(), PhpType::null()]);
+        if let TypeKind::Nullable(inner) = supertype.kind() {
+            let as_union = PhpType::union(vec![inner.clone(), PhpType::null()]);
             return self.is_subtype_of(&as_union);
         }
 
@@ -119,36 +119,36 @@ impl PhpType {
         }
 
         // ── Union subtype: every member must be a subtype ───────────
-        if let PhpType::Union(members) = self {
+        if let TypeKind::Union(members) = self.kind() {
             return members.iter().all(|m| m.is_subtype_of(supertype));
         }
 
         // ── Union supertype: at least one member must accept self ────
-        if let PhpType::Union(members) = supertype {
+        if let TypeKind::Union(members) = supertype.kind() {
             return members.iter().any(|m| self.is_subtype_of(m));
         }
 
         // ── Intersection subtype: at least one member suffices ──────
-        if let PhpType::Intersection(members) = self {
+        if let TypeKind::Intersection(members) = self.kind() {
             return members.iter().any(|m| m.is_subtype_of(supertype));
         }
 
         // ── Intersection supertype: all members required ────────────
-        if let PhpType::Intersection(members) = supertype {
+        if let TypeKind::Intersection(members) = supertype.kind() {
             return members.iter().all(|m| self.is_subtype_of(m));
         }
 
         // ── Named ↔ Named scalar subtyping ──────────────────────────
-        if let (PhpType::Named(sub), PhpType::Named(sup)) = (self, supertype) {
+        if let (TypeKind::Named(sub), TypeKind::Named(sup)) = (self.kind(), supertype.kind()) {
             return is_named_subtype(sub, sup);
         }
 
         // ── StaticType / ThisType <: bound class ────────────────────
         // StaticType(A) <: A and ThisType(A) <: A always hold.
         // ThisType(A) <: StaticType(A) also holds ($this is more specific).
-        if let PhpType::StaticType(sub) | PhpType::ThisType(sub) = self {
-            match supertype {
-                PhpType::Named(sup) | PhpType::StaticType(sup) => {
+        if let TypeKind::StaticType(sub) | TypeKind::ThisType(sub) = self.kind() {
+            match supertype.kind() {
+                TypeKind::Named(sup) | TypeKind::StaticType(sup) => {
                     return is_named_subtype(sub, sup);
                 }
                 _ => {}
@@ -156,15 +156,15 @@ impl PhpType {
         }
 
         // ── Literal subtyping ───────────────────────────────────────
-        if let PhpType::Literal(lit) = self {
+        if let TypeKind::Literal(lit) = self.kind() {
             return literal_is_subtype_of(lit, supertype);
         }
 
         // ── IntRange <: int / refined-int / IntRange ────────────────
-        if let PhpType::IntRange(sub_min, sub_max) = self {
-            match supertype {
+        if let TypeKind::IntRange(sub_min, sub_max) = self.kind() {
+            match supertype.kind() {
                 // IntRange <: int, numeric, scalar, array-key
-                PhpType::Named(sup) => {
+                TypeKind::Named(sup) => {
                     let sup_l = sup.to_ascii_lowercase();
                     if matches!(
                         sup_l.as_str(),
@@ -186,7 +186,7 @@ impl PhpType {
                     return false;
                 }
                 // IntRange <: IntRange (e.g. int<1,100> <: int<0,max>)
-                PhpType::IntRange(sup_min, sup_max) => {
+                TypeKind::IntRange(sup_min, sup_max) => {
                     return int_range_is_subrange(sub_min, sub_max, sup_min, sup_max);
                 }
                 _ => {}
@@ -195,8 +195,8 @@ impl PhpType {
 
         // ── refined-int <: IntRange ─────────────────────────────────
         // e.g. non-negative-int <: int<0,max>, positive-int <: int<0,max>
-        if let PhpType::Named(sub) = self
-            && let PhpType::IntRange(sup_min, sup_max) = supertype
+        if let TypeKind::Named(sub) = self.kind()
+            && let TypeKind::IntRange(sup_min, sup_max) = supertype.kind()
         {
             let sub_l = sub.to_ascii_lowercase();
             if let Some((sub_min, sub_max)) = refined_int_to_range(&sub_l) {
@@ -205,15 +205,15 @@ impl PhpType {
         }
 
         // ── Array slice: T[] <: array ───────────────────────────────
-        if let PhpType::Array(inner_sub) = self {
-            match supertype {
-                PhpType::Named(sup) => {
+        if let TypeKind::Array(inner_sub) = self.kind() {
+            match supertype.kind() {
+                TypeKind::Named(sup) => {
                     return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
                 }
-                PhpType::Array(inner_sup) => {
+                TypeKind::Array(inner_sup) => {
                     return inner_sub.is_subtype_of(inner_sup);
                 }
-                PhpType::Generic(g) if is_array_like_name(&g.name) => {
+                TypeKind::Generic(g) if is_array_like_name(&g.name) => {
                     // T[] <: array<int, T2> when T <: T2
                     if let Some(val) = g.args.last() {
                         return inner_sub.is_subtype_of(val);
@@ -224,14 +224,14 @@ impl PhpType {
         }
 
         // ── ArrayShape <: array / iterable ──────────────────────────
-        if let PhpType::ArrayShape(entries) = self {
-            if let PhpType::Named(sup) = supertype {
+        if let TypeKind::ArrayShape(entries) = self.kind() {
+            if let TypeKind::Named(sup) = supertype.kind() {
                 return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
             }
 
             // ArrayShape <: array<K, V>  (or other generic array-like)
             // Every shape key must be a subtype of K, every value a subtype of V.
-            if let PhpType::Generic(g) = supertype
+            if let TypeKind::Generic(g) = supertype.kind()
                 && is_array_like_name(&g.name)
             {
                 match g.args.len() {
@@ -261,20 +261,20 @@ impl PhpType {
             }
 
             // ArrayShape <: T[] — check all values against T.
-            if let PhpType::Array(inner) = supertype {
+            if let TypeKind::Array(inner) = supertype.kind() {
                 return entries.iter().all(|e| e.value_type.is_subtype_of(inner));
             }
         }
 
         // ── ObjectShape <: object ───────────────────────────────────
-        if matches!(self, PhpType::ObjectShape(_))
-            && let PhpType::Named(sup) = supertype
+        if matches!(self.kind(), TypeKind::ObjectShape(_))
+            && let TypeKind::Named(sup) = supertype.kind()
         {
             return sup.eq_ignore_ascii_case("object");
         }
 
         // ── Generic covariance (array-like containers) ──────────────
-        if let (PhpType::Generic(sub), PhpType::Generic(sup)) = (self, supertype) {
+        if let (TypeKind::Generic(sub), TypeKind::Generic(sup)) = (self.kind(), supertype.kind()) {
             let base_sub = sub.name.to_ascii_lowercase();
             let base_sup = sup.name.to_ascii_lowercase();
 
@@ -292,32 +292,32 @@ impl PhpType {
         }
 
         // Generic array-like <: bare `array` / `iterable`
-        if let PhpType::Generic(g) = self
+        if let TypeKind::Generic(g) = self.kind()
             && is_array_like_name(&g.name)
-            && let PhpType::Named(sup) = supertype
+            && let TypeKind::Named(sup) = supertype.kind()
         {
             return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
         }
 
         // ── class-string subtyping ──────────────────────────────────
-        match (self, supertype) {
-            (PhpType::ClassString(_), PhpType::Named(sup))
+        match (self.kind(), supertype.kind()) {
+            (TypeKind::ClassString(_), TypeKind::Named(sup))
                 if matches!(sup.to_ascii_lowercase().as_str(), "string" | "class-string") =>
             {
                 return true;
             }
-            (PhpType::ClassString(Some(sub_inner)), PhpType::ClassString(Some(sup_inner))) => {
+            (TypeKind::ClassString(Some(sub_inner)), TypeKind::ClassString(Some(sup_inner))) => {
                 return sub_inner.is_subtype_of(sup_inner);
             }
-            (PhpType::ClassString(Some(_)), PhpType::ClassString(None)) => {
+            (TypeKind::ClassString(Some(_)), TypeKind::ClassString(None)) => {
                 return true;
             }
             _ => {}
         }
 
         // ── interface-string subtyping ──────────────────────────────
-        match (self, supertype) {
-            (PhpType::InterfaceString(_), PhpType::Named(sup))
+        match (self.kind(), supertype.kind()) {
+            (TypeKind::InterfaceString(_), TypeKind::Named(sup))
                 if matches!(
                     sup.to_ascii_lowercase().as_str(),
                     "string" | "class-string" | "interface-string"
@@ -329,7 +329,8 @@ impl PhpType {
         }
 
         // ── Callable subtyping ──────────────────────────────────────
-        if let (PhpType::Callable(sub), PhpType::Callable(sup)) = (self, supertype) {
+        if let (TypeKind::Callable(sub), TypeKind::Callable(sup)) = (self.kind(), supertype.kind())
+        {
             let (params_sub, ret_sub) = (&sub.params, &sub.return_type);
             let (params_sup, ret_sup) = (&sup.params, &sup.return_type);
             // Return type is covariant.
@@ -354,8 +355,8 @@ impl PhpType {
         // Callable/Closure specification <: callable | Closure | object
         // A callable specification like `Closure(int): void` is always
         // a Closure instance, which is both callable and an object.
-        if matches!(self, PhpType::Callable(_))
-            && let PhpType::Named(sup) = supertype
+        if matches!(self.kind(), TypeKind::Callable(_))
+            && let TypeKind::Named(sup) = supertype.kind()
         {
             return matches!(
                 sup.to_ascii_lowercase().as_str(),
@@ -366,9 +367,9 @@ impl PhpType {
         // Bare `Closure` or `callable` <: callable specification.
         // A bare `Closure` might have any signature — we cannot prove
         // it violates the specification, so treat it as compatible.
-        if let PhpType::Named(sub) = self
+        if let TypeKind::Named(sub) = self.kind()
             && matches!(sub.to_ascii_lowercase().as_str(), "callable" | "closure")
-            && matches!(supertype, PhpType::Callable(_))
+            && matches!(supertype.kind(), TypeKind::Callable(_))
         {
             return true;
         }
@@ -650,12 +651,12 @@ pub(crate) fn normalize_alias(name: &str) -> &str {
 
 /// Check whether a literal type is a subtype of a given supertype.
 pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> bool {
-    match supertype {
-        PhpType::Literal(other_lit) => literals_equal(lit, other_lit),
-        PhpType::IntRange(min, max) => lit
+    match supertype.kind() {
+        TypeKind::Literal(other_lit) => literals_equal(lit, other_lit),
+        TypeKind::IntRange(min, max) => lit
             .parse_i64()
             .is_some_and(|value| int_literal_is_within_range(value, min, max)),
-        PhpType::Named(sup) => {
+        TypeKind::Named(sup) => {
             let sup_l = sup.to_ascii_lowercase();
             // A differently-cased bare `Number` (e.g. `BcMath\Number`) is a
             // real class, not the lowercase `number` pseudo-type; a scalar

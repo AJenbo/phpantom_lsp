@@ -717,7 +717,7 @@ fn mixin_template_param_substituted_via_ancestor_walk() {
     // The child class: extends Subclient<EventsApi>
     let mut child = make_class("EventSubclient");
     child.parent_class = Some(atom("Subclient"));
-    child.extends_generics = vec![(atom("Subclient"), vec![PhpType::Named(atom("EventsApi"))])];
+    child.extends_generics = vec![(atom("Subclient"), vec![PhpType::named(atom("EventsApi"))])];
 
     // The parent class: @template TWraps, @mixin TWraps
     let mut subclient = make_class("Subclient");

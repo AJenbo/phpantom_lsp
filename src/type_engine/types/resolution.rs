@@ -22,7 +22,7 @@ use std::sync::Arc;
 use crate::atom::atom;
 use crate::class_lookup::find_class_by_name;
 use crate::inheritance::{apply_generic_args, build_generic_subs};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::*;
 use crate::util::short_name;
 use crate::virtual_members::{self, laravel};
@@ -89,9 +89,9 @@ fn type_hint_to_classes_typed_depth(
         return vec![];
     }
 
-    match ty {
+    match ty.kind() {
         // ── Nullable → unwrap inner ────────────────────────────────
-        PhpType::Nullable(inner) => type_hint_to_classes_typed_depth(
+        TypeKind::Nullable(inner) => type_hint_to_classes_typed_depth(
             inner,
             owning_class_name,
             all_classes,
@@ -100,7 +100,7 @@ fn type_hint_to_classes_typed_depth(
         ),
 
         // ── Union type ─────────────────────────────────────────────
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             let mut results: Vec<Arc<ClassInfo>> = Vec::new();
             for member in members {
                 let resolved = type_hint_to_classes_typed_depth(
@@ -120,7 +120,7 @@ fn type_hint_to_classes_typed_depth(
         }
 
         // ── Intersection type ──────────────────────────────────────
-        PhpType::Intersection(members) => {
+        TypeKind::Intersection(members) => {
             let mut results: Vec<Arc<ClassInfo>> = Vec::new();
             for member in members {
                 let resolved = type_hint_to_classes_typed_depth(
@@ -140,7 +140,7 @@ fn type_hint_to_classes_typed_depth(
         }
 
         // ── Object shape ───────────────────────────────────────────
-        PhpType::ObjectShape(entries) => {
+        TypeKind::ObjectShape(entries) => {
             let properties = SharedVec::from_vec(
                 entries
                     .iter()
@@ -170,12 +170,12 @@ fn type_hint_to_classes_typed_depth(
             })]
         }
 
-        PhpType::StaticType(s) | PhpType::ThisType(s) => {
+        TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
             resolve_named_type(s, &[], owning_class_name, all_classes, class_loader, depth)
         }
 
         // ── Named type (class name, keyword, or alias) ─────────────
-        PhpType::Named(name) => resolve_named_type(
+        TypeKind::Named(name) => resolve_named_type(
             name,
             &[],
             owning_class_name,
@@ -185,7 +185,7 @@ fn type_hint_to_classes_typed_depth(
         ),
 
         // ── Generic type ───────────────────────────────────────────
-        PhpType::Generic(g) => resolve_named_type(
+        TypeKind::Generic(g) => resolve_named_type(
             &g.name,
             &g.args,
             owning_class_name,
@@ -196,18 +196,18 @@ fn type_hint_to_classes_typed_depth(
 
         // ── Array slice (T[]) ──────────────────────────────────────
         // Not a class type itself; skip.
-        PhpType::Array(_)
-        | PhpType::ArrayShape(_)
-        | PhpType::Callable(_)
-        | PhpType::ClassString(_)
-        | PhpType::InterfaceString(_)
-        | PhpType::KeyOf(_)
-        | PhpType::ValueOf(_)
-        | PhpType::IntRange(..)
-        | PhpType::IndexAccess(..)
-        | PhpType::Literal(_)
-        | PhpType::Conditional { .. }
-        | PhpType::Raw(_) => vec![],
+        TypeKind::Array(_)
+        | TypeKind::ArrayShape(_)
+        | TypeKind::Callable(_)
+        | TypeKind::ClassString(_)
+        | TypeKind::InterfaceString(_)
+        | TypeKind::KeyOf(_)
+        | TypeKind::ValueOf(_)
+        | TypeKind::IntRange(..)
+        | TypeKind::IndexAccess(..)
+        | TypeKind::Literal(_)
+        | TypeKind::Conditional { .. }
+        | TypeKind::Raw(_) => vec![],
     }
 }
 
@@ -232,7 +232,7 @@ fn resolve_named_type(
 
     // ── Type alias resolution ──────────────────────────────────────
     if let Some(alias_type) = resolve_type_alias_typed(
-        &PhpType::Named(atom(name)),
+        &PhpType::named(atom(name)),
         owning_class_name,
         all_classes,
         class_loader,
@@ -294,7 +294,7 @@ fn resolve_named_type(
             .iter()
             .map(|arg| {
                 if arg.is_self_ref() {
-                    PhpType::Named(atom(owning_class_name))
+                    PhpType::named(atom(owning_class_name))
                 } else {
                     arg.clone()
                 }
@@ -482,7 +482,7 @@ pub(crate) fn resolve_type_alias_typed(
     for _ in 0..10 {
         // Only bare identifiers can be type aliases.  Skip anything that
         // looks like a complex type expression to avoid false matches.
-        if !matches!(current, PhpType::Named(_)) {
+        if !matches!(current.kind(), TypeKind::Named(_)) {
             break;
         }
 
@@ -508,8 +508,8 @@ fn resolve_type_alias_once(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    let name = match hint {
-        PhpType::Named(n) => n.as_str(),
+    let name = match hint.kind() {
+        TypeKind::Named(n) => n.as_str(),
         _ => return None,
     };
 

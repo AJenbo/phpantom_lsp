@@ -29,7 +29,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::code_actions::CodeActionData;
 use crate::code_actions::make_code_action_data;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::ranges_overlap;
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -548,7 +548,7 @@ impl Backend {
 
         // Try to extract the generic parameter(s) from the inferred type.
         // e.g. `list<string>` → [string], `array<int, User>` → [int, User]
-        if let PhpType::Generic(g) = &parsed {
+        if let TypeKind::Generic(g) = &parsed.kind() {
             if !g.args.is_empty() && g.args.iter().all(|a| !a.is_mixed()) {
                 return Some(g.args.clone());
             }

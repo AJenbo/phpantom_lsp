@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::is_self_or_static;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::variable::rhs_resolution::{
     TemplateBindingMode, classify_template_binding,
 };
@@ -117,7 +117,7 @@ impl Backend {
             // indexed access types like `TData[K]` can look up the
             // specific key in the array shape.
             if let Some(bound) = method.template_param_bounds.get(&atom(tpl_name))
-                && matches!(bound, PhpType::KeyOf(_))
+                && matches!(bound.kind(), TypeKind::KeyOf(_))
             {
                 let trimmed = arg_text.trim();
                 let is_string_lit = (trimmed.starts_with('\'') && trimmed.ends_with('\''))
@@ -210,8 +210,8 @@ impl Backend {
                         // argument (key or value type).
                         if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
                             let generic_arg_count = param_hint
-                                .and_then(|h| match h {
-                                    crate::php_type::PhpType::Generic(g) => Some(g.args.len()),
+                                .and_then(|h| match h.kind() {
+                                    crate::php_type::TypeKind::Generic(g) => Some(g.args.len()),
                                     _ => None,
                                 })
                                 .unwrap_or(1);
@@ -273,7 +273,7 @@ impl Backend {
                         let extracted = (|| -> Option<PhpType> {
                             // Direct match: resolved type is already
                             // `Wrapper<..., ConcreteArg, ...>`.
-                            if let PhpType::Generic(g) = &resolved_type {
+                            if let TypeKind::Generic(g) = &resolved_type.kind() {
                                 let args = &g.args;
                                 let short = crate::util::short_name(&g.name);
                                 let wrapper_short = crate::util::short_name(wrapper_name);
@@ -285,8 +285,8 @@ impl Backend {
                                     // single param-hint arg represents
                                     // the value/last type.
                                     let param_generic_count = param_hint
-                                        .and_then(|h| match h {
-                                            PhpType::Generic(g) => Some(g.args.len()),
+                                        .and_then(|h| match h.kind() {
+                                            TypeKind::Generic(g) => Some(g.args.len()),
                                             _ => None,
                                         })
                                         .unwrap_or(1);
@@ -320,7 +320,7 @@ impl Backend {
                             // would return the raw `T` instead of the
                             // concrete `ASTClass`.
                             let class_tpl_subs: HashMap<String, PhpType> =
-                                if let PhpType::Generic(g) = &resolved_type {
+                                if let TypeKind::Generic(g) = &resolved_type.kind() {
                                     merged
                                         .template_params
                                         .iter()
@@ -356,8 +356,8 @@ impl Backend {
                                 };
 
                                 let param_generic_count = param_hint
-                                    .and_then(|h| match h {
-                                        PhpType::Generic(g) => Some(g.args.len()),
+                                    .and_then(|h| match h.kind() {
+                                        TypeKind::Generic(g) => Some(g.args.len()),
                                         _ => None,
                                     })
                                     .unwrap_or(1);
@@ -542,8 +542,8 @@ impl Backend {
         // shape.  E.g., if callable returns `Generator<TKey, TValue, ...>`
         // and we inferred `Generator<int, string, mixed, mixed>`, extract
         // the arg at tpl_position.
-        if let (PhpType::Generic(expected), PhpType::Generic(inferred)) =
-            (&callable_return_type, &closure_ret)
+        if let (TypeKind::Generic(expected), TypeKind::Generic(inferred)) =
+            (callable_return_type.kind(), closure_ret.kind())
         {
             let exp_short = crate::util::short_name(&expected.name);
             let inf_short = crate::util::short_name(&inferred.name);
@@ -565,8 +565,8 @@ impl Backend {
     /// return type is a Generic containing the given template param name.
     /// Returns that Generic return type if found.
     fn find_callable_return_generic_in_hint(hint: &PhpType, tpl_name: &str) -> Option<PhpType> {
-        match hint {
-            PhpType::Union(members) => {
+        match hint.kind() {
+            TypeKind::Union(members) => {
                 for m in members {
                     if let Some(found) = Self::find_callable_return_generic_in_hint(m, tpl_name) {
                         return Some(found);
@@ -574,8 +574,10 @@ impl Backend {
                 }
                 None
             }
-            PhpType::Nullable(inner) => Self::find_callable_return_generic_in_hint(inner, tpl_name),
-            PhpType::Callable(c) => {
+            TypeKind::Nullable(inner) => {
+                Self::find_callable_return_generic_in_hint(inner, tpl_name)
+            }
+            TypeKind::Callable(c) => {
                 if let Some(rt) = &c.return_type
                     && crate::type_engine::variable::rhs_resolution::type_contains_name(
                         rt, tpl_name,
@@ -636,20 +638,20 @@ impl Backend {
             // self::class / static::class / parent::class resolve relative
             // to the class at the call site.
             let class_named = if is_self_or_static(name) {
-                ctx.current_class.map(|c| PhpType::Named(c.fqn()))
+                ctx.current_class.map(|c| PhpType::named(c.fqn()))
             } else if name.eq_ignore_ascii_case("parent") {
                 ctx.current_class
                     .and_then(|c| c.parent_class.as_ref())
-                    .map(|p| PhpType::Named(atom(p.as_ref())))
+                    .map(|p| PhpType::named(atom(p.as_ref())))
             } else {
                 let resolved_name = if let Some(cls) = (ctx.class_loader)(name) {
                     cls.fqn().to_string()
                 } else {
                     name.to_string()
                 };
-                Some(PhpType::Named(atom(&resolved_name)))
+                Some(PhpType::named(atom(&resolved_name)))
             };
-            return class_named.map(|n| PhpType::ClassString(Some(Box::new(n))));
+            return class_named.map(|n| PhpType::class_string(Some(n)));
         }
 
         // When the expression contains a `->` chain (e.g.
@@ -676,7 +678,7 @@ impl Backend {
             } else {
                 class_name
             };
-            return Some(PhpType::Named(atom(&resolved_name)));
+            return Some(PhpType::named(atom(&resolved_name)));
         }
 
         // $this / self / static → current class (or preserve the keyword when asked)
@@ -684,12 +686,12 @@ impl Backend {
             return ctx.current_class.map(|c| {
                 if ctx.preserve_static {
                     match trimmed {
-                        "static" => PhpType::StaticType(c.fqn()),
-                        "$this" => PhpType::ThisType(c.fqn()),
-                        _ => PhpType::Named(c.fqn()),
+                        "static" => PhpType::static_type(c.fqn()),
+                        "$this" => PhpType::this_type(c.fqn()),
+                        _ => PhpType::named(c.fqn()),
                     }
                 } else {
-                    PhpType::Named(atom(c.name.as_ref()))
+                    PhpType::named(atom(c.name.as_ref()))
                 }
             });
         }

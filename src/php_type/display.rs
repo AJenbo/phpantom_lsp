@@ -8,14 +8,14 @@ use super::*;
 
 impl fmt::Display for PhpType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PhpType::Named(s) => write!(f, "{s}"),
-            PhpType::StaticType(bound) => write!(f, "static({bound})"),
-            PhpType::ThisType(bound) => write!(f, "$this({bound})"),
+        match self.kind() {
+            TypeKind::Named(s) => write!(f, "{s}"),
+            TypeKind::StaticType(bound) => write!(f, "static({bound})"),
+            TypeKind::ThisType(bound) => write!(f, "$this({bound})"),
 
-            PhpType::Nullable(inner) => write!(f, "?{inner}"),
+            TypeKind::Nullable(inner) => write!(f, "?{inner}"),
 
-            PhpType::Union(types) => {
+            TypeKind::Union(types) => {
                 for (i, ty) in types.iter().enumerate() {
                     if i > 0 {
                         write!(f, "|")?;
@@ -23,7 +23,7 @@ impl fmt::Display for PhpType {
                     // Wrap callable types in parentheses so
                     // `(Closure(int): string)|Foo` is not misread as
                     // `Closure(int): string|Foo`.
-                    if matches!(ty, PhpType::Callable(_)) {
+                    if matches!(ty.kind(), TypeKind::Callable(_)) {
                         write!(f, "({ty})")?;
                     } else {
                         write!(f, "{ty}")?;
@@ -32,7 +32,7 @@ impl fmt::Display for PhpType {
                 Ok(())
             }
 
-            PhpType::Intersection(types) => {
+            TypeKind::Intersection(types) => {
                 for (i, ty) in types.iter().enumerate() {
                     if i > 0 {
                         write!(f, "&")?;
@@ -42,7 +42,7 @@ impl fmt::Display for PhpType {
                 Ok(())
             }
 
-            PhpType::Generic(g) => {
+            TypeKind::Generic(g) => {
                 let name = &g.name;
                 write!(f, "{name}<")?;
                 for (i, arg) in g.args.iter().enumerate() {
@@ -54,7 +54,7 @@ impl fmt::Display for PhpType {
                 write!(f, ">")
             }
 
-            PhpType::Array(inner) => {
+            TypeKind::Array(inner) => {
                 if inner.is_mixed() {
                     write!(f, "array")
                 } else {
@@ -62,7 +62,7 @@ impl fmt::Display for PhpType {
                 }
             }
 
-            PhpType::ArrayShape(entries) => {
+            TypeKind::ArrayShape(entries) => {
                 write!(f, "array{{")?;
                 for (i, entry) in entries.iter().enumerate() {
                     if i > 0 {
@@ -73,7 +73,7 @@ impl fmt::Display for PhpType {
                 write!(f, "}}")
             }
 
-            PhpType::ObjectShape(entries) => {
+            TypeKind::ObjectShape(entries) => {
                 write!(f, "object{{")?;
                 for (i, entry) in entries.iter().enumerate() {
                     if i > 0 {
@@ -84,7 +84,7 @@ impl fmt::Display for PhpType {
                 write!(f, "}}")
             }
 
-            PhpType::Callable(c) => {
+            TypeKind::Callable(c) => {
                 let kind = &c.kind;
                 write!(f, "{kind}(")?;
                 for (i, param) in c.params.iter().enumerate() {
@@ -100,7 +100,7 @@ impl fmt::Display for PhpType {
                 Ok(())
             }
 
-            PhpType::Conditional(c) => {
+            TypeKind::Conditional(c) => {
                 let ConditionalType {
                     param,
                     negated,
@@ -115,27 +115,27 @@ impl fmt::Display for PhpType {
                 }
             }
 
-            PhpType::ClassString(inner) => match inner {
+            TypeKind::ClassString(inner) => match inner {
                 Some(ty) => write!(f, "class-string<{ty}>"),
                 None => write!(f, "class-string"),
             },
 
-            PhpType::InterfaceString(inner) => match inner {
+            TypeKind::InterfaceString(inner) => match inner {
                 Some(ty) => write!(f, "interface-string<{ty}>"),
                 None => write!(f, "interface-string"),
             },
 
-            PhpType::KeyOf(inner) => write!(f, "key-of<{inner}>"),
+            TypeKind::KeyOf(inner) => write!(f, "key-of<{inner}>"),
 
-            PhpType::ValueOf(inner) => write!(f, "value-of<{inner}>"),
+            TypeKind::ValueOf(inner) => write!(f, "value-of<{inner}>"),
 
-            PhpType::IntRange(min, max) => write!(f, "int<{min}..{max}>"),
+            TypeKind::IntRange(min, max) => write!(f, "int<{min}..{max}>"),
 
-            PhpType::IndexAccess(target, index) => write!(f, "{target}[{index}]"),
+            TypeKind::IndexAccess(target, index) => write!(f, "{target}[{index}]"),
 
-            PhpType::Literal(s) => write!(f, "{s}"),
+            TypeKind::Literal(s) => write!(f, "{s}"),
 
-            PhpType::Raw(s) => write!(f, "{s}"),
+            TypeKind::Raw(s) => write!(f, "{s}"),
         }
     }
 }

@@ -148,7 +148,7 @@ fn extracts_first_generic_arg() {
     let parsed = PhpType::parse("HasMany<Post, $this>");
     assert_eq!(
         extract_related_type_typed(&parsed),
-        Some(&PhpType::Named(atom("Post")))
+        Some(&PhpType::named(atom("Post")))
     );
 }
 
@@ -157,7 +157,7 @@ fn extracts_fqn_related_type() {
     let parsed = PhpType::parse("HasOne<\\App\\Models\\Profile, $this>");
     assert_eq!(
         extract_related_type_typed(&parsed),
-        Some(&PhpType::Named(atom("\\App\\Models\\Profile")))
+        Some(&PhpType::named(atom("\\App\\Models\\Profile")))
     );
 }
 
@@ -199,10 +199,10 @@ fn singular_with_related() {
     assert_eq!(
         build_property_type(
             RelationshipKind::Singular,
-            Some(&PhpType::Named(atom("App\\Models\\Post"))),
+            Some(&PhpType::named(atom("App\\Models\\Post"))),
             None
         ),
-        Some(PhpType::Named(atom("App\\Models\\Post")))
+        Some(PhpType::named(atom("App\\Models\\Post")))
     );
 }
 
@@ -219,12 +219,12 @@ fn collection_with_related() {
     assert_eq!(
         build_property_type(
             RelationshipKind::Collection,
-            Some(&PhpType::Named(atom("App\\Models\\Post"))),
+            Some(&PhpType::named(atom("App\\Models\\Post"))),
             None
         ),
         Some(PhpType::generic(
             "Illuminate\\Database\\Eloquent\\Collection",
-            vec![PhpType::Named(atom("App\\Models\\Post"))],
+            vec![PhpType::named(atom("App\\Models\\Post"))],
         ))
     );
 }
@@ -235,7 +235,7 @@ fn collection_without_related_uses_model() {
         build_property_type(RelationshipKind::Collection, None::<&PhpType>, None),
         Some(PhpType::generic(
             "Illuminate\\Database\\Eloquent\\Collection",
-            vec![PhpType::Named(atom(
+            vec![PhpType::named(atom(
                 "Illuminate\\Database\\Eloquent\\Model"
             ))],
         ))
@@ -247,10 +247,10 @@ fn morph_to_always_returns_model() {
     assert_eq!(
         build_property_type(
             RelationshipKind::MorphTo,
-            Some(&PhpType::Named(atom("App\\Models\\Foo"))),
+            Some(&PhpType::named(atom("App\\Models\\Foo"))),
             None
         ),
-        Some(PhpType::Named(atom(
+        Some(PhpType::named(atom(
             "Illuminate\\Database\\Eloquent\\Model"
         )))
     );
@@ -261,12 +261,12 @@ fn collection_with_custom_collection() {
     assert_eq!(
         build_property_type(
             RelationshipKind::Collection,
-            Some(&PhpType::Named(atom("App\\Models\\Post"))),
+            Some(&PhpType::named(atom("App\\Models\\Post"))),
             Some("App\\Collections\\PostCollection")
         ),
         Some(PhpType::generic(
             "App\\Collections\\PostCollection",
-            vec![PhpType::Named(atom("App\\Models\\Post"))],
+            vec![PhpType::named(atom("App\\Models\\Post"))],
         ))
     );
 }
@@ -276,12 +276,12 @@ fn collection_custom_collection_canonical() {
     assert_eq!(
         build_property_type(
             RelationshipKind::Collection,
-            Some(&PhpType::Named(atom("App\\Models\\Post"))),
+            Some(&PhpType::named(atom("App\\Models\\Post"))),
             Some("App\\Collections\\PostCollection")
         ),
         Some(PhpType::generic(
             "App\\Collections\\PostCollection",
-            vec![PhpType::Named(atom("App\\Models\\Post"))],
+            vec![PhpType::named(atom("App\\Models\\Post"))],
         ))
     );
 }
@@ -291,10 +291,10 @@ fn singular_ignores_custom_collection() {
     assert_eq!(
         build_property_type(
             RelationshipKind::Singular,
-            Some(&PhpType::Named(atom("App\\Models\\Post"))),
+            Some(&PhpType::named(atom("App\\Models\\Post"))),
             Some("App\\Collections\\PostCollection")
         ),
-        Some(PhpType::Named(atom("App\\Models\\Post")))
+        Some(PhpType::named(atom("App\\Models\\Post")))
     );
 }
 
@@ -303,10 +303,10 @@ fn morph_to_ignores_custom_collection() {
     assert_eq!(
         build_property_type(
             RelationshipKind::MorphTo,
-            Some(&PhpType::Named(atom("App\\Models\\Foo"))),
+            Some(&PhpType::named(atom("App\\Models\\Foo"))),
             Some("App\\Collections\\FooCollection")
         ),
-        Some(PhpType::Named(atom(
+        Some(PhpType::named(atom(
             "Illuminate\\Database\\Eloquent\\Model"
         )))
     );
@@ -321,7 +321,7 @@ fn infer_has_many_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasMany",
-            vec![PhpType::Named(atom("Post"))],
+            vec![PhpType::named(atom("Post"))],
         ))
     );
 }
@@ -333,7 +333,7 @@ fn infer_has_one_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasOne",
-            vec![PhpType::Named(atom("Profile"))],
+            vec![PhpType::named(atom("Profile"))],
         ))
     );
 }
@@ -345,7 +345,7 @@ fn infer_belongs_to_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",
-            vec![PhpType::Named(atom("User"))],
+            vec![PhpType::named(atom("User"))],
         ))
     );
 }
@@ -357,7 +357,7 @@ fn infer_belongs_to_many_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany",
-            vec![PhpType::Named(atom("Role"))],
+            vec![PhpType::named(atom("Role"))],
         ))
     );
 }
@@ -369,7 +369,7 @@ fn infer_morph_one_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\MorphOne",
-            vec![PhpType::Named(atom("Image"))],
+            vec![PhpType::named(atom("Image"))],
         ))
     );
 }
@@ -381,7 +381,7 @@ fn infer_morph_many_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\MorphMany",
-            vec![PhpType::Named(atom("Comment"))],
+            vec![PhpType::named(atom("Comment"))],
         ))
     );
 }
@@ -392,7 +392,7 @@ fn infer_morph_to_from_body() {
     let body = "{ return $this->morphTo(); }";
     assert_eq!(
         infer_relationship_from_body(body),
-        Some(PhpType::Named(atom(
+        Some(PhpType::named(atom(
             "\\Illuminate\\Database\\Eloquent\\Relations\\MorphTo"
         )))
     );
@@ -405,7 +405,7 @@ fn infer_morph_to_many_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\MorphToMany",
-            vec![PhpType::Named(atom("Tag"))],
+            vec![PhpType::named(atom("Tag"))],
         ))
     );
 }
@@ -418,7 +418,7 @@ fn infer_morphed_by_many_from_body() {
         result,
         PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\MorphToMany",
-            vec![PhpType::Named(atom("Tag"))],
+            vec![PhpType::named(atom("Tag"))],
         )
     );
 }
@@ -430,7 +430,7 @@ fn infer_has_many_through_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasManyThrough",
-            vec![PhpType::Named(atom("Post"))],
+            vec![PhpType::named(atom("Post"))],
         )),
     );
 }
@@ -442,7 +442,7 @@ fn infer_has_one_through_from_body() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasOneThrough",
-            vec![PhpType::Named(atom("Owner"))],
+            vec![PhpType::named(atom("Owner"))],
         ))
     );
 }
@@ -454,7 +454,7 @@ fn infer_relationship_fqn_class_argument() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasMany",
-            vec![PhpType::Named(atom("Post"))],
+            vec![PhpType::named(atom("Post"))],
         ))
     );
 }
@@ -466,7 +466,7 @@ fn infer_relationship_with_extra_arguments() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasMany",
-            vec![PhpType::Named(atom("Post"))],
+            vec![PhpType::named(atom("Post"))],
         ))
     );
 }
@@ -480,7 +480,7 @@ fn infer_relationship_with_whitespace() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasMany",
-            vec![PhpType::Named(atom("Post"))],
+            vec![PhpType::named(atom("Post"))],
         ))
     );
 }
@@ -503,7 +503,7 @@ fn infer_relationship_without_class_argument() {
     let body = "{ return $this->hasMany('App\\Models\\Post'); }";
     assert_eq!(
         infer_relationship_from_body(body),
-        Some(PhpType::Named(atom(
+        Some(PhpType::named(atom(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasMany"
         ))),
         "Without ::class argument, returns bare FQN relationship name"
@@ -516,7 +516,7 @@ fn infer_morph_to_with_arguments() {
     let body = "{ return $this->morphTo('commentable', 'commentable_type', 'commentable_id'); }";
     assert_eq!(
         infer_relationship_from_body(body),
-        Some(PhpType::Named(atom(
+        Some(PhpType::named(atom(
             "\\Illuminate\\Database\\Eloquent\\Relations\\MorphTo"
         )))
     );
@@ -541,7 +541,7 @@ fn infer_relationship_same_line_chain() {
         infer_relationship_from_body(body),
         Some(PhpType::generic(
             "\\Illuminate\\Database\\Eloquent\\Relations\\HasMany",
-            vec![PhpType::Named(atom("Post"))],
+            vec![PhpType::named(atom("Post"))],
         ))
     );
 }

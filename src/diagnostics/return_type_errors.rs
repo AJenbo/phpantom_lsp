@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
@@ -312,7 +312,10 @@ fn resolve_return_and_push(
             let ty = resolve_expression_type(expr, &var_ctx).unwrap_or_else(PhpType::untyped);
 
             // Skip unresolved types.
-            if ty.is_untyped() || ty.is_empty() || matches!(&ty, PhpType::Raw(s) if s.is_empty()) {
+            if ty.is_untyped()
+                || ty.is_empty()
+                || matches!(&ty.kind(), TypeKind::Raw(s) if s.is_empty())
+            {
                 return;
             }
 

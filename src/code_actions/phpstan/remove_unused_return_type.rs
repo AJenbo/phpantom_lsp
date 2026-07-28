@@ -25,7 +25,7 @@ use crate::code_actions::phpstan::add_iterable_type::{
     find_function_docblock, find_function_keyword_line as find_func_keyword_line,
 };
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::ranges_overlap;
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
@@ -73,8 +73,8 @@ fn extract_unused_type(message: &str) -> Option<&str> {
 fn remove_type_from_union(full_type: &PhpType, unused_type: &str) -> Option<PhpType> {
     let unused_parsed = PhpType::parse(unused_type);
 
-    match full_type {
-        PhpType::Union(members) => {
+    match full_type.kind() {
+        TypeKind::Union(members) => {
             let remaining: Vec<&PhpType> = members
                 .iter()
                 .filter(|m| !m.equivalent(&unused_parsed))
@@ -92,7 +92,7 @@ fn remove_type_from_union(full_type: &PhpType, unused_type: &str) -> Option<PhpT
 
             Some(format_type_list(&remaining, "|"))
         }
-        PhpType::Intersection(members) => {
+        TypeKind::Intersection(members) => {
             let remaining: Vec<&PhpType> = members
                 .iter()
                 .filter(|m| !m.equivalent(&unused_parsed))
@@ -108,11 +108,11 @@ fn remove_type_from_union(full_type: &PhpType, unused_type: &str) -> Option<PhpT
 
             Some(format_type_list(&remaining, "&"))
         }
-        PhpType::Nullable(inner) => {
+        TypeKind::Nullable(inner) => {
             // `?T` is equivalent to `T|null`.
             if unused_parsed.equivalent(&PhpType::null()) {
                 // Remove the null → just `T`.
-                Some((**inner).clone())
+                Some((**inner).clone().into())
             } else if inner.equivalent(&unused_parsed) {
                 // Remove the inner type → just `null`.
                 Some(PhpType::null())
@@ -127,7 +127,7 @@ fn remove_type_from_union(full_type: &PhpType, unused_type: &str) -> Option<PhpT
 /// Build a `PhpType` from a list of type references.
 ///
 /// When only one member remains, returns it directly.  Otherwise
-/// constructs a `PhpType::Union` (for `"|"`) or `PhpType::Intersection`
+/// constructs a `TypeKind::Union` (for `"|"`) or `TypeKind::Intersection`
 /// (for `"&"`).
 fn format_type_list(types: &[&PhpType], sep: &str) -> PhpType {
     let cloned: Vec<PhpType> = types.iter().map(|t| (*t).clone()).collect();

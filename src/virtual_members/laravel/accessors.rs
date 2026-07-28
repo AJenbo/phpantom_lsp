@@ -4,7 +4,7 @@
 //! (Laravel 9+ `Attribute` cast) accessor patterns, mapping method
 //! signatures to virtual property names and types.
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo};
 
 use super::helpers::camel_to_snake;
@@ -88,10 +88,10 @@ pub(super) fn is_modern_accessor(method: &MethodInfo) -> bool {
 /// no generic parameter is present.
 pub(super) fn extract_modern_accessor_type(method: &MethodInfo) -> PhpType {
     if let Some(rt) = method.return_type.as_ref()
-        && let PhpType::Generic(g) = rt
+        && let TypeKind::Generic(g) = rt.kind()
         && let Some(first) = g.args.first()
-        && !matches!(first, PhpType::Named(s) if s.is_empty())
-        && !matches!(first, PhpType::Raw(s) if s.is_empty())
+        && !matches!(first.kind(), TypeKind::Named(s) if s.is_empty())
+        && !matches!(first.kind(), TypeKind::Raw(s) if s.is_empty())
     {
         return first.clone();
     }

@@ -17,7 +17,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::atom::{Atom, AtomMap};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 
 mod resolved_type;
 mod shared_vec;
@@ -518,7 +518,7 @@ pub struct MethodInfo {
     /// Exception types declared via `@throws` tags in the method's docblock.
     ///
     /// For example, a method with `@throws \InvalidArgumentException` would have
-    /// `throws: vec![PhpType::Named(atom("InvalidArgumentException"))]`.  Used
+    /// `throws: vec![PhpType::named(atom("InvalidArgumentException"))]`.  Used
     /// during code generation and analysis to propagate exception information.
     pub throws: Vec<PhpType>,
     /// Type constraint from `@psalm-if-this-is` or `@phpstan-if-this-is`.
@@ -2187,7 +2187,7 @@ impl ClassInfo {
 /// consumer reads the field it needs.
 #[derive(Clone, Debug)]
 pub struct ResolvedType {
-    /// Structured type expression, e.g. `PhpType::Generic("Collection", [PhpType::Named("int"), PhpType::Named("User")])`.
+    /// Structured type expression, e.g. `TypeKind::Generic("Collection", [PhpType::named("int"), PhpType::named("User")])`.
     ///
     /// Call `.to_string()` when a display string is needed.
     pub type_string: PhpType,

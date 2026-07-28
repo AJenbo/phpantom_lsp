@@ -193,7 +193,7 @@ fn synthesizes_from_dates_definitions() {
 fn synthesizes_from_attributes_definitions() {
     let mut user = make_model("App\\Models\\User");
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named(atom("string")))];
+        vec![("role".to_string(), PhpType::named(atom("string")))];
 
     let methods = build_where_property_methods_for_class(&user, &HashSet::new());
 
@@ -393,7 +393,7 @@ fn all_sources_combined() {
     user.laravel_mut().casts_definitions = vec![("is_admin".to_string(), "boolean".to_string())];
     user.laravel_mut().dates_definitions = vec!["verified_at".to_string()];
     user.laravel_mut().attributes_definitions =
-        vec![("role".to_string(), PhpType::Named(atom("string")))];
+        vec![("role".to_string(), PhpType::named(atom("string")))];
     user.laravel_mut().column_names = vec!["nickname".to_string()];
     user.laravel_mut().timestamps = Some(true);
     user.properties

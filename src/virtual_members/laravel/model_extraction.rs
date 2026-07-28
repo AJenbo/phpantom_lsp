@@ -209,7 +209,7 @@ fn extract_custom_builder(
 ) -> Option<PhpType> {
     // 1. Try the #[UseEloquentBuilder] attribute first.
     if let Some(name) = extract_use_eloquent_builder_attribute(attribute_lists, content) {
-        return Some(PhpType::Named(atom(&name)));
+        return Some(PhpType::named(atom(&name)));
     }
 
     // 2. Fall back to @use HasBuilder<X>.
@@ -249,7 +249,7 @@ fn extract_custom_collection(
 ) -> Option<PhpType> {
     // 1. Try the #[CollectedBy] attribute first.
     if let Some(name) = extract_collected_by_attribute(attribute_lists, content) {
-        return Some(PhpType::Named(atom(&name)));
+        return Some(PhpType::named(atom(&name)));
     }
 
     // 2. Fall back to @use HasCollection<X>.

@@ -308,7 +308,7 @@ The remaining gap is that *unannotated* closures like
 `$fn = function(int $x): string { ... }` resolve to bare `Closure`
 with no signature detail. `infer_closure_literal_type` (in
 `rhs_resolution.rs`) already embeds the inferred return type in a
-`PhpType::Callable`, but always leaves `params` empty, so it does not
+`TypeKind::Callable`, but always leaves `params` empty, so it does not
 produce a full callable type string for variable-type contexts.
 
 **Example:**

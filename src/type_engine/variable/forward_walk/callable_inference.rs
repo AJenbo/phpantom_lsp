@@ -7,7 +7,7 @@ use mago_syntax::cst::argument::Argument;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use crate::atom::{atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 // ─── Callable parameter inference for the forward walker ────────────────────
@@ -171,17 +171,17 @@ pub(crate) fn filter_resolvable_inferred_params(
 /// Check whether a type has a base name that looks class-like but
 /// doesn't resolve to any known class in the project or stubs.
 pub(crate) fn has_unresolvable_base(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> bool {
-    match ty {
-        PhpType::Named(name) => is_unresolvable_class_name(name, ctx),
-        PhpType::Generic(g) => {
+    match ty.kind() {
+        TypeKind::Named(name) => is_unresolvable_class_name(name, ctx),
+        TypeKind::Generic(g) => {
             is_unresolvable_class_name(&g.name, ctx)
                 || g.args.iter().any(|a| has_unresolvable_base(a, ctx))
         }
-        PhpType::Union(parts) | PhpType::Intersection(parts) => {
+        TypeKind::Union(parts) | TypeKind::Intersection(parts) => {
             parts.iter().any(|p| has_unresolvable_base(p, ctx))
         }
-        PhpType::Nullable(inner) => has_unresolvable_base(inner, ctx),
-        PhpType::Callable(c) => {
+        TypeKind::Nullable(inner) => has_unresolvable_base(inner, ctx),
+        TypeKind::Callable(c) => {
             if let Some(ret) = &c.return_type
                 && has_unresolvable_base(ret, ctx)
             {
@@ -254,8 +254,8 @@ pub(crate) fn build_receiver_template_subs(
     // Use the first resolved type that has generic args and a matching
     // class with template params.
     for rt in resolved_types {
-        let generic_args = match &rt.type_string {
-            PhpType::Generic(g) if !g.args.is_empty() => &g.args,
+        let generic_args = match &rt.type_string.kind() {
+            TypeKind::Generic(g) if !g.args.is_empty() => &g.args,
             _ => continue,
         };
         // Find the matching class info (by FQN or short name).
@@ -286,7 +286,7 @@ pub(crate) fn build_receiver_template_subs(
         };
         let reconstructed =
             super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
-        if let PhpType::Generic(ref g) = reconstructed
+        if let TypeKind::Generic(g) = reconstructed.kind()
             && !g.args.is_empty()
         {
             return crate::inheritance::build_generic_subs(cls, &g.args);
@@ -349,7 +349,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         // `Closure(Collection<int, Customer>)`.
         let receiver_type =
             super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
-        let template_subs = if let PhpType::Generic(ref g) = receiver_type
+        let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
             && !g.args.is_empty()
             && !cls.template_params.is_empty()
         {

@@ -56,7 +56,7 @@ impl LaravelPivotIndex {
 }
 
 fn base_pivot_type() -> PhpType {
-    PhpType::Named(atom(ELOQUENT_PIVOT_FQN))
+    PhpType::named(atom(ELOQUENT_PIVOT_FQN))
 }
 
 /// Resolve the pivot type for one many-to-many relationship method.
@@ -73,9 +73,9 @@ fn pivot_type_for(
         && let Some(name) = pivot.base_name()
     {
         if let Some(cls) = resolve_related_fqn(name, declaring, loader) {
-            return PhpType::Named(cls.fqn());
+            return PhpType::named(cls.fqn());
         }
-        return PhpType::Named(atom(name.trim_start_matches(char::from(92))));
+        return PhpType::named(atom(name.trim_start_matches(char::from(92))));
     }
 
     if let Some(laravel) = declaring.laravel()
@@ -85,7 +85,7 @@ fn pivot_type_for(
             .find(|p| p.method == method_name)
         && let Some(using) = &pivot.using
     {
-        return PhpType::Named(atom(using));
+        return PhpType::named(atom(using));
     }
 
     base_pivot_type()

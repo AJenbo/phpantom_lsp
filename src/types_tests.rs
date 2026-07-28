@@ -681,7 +681,7 @@ fn class_signature_eq_detects_laravel_metadata_change() {
         name: crate::atom::atom("User"),
         ..Default::default()
     };
-    a.laravel_mut().custom_collection = Some(PhpType::Named(atom("UserCollection")));
+    a.laravel_mut().custom_collection = Some(PhpType::named(atom("UserCollection")));
 
     let b = ClassInfo {
         name: crate::atom::atom("User"),
@@ -893,7 +893,7 @@ fn cache_fqn_matches_computed_value() {
 
 #[test]
 fn from_classes_with_hint_single_class_uses_hint() {
-    let hint = PhpType::Named(atom("Foo"));
+    let hint = PhpType::named(atom("Foo"));
     let result = ResolvedType::from_classes_with_hint(vec![Arc::new(class("Foo"))], hint.clone());
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].type_string, hint);
@@ -903,8 +903,8 @@ fn from_classes_with_hint_single_class_uses_hint() {
 #[test]
 fn from_classes_with_hint_intersection_preserves_type() {
     let hint = PhpType::intersection(vec![
-        PhpType::Named(atom("Countable")),
-        PhpType::Named(atom("Serializable")),
+        PhpType::named(atom("Countable")),
+        PhpType::named(atom("Serializable")),
     ]);
     let classes = vec![
         Arc::new(class("Countable")),
@@ -922,33 +922,33 @@ fn from_classes_with_hint_intersection_preserves_type() {
 #[test]
 fn from_classes_with_hint_union_uses_class_names() {
     let hint = PhpType::union(vec![
-        PhpType::Named(atom("Foo")),
-        PhpType::Named(atom("Bar")),
+        PhpType::named(atom("Foo")),
+        PhpType::named(atom("Bar")),
     ]);
     let classes = vec![Arc::new(class("Foo")), Arc::new(class("Bar"))];
     let result = ResolvedType::from_classes_with_hint(classes, hint);
     assert_eq!(result.len(), 2);
     // Union: each entry uses the class's own name (old behaviour).
-    assert_eq!(result[0].type_string, PhpType::Named(atom("Foo")));
-    assert_eq!(result[1].type_string, PhpType::Named(atom("Bar")));
+    assert_eq!(result[0].type_string, PhpType::named(atom("Foo")));
+    assert_eq!(result[1].type_string, PhpType::named(atom("Bar")));
 }
 
 // ── types_joined: intersection ──────────────────────────────────
 
 #[test]
 fn types_joined_single_entry() {
-    let entries = vec![ResolvedType::from_type_string(PhpType::Named(atom("Foo")))];
+    let entries = vec![ResolvedType::from_type_string(PhpType::named(atom("Foo")))];
     assert_eq!(
         ResolvedType::types_joined(&entries),
-        PhpType::Named(atom("Foo"))
+        PhpType::named(atom("Foo"))
     );
 }
 
 #[test]
 fn types_joined_intersection_entries_return_intersection() {
     let intersection = PhpType::intersection(vec![
-        PhpType::Named(atom("Countable")),
-        PhpType::Named(atom("Serializable")),
+        PhpType::named(atom("Countable")),
+        PhpType::named(atom("Serializable")),
     ]);
     let entries = vec![
         ResolvedType::from_both(intersection.clone(), class("Countable")),
@@ -961,15 +961,15 @@ fn types_joined_intersection_entries_return_intersection() {
 #[test]
 fn types_joined_mixed_entries_return_union() {
     let entries = vec![
-        ResolvedType::from_type_string(PhpType::Named(atom("Foo"))),
-        ResolvedType::from_type_string(PhpType::Named(atom("Bar"))),
+        ResolvedType::from_type_string(PhpType::named(atom("Foo"))),
+        ResolvedType::from_type_string(PhpType::named(atom("Bar"))),
     ];
     let joined = ResolvedType::types_joined(&entries);
     assert_eq!(
         joined,
         PhpType::union(vec![
-            PhpType::Named(atom("Foo")),
-            PhpType::Named(atom("Bar")),
+            PhpType::named(atom("Foo")),
+            PhpType::named(atom("Bar")),
         ])
     );
 }
@@ -984,20 +984,18 @@ fn types_joined_empty_returns_mixed() {
 
 #[test]
 fn strip_null_removes_nullable() {
-    let mut rt = ResolvedType::from_both(
-        PhpType::Nullable(Box::new(PhpType::Named(atom("Foo")))),
-        class("Foo"),
-    );
+    let mut rt =
+        ResolvedType::from_both(PhpType::nullable(PhpType::named(atom("Foo"))), class("Foo"));
     rt.strip_null();
-    assert_eq!(rt.type_string, PhpType::Named(atom("Foo")));
+    assert_eq!(rt.type_string, PhpType::named(atom("Foo")));
     assert!(rt.class_info.is_some());
 }
 
 #[test]
 fn strip_null_no_op_when_not_nullable() {
-    let mut rt = ResolvedType::from_both(PhpType::Named(atom("Foo")), class("Foo"));
+    let mut rt = ResolvedType::from_both(PhpType::named(atom("Foo")), class("Foo"));
     rt.strip_null();
-    assert_eq!(rt.type_string, PhpType::Named(atom("Foo")));
+    assert_eq!(rt.type_string, PhpType::named(atom("Foo")));
     assert!(rt.class_info.is_some());
 }
 
@@ -1005,28 +1003,28 @@ fn strip_null_no_op_when_not_nullable() {
 
 #[test]
 fn replace_type_keeps_class_info_when_matching() {
-    let mut rt = ResolvedType::from_both(PhpType::Named(atom("Foo")), class("Foo"));
-    rt.replace_type(PhpType::Named(atom("Foo")));
-    assert_eq!(rt.type_string, PhpType::Named(atom("Foo")));
+    let mut rt = ResolvedType::from_both(PhpType::named(atom("Foo")), class("Foo"));
+    rt.replace_type(PhpType::named(atom("Foo")));
+    assert_eq!(rt.type_string, PhpType::named(atom("Foo")));
     assert!(rt.class_info.is_some());
 }
 
 #[test]
 fn replace_type_clears_class_info_when_mismatched() {
-    let mut rt = ResolvedType::from_both(PhpType::Named(atom("Foo")), class("Foo"));
-    rt.replace_type(PhpType::Named(atom("array")));
-    assert_eq!(rt.type_string, PhpType::Named(atom("array")));
+    let mut rt = ResolvedType::from_both(PhpType::named(atom("Foo")), class("Foo"));
+    rt.replace_type(PhpType::named(atom("array")));
+    assert_eq!(rt.type_string, PhpType::named(atom("array")));
     assert!(rt.class_info.is_none());
 }
 
 #[test]
 fn replace_type_matches_fqn_with_leading_backslash() {
     let mut rt = ResolvedType::from_both(
-        PhpType::Named(atom("App\\Models\\User")),
+        PhpType::named(atom("App\\Models\\User")),
         class_with_ns("User", "App\\Models"),
     );
-    rt.replace_type(PhpType::Named(atom("\\App\\Models\\User")));
-    assert_eq!(rt.type_string, PhpType::Named(atom("\\App\\Models\\User")));
+    rt.replace_type(PhpType::named(atom("\\App\\Models\\User")));
+    assert_eq!(rt.type_string, PhpType::named(atom("\\App\\Models\\User")));
     assert!(
         rt.class_info.is_some(),
         "class_info should be preserved when FQN matches modulo leading backslash"
@@ -1035,16 +1033,16 @@ fn replace_type_matches_fqn_with_leading_backslash() {
 
 #[test]
 fn replace_type_matches_short_name() {
-    let mut rt = ResolvedType::from_both(PhpType::Named(atom("User")), class("User"));
-    rt.replace_type(PhpType::Named(atom("User")));
+    let mut rt = ResolvedType::from_both(PhpType::named(atom("User")), class("User"));
+    rt.replace_type(PhpType::named(atom("User")));
     assert!(rt.class_info.is_some());
 }
 
 #[test]
 fn replace_type_clears_when_no_class_info() {
-    let mut rt = ResolvedType::from_type_string(PhpType::Named(atom("int")));
-    rt.replace_type(PhpType::Named(atom("string")));
-    assert_eq!(rt.type_string, PhpType::Named(atom("string")));
+    let mut rt = ResolvedType::from_type_string(PhpType::named(atom("int")));
+    rt.replace_type(PhpType::named(atom("string")));
+    assert_eq!(rt.type_string, PhpType::named(atom("string")));
     assert!(rt.class_info.is_none());
 }
 

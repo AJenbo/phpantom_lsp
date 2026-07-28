@@ -21,6 +21,7 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap};
 use crate::php_type::{
     CallableParam, CallableType, ConditionalType, GenericType, LiteralValue, PhpType, ShapeEntry,
+    TypeKind,
 };
 use crate::types::{
     ClassInfo, ConstantInfo, FunctionInfo, LaravelMetadata, MethodInfo, ParameterInfo,
@@ -178,13 +179,14 @@ fn ty_vec(v: &[PhpType]) -> Sz {
     z
 }
 
-/// Per-variant counts plus distinct rendered forms, to size up both
-/// "which variants force `PhpType` to be 64 bytes" and "how much would
-/// interning types collapse".
+/// Per-variant counts plus distinct nodes, to size up which variants carry
+/// the interner's payload and how much sharing the workload actually gets.
 #[derive(Default)]
 struct TypeStats {
     variants: HashMap<&'static str, usize>,
-    distinct: HashSet<String>,
+    /// Interned nodes reached at least once, by address. Types are
+    /// hash-consed, so this is exactly the distinct-form count.
+    distinct: HashSet<usize>,
     total: usize,
 }
 
@@ -194,59 +196,68 @@ thread_local! {
 }
 
 fn variant_name(t: &PhpType) -> &'static str {
-    match t {
-        PhpType::Named(_) => "Named",
-        PhpType::StaticType(_) => "StaticType",
-        PhpType::ThisType(_) => "ThisType",
-        PhpType::Nullable(_) => "Nullable",
-        PhpType::Union(_) => "Union",
-        PhpType::Intersection(_) => "Intersection",
-        PhpType::Generic(..) => "Generic",
-        PhpType::Array(_) => "Array",
-        PhpType::ArrayShape(_) => "ArrayShape",
-        PhpType::ObjectShape(_) => "ObjectShape",
-        PhpType::Callable(_) => "Callable",
-        PhpType::Conditional(_) => "Conditional",
-        PhpType::ClassString(_) => "ClassString",
-        PhpType::InterfaceString(_) => "InterfaceString",
-        PhpType::KeyOf(_) => "KeyOf",
-        PhpType::ValueOf(_) => "ValueOf",
-        PhpType::IntRange(..) => "IntRange",
-        PhpType::IndexAccess(..) => "IndexAccess",
-        PhpType::Literal(_) => "Literal",
-        PhpType::Raw(_) => "Raw",
+    match t.kind() {
+        TypeKind::Named(_) => "Named",
+        TypeKind::StaticType(_) => "StaticType",
+        TypeKind::ThisType(_) => "ThisType",
+        TypeKind::Nullable(_) => "Nullable",
+        TypeKind::Union(_) => "Union",
+        TypeKind::Intersection(_) => "Intersection",
+        TypeKind::Generic(..) => "Generic",
+        TypeKind::Array(_) => "Array",
+        TypeKind::ArrayShape(_) => "ArrayShape",
+        TypeKind::ObjectShape(_) => "ObjectShape",
+        TypeKind::Callable(_) => "Callable",
+        TypeKind::Conditional(_) => "Conditional",
+        TypeKind::ClassString(_) => "ClassString",
+        TypeKind::InterfaceString(_) => "InterfaceString",
+        TypeKind::KeyOf(_) => "KeyOf",
+        TypeKind::ValueOf(_) => "ValueOf",
+        TypeKind::IntRange(..) => "IntRange",
+        TypeKind::IndexAccess(..) => "IndexAccess",
+        TypeKind::Literal(_) => "Literal",
+        TypeKind::Raw(_) => "Raw",
     }
 }
 
-fn record_type(t: &PhpType) {
+/// Record one *occurrence* of a type, returning whether this is the first
+/// time the audit has reached its interned node.
+fn record_type(t: &PhpType) -> bool {
     TYPE_STATS.with(|s| {
         let mut s = s.borrow_mut();
         s.total += 1;
         *s.variants.entry(variant_name(t)).or_default() += 1;
-        let rendered = t.to_string();
-        if !s.distinct.contains(&rendered) {
-            s.distinct.insert(rendered);
-        }
-    });
+        s.distinct.insert(std::ptr::from_ref(t.kind()) as usize)
+    })
 }
 
-/// Heap bytes hanging off one inline `PhpType` value.
+/// Heap bytes hanging off one `PhpType` occurrence.
+///
+/// Types are interned, so an occurrence costs one pointer-sized slot in
+/// whatever holds it, and the node itself is charged once no matter how
+/// many members share it — the same pointer-dedup rule the audit already
+/// applies to shared `Arc` members.
 fn ty(t: &PhpType) -> Sz {
-    record_type(t);
     let mut z = Sz::default();
-    match t {
-        PhpType::Named(_) | PhpType::StaticType(_) | PhpType::ThisType(_) => {}
-        PhpType::Nullable(b) | PhpType::Array(b) | PhpType::KeyOf(b) | PhpType::ValueOf(b) => {
-            z.add(PT);
+    if !record_type(t) {
+        return z;
+    }
+
+    // The node's own `Arc` allocation: control block plus the enum.
+    z.add(ARC + size_of::<TypeKind>());
+
+    match t.kind() {
+        TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_) => {}
+        TypeKind::Nullable(b) | TypeKind::Array(b) | TypeKind::KeyOf(b) | TypeKind::ValueOf(b) => {
             z.slot(1);
             z += ty(b);
         }
-        PhpType::Union(v) | PhpType::Intersection(v) => z += ty_vec(v),
-        PhpType::Generic(g) => {
+        TypeKind::Union(v) | TypeKind::Intersection(v) => z += ty_vec(v),
+        TypeKind::Generic(g) => {
             z.add(size_of::<GenericType>());
             z += ty_vec(&g.args);
         }
-        PhpType::ArrayShape(v) | PhpType::ObjectShape(v) => {
+        TypeKind::ArrayShape(v) | TypeKind::ObjectShape(v) => {
             z.add(v.len() * size_of::<ShapeEntry>());
             z.slot(v.len());
             for e in v {
@@ -256,7 +267,7 @@ fn ty(t: &PhpType) -> Sz {
                 z += ty(&e.value_type);
             }
         }
-        PhpType::Callable(c) => {
+        TypeKind::Callable(c) => {
             z.add(size_of::<CallableType>());
             // The boxed payload always holds one `Option<PhpType>` slot,
             // whether or not a return type was written.
@@ -270,31 +281,27 @@ fn ty(t: &PhpType) -> Sz {
                 z += ty(b);
             }
         }
-        PhpType::Conditional(c) => {
+        TypeKind::Conditional(c) => {
             z.add(size_of::<ConditionalType>());
             z.slot(3);
             for b in [&c.condition, &c.then_type, &c.else_type] {
                 z += ty(b);
             }
         }
-        PhpType::ClassString(o) | PhpType::InterfaceString(o) => {
+        TypeKind::ClassString(o) | TypeKind::InterfaceString(o) => {
             if let Some(b) = o {
-                z.add(PT);
                 z.slot(1);
                 z += ty(b);
             }
         }
-        // Interned bounds: no per-value heap payload.
-        PhpType::IntRange(..) => {}
-        PhpType::IndexAccess(a, b) => {
-            z.add(PT);
-            z.slot(1);
+        // Interned bounds: no per-node heap payload.
+        TypeKind::IntRange(..) => {}
+        TypeKind::IndexAccess(a, b) => {
+            z.slot(2);
             z += ty(a);
-            z.add(PT);
-            z.slot(1);
             z += ty(b);
         }
-        PhpType::Literal(l) => {
+        TypeKind::Literal(l) => {
             z.add(size_of::<LiteralValue>());
             match &**l {
                 LiteralValue::Int(x) | LiteralValue::Float(x) | LiteralValue::String(x) => {
@@ -302,7 +309,7 @@ fn ty(t: &PhpType) -> Sz {
                 }
             }
         }
-        PhpType::Raw(x) => z.add(x.len()),
+        TypeKind::Raw(x) => z.add(x.len()),
     }
     z
 }
@@ -896,11 +903,6 @@ impl Audit {
     /// Turn the simulation counters into projected reclaim, so each
     /// candidate representation change can be ranked directly.
     fn print_reclaim(&self) {
-        // Shrinking `PhpType` further, to a single pointer-sized handle
-        // (interning, or a thin vec/string for the remaining two-word
-        // payloads), would save this much per slot.
-        const PT_SHRUNK: usize = 16;
-        let per_slot = PT.saturating_sub(PT_SHRUNK);
         let heap_slots: usize = [
             self.m_types,
             self.p_types,
@@ -925,11 +927,11 @@ impl Audit {
 
         eprintln!("  [projected reclaim]");
         eprintln!(
-            "    PhpType {PT}→{PT_SHRUNK} B: {} slots ({} inline in structs + {} in heap allocs) → {:.1} MB",
+            "    PhpType slots at {PT} B: {} ({} inline in structs + {} in heap allocs) → {:.1} MB",
             pt_total,
             self.pt_inline_slots,
             heap_slots,
-            mb(pt_total * per_slot),
+            mb(pt_total * PT),
         );
         eprintln!(
             "    box docblock fields: {}/{} methods doc-free ({:.0}%) → {:.1} MB; {}/{} props → {:.1} MB; {}/{} params → {:.1} MB",
@@ -1492,10 +1494,11 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             .map(|(k, n)| format!("{k} {:.1}%", 100.0 * *n as f64 / s.total.max(1) as f64))
             .collect();
         eprintln!(
-            "── PhpType values walked: {} | distinct rendered forms: {} ({:.1}x duplication)",
+            "── PhpType occurrences walked: {} | distinct interned nodes: {} ({:.1}x sharing) | interner holds {}",
             s.total,
             s.distinct.len(),
             s.total as f64 / s.distinct.len().max(1) as f64,
+            crate::php_type::interned_len(),
         );
         eprintln!("    variant mix: {}", listed.join(", "));
     });

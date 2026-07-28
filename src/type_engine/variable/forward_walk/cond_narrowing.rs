@@ -6,7 +6,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{Atom, atom, bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::{MethodInfo, PropertyInfo, ResolvedType};
@@ -347,8 +347,8 @@ pub(crate) fn apply_condition_narrowing<'b>(
                 let all_broad = existing.iter().all(|rt| {
                     rt.class_info.is_none()
                         && matches!(
-                            rt.type_string.unwrap_nullable(),
-                            PhpType::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
+                            rt.type_string.unwrap_nullable().kind(),
+                            TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
                         )
                 });
                 if all_broad {
@@ -420,12 +420,12 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     // Apply all narrowed classes as a single group by
                     // building a union type.
                     let union_type = if narrowed_fqns.len() == 1 {
-                        PhpType::Named(atom(&narrowed_fqns[0]))
+                        PhpType::named(atom(&narrowed_fqns[0]))
                     } else {
-                        PhpType::Union(
+                        PhpType::union(
                             narrowed_fqns
                                 .iter()
-                                .map(|n| PhpType::Named(atom(n)))
+                                .map(|n| PhpType::named(atom(n)))
                                 .collect(),
                         )
                     };
@@ -1622,7 +1622,7 @@ pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
         return;
     }
 
-    let is_false = |t: &PhpType| matches!(t, PhpType::Named(n) if n == "false");
+    let is_false = |t: &PhpType| matches!(t.kind(), TypeKind::Named(n) if n == "false");
 
     let stripped: Vec<ResolvedType> = types
         .into_iter()
@@ -1637,8 +1637,8 @@ pub(crate) fn strip_falsy_from_scope(var_name: &str, scope: &mut ScopeState) {
             if is_false(&ty) {
                 return None;
             }
-            let ty = match &ty {
-                PhpType::Union(members) => {
+            let ty = match &ty.kind() {
+                TypeKind::Union(members) => {
                     let non_false: Vec<PhpType> =
                         members.iter().filter(|m| !is_false(m)).cloned().collect();
                     match non_false.len() {
@@ -1709,9 +1709,9 @@ pub(crate) fn strip_null_from_shape_key(
     ty: &crate::php_type::PhpType,
     key: &str,
 ) -> crate::php_type::PhpType {
-    use crate::php_type::{PhpType, ShapeEntry};
-    match ty {
-        PhpType::ArrayShape(entries) => {
+    use crate::php_type::{PhpType, ShapeEntry, TypeKind};
+    match ty.kind() {
+        TypeKind::ArrayShape(entries) => {
             let new_entries: Vec<ShapeEntry> = entries
                 .iter()
                 .map(|e| {
@@ -1732,18 +1732,18 @@ pub(crate) fn strip_null_from_shape_key(
                 .collect();
             PhpType::array_shape(new_entries)
         }
-        PhpType::Nullable(inner) => {
+        TypeKind::Nullable(inner) => {
             // `?array{test: ?int}` → `?array{test: int}`
-            PhpType::Nullable(Box::new(strip_null_from_shape_key(inner, key)))
+            PhpType::nullable(strip_null_from_shape_key(inner, key))
         }
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             let new_members: Vec<PhpType> = members
                 .iter()
                 .map(|m| strip_null_from_shape_key(m, key))
                 .collect();
             PhpType::union(new_members)
         }
-        other => other.clone(),
+        other => other.clone().into(),
     }
 }
 

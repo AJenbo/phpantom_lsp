@@ -172,7 +172,7 @@ pub(crate) fn find_uncaught_throw_types_with_context(
         })
     }
 
-    /// Normalize a ThrowInfo's type_name into a PhpType::Named,
+    /// Normalize a ThrowInfo's type_name into a TypeKind::Named,
     /// resolving short names to FQN when use_map/namespace are available.
     fn normalize_throw_type(
         ty: &PhpType,
@@ -195,7 +195,7 @@ pub(crate) fn find_uncaught_throw_types_with_context(
             } else {
                 resolved
             };
-            Some(PhpType::Named(atom(&fqn)))
+            Some(PhpType::named(atom(&fqn)))
         }
     }
 
@@ -444,12 +444,12 @@ pub(crate) fn parse_param_type_map(signature: &str) -> Vec<(String, PhpType)> {
         let parsed = PhpType::parse(type_token);
         let non_null = parsed.non_null_type().unwrap_or_else(|| parsed.clone());
         if let Some(name) = non_null.base_name() {
-            result.push((var_name.to_string(), PhpType::Named(atom(name))));
+            result.push((var_name.to_string(), PhpType::named(atom(name))));
         } else {
             // Fallback for scalars and other non-class types.
             let cleaned_type = type_token.trim_start_matches('?').trim_start_matches('\\');
             if !cleaned_type.is_empty() {
-                result.push((var_name.to_string(), PhpType::Named(atom(cleaned_type))));
+                result.push((var_name.to_string(), PhpType::named(atom(cleaned_type))));
             }
         }
     }
@@ -480,7 +480,7 @@ pub(crate) fn find_cross_file_propagated_throws(
         .into_iter()
         .map(|(name, ty)| {
             let resolved = if let Some(base) = ty.base_name() {
-                PhpType::Named(atom(&crate::util::resolve_to_fqn(
+                PhpType::named(atom(&crate::util::resolve_to_fqn(
                     base,
                     ctx.use_map,
                     ctx.file_namespace,

@@ -25,7 +25,7 @@ use crate::atom::{Atom, atom};
 use crate::docblock;
 use crate::inheritance;
 use crate::inheritance::ClassRef;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     ClassInfo, ConstantInfo, MAX_INHERITANCE_DEPTH, MAX_MIXIN_DEPTH, MethodInfo, PropertyInfo,
     Visibility,
@@ -1028,17 +1028,17 @@ fn return_type_is_mixin_self(
             || stripped == resolved_short
             || short_name(stripped) == mixin_short
     };
-    match ty {
-        PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => check_name(n),
-        PhpType::Generic(g) => check_name(&g.name),
-        PhpType::Nullable(inner) => return_type_is_mixin_self(
+    match ty.kind() {
+        TypeKind::Named(n) | TypeKind::StaticType(n) | TypeKind::ThisType(n) => check_name(n),
+        TypeKind::Generic(g) => check_name(&g.name),
+        TypeKind::Nullable(inner) => return_type_is_mixin_self(
             inner,
             mixin_fqn,
             mixin_short,
             mixin_resolved_name,
             resolved_short,
         ),
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             let non_null: Vec<_> = members.iter().filter(|m| !m.is_null()).collect();
             !non_null.is_empty()
                 && non_null.iter().all(|m| {

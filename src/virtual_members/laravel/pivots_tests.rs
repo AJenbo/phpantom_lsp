@@ -46,7 +46,7 @@ fn build_maps_related_to_third_generic_pivot() {
 
     assert_eq!(
         index.get("App\\Models\\Permission"),
-        Some(&PhpType::Named(atom("App\\Models\\PermissionRole")))
+        Some(&PhpType::named(atom("App\\Models\\PermissionRole")))
     );
 }
 
@@ -65,7 +65,7 @@ fn build_falls_back_to_base_pivot_without_third_generic() {
 
     assert_eq!(
         index.get("App\\Models\\Role"),
-        Some(&PhpType::Named(atom(ELOQUENT_PIVOT_FQN)))
+        Some(&PhpType::named(atom(ELOQUENT_PIVOT_FQN)))
     );
 }
 
@@ -90,7 +90,7 @@ fn build_uses_parsed_using_when_no_third_generic() {
 
     assert_eq!(
         index.get("App\\Models\\Role"),
-        Some(&PhpType::Named(atom("App\\Models\\RoleUser")))
+        Some(&PhpType::named(atom("App\\Models\\RoleUser")))
     );
 }
 
@@ -118,7 +118,7 @@ fn build_ambiguous_targets_fall_back_to_base() {
 
     assert_eq!(
         index.get("App\\Models\\Permission"),
-        Some(&PhpType::Named(atom(ELOQUENT_PIVOT_FQN))),
+        Some(&PhpType::named(atom(ELOQUENT_PIVOT_FQN))),
         "conflicting pivots collapse to the base Pivot"
     );
 }
@@ -186,7 +186,7 @@ fn inject_respects_declared_pivot() {
         .properties
         .push(Arc::new(PropertyInfo::virtual_property_typed(
             "pivot",
-            Some(&PhpType::Named(atom("App\\Models\\Custom"))),
+            Some(&PhpType::named(atom("App\\Models\\Custom"))),
         )));
     let out = inject_pivot(&index, Arc::new(permission_with_pivot));
     let pivots: Vec<_> = out

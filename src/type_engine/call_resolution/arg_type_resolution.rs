@@ -9,7 +9,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::resolve_class_keyword;
 use crate::docblock;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
@@ -137,8 +137,8 @@ impl Backend {
                 // produce.  Fall through to the unified pipeline below,
                 // which resolves the variable through the forward walker
                 // and substitutes template params with their bounds.
-                let looks_like_unbound_template = match &raw {
-                    PhpType::Named(name) => {
+                let looks_like_unbound_template = match &raw.kind() {
+                    TypeKind::Named(name) => {
                         !crate::php_type::is_keyword_type(name)
                             && (ctx.class_loader)(name).is_none()
                     }

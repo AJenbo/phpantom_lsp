@@ -44,7 +44,7 @@ use crate::Backend;
 use crate::class_lookup::{find_class_by_name, is_self_or_static, resolve_class_keyword};
 use crate::docblock;
 use crate::inheritance::resolve_property_type_hint;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::BracketSegment;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
@@ -57,7 +57,7 @@ use context::{CHAIN_CACHE, resolved_to_arcs};
 ///
 /// This is the primary entry point for subject resolution.  It returns
 /// `Vec<ResolvedType>` which carries both the structured type string
-/// (e.g. `PhpType::Named("Collection")`) and the optional `ClassInfo`.
+/// (e.g. `PhpType::named("Collection")`) and the optional `ClassInfo`.
 /// Callers that only need classes can call
 /// `ResolvedType::into_arced_classes()` on the result.
 pub(crate) fn resolve_target_classes(
@@ -1008,7 +1008,7 @@ fn check_unresolvable_class_name(
     let base = effective.base_name()?;
 
     if class_loader(base).is_none() {
-        Some(PhpType::Named(atom(base)))
+        Some(PhpType::named(atom(base)))
     } else {
         None
     }
@@ -1223,20 +1223,20 @@ fn resolve_variable_fallback(
     if access_kind == AccessKind::DoubleColon {
         let mut class_string_results: Vec<ResolvedType> = Vec::new();
         for rt in &resolved_types {
-            let inner = match &rt.type_string {
-                PhpType::ClassString(Some(inner)) => Some(inner.as_ref()),
+            let inner = match &rt.type_string.kind() {
+                TypeKind::ClassString(Some(inner)) => Some(inner),
                 // Handle `?class-string<T>` — unwrap nullable first.
-                PhpType::Nullable(inner) => match inner.as_ref() {
-                    PhpType::ClassString(Some(cs_inner)) => Some(cs_inner.as_ref()),
+                TypeKind::Nullable(inner) => match inner.kind() {
+                    TypeKind::ClassString(Some(cs_inner)) => Some(cs_inner),
                     _ => None,
                 },
                 // Handle union types containing class-string<T>.
-                PhpType::Union(members) => {
+                TypeKind::Union(members) => {
                     for member in members {
-                        let cs_inner = match member {
-                            PhpType::ClassString(Some(inner)) => Some(inner.as_ref()),
-                            PhpType::Nullable(inner) => match inner.as_ref() {
-                                PhpType::ClassString(Some(cs_inner)) => Some(cs_inner.as_ref()),
+                        let cs_inner = match member.kind() {
+                            TypeKind::ClassString(Some(inner)) => Some(inner),
+                            TypeKind::Nullable(inner) => match inner.kind() {
+                                TypeKind::ClassString(Some(cs_inner)) => Some(cs_inner),
                                 _ => None,
                             },
                             _ => None,

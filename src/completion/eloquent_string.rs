@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::position_to_offset;
 use crate::types::{ClassInfo, FileContext};
 use crate::virtual_members::laravel::{
@@ -589,7 +589,7 @@ impl Backend {
         let param_type = param.type_hint.as_ref()?;
 
         let model_name_owned: String;
-        let model_name: &str = if let PhpType::Generic(g) = param_type
+        let model_name: &str = if let TypeKind::Generic(g) = param_type.kind()
             && g.name.eq_ignore_ascii_case("model-property")
             && g.args.len() == 1
         {
@@ -639,14 +639,14 @@ impl Backend {
 /// Extract the model name from a `model-property<Model>` type nested
 /// inside an array or list generic argument.
 fn extract_model_property_from_generic_args(ty: &PhpType) -> Option<String> {
-    let PhpType::Generic(g) = ty else {
+    let TypeKind::Generic(g) = ty.kind() else {
         return None;
     };
     if !crate::php_type::is_array_like_name(&g.name) && !g.name.eq_ignore_ascii_case("list") {
         return None;
     }
     for arg in &g.args {
-        if let PhpType::Generic(inner) = arg
+        if let TypeKind::Generic(inner) = arg.kind()
             && inner.name.eq_ignore_ascii_case("model-property")
             && inner.args.len() == 1
         {
@@ -694,7 +694,7 @@ fn count_top_level_commas(text: &str) -> usize {
 
 /// Extract the model FQN from a `Builder<Model>` type.
 fn extract_model_from_builder_type(ty: &PhpType) -> Option<String> {
-    if let PhpType::Generic(g) = ty
+    if let TypeKind::Generic(g) = ty.kind()
         && (g.name.ends_with("Builder") || g.name == ELOQUENT_BUILDER_FQN)
         && let Some(first) = g.args.first()
     {

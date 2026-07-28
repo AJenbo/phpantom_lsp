@@ -26,7 +26,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
@@ -372,7 +372,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     // Skip unresolved types.
     if rhs_type.is_untyped()
         || rhs_type.is_empty()
-        || matches!(&rhs_type, PhpType::Raw(s) if s.is_empty())
+        || matches!(&rhs_type.kind(), TypeKind::Raw(s) if s.is_empty())
     {
         return;
     }

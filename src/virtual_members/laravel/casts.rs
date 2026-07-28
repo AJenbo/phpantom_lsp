@@ -9,7 +9,7 @@
 //! fallback resolution.
 
 use crate::atom::atom;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
 use std::collections::HashMap;
@@ -31,20 +31,20 @@ static CAST_TYPE_MAP: LazyLock<HashMap<&'static str, PhpType>> = LazyLock::new(|
     HashMap::from([
         (
             "datetime",
-            PhpType::Named(atom(super::CONFIGURED_DATE_CLASS_FQN)),
+            PhpType::named(atom(super::CONFIGURED_DATE_CLASS_FQN)),
         ),
         (
             "date",
-            PhpType::Named(atom(super::CONFIGURED_DATE_CLASS_FQN)),
+            PhpType::named(atom(super::CONFIGURED_DATE_CLASS_FQN)),
         ),
         ("timestamp", PhpType::int()),
         (
             "immutable_datetime",
-            PhpType::Named(atom("Carbon\\CarbonImmutable")),
+            PhpType::named(atom("Carbon\\CarbonImmutable")),
         ),
         (
             "immutable_date",
-            PhpType::Named(atom("Carbon\\CarbonImmutable")),
+            PhpType::named(atom("Carbon\\CarbonImmutable")),
         ),
         ("boolean", PhpType::bool()),
         ("bool", PhpType::bool()),
@@ -59,13 +59,13 @@ static CAST_TYPE_MAP: LazyLock<HashMap<&'static str, PhpType>> = LazyLock::new(|
         ("object", PhpType::object()),
         (
             "collection",
-            PhpType::Named(atom("Illuminate\\Support\\Collection")),
+            PhpType::named(atom("Illuminate\\Support\\Collection")),
         ),
         ("encrypted", PhpType::string()),
         ("encrypted:array", PhpType::array()),
         (
             "encrypted:collection",
-            PhpType::Named(atom("Illuminate\\Support\\Collection")),
+            PhpType::named(atom("Illuminate\\Support\\Collection")),
         ),
         ("encrypted:object", PhpType::object()),
         ("hashed", PhpType::string()),
@@ -74,12 +74,12 @@ static CAST_TYPE_MAP: LazyLock<HashMap<&'static str, PhpType>> = LazyLock::new(|
 
 /// Laravel configured date type used by date/datetime casts.
 fn carbon_type() -> PhpType {
-    PhpType::Named(atom(super::CONFIGURED_DATE_CLASS_FQN))
+    PhpType::named(atom(super::CONFIGURED_DATE_CLASS_FQN))
 }
 
 /// Pre-built `PhpType` for `\Carbon\CarbonImmutable`, used by immutable date casts.
 fn carbon_immutable_type() -> PhpType {
-    PhpType::Named(atom("Carbon\\CarbonImmutable"))
+    PhpType::named(atom("Carbon\\CarbonImmutable"))
 }
 
 /// The fully-qualified name of the `Castable` contract.
@@ -143,7 +143,7 @@ pub(super) fn cast_type_to_php_type(
     if let Some(cast_class) = class_loader(class_name) {
         // 7a. Enums — the property type is the enum itself.
         if cast_class.kind == ClassLikeKind::Enum {
-            return PhpType::Named(atom(class_name));
+            return PhpType::named(atom(class_name));
         }
 
         // 7b. Castable implementations — the property type is the
@@ -151,7 +151,7 @@ pub(super) fn cast_type_to_php_type(
         //     which returns a CastsAttributes instance, but the
         //     developer-facing type is the Castable class.
         if is_castable(&cast_class) {
-            return PhpType::Named(atom(class_name));
+            return PhpType::named(atom(class_name));
         }
 
         // 7c. `@implements CastsAttributes<TGet, TSet>` — the canonical
@@ -194,8 +194,8 @@ fn extract_tget_from_implements_generics(class: &ClassInfo) -> Option<PhpType> {
             && let Some(tget) = args.first()
         {
             // Skip empty/blank type arguments (e.g. from malformed docblocks).
-            if matches!(tget, PhpType::Named(s) if s.is_empty())
-                || matches!(tget, PhpType::Raw(s) if s.is_empty())
+            if matches!(tget.kind(), TypeKind::Named(s) if s.is_empty())
+                || matches!(tget.kind(), TypeKind::Raw(s) if s.is_empty())
             {
                 continue;
             }

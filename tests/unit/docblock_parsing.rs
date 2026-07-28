@@ -5,7 +5,7 @@
 
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::docblock::*;
-use phpantom_lsp::php_type::PhpType;
+use phpantom_lsp::php_type::{PhpType, TypeKind};
 use phpantom_lsp::types::*;
 
 // ─── @method tag extraction ─────────────────────────────────────────
@@ -1131,12 +1131,12 @@ fn conditional_simple_class_string() {
     let result = extract_conditional_return_type(doc);
     assert!(result.is_some(), "Should parse a conditional return type");
     let cond = result.unwrap();
-    match cond {
-        PhpType::Conditional(ref c) => {
+    match cond.kind() {
+        TypeKind::Conditional(c) => {
             assert_eq!(c.param, "$abstract");
             assert!(!c.negated);
-            assert!(matches!(c.condition, PhpType::ClassString(_)));
-            assert_eq!(c.then_type, PhpType::Named(atom("TClass")));
+            assert!(matches!(c.condition.kind(), TypeKind::ClassString(_)));
+            assert_eq!(c.then_type, PhpType::named(atom("TClass")));
             assert_eq!(c.else_type, PhpType::mixed());
         }
         _ => panic!("Expected Conditional, got {:?}", cond),
@@ -1151,18 +1151,18 @@ fn conditional_null_check() {
         " */",
     );
     let result = extract_conditional_return_type(doc).unwrap();
-    match result {
-        PhpType::Conditional(c) => {
+    match result.kind() {
+        TypeKind::Conditional(c) => {
             assert_eq!(c.param, "$guard");
             assert!(!c.negated);
             assert_eq!(c.condition, PhpType::null());
             assert_eq!(
                 c.then_type,
-                PhpType::Named(atom("\\Illuminate\\Contracts\\Auth\\Factory"))
+                PhpType::named(atom("\\Illuminate\\Contracts\\Auth\\Factory"))
             );
             assert_eq!(
                 c.else_type,
-                PhpType::Named(atom("\\Illuminate\\Contracts\\Auth\\StatefulGuard"))
+                PhpType::named(atom("\\Illuminate\\Contracts\\Auth\\StatefulGuard"))
             );
         }
         _ => panic!("Expected Conditional"),
@@ -1177,21 +1177,21 @@ fn conditional_nested() {
         " */",
     );
     let result = extract_conditional_return_type(doc).unwrap();
-    match result {
-        PhpType::Conditional(ref c) => {
+    match result.kind() {
+        TypeKind::Conditional(c) => {
             assert_eq!(c.param, "$abstract");
             assert!(!c.negated);
-            assert!(matches!(c.condition, PhpType::ClassString(_)));
-            assert_eq!(c.then_type, PhpType::Named(atom("TClass")));
+            assert!(matches!(c.condition.kind(), TypeKind::ClassString(_)));
+            assert_eq!(c.then_type, PhpType::named(atom("TClass")));
             // else_type should be another conditional
-            match &c.else_type {
-                PhpType::Conditional(inner) => {
+            match &c.else_type.kind() {
+                TypeKind::Conditional(inner) => {
                     assert_eq!(inner.param, "$abstract");
                     assert!(!inner.negated);
                     assert_eq!(inner.condition, PhpType::null());
                     assert_eq!(
                         inner.then_type,
-                        PhpType::Named(atom("\\Illuminate\\Foundation\\Application"))
+                        PhpType::named(atom("\\Illuminate\\Foundation\\Application"))
                     );
                     assert_eq!(inner.else_type, PhpType::mixed());
                 }
@@ -1218,10 +1218,10 @@ fn conditional_multiline() {
     );
     let result = extract_conditional_return_type(doc);
     assert!(result.is_some(), "Should parse multi-line conditional");
-    match result.unwrap() {
-        PhpType::Conditional(c) => {
+    match result.unwrap().kind() {
+        TypeKind::Conditional(c) => {
             assert_eq!(c.param, "$abstract");
-            assert!(matches!(c.condition, PhpType::ClassString(_)));
+            assert!(matches!(c.condition.kind(), TypeKind::ClassString(_)));
         }
         _ => panic!("Expected Conditional"),
     }
@@ -1235,20 +1235,20 @@ fn conditional_is_type() {
         " */",
     );
     let result = extract_conditional_return_type(doc).unwrap();
-    match result {
-        PhpType::Conditional(c) => {
+    match result.kind() {
+        TypeKind::Conditional(c) => {
             assert_eq!(c.param, "$job");
             assert!(!c.negated);
-            assert_eq!(c.condition, PhpType::Named(atom("\\Closure")));
+            assert_eq!(c.condition, PhpType::named(atom("\\Closure")));
             assert_eq!(
                 c.then_type,
-                PhpType::Named(atom(
+                PhpType::named(atom(
                     "\\Illuminate\\Foundation\\Bus\\PendingClosureDispatch"
                 ))
             );
             assert_eq!(
                 c.else_type,
-                PhpType::Named(atom("\\Illuminate\\Foundation\\Bus\\PendingDispatch"))
+                PhpType::named(atom("\\Illuminate\\Foundation\\Bus\\PendingDispatch"))
             );
         }
         _ => panic!("Expected Conditional"),
@@ -2042,15 +2042,15 @@ fn conditional_resolves_with_template_default_false() {
         "TAsync",
         false,
         PhpType::false_(),
-        PhpType::Named(atom("Response")),
-        PhpType::Named(atom("PromiseInterface")),
+        PhpType::named(atom("Response")),
+        PhpType::named(atom("PromiseInterface")),
     );
 
     let mut defaults = HashMap::new();
     defaults.insert("TAsync".to_string(), PhpType::false_());
 
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
-    assert_eq!(result, Some(PhpType::Named(atom("Response"))));
+    assert_eq!(result, Some(PhpType::named(atom("Response"))));
 }
 
 #[test]
@@ -2064,15 +2064,15 @@ fn conditional_resolves_with_template_default_true() {
         "TAsync",
         false,
         PhpType::false_(),
-        PhpType::Named(atom("Response")),
-        PhpType::Named(atom("PromiseInterface")),
+        PhpType::named(atom("Response")),
+        PhpType::named(atom("PromiseInterface")),
     );
 
     let mut defaults = HashMap::new();
     defaults.insert("TAsync".to_string(), PhpType::true_());
 
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
-    assert_eq!(result, Some(PhpType::Named(atom("PromiseInterface"))));
+    assert_eq!(result, Some(PhpType::named(atom("PromiseInterface"))));
 }
 
 #[test]
@@ -2086,8 +2086,8 @@ fn conditional_no_template_default_falls_through() {
         "TAsync",
         false,
         PhpType::false_(),
-        PhpType::Named(atom("Response")),
-        PhpType::Named(atom("PromiseInterface")),
+        PhpType::named(atom("Response")),
+        PhpType::named(atom("PromiseInterface")),
     );
 
     let defaults = HashMap::new();
@@ -2095,7 +2095,7 @@ fn conditional_no_template_default_falls_through() {
     // Empty defaults map — should not resolve via template default
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
     // Falls through to else branch since TAsync is not a $param either
-    assert_eq!(result, Some(PhpType::Named(atom("PromiseInterface"))));
+    assert_eq!(result, Some(PhpType::named(atom("PromiseInterface"))));
 }
 
 #[test]
@@ -2109,8 +2109,8 @@ fn conditional_negated_with_template_default() {
         "TAsync",
         true,
         PhpType::false_(),
-        PhpType::Named(atom("PromiseInterface")),
-        PhpType::Named(atom("Response")),
+        PhpType::named(atom("PromiseInterface")),
+        PhpType::named(atom("Response")),
     );
 
     let mut defaults = HashMap::new();
@@ -2118,7 +2118,7 @@ fn conditional_negated_with_template_default() {
 
     // negated: TAsync is not false → false (since default IS false) → else branch → Response
     let result = resolve_conditional_without_args_and_defaults(&cond, &[], Some(&defaults));
-    assert_eq!(result, Some(PhpType::Named(atom("Response"))));
+    assert_eq!(result, Some(PhpType::named(atom("Response"))));
 }
 
 #[test]

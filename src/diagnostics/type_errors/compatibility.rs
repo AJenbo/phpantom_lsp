@@ -12,13 +12,15 @@
 use std::sync::Arc;
 
 use crate::class_lookup::is_subtype_of_typed;
-use crate::php_type::{LiteralValue, PhpType, int_literal_is_within_range, is_array_like_name};
+use crate::php_type::{
+    LiteralValue, PhpType, TypeKind, int_literal_is_within_range, is_array_like_name,
+};
 use crate::types::ClassInfo;
 
 /// Returns `true` when the type is a bare unparameterised `array`.
 fn is_bare_array(ty: &PhpType) -> bool {
-    matches!(ty, PhpType::Named(n) if n.eq_ignore_ascii_case("array"))
-        || matches!(ty, PhpType::Array(inner) if inner.is_mixed())
+    matches!(ty.kind(), TypeKind::Named(n) if n.eq_ignore_ascii_case("array"))
+        || matches!(ty.kind(), TypeKind::Array(inner) if inner.is_mixed())
 }
 
 /// Check if an argument type is compatible with a parameter type.
@@ -67,7 +69,7 @@ pub(crate) fn is_type_compatible(
     // conservatively.  `mixed` means "we don't know" — the actual
     // runtime value could satisfy the parameter type, so reporting
     // an error would be a false positive.
-    if let PhpType::Union(members) = arg_type
+    if let TypeKind::Union(members) = arg_type.kind()
         && members.iter().any(|m| m.is_mixed())
     {
         return true;
@@ -77,7 +79,8 @@ pub(crate) fn is_type_compatible(
         return true;
     }
     // Skip Raw types (unparseable / unresolved type strings).
-    if matches!(arg_type, PhpType::Raw(_)) || matches!(param_type, PhpType::Raw(_)) {
+    if matches!(arg_type.kind(), TypeKind::Raw(_)) || matches!(param_type.kind(), TypeKind::Raw(_))
+    {
         return true;
     }
 
@@ -87,7 +90,7 @@ pub(crate) fn is_type_compatible(
     // compatibility without the underlying type, so suppress to avoid
     // false positives.  Namespaced types (containing `\`) are real class
     // references that should still be checked.
-    if let PhpType::Named(name) = param_type
+    if let TypeKind::Named(name) = param_type.kind()
         && !name.contains('\\')
         && !crate::php_type::is_builtin_non_class_type(name)
         && class_loader(name).is_none()
@@ -98,7 +101,7 @@ pub(crate) fn is_type_compatible(
     // Same escape hatch for the argument type — an unexpanded
     // @phpstan-type / @psalm-type alias on the arg side would also
     // cause false positives (e.g. `Payload` passed to `?array`).
-    if let PhpType::Named(name) = arg_type
+    if let TypeKind::Named(name) = arg_type.kind()
         && !name.contains('\\')
         && !crate::php_type::is_builtin_non_class_type(name)
         && class_loader(name).is_none()
@@ -174,8 +177,8 @@ pub(crate) fn is_type_compatible(
     // ── int → int<min..max>: MAYBE ──────────────────────────────
     // A bare `int` *might* satisfy any int range constraint at
     // runtime.  We cannot prove otherwise from the type alone.
-    if matches!(param_type, PhpType::IntRange(..))
-        && let PhpType::Named(sub) = arg_type
+    if matches!(param_type.kind(), TypeKind::IntRange(..))
+        && let TypeKind::Named(sub) = arg_type.kind()
         && matches!(sub.to_ascii_lowercase().as_str(), "int" | "integer")
     {
         return true;
@@ -188,7 +191,7 @@ pub(crate) fn is_type_compatible(
     // type in a way we can't see (assert, instanceof, etc.).
     // This avoids false positives like `null|Pen` vs `object|string`
     // where `Pen` is clearly fine and the null path may be guarded.
-    if let PhpType::Union(members) = arg_type
+    if let TypeKind::Union(members) = arg_type.kind()
         && members
             .iter()
             .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
@@ -203,7 +206,7 @@ pub(crate) fn is_type_compatible(
     // cases like PHPUnit's `MockObject&Foo` (a mock that is also a Foo)
     // being returned where `Foo` (or a union containing `Foo`) is
     // expected.
-    if let PhpType::Intersection(members) = arg_type
+    if let TypeKind::Intersection(members) = arg_type.kind()
         && members
             .iter()
             .any(|m| is_type_compatible(m, param_type, class_loader, strict_types))
@@ -216,7 +219,7 @@ pub(crate) fn is_type_compatible(
     // with *any* member.  This extends the structural check to use
     // our full compatibility logic (including MAYBE rules) for each
     // union branch.
-    if let PhpType::Union(members) = param_type
+    if let TypeKind::Union(members) = param_type.kind()
         && members
             .iter()
             .any(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
@@ -231,7 +234,7 @@ pub(crate) fn is_type_compatible(
     // is compatible with all members we can check.  Combined with the
     // conservative rules above, this avoids false positives on mock
     // types like `MethodNode&MockObject`.
-    if let PhpType::Intersection(members) = param_type
+    if let TypeKind::Intersection(members) = param_type.kind()
         && members
             .iter()
             .all(|m| is_type_compatible(arg_type, m, class_loader, strict_types))
@@ -245,7 +248,7 @@ pub(crate) fn is_type_compatible(
     // or `callable`, we can't verify the signature — stay silent.
     // (The reverse direction — callable spec <: bare Closure — is a
     // strict YES handled by the `is_subtype_of_typed` fallback.)
-    if matches!(param_type, PhpType::Callable { .. })
+    if matches!(param_type.kind(), TypeKind::Callable { .. })
         && (arg_type.is_closure() || arg_type.is_callable())
     {
         return true;
@@ -264,7 +267,7 @@ pub(crate) fn is_type_compatible(
     // The developer may have guarded against null before this call
     // (instanceof, assert, if-check).  We can't prove the null
     // path actually reaches here, so stay silent.
-    if let PhpType::Nullable(inner) = arg_type
+    if let TypeKind::Nullable(inner) = arg_type.kind()
         && is_type_compatible(inner, param_type, class_loader, strict_types)
     {
         return true;
@@ -272,7 +275,7 @@ pub(crate) fn is_type_compatible(
 
     // ── Non-nullable arg → nullable param: YES ──────────────────
     // Passing `X` where `?X` is expected is always valid.
-    if let PhpType::Nullable(inner) = param_type
+    if let TypeKind::Nullable(inner) = param_type.kind()
         && is_type_compatible(arg_type, inner, class_loader, strict_types)
     {
         return true;
@@ -309,17 +312,17 @@ pub(crate) fn is_type_compatible(
     // strict_types=1 this is a TypeError, so we flag it.  Also
     // covers numeric literals (e.g. `42` or `1.0` passed to `string`).
     if !strict_types
-        && let PhpType::Named(sup) = param_type
+        && let TypeKind::Named(sup) = param_type.kind()
         && sup.eq_ignore_ascii_case("string")
     {
-        let is_numeric_like = match arg_type {
-            PhpType::Named(sub) => {
+        let is_numeric_like = match arg_type.kind() {
+            TypeKind::Named(sub) => {
                 matches!(
                     sub.to_ascii_lowercase().as_str(),
                     "int" | "integer" | "float" | "double"
                 )
             }
-            PhpType::Literal(l) => matches!(**l, LiteralValue::Int(_) | LiteralValue::Float(_)),
+            TypeKind::Literal(l) => matches!(**l, LiteralValue::Int(_) | LiteralValue::Float(_)),
             _ => false,
         };
         if is_numeric_like {
@@ -332,14 +335,14 @@ pub(crate) fn is_type_compatible(
     // function calls.  Under strict_types=1 string-to-int/float
     // coercion is forbidden.
     if !strict_types {
-        let arg_is_numeric_string = match arg_type {
-            PhpType::Named(sub) => sub.eq_ignore_ascii_case("numeric-string"),
-            PhpType::Literal(l) => matches!(**l, LiteralValue::String(_)) && l.is_numeric_string(),
+        let arg_is_numeric_string = match arg_type.kind() {
+            TypeKind::Named(sub) => sub.eq_ignore_ascii_case("numeric-string"),
+            TypeKind::Literal(l) => matches!(**l, LiteralValue::String(_)) && l.is_numeric_string(),
             _ => false,
         };
         if arg_is_numeric_string {
-            match param_type {
-                PhpType::Named(sup)
+            match param_type.kind() {
+                TypeKind::Named(sup)
                     if matches!(
                         sup.to_ascii_lowercase().as_str(),
                         "float" | "double" | "int" | "integer" | "numeric"
@@ -347,7 +350,7 @@ pub(crate) fn is_type_compatible(
                 {
                     return true;
                 }
-                PhpType::IntRange(min, max)
+                TypeKind::IntRange(min, max)
                     if let Some(lit @ LiteralValue::String(_)) = arg_type.as_literal()
                         && lit
                             .string_content()
@@ -366,9 +369,9 @@ pub(crate) fn is_type_compatible(
     // coerced to float or int.  Under strict_types=1 the
     // numeric-string component would fail, but int→float is still
     // valid, so we stay silent regardless.
-    if let PhpType::Named(sub) = arg_type
+    if let TypeKind::Named(sub) = arg_type.kind()
         && sub.eq_ignore_ascii_case("numeric")
-        && let PhpType::Named(sup) = param_type
+        && let TypeKind::Named(sup) = param_type.kind()
         && matches!(
             sup.to_ascii_lowercase().as_str(),
             "float" | "double" | "int" | "integer"
@@ -385,12 +388,12 @@ pub(crate) fn is_type_compatible(
     // property name at runtime).  For string literals, we check
     // against the model's known properties when the class can be
     // loaded.
-    if let PhpType::Generic(g) = param_type
+    if let TypeKind::Generic(g) = param_type.kind()
         && g.name.eq_ignore_ascii_case("model-property")
         && g.args.len() == 1
     {
         let args = &g.args;
-        if let PhpType::Literal(lit) = arg_type
+        if let TypeKind::Literal(lit) = arg_type.kind()
             && let Some(prop_name) = lit.string_content()
         {
             if let Some(model_name) = args[0].base_name()
@@ -416,7 +419,7 @@ pub(crate) fn is_type_compatible(
     // or any interface that extends Traversable (e.g. `Arrayable<K,V>`),
     // we can't verify the generic type arguments covariantly at this
     // phase.  Stay silent (MAYBE) when the base types are compatible.
-    if let PhpType::Generic(g) = param_type
+    if let TypeKind::Generic(g) = param_type.kind()
         && (g.name.eq_ignore_ascii_case("iterable")
             || class_loader(&g.name).is_some_and(|cls| {
                 crate::class_lookup::is_subtype_of(&cls, "Traversable", class_loader)
@@ -424,8 +427,11 @@ pub(crate) fn is_type_compatible(
     {
         // Array-like args always satisfy iterable/Traversable generics.
         if arg_type.is_array_like()
-            || matches!(arg_type, PhpType::Generic(n) if is_array_like_name(&n.name))
-            || matches!(arg_type, PhpType::Array(_) | PhpType::ArrayShape(_))
+            || matches!(arg_type.kind(), TypeKind::Generic(n) if is_array_like_name(&n.name))
+            || matches!(
+                arg_type.kind(),
+                TypeKind::Array(_) | TypeKind::ArrayShape(_)
+            )
         {
             return true;
         }
@@ -451,7 +457,7 @@ pub(crate) fn is_type_compatible(
     // (which has all our MAYBE rules) rather than falling through to
     // `is_subtype_of_typed` (which uses strict structural subtyping
     // and misses Stringable, type juggling, etc.).
-    if let (PhpType::Generic(ga), PhpType::Generic(gp)) = (arg_type, param_type) {
+    if let (TypeKind::Generic(ga), TypeKind::Generic(gp)) = (arg_type.kind(), param_type.kind()) {
         let (name_arg, args_arg) = (&ga.name, &ga.args);
         let (name_param, args_param) = (&gp.name, &gp.args);
         let base_arg = name_arg.to_ascii_lowercase();
@@ -473,7 +479,7 @@ pub(crate) fn is_type_compatible(
     // A list is an array with sequential int keys starting at 0.
     // In practice, PHP codebases use these interchangeably and we
     // can't verify the structural guarantee statically.
-    if let (PhpType::Generic(ga), PhpType::Generic(gp)) = (arg_type, param_type) {
+    if let (TypeKind::Generic(ga), TypeKind::Generic(gp)) = (arg_type.kind(), param_type.kind()) {
         let (name_arg, args_arg) = (&ga.name, &ga.args);
         let (name_param, args_param) = (&gp.name, &gp.args);
         let arg_is_list = name_arg.eq_ignore_ascii_case("list");
@@ -540,9 +546,9 @@ pub(crate) fn is_type_compatible(
     // ── Generic array → X[] : YES ───────────────────────────────
     // `array<int, string>` → `string[]` — the value type of the
     // generic form is more specific than (or equal to) the slice.
-    if let PhpType::Generic(g) = arg_type
+    if let TypeKind::Generic(g) = arg_type.kind()
         && is_array_like_name(&g.name)
-        && let PhpType::Array(inner) = param_type
+        && let TypeKind::Array(inner) = param_type.kind()
     {
         let mixed = PhpType::mixed();
         let val = g.args.last().unwrap_or(&mixed);
@@ -554,8 +560,8 @@ pub(crate) fn is_type_compatible(
     // ── X[] → Generic array : MAYBE ─────────────────────────────
     // `string[]` → `array<int, string>` — the key type is unknown,
     // it *might* be int at runtime.
-    if let PhpType::Array(inner) = arg_type
-        && let PhpType::Generic(g) = param_type
+    if let TypeKind::Array(inner) = arg_type.kind()
+        && let TypeKind::Generic(g) = param_type.kind()
         && is_array_like_name(&g.name)
     {
         let mixed = PhpType::mixed();
@@ -568,10 +574,10 @@ pub(crate) fn is_type_compatible(
     // ── list<X> → X[] : YES ────────────────────────────────────
     // A list is a stricter form of array (sequential int keys).
     // It always satisfies the weaker `X[]` constraint.
-    if let PhpType::Generic(g) = arg_type
+    if let TypeKind::Generic(g) = arg_type.kind()
         && g.name.eq_ignore_ascii_case("list")
         && g.args.len() == 1
-        && let PhpType::Array(inner) = param_type
+        && let TypeKind::Array(inner) = param_type.kind()
         && is_type_compatible(&g.args[0], inner, class_loader, strict_types)
     {
         return true;
@@ -580,8 +586,8 @@ pub(crate) fn is_type_compatible(
     // ── X[] → list<X> : MAYBE ──────────────────────────────────
     // `X[]` is `array<mixed, X>` — it might have non-sequential
     // keys, so it might not be a valid list.  Stay silent.
-    if let PhpType::Array(inner) = arg_type
-        && let PhpType::Generic(g) = param_type
+    if let TypeKind::Array(inner) = arg_type.kind()
+        && let TypeKind::Generic(g) = param_type.kind()
         && g.name.eq_ignore_ascii_case("list")
         && g.args.len() == 1
         && is_type_compatible(inner, &g.args[0], class_loader, strict_types)
@@ -659,9 +665,11 @@ pub(crate) fn is_type_compatible(
         // from a docblock), treat it as potentially array-like
         // to avoid false positives on large collection union
         // types (DataCollection|PaginatedDataCollection|...).
-        if let PhpType::Union(members) = arg_type {
+        if let TypeKind::Union(members) = arg_type.kind() {
             let all_array_like = members.iter().all(|m| {
-                if m.is_array_like() || matches!(m, PhpType::Array(_) | PhpType::ArrayShape(_)) {
+                if m.is_array_like()
+                    || matches!(m.kind(), TypeKind::Array(_) | TypeKind::ArrayShape(_))
+                {
                     return true;
                 }
                 if let Some(name) = m.base_name() {
@@ -696,8 +704,8 @@ pub(crate) fn is_type_compatible(
     // Optional keys in the param shape (marked with `?`) do not need
     // to be present in the arg shape — they are, by definition,
     // not required.
-    if let (PhpType::ArrayShape(arg_entries), PhpType::ArrayShape(param_entries)) =
-        (arg_type, param_type)
+    if let (TypeKind::ArrayShape(arg_entries), TypeKind::ArrayShape(param_entries)) =
+        (arg_type.kind(), param_type.kind())
     {
         let all_param_keys_satisfied = param_entries.iter().all(|pe| {
             // Optional param keys don't need to appear in the arg.
@@ -734,12 +742,14 @@ pub(crate) fn is_type_compatible(
     // `array{id: string, index: string, body: array}` should be
     // accepted where `array<string, mixed>` or similar is expected.
     // The shape is a more specific form of the typed array.
-    if matches!(arg_type, PhpType::ArrayShape(_))
-        && matches!(param_type, PhpType::Generic(g) if is_array_like_name(&g.name))
+    if matches!(arg_type.kind(), TypeKind::ArrayShape(_))
+        && matches!(param_type.kind(), TypeKind::Generic(g) if is_array_like_name(&g.name))
     {
         return true;
     }
-    if matches!(arg_type, PhpType::ArrayShape(_)) && matches!(param_type, PhpType::Array(_)) {
+    if matches!(arg_type.kind(), TypeKind::ArrayShape(_))
+        && matches!(param_type.kind(), TypeKind::Array(_))
+    {
         return true;
     }
 
@@ -748,7 +758,7 @@ pub(crate) fn is_type_compatible(
     // passed where a specific shape is expected.  The actual array
     // might have the right keys at runtime.  We can't prove
     // otherwise from the type alone.
-    if matches!(param_type, PhpType::ArrayShape(_)) && is_any_array_type(arg_type) {
+    if matches!(param_type.kind(), TypeKind::ArrayShape(_)) && is_any_array_type(arg_type) {
         return true;
     }
 
@@ -765,12 +775,14 @@ pub(crate) fn is_type_compatible(
 /// we stay silent (the value might satisfy that branch at runtime).
 fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
     // When the param is a union, check each member individually.
-    if let PhpType::Union(members) = param {
+    if let TypeKind::Union(members) = param.kind() {
         return members.iter().any(|m| is_refined_scalar_pair(arg, m));
     }
 
-    let (arg_name, param_name) = match (arg, param) {
-        (PhpType::Named(a), PhpType::Named(p)) => (a.to_ascii_lowercase(), p.to_ascii_lowercase()),
+    let (arg_name, param_name) = match (arg.kind(), param.kind()) {
+        (TypeKind::Named(a), TypeKind::Named(p)) => {
+            (a.to_ascii_lowercase(), p.to_ascii_lowercase())
+        }
         _ => return false,
     };
 
@@ -809,8 +821,8 @@ fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
 /// slice, or shape).  Used by the bare-array MAYBE rules to check
 /// inside unions as well as at the top level.
 fn is_any_array_type(ty: &PhpType) -> bool {
-    matches!(ty, PhpType::Array(_) | PhpType::ArrayShape(_))
-        || matches!(ty, PhpType::Generic(g) if is_array_like_name(&g.name))
+    matches!(ty.kind(), TypeKind::Array(_) | TypeKind::ArrayShape(_))
+        || matches!(ty.kind(), TypeKind::Generic(g) if is_array_like_name(&g.name))
         || is_bare_array(ty)
 }
 
@@ -818,23 +830,23 @@ fn is_any_array_type(ty: &PhpType) -> bool {
 /// `$this`, or `parent` anywhere in its structure — including inside
 /// union/intersection members, nullable wrappers, and generic arguments.
 fn contains_self_or_parent(ty: &PhpType) -> bool {
-    match ty {
-        PhpType::Named(s) => {
+    match ty.kind() {
+        TypeKind::Named(s) => {
             let low = s.to_ascii_lowercase();
             matches!(low.as_str(), "self" | "static" | "$this" | "parent")
         }
-        PhpType::Nullable(inner) => contains_self_or_parent(inner),
-        PhpType::Union(members) | PhpType::Intersection(members) => {
+        TypeKind::Nullable(inner) => contains_self_or_parent(inner),
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
             members.iter().any(contains_self_or_parent)
         }
-        PhpType::Generic(g) => {
+        TypeKind::Generic(g) => {
             let low = g.name.to_ascii_lowercase();
             matches!(low.as_str(), "self" | "static" | "$this" | "parent")
                 || g.args.iter().any(contains_self_or_parent)
         }
-        PhpType::ClassString(inner) | PhpType::InterfaceString(inner) => inner
-            .as_ref()
-            .is_some_and(|inner| contains_self_or_parent(inner)),
+        TypeKind::ClassString(inner) | TypeKind::InterfaceString(inner) => {
+            inner.as_ref().is_some_and(contains_self_or_parent)
+        }
         _ => false,
     }
 }

@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::Position;
 use crate::completion::phpdoc::context::{DocblockContext, SymbolInfo};
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::FunctionLoaderFn;
 use crate::types::{ClassInfo, FunctionLoader};
 
@@ -30,8 +30,8 @@ fn is_bare_array(pt: &PhpType) -> bool {
 /// Extract the callable display name from a `PhpType` that satisfies
 /// `is_callable_keyword`.
 fn callable_display_name(pt: &PhpType) -> &str {
-    match pt {
-        PhpType::Named(s) => s.as_str(),
+    match pt.kind() {
+        TypeKind::Named(s) => s.as_str(),
         _ => "callable",
     }
 }
@@ -110,7 +110,7 @@ pub(crate) fn enrichment_snippet(
     }
 
     // Intersection types (&), nullable (?Type) — skip.
-    if matches!(pt, PhpType::Intersection(_) | PhpType::Nullable(_)) {
+    if matches!(pt.kind(), TypeKind::Intersection(_) | TypeKind::Nullable(_)) {
         return None;
     }
 
@@ -191,7 +191,7 @@ pub(crate) fn enrichment_plain_typed(
         return None;
     }
 
-    if matches!(pt, PhpType::Intersection(_) | PhpType::Nullable(_)) {
+    if matches!(pt.kind(), TypeKind::Intersection(_) | TypeKind::Nullable(_)) {
         return None;
     }
 
@@ -208,7 +208,7 @@ pub(crate) fn enrichment_plain_typed(
         let args: Vec<PhpType> = cls
             .template_params
             .iter()
-            .map(|s| PhpType::Named(atom(s.as_ref())))
+            .map(|s| PhpType::named(atom(s.as_ref())))
             .collect();
         return Some(PhpType::generic(name, args));
     }
@@ -240,9 +240,9 @@ pub(crate) fn enrichment_plain(
 /// to match PHPDoc inline callable notation. Union members are
 /// formatted individually and joined with `|`.
 fn enrichment_type_to_plain(ty: &PhpType) -> String {
-    match ty {
-        PhpType::Callable { .. } => format!("({})", ty),
-        PhpType::Union(members) => members
+    match ty.kind() {
+        TypeKind::Callable { .. } => format!("({})", ty),
+        TypeKind::Union(members) => members
             .iter()
             .map(enrichment_type_to_plain)
             .collect::<Vec<_>>()

@@ -26,7 +26,7 @@ use crate::types::{AssertionKind, PhpVersion, TypeAssertion};
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
 use super::type_strings::split_type_token;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ pub fn has_deprecated_tag_from_info(info: &DocblockInfo) -> bool {
 /// Extract the type from a `@psalm-if-this-is` or `@phpstan-if-this-is` tag.
 ///
 /// `@psalm-if-this-is ArrayList<TOption|TEither>` returns
-/// `Some(PhpType::Generic("ArrayList", [Union(TOption, TEither)]))`.
+/// `Some(TypeKind::Generic("ArrayList", [Union(TOption, TEither)]))`.
 pub fn extract_if_this_is_type(docblock: &str) -> Option<PhpType> {
     extract_if_this_is_type_from_info(&parse_docblock_for_tags(docblock)?)
 }
@@ -251,22 +251,22 @@ pub fn extract_mixin_tags_from_info(info: &DocblockInfo) -> Vec<(String, Vec<Php
 
         // Collect individual type members. A union like `Foo|Bar` yields
         // multiple mixin entries, one per member.
-        let members: Vec<&PhpType> = match &parsed {
-            PhpType::Union(parts) => parts.iter().collect(),
-            other => vec![other],
+        let members: Vec<&PhpType> = match parsed.kind() {
+            TypeKind::Union(parts) => parts.iter().collect(),
+            _ => vec![&parsed],
         };
 
         for member in members {
-            let (base, generic_args) = match member {
-                PhpType::Generic(g) => {
+            let (base, generic_args) = match member.kind() {
+                TypeKind::Generic(g) => {
                     let cleaned_args: Vec<PhpType> =
                         g.args.iter().map(strip_fqn_prefix_typed).collect();
                     (g.name.to_string(), cleaned_args)
                 }
-                PhpType::Named(name) => (name.to_string(), vec![]),
-                PhpType::Nullable(inner) => match inner.as_ref() {
-                    PhpType::Named(name) => (name.to_string(), vec![]),
-                    PhpType::Generic(g) => {
+                TypeKind::Named(name) => (name.to_string(), vec![]),
+                TypeKind::Nullable(inner) => match inner.kind() {
+                    TypeKind::Named(name) => (name.to_string(), vec![]),
+                    TypeKind::Generic(g) => {
                         let cleaned_args: Vec<PhpType> =
                             g.args.iter().map(strip_fqn_prefix_typed).collect();
                         (g.name.to_string(), cleaned_args)
@@ -312,9 +312,9 @@ pub fn extract_require_extends_from_info(info: &DocblockInfo) -> Option<String> 
         // Take the first type token so a trailing description or generic
         // argument list does not leak into the class name.
         let (type_token, _remainder) = split_type_token(desc);
-        let base = match PhpType::parse(type_token) {
-            PhpType::Generic(g) => g.name.to_string(),
-            PhpType::Named(name) => name.to_string(),
+        let base = match PhpType::parse(type_token).kind() {
+            TypeKind::Generic(g) => g.name.to_string(),
+            TypeKind::Named(name) => name.to_string(),
             _ => continue,
         };
         if !base.is_empty() {
@@ -352,9 +352,9 @@ pub fn extract_require_implements_from_info(info: &DocblockInfo) -> Vec<String> 
             continue;
         }
         let (type_token, _remainder) = split_type_token(desc);
-        let interface = match PhpType::parse(type_token) {
-            PhpType::Generic(g) => g.name.to_string(),
-            PhpType::Named(name) => name.to_string(),
+        let interface = match PhpType::parse(type_token).kind() {
+            TypeKind::Generic(g) => g.name.to_string(),
+            TypeKind::Named(name) => name.to_string(),
             _ => continue,
         };
         if !interface.is_empty() {
@@ -1425,8 +1425,8 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     // `array<int, User>|false` docblock (dropping the element type), and
     // `object|string` would reject a `class-string<T>|T` docblock (as with
     // `new ReflectionClass($classString)`, dropping the template binding).
-    match native_inner {
-        PhpType::Union(members) | PhpType::Intersection(members) => {
+    match native_inner.kind() {
+        TypeKind::Union(members) | TypeKind::Intersection(members) => {
             return members.iter().any(|m| {
                 !m.is_scalar()
                     || m.is_bare_array()
@@ -1467,8 +1467,8 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
 /// Check whether a `PhpType` has generic parameters or shape braces.
 fn has_parameterisation(ty: &PhpType) -> bool {
     matches!(
-        ty,
-        PhpType::Generic(_) | PhpType::ArrayShape(_) | PhpType::ObjectShape(_)
+        ty.kind(),
+        TypeKind::Generic(_) | TypeKind::ArrayShape(_) | TypeKind::ObjectShape(_)
     )
 }
 
@@ -1515,7 +1515,7 @@ pub(crate) fn is_compatible_refinement_typed(doc_type: &PhpType, native_type: &P
         return true;
     }
     if native_type.is_object() {
-        return !doc_type.is_scalar() || matches!(doc_type, PhpType::ObjectShape(_));
+        return !doc_type.is_scalar() || matches!(doc_type.kind(), TypeKind::ObjectShape(_));
     }
     if native_type.is_self_like() {
         // `static` and `$this` are valid refinements of `self` — they
@@ -1758,7 +1758,7 @@ fn extract_type_via_mago_from_info(info: &DocblockInfo, kinds: &[TagKind]) -> Op
             // here only when the type genuinely parses as a conditional;
             // a parenthesized union/intersection group is a normal type
             // and must be returned.
-            if matches!(parsed, Some(PhpType::Conditional { .. })) {
+            if matches!(parsed.as_deref(), Some(TypeKind::Conditional { .. })) {
                 return None;
             }
             return parsed;

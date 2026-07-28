@@ -9,7 +9,7 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
 use crate::docblock;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::ResolvedType;
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -248,21 +248,21 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
             if existing == value {
                 return;
             }
-            let mut parts = match existing {
-                PhpType::Union(parts) => parts.into_vec(),
-                other => vec![other],
+            let mut parts = match existing.kind() {
+                TypeKind::Union(parts) => parts.to_vec(),
+                _ => vec![existing],
             };
-            match value {
-                PhpType::Union(new_parts) => {
+            match value.kind() {
+                TypeKind::Union(new_parts) => {
                     for p in new_parts {
-                        if !parts.contains(&p) {
-                            parts.push(p);
+                        if !parts.contains(p) {
+                            parts.push(p.clone());
                         }
                     }
                 }
-                other => {
-                    if !parts.contains(&other) {
-                        parts.push(other);
+                _ => {
+                    if !parts.contains(&value) {
+                        parts.push(value);
                     }
                 }
             }
@@ -282,7 +282,7 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
 ///
 /// This mirrors PHPStan's `GenericClassStringType::inferTemplateTypes`:
 ///
-/// - `X::class` resolves to `PhpType::Named("X")` — bound directly to the
+/// - `X::class` resolves to `PhpType::named("X")` — bound directly to the
 ///   class.
 /// - A string literal naming a class (e.g. `'Iterator'`) binds to the
 ///   class it names, never to the literal's own `string` type — otherwise
@@ -320,7 +320,7 @@ pub(crate) fn class_string_inner_binding(
             Some(cls) => cls.fqn().to_string(),
             None => content.to_string(),
         };
-        return Some(PhpType::Named(atom(&fqn)));
+        return Some(PhpType::named(atom(&fqn)));
     }
 
     class_string_inner_from_type(&Backend::resolve_arg_text_to_type(arg_text, ctx)?)
@@ -334,24 +334,24 @@ pub(crate) fn class_string_inner_binding(
 /// checked against `T`'s bound individually and the concrete union is kept
 /// for the return type rather than collapsing to the declared bound.
 pub(super) fn class_string_inner_from_type(ty: &PhpType) -> Option<PhpType> {
-    match ty {
-        PhpType::ClassString(Some(inner)) => Some(inner.as_ref().clone()),
-        PhpType::ClassString(None) => Some(PhpType::Named(atom("object"))),
+    match ty.kind() {
+        TypeKind::ClassString(Some(inner)) => Some(inner.clone()),
+        TypeKind::ClassString(None) => Some(PhpType::named(atom("object"))),
         // A class name binds directly; a scalar keyword (`string`, `int`,
         // …) is not a class, so it must not bind `T` — otherwise a plain
         // `string` argument would produce `class-string<string>`.
-        PhpType::Named(name) => {
+        TypeKind::Named(name) => {
             if crate::php_type::is_builtin_non_class_type(name) {
                 None
             } else {
-                Some(PhpType::Named(*name))
+                Some(PhpType::named(*name))
             }
         }
         // A union of class-strings binds `T` to the union of the inner
         // classes.  Every member must yield a class; if any member is not
         // a class-string the whole binding is abandoned so `T` falls back
         // to its declared bound.
-        PhpType::Union(members) => {
+        TypeKind::Union(members) => {
             let mut parts: Vec<PhpType> = Vec::with_capacity(members.len());
             for member in members {
                 let inner = class_string_inner_from_type(member)?;

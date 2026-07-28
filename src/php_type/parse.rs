@@ -6,7 +6,7 @@ impl PhpType {
     /// Parse a PHP type string into a structured [`PhpType`].
     ///
     /// This never fails. If the input cannot be parsed by `mago_type_syntax`,
-    /// returns `PhpType::Raw(input)`.
+    /// returns `PhpType::raw(input)`.
     ///
     /// PHPStan/Larastan variance annotations (`covariant`, `contravariant`)
     /// inside generic parameter positions are stripped before parsing so
@@ -171,7 +171,7 @@ fn restore_hyphenated_keywords(ty: PhpType) -> PhpType {
 /// like `model-property` do not.  This function acts as a fallback when
 /// the Mago parse fails: it splits the input at the first `<` that
 /// follows a hyphenated base name, parses the inner type(s) recursively,
-/// and returns `PhpType::Generic` if the base name is a recognised
+/// and returns `TypeKind::Generic` if the base name is a recognised
 /// keyword type.
 fn try_parse_hyphenated_generic(input: &str) -> Option<PhpType> {
     let angle = input.find('<')?;
@@ -317,7 +317,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         // -- Composite types --------------------------------------------------
         cst::Type::Union(_) => PhpType::union(flatten_union(ty)),
         cst::Type::Intersection(_) => PhpType::intersection(flatten_intersection(ty)),
-        cst::Type::Nullable(n) => PhpType::Nullable(Box::new(convert(n.inner))),
+        cst::Type::Nullable(n) => PhpType::nullable(convert(n.inner)),
         cst::Type::Parenthesized(p) => convert(p.inner),
 
         // -- Named / Reference types ------------------------------------------
@@ -335,7 +335,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                     }
                     PhpType::generic(name, args)
                 }
-                None => PhpType::Named(atom(name)),
+                None => PhpType::named(atom(name)),
             }
         }
 
@@ -360,7 +360,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- Slice: T[] -------------------------------------------------------
-        cst::Type::Slice(s) => PhpType::Array(Box::new(convert(s.inner))),
+        cst::Type::Slice(s) => PhpType::array_of(convert(s.inner)),
 
         // -- Shape types ------------------------------------------------------
         cst::Type::Shape(s) => {
@@ -434,7 +434,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
                     let return_type = spec.return_type.as_ref().map(|rt| convert(rt.return_type));
                     PhpType::callable_spec(kind, params, return_type)
                 }
-                None => PhpType::Named(atom(kind)),
+                None => PhpType::named(atom(kind)),
             }
         }
 
@@ -449,34 +449,26 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
 
         // -- class-string / interface-string ----------------------------------
         cst::Type::ClassString(c) => {
-            let inner = c
-                .parameter
-                .as_ref()
-                .map(|p| Box::new(convert(&p.entry.inner)));
-            PhpType::ClassString(inner)
+            let inner = c.parameter.as_ref().map(|p| convert(&p.entry.inner));
+            PhpType::class_string(inner)
         }
         cst::Type::InterfaceString(i) => {
-            let inner = i
-                .parameter
-                .as_ref()
-                .map(|p| Box::new(convert(&p.entry.inner)));
-            PhpType::InterfaceString(inner)
+            let inner = i.parameter.as_ref().map(|p| convert(&p.entry.inner));
+            PhpType::interface_string(inner)
         }
 
         // -- key-of / value-of ------------------------------------------------
-        cst::Type::KeyOf(k) => PhpType::KeyOf(Box::new(convert(&k.parameter.entry.inner))),
-        cst::Type::ValueOf(v) => PhpType::ValueOf(Box::new(convert(&v.parameter.entry.inner))),
+        cst::Type::KeyOf(k) => PhpType::key_of(convert(&k.parameter.entry.inner)),
+        cst::Type::ValueOf(v) => PhpType::value_of(convert(&v.parameter.entry.inner)),
 
         // -- int range --------------------------------------------------------
         cst::Type::IntRange(r) => PhpType::int_range(r.min.to_string(), r.max.to_string()),
 
         // -- Index access: T[K] -----------------------------------------------
-        cst::Type::IndexAccess(i) => {
-            PhpType::IndexAccess(Box::new(convert(i.target)), Box::new(convert(i.index)))
-        }
+        cst::Type::IndexAccess(i) => PhpType::index_access(convert(i.target), convert(i.index)),
 
         // -- Variable (e.g. $this in conditional types) -----------------------
-        cst::Type::Variable(v) => PhpType::Named(atom(bytes_to_str(v.value))),
+        cst::Type::Variable(v) => PhpType::named(atom(bytes_to_str(v.value))),
 
         // -- Literal types ----------------------------------------------------
         cst::Type::LiteralInt(l) => PhpType::literal_int(bytes_to_str(l.raw)),
@@ -526,7 +518,7 @@ pub(crate) fn convert(ty: &cst::Type<'_>) -> PhpType {
         | cst::Type::UnspecifiedLiteralString(k)
         | cst::Type::UnspecifiedLiteralFloat(k)
         | cst::Type::NonEmptyUnspecifiedLiteralString(k) => {
-            PhpType::Named(atom(&normalize_keyword_casing(bytes_to_str(k.value))))
+            PhpType::named(atom(&normalize_keyword_casing(bytes_to_str(k.value))))
         }
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------
@@ -547,7 +539,7 @@ pub(crate) fn convert_keyword_with_optional_generics(
             let args: Vec<PhpType> = params.entries.iter().map(|e| convert(&e.inner)).collect();
             PhpType::generic(&canonical, args)
         }
-        None => PhpType::Named(atom(&canonical)),
+        None => PhpType::named(atom(&canonical)),
     }
 }
 
@@ -586,30 +578,30 @@ pub(crate) fn flatten_intersection(ty: &cst::Type<'_>) -> Vec<PhpType> {
 /// - `key-of<list<T>>` → `int`
 /// - Otherwise returns `key-of<T>` unchanged.
 pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
-    match resolved {
-        PhpType::ArrayShape(entries) => {
+    match resolved.kind() {
+        TypeKind::ArrayShape(entries) => {
             let keys: Vec<PhpType> = entries
                 .iter()
                 .filter_map(|e| e.key.as_ref())
                 .map(PhpType::literal_string_value)
                 .collect();
             match keys.len() {
-                0 => PhpType::Named(atom("never")),
+                0 => PhpType::named(atom("never")),
                 1 => keys.into_iter().next().unwrap(),
                 _ => PhpType::union(keys),
             }
         }
-        PhpType::Generic(g) => {
+        TypeKind::Generic(g) => {
             let n = g.name.to_ascii_lowercase();
             match n.as_str() {
                 "array" | "non-empty-array" if g.args.len() == 2 => g.args[0].clone(),
-                "array" | "non-empty-array" if g.args.len() == 1 => PhpType::Named(atom("int")),
-                "list" | "non-empty-list" => PhpType::Named(atom("int")),
-                _ => PhpType::KeyOf(Box::new(resolved.clone())),
+                "array" | "non-empty-array" if g.args.len() == 1 => PhpType::named(atom("int")),
+                "list" | "non-empty-list" => PhpType::named(atom("int")),
+                _ => PhpType::key_of(resolved.clone()),
             }
         }
-        PhpType::Array(_) => PhpType::Named(atom("int")),
-        _ => PhpType::KeyOf(Box::new(resolved.clone())),
+        TypeKind::Array(_) => PhpType::named(atom("int")),
+        _ => PhpType::key_of(resolved.clone()),
     }
 }
 
@@ -619,30 +611,30 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
 /// - `value-of<array<string, User>>` → `User`
 /// - Otherwise returns `value-of<T>` unchanged.
 pub(crate) fn evaluate_value_of(resolved: &PhpType) -> PhpType {
-    match resolved {
-        PhpType::ArrayShape(entries) => {
+    match resolved.kind() {
+        TypeKind::ArrayShape(entries) => {
             let mut values: Vec<PhpType> = entries.iter().map(|e| e.value_type.clone()).collect();
             // Deduplicate the whole value set (not just adjacent duplicates),
             // so `array{a: int, b: string, c: int}` yields `int|string`.
             dedup_types(&mut values);
             match values.len() {
-                0 => PhpType::Named(atom("never")),
+                0 => PhpType::named(atom("never")),
                 1 => values.into_iter().next().unwrap(),
                 _ => PhpType::union(values),
             }
         }
-        PhpType::Generic(g) => {
+        TypeKind::Generic(g) => {
             let n = g.name.to_ascii_lowercase();
             match n.as_str() {
                 "array" | "non-empty-array" if g.args.len() == 2 => g.args[1].clone(),
                 "array" | "non-empty-array" | "list" | "non-empty-list" if g.args.len() == 1 => {
                     g.args[0].clone()
                 }
-                _ => PhpType::ValueOf(Box::new(resolved.clone())),
+                _ => PhpType::value_of(resolved.clone()),
             }
         }
-        PhpType::Array(inner) => *inner.clone(),
-        _ => PhpType::ValueOf(Box::new(resolved.clone())),
+        TypeKind::Array(inner) => inner.clone(),
+        _ => PhpType::value_of(resolved.clone()),
     }
 }
 
@@ -652,7 +644,7 @@ pub(crate) fn evaluate_value_of(resolved: &PhpType) -> PhpType {
 /// - `array{a: int, b: string}[key-of<...>]` → `int|string` (all values)
 /// - Otherwise returns `T[K]` unchanged.
 pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType {
-    if let PhpType::ArrayShape(entries) = base {
+    if let TypeKind::ArrayShape(entries) = base.kind() {
         // If index is a literal string key, look it up directly.
         if let Some(bare_key) = literal_or_named_shape_key(index) {
             for entry in entries {
@@ -662,7 +654,7 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
             }
         }
         // If index is a union of literals, collect their value types.
-        if let PhpType::Union(members) = index {
+        if let TypeKind::Union(members) = index.kind() {
             let mut values: Vec<PhpType> = Vec::new();
             for member in members {
                 if let Some(bare_key) = literal_or_named_shape_key(member) {
@@ -684,7 +676,7 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
         }
     }
     // Generic array: T[K] where T is array<K2, V> → V
-    if let PhpType::Generic(g) = base {
+    if let TypeKind::Generic(g) = base.kind() {
         let n = g.name.to_ascii_lowercase();
         match n.as_str() {
             "array" | "non-empty-array" if g.args.len() == 2 => return g.args[1].clone(),
@@ -694,13 +686,13 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
             _ => {}
         }
     }
-    PhpType::IndexAccess(Box::new(base.clone()), Box::new(index.clone()))
+    PhpType::index_access(base.clone(), index.clone())
 }
 
 pub(crate) fn literal_or_named_shape_key(ty: &PhpType) -> Option<String> {
-    match ty {
-        PhpType::Literal(lit) => lit.string_content().map(ToOwned::to_owned),
-        PhpType::Named(key) => Some(key.to_string()),
+    match ty.kind() {
+        TypeKind::Literal(lit) => lit.string_content().map(ToOwned::to_owned),
+        TypeKind::Named(key) => Some(key.to_string()),
         _ => None,
     }
 }

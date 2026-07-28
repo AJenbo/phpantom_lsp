@@ -86,7 +86,7 @@ pub(super) fn resolve_rhs_property_access(
         };
         if let Some(class_name) = class_name {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
-            let resolved_typed = PhpType::Named(atom(resolved_name));
+            let resolved_typed = PhpType::named(atom(resolved_name));
             let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &resolved_typed,
                 current_class_name,
@@ -107,8 +107,8 @@ pub(super) fn resolve_rhs_property_access(
             // consumers (array element inference, `??` fallbacks, and
             // `class-string<object>` parameters) keep the concrete class.
             if const_name.as_deref() == Some("class") {
-                return vec![ResolvedType::from_type_string(PhpType::ClassString(Some(
-                    Box::new(PhpType::Named(atom(resolved_name))),
+                return vec![ResolvedType::from_type_string(PhpType::class_string(Some(
+                    PhpType::named(atom(resolved_name)),
                 )))];
             }
 
@@ -206,7 +206,7 @@ pub(super) fn resolve_rhs_property_access(
             && let Some(prop_name) = prop_name
         {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
-            let resolved_typed = PhpType::Named(atom(resolved_name));
+            let resolved_typed = PhpType::named(atom(resolved_name));
             let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &resolved_typed,
                 current_class_name,
@@ -300,7 +300,7 @@ pub(super) fn resolve_rhs_property_access(
                             // Intersection types: each member must be
                             // a subtype.  If any member satisfies the
                             // declared type, the intersection does too.
-                            if let crate::php_type::PhpType::Intersection(members) = ts {
+                            if let crate::php_type::TypeKind::Intersection(members) = ts.kind() {
                                 return members.iter().any(|m| {
                                     if m.is_subtype_of(declared) {
                                         return true;

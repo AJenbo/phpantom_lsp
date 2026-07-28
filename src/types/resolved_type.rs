@@ -12,7 +12,7 @@ impl ResolvedType {
     /// but loses generic parameters.  Future sprints will populate the
     /// type string from the actual return type annotation.
     pub fn from_class(class: ClassInfo) -> Self {
-        let type_string = PhpType::Named(class.fqn());
+        let type_string = PhpType::named(class.fqn());
         Self {
             type_string,
             class_info: Some(Arc::new(class)),
@@ -23,7 +23,7 @@ impl ResolvedType {
     /// as the type string.  Avoids cloning when the caller already holds
     /// an `Arc`.
     pub fn from_arc(class: Arc<ClassInfo>) -> Self {
-        let type_string = PhpType::Named(class.fqn());
+        let type_string = PhpType::named(class.fqn());
         Self {
             type_string,
             class_info: Some(class),
@@ -157,7 +157,7 @@ impl ResolvedType {
         if classes.len() == 1 {
             let class = classes.into_iter().next().unwrap();
             vec![ResolvedType::from_both_arc(type_hint, class)]
-        } else if matches!(&type_hint, PhpType::Intersection(_)) {
+        } else if matches!(&type_hint.kind(), TypeKind::Intersection(_)) {
             // Intersection types: all classes contribute members to a
             // single value.  Emit one ResolvedType per class (so
             // `into_arced_classes` sees every member set) but tag each
@@ -184,14 +184,16 @@ impl ResolvedType {
                 .iter()
                 .filter_map(|rt| rt.class_info.as_ref().map(|c| c.fqn().to_string()))
                 .collect();
-            let extra_members: Vec<PhpType> = match &type_hint {
-                PhpType::Nullable(_) => vec![PhpType::null()],
-                PhpType::Union(members) => members
+            let extra_members: Vec<PhpType> = match &type_hint.kind() {
+                TypeKind::Nullable(_) => vec![PhpType::null()],
+                TypeKind::Union(members) => members
                     .iter()
                     .filter(|m| {
                         // Keep members that were not resolved to a class.
-                        match m {
-                            PhpType::Named(n) | PhpType::StaticType(n) | PhpType::ThisType(n) => {
+                        match m.kind() {
+                            TypeKind::Named(n)
+                            | TypeKind::StaticType(n)
+                            | TypeKind::ThisType(n) => {
                                 let stripped = n.strip_prefix('\\').unwrap_or(n);
                                 !class_fqns.iter().any(|fqn| {
                                     fqn == stripped || crate::util::short_name(fqn) == stripped
@@ -320,8 +322,8 @@ impl ResolvedType {
     /// Combine the type strings of all entries into a single [`PhpType`].
     ///
     /// When there is exactly one entry, returns its `type_string` directly.
-    /// When there are multiple entries, wraps them in a [`PhpType::Union`].
-    /// When the slice is empty, returns `PhpType::Named("mixed")` as a
+    /// When there are multiple entries, wraps them in a [`TypeKind::Union`].
+    /// When the slice is empty, returns `PhpType::named("mixed")` as a
     /// safe fallback (callers should check emptiness beforehand).
     ///
     /// Callers that need a display string can use `.to_string()` on the
@@ -336,7 +338,7 @@ impl ResolvedType {
                 // When all entries share the same intersection type,
                 // they came from a single intersection — return it
                 // directly instead of wrapping in a Union.
-                if let PhpType::Intersection(_) = &resolved[0].type_string
+                if let TypeKind::Intersection(_) = &resolved[0].type_string.kind()
                     && resolved
                         .iter()
                         .all(|rt| rt.type_string == resolved[0].type_string)

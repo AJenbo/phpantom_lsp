@@ -7,13 +7,13 @@
 //! ```
 //!
 //! The main entry point is [`extract_conditional_return_type`], which
-//! returns a [`PhpType::Conditional`] tree that downstream code can
+//! returns a [`TypeKind::Conditional`] tree that downstream code can
 //! evaluate at call-sites by matching the actual argument types against
 //! the declared conditions.
 
 use mago_docblock::document::TagKind;
 
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
 
@@ -42,7 +42,7 @@ pub fn extract_conditional_return_type_from_info(info: &DocblockInfo) -> Option<
     }
     let parsed = PhpType::parse(trimmed);
     // Only return if parsing produced a Conditional variant.
-    if matches!(parsed, PhpType::Conditional { .. }) {
+    if matches!(parsed.kind(), TypeKind::Conditional { .. }) {
         Some(parsed)
     } else {
         None
