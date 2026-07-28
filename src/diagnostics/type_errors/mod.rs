@@ -127,6 +127,75 @@ fn extract_array_string_literals(expr: &Expression<'_>) -> Vec<(String, usize, u
     literals
 }
 
+/// Narrow an expression to its precise literal type for diagnostics.
+///
+/// The general expression resolver widens literals to base types
+/// (`string`, `int`, `float`) for variable and array-shape tracking.
+/// This function recovers precise literal types in the diagnostic
+/// path by walking the expression tree.
+///
+/// It handles every PHP expression form that selects among
+/// sub-expressions at runtime — ternary, null-coalesce, match,
+/// and parenthesised wrappers — plus scalar literals and negated
+/// numeric literals.  This is a closed set: these are the only
+/// expression forms whose result is "one of N sub-expression values."
+///
+/// Returns `Some(literal_type)` when every leaf is a narrowable
+/// scalar literal.  Returns `None` when any leaf is a variable or
+/// other non-literal, letting the caller keep the widened type.
+fn narrow_literal_type(expr: &Expression<'_>) -> Option<PhpType> {
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            Some(PhpType::literal_string_raw(bytes_to_str(s.raw).to_string()))
+        }
+        Expression::Literal(Literal::Integer(i)) => {
+            i.value.map(|value| PhpType::literal_int(value.to_string()))
+        }
+        Expression::Literal(Literal::Float(f)) => {
+            Some(PhpType::literal_float(bytes_to_str(f.raw).to_string()))
+        }
+        Expression::UnaryPrefix(unary)
+            if matches!(
+                unary.operator,
+                mago_syntax::cst::unary::UnaryPrefixOperator::Negation(_)
+            ) =>
+        {
+            match unary.operand {
+                Expression::Literal(Literal::Integer(i)) => i
+                    .value
+                    .map(|value| PhpType::literal_int(format!("-{value}"))),
+                Expression::Literal(Literal::Float(f)) => {
+                    Some(PhpType::literal_float(format!("-{}", bytes_to_str(f.raw))))
+                }
+                _ => None,
+            }
+        }
+        Expression::Conditional(cond) => {
+            let then_expr = cond.then.unwrap_or(cond.condition);
+            let then_ty = narrow_literal_type(then_expr)?;
+            let else_ty = narrow_literal_type(cond.r#else)?;
+            Some(PhpType::union(vec![then_ty, else_ty]))
+        }
+        Expression::Binary(binary) if binary.operator.is_null_coalesce() => {
+            let lhs = narrow_literal_type(binary.lhs)?;
+            let rhs = narrow_literal_type(binary.rhs)?;
+            Some(PhpType::union(vec![lhs, rhs]))
+        }
+        Expression::Match(match_expr) => {
+            let mut types = Vec::new();
+            for arm in match_expr.arms.iter() {
+                types.push(narrow_literal_type(arm.expression())?);
+            }
+            if types.is_empty() {
+                return None;
+            }
+            Some(PhpType::union(types))
+        }
+        Expression::Parenthesized(p) => narrow_literal_type(p.expression),
+        _ => None,
+    }
+}
+
 /// Extract the model name from a `model-property<Model>` type that
 /// appears as a generic argument of an array/list type.
 fn extract_model_property_from_array_type(ty: &PhpType) -> Option<String> {
@@ -362,40 +431,7 @@ impl Backend {
                         // literal unions (`1|2|3`).  The raw text would not
                         // parse back into a number and would be flagged as
                         // an incompatible argument.
-                        let ty = match arg_expr {
-                            Expression::Literal(Literal::String(s)) => {
-                                PhpType::literal_string_raw(bytes_to_str(s.raw).to_string())
-                            }
-                            Expression::Literal(Literal::Integer(i)) => match i.value {
-                                Some(value) => PhpType::literal_int(value.to_string()),
-                                None => ty,
-                            },
-                            Expression::Literal(Literal::Float(f)) => {
-                                PhpType::literal_float(bytes_to_str(f.raw).to_string())
-                            }
-                            // Negative numeric literals (`-1`, `-1.5`) parse
-                            // as a unary negation wrapping the literal, not
-                            // as a single `Literal` node, so they need their
-                            // own case to be narrowed the same way.
-                            Expression::UnaryPrefix(unary)
-                                if matches!(
-                                    unary.operator,
-                                    mago_syntax::cst::unary::UnaryPrefixOperator::Negation(_)
-                                ) =>
-                            {
-                                match unary.operand {
-                                    Expression::Literal(Literal::Integer(i)) => match i.value {
-                                        Some(value) => PhpType::literal_int(format!("-{value}")),
-                                        None => ty,
-                                    },
-                                    Expression::Literal(Literal::Float(f)) => {
-                                        PhpType::literal_float(format!("-{}", bytes_to_str(f.raw)))
-                                    }
-                                    _ => ty,
-                                }
-                            }
-                            _ => ty,
-                        };
+                        let ty = narrow_literal_type(arg_expr).unwrap_or(ty);
                         // Resolve any short class names in the arg type
                         // to FQN via the class loader.  Variable
                         // resolution may return raw docblock names

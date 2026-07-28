@@ -4637,6 +4637,24 @@ function test(): void {
 }
 
 #[test]
+fn no_false_positive_for_ternary_with_string_literal_branches() {
+    let php = r#"<?php
+/** @param 'asc'|'desc' $direction */
+function orderBy(string $column, string $direction): void {}
+
+function test(bool $flag): void {
+    orderBy('id', $flag ? 'asc' : 'desc');
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "Ternary with literal branches should match 'asc'|'desc' (issue #180), got: {msgs:?}"
+    );
+}
+
+#[test]
 fn no_false_positive_for_int_literal_matching_literal_type() {
     let php = r#"<?php
 /** @param 1|2|3 $mode */
