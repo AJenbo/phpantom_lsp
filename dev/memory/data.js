@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785217852778,
+  "lastUpdate": 1785257945372,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21939,6 +21939,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3095978fbdc0d2f71e192e1aac6091636e0d115f",
+          "message": "Find References, Rename, and Go to Implementation no longer look stalled\nduring startup",
+          "timestamp": "2026-07-28T18:43:25+02:00",
+          "tree_id": "7ea55168a67f1fbbd48f717fbeae723a20d4bd49",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3095978fbdc0d2f71e192e1aac6091636e0d115f"
+        },
+        "date": 1785257937976,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 33.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.6,
             "unit": "MiB"
           }
         ]
