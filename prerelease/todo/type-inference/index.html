@@ -2239,7 +2239,7 @@ signature (parameter types, return type) is lost. This means:</p>
 <code>$fn = function(int $x): string { ... }</code> resolve to bare <code>Closure</code>
 with no signature detail. <code>infer_closure_literal_type</code> (in
 <code>rhs_resolution.rs</code>) already embeds the inferred return type in a
-<code>PhpType::Callable</code>, but always leaves <code>params</code> empty, so it does not
+<code>TypeKind::Callable</code>, but always leaves <code>params</code> empty, so it does not
 produce a full callable type string for variable-type contexts.</p>
 <p><strong>Example:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$fn = function(int $x): string { return (string)$x; };</span>

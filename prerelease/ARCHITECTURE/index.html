@@ -3343,7 +3343,8 @@ project for PHP parsing and type representation:</p>
 </tr>
 </tbody>
 </table>
-<p><code>PhpType</code> (<code>src/php_type.rs</code>) is an owned enum that wraps the borrowed
+<p><code>PhpType</code> (<code>src/php_type/</code>) is a pointer-sized handle to an interned
+<code>TypeKind</code> node, itself built from the borrowed
 <code>mago_type_syntax::cst::Type</code> AST. Every type-carrying field in the
 data model (<code>type_hint</code>, <code>return_type</code>, <code>native_type_hint</code>,
 <code>native_return_type</code>, <code>asserted_type</code>, <code>template_param_bounds</code> values,
@@ -3351,6 +3352,19 @@ generics type arguments, <code>ResolvedType::type_string</code>) uses <code>PhpT
 The substitution engine in <code>inheritance.rs</code> operates on
 <code>HashMap&lt;String, PhpType&gt;</code> so that template parameter replacement
 never re-parses type strings.</p>
+<p>Types are hash-consed: every constructor routes through the interner in
+<code>php_type/intern.rs</code>, so two structurally equal types always share one
+allocation. That is what lets a type occurrence cost 8 bytes rather
+than 24 plus a private copy of its payload on a workload that repeats
+the same few thousand forms everywhere, and it makes <code>PartialEq</code> a
+pointer comparison instead of a structural walk. Match on
+<code>PhpType::kind()</code> to inspect a node, and build new ones through the
+constructors (<code>PhpType::named</code>, <code>PhpType::nullable</code>, <code>PhpType::union</code>,
+…) rather than by constructing a <code>TypeKind</code> directly, so the pointer
+and structural notions of equality never drift apart. The table holds
+weak references, so forms nothing refers to any more are reclaimed:
+<code>TypeKind::Raw</code> and <code>TypeKind::Literal</code> carry free text, which would
+otherwise grow without bound in a long-running server.</p>
 <p>Several other Mago crates were evaluated and ruled out:</p>
 <table>
 <thead>

@@ -1593,32 +1593,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink" class="md-nav__link">
+  <a href="#memory-baseline-2026-07-28-refreshed-after-phptype-interning" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Memory baseline (2026-07-26, refreshed after the <code>PhpType</code> shrink)
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p38-resolved-type-values-are-duplicated-34x" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P38. Resolved type values are duplicated ~34x
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P41. 3.8 M live allocations cost ~170 MB in allocator overhead
+        Memory baseline (2026-07-28, refreshed after <code>PhpType</code> interning)
       </span>
     </span>
   </a>
@@ -2383,32 +2361,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink" class="md-nav__link">
+  <a href="#memory-baseline-2026-07-28-refreshed-after-phptype-interning" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Memory baseline (2026-07-26, refreshed after the <code>PhpType</code> shrink)
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p38-resolved-type-values-are-duplicated-34x" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P38. Resolved type values are duplicated ~34x
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P41. 3.8 M live allocations cost ~170 MB in allocator overhead
+        Memory baseline (2026-07-28, refreshed after <code>PhpType</code> interning)
       </span>
     </span>
   </a>
@@ -2849,9 +2805,10 @@ so this fast-path would apply to the majority of checks.</p>
    <code>HashMap&lt;(Atom, Atom), bool&gt;</code> that caches the result of
    "is type A a subtype of type B?" lookups. Clear the map at the
    start of each completion/hover/diagnostic request. Class names
-   are interned now (<code>PhpType::Named</code> carries an <code>Atom</code>, <code>ClassInfo</code>
+   are interned now (<code>TypeKind::Named</code> carries an <code>Atom</code>, <code>ClassInfo</code>
    caches its FQN as an <code>Atom</code>), so the keys are <code>Copy</code> and
-   identity-hashed.</p>
+   identity-hashed. Whole types are interned too, so a <code>(PhpType,
+   PhpType)</code> key would work as well and hash just as cheaply.</p>
 </li>
 <li>
 <p>Add a <code>has_template_params: bool</code> flag (or equivalent) to
@@ -3388,14 +3345,14 @@ interface merge inside <code>resolve_class_fully_inner</code> are intentional
 a CPU fix (11% of diagnostic-pass CPU), not a memory one, but it is
 memory-neutral-to-positive: today each of the 25,676 calls builds a
 full inheritance-merged <code>ClassInfo</code> (its own methods/properties vecs)
-and immediately discards it, which is 25,676 transient allocations of
-exactly the kind P41 cares about. Routing through the cache turns most
-of those into a hit against an entry the diagnostic pass populates
-anyway; it can only add a new persistent cache entry for a class that
-was otherwise <em>never</em> resolved in the pass, which is a narrow case
-bounded by the same fix as P33.</p>
+and immediately discards it — 25,676 transient allocations that
+straight-line CPU savings would remove as a side effect. Routing
+through the cache turns most of those into a hit against an entry the
+diagnostic pass populates anyway; it can only add a new persistent
+cache entry for a class that was otherwise <em>never</em> resolved in the
+pass, which is a narrow case bounded by the same fix as P33.</p>
 <hr />
-<h2 id="memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink">Memory baseline (2026-07-26, refreshed after the <code>PhpType</code> shrink)<a class="headerlink" href="#memory-baseline-2026-07-26-refreshed-after-the-phptype-shrink" title="Permanent link">&para;</a></h2>
+<h2 id="memory-baseline-2026-07-28-refreshed-after-phptype-interning">Memory baseline (2026-07-28, refreshed after <code>PhpType</code> interning)<a class="headerlink" href="#memory-baseline-2026-07-28-refreshed-after-phptype-interning" title="Permanent link">&para;</a></h2>
 <p>Measured with the <code>mem-audit</code> cargo feature, which installs a counting
 global allocator and prints a deep-size walk of every long-lived store
 at the end of <code>analyze</code> when <code>PHPANTOM_MEM_AUDIT</code> is set:</p>
@@ -3407,8 +3364,8 @@ at the end of <code>analyze</code> when <code>PHPANTOM_MEM_AUDIT</code> is set:<
 several classes is counted once. It reports both a field-level
 attribution and a drop-and-measure probe that clears each store and
 reads the exact allocator delta, which cross-checks the walk. Since
-which allocator is active changes the RSS/overhead figures (see P41),
-the audit labels its own build (<code>target … / … libc, allocator …</code>) —
+which allocator is active changes the RSS/overhead figures, the audit
+labels its own build (<code>target … / … libc, allocator …</code>) —
 always check that line before comparing a new run to the table below.</p>
 <p>The byte/allocation figures (live heap, per-store bytes released,
 <code>PhpType</code> duplication) are allocator-independent — they come from
@@ -3428,41 +3385,49 @@ mimalloc, since that is what every shipped Linux binary runs (see
 <tbody>
 <tr>
 <td>Peak RSS (<code>VmHWM</code>)</td>
-<td>505 MB</td>
-<td>706 MB</td>
+<td>402 MB</td>
+<td>540 MB</td>
 </tr>
 <tr>
 <td>RSS after mimalloc collect</td>
-<td>477 MB</td>
-<td>686 MB</td>
+<td>370 MB</td>
+<td>510 MB</td>
 </tr>
 <tr>
 <td>Live heap (allocator-reported)</td>
-<td>344 MB</td>
-<td>514 MB</td>
+<td>245 MB</td>
+<td>358 MB</td>
 </tr>
 <tr>
 <td>Live allocations</td>
-<td>2.45 M</td>
-<td>3.81 M</td>
+<td>1.44 M</td>
+<td>2.21 M</td>
 </tr>
 <tr>
 <td>Allocator + page overhead</td>
-<td>133 MB (28% of RSS)</td>
-<td>172 MB (25%)</td>
+<td>125 MB (34% of RSS)</td>
+<td>152 MB (30%)</td>
 </tr>
 </tbody>
 </table>
 <p>The glibc figures below were taken against the original baseline (the
-one with a 64-byte <code>PhpType</code>) and have not been re-measured since; the
-relative picture they illustrate is unchanged. Under plain glibc
+one with a 64-byte <code>PhpType</code>, before it was shrunk and then interned)
+and have not been re-measured since; the relative picture they
+illustrate is unchanged. Under plain glibc
 <code>malloc</code> (no mimalloc) the same run peaked higher despite a <em>lower</em>
 overhead percentage: 622 MB / 855 MB peak, 100 MB (19%) / 133 MB (17%)
 overhead. mimalloc holds more
 allocator/page overhead in percentage terms but a smaller absolute
 peak, because PHPantom already tunes it (<code>configure_allocator</code>: a
 short purge delay plus a per-process THP opt-out) to return freed
-parse-burst memory promptly. See P41 for what's left after that tuning.</p>
+parse-burst memory promptly.</p>
+<p>The overhead percentage rose as later changes (P33 sharing, P38
+interning) cut the live-allocation count — evidence that this overhead
+tracks the size of mimalloc's retained free-page pool, not a flat
+per-allocation cost, and that pool is sized by the parse-burst peak
+rather than the steady-state live set. Reducing allocation count on
+its own is therefore not expected to move it further; a real
+reduction would have to target that peak instead.</p>
 <p>Bytes released per store (drop-and-measure, mid-size / large):</p>
 <table>
 <thead>
@@ -3475,23 +3440,23 @@ parse-burst memory promptly. See P41 for what's left after that tuning.</p>
 <tbody>
 <tr>
 <td><code>resolved_class_cache</code></td>
-<td>143 MB / 237 MB</td>
-<td>1.17 M / 1.94 M</td>
+<td>101 MB / 165 MB</td>
+<td>719 K / 1.18 M</td>
 </tr>
 <tr>
 <td><code>symbol_maps</code></td>
-<td>40 MB / 64 MB</td>
-<td>367 K / 602 K</td>
-</tr>
-<tr>
-<td><code>reference_index</code></td>
-<td>26 MB / 43 MB</td>
-<td>204 K / 330 K</td>
+<td>30 MB / 47 MB</td>
+<td>159 K / 248 K</td>
 </tr>
 <tr>
 <td><code>uri_classes_index</code></td>
-<td>25 MB / 27 MB</td>
-<td>122 K / 171 K</td>
+<td>16 MB / 23 MB</td>
+<td>104 K / 149 K</td>
+</tr>
+<tr>
+<td><code>reference_index</code></td>
+<td>5.3 MB / 8.1 MB</td>
+<td>73 K / 112 K</td>
 </tr>
 <tr>
 <td><code>resolved_names</code></td>
@@ -3506,10 +3471,12 @@ parse-burst memory promptly. See P41 for what's left after that tuning.</p>
 </tbody>
 </table>
 <p>Within the member data, the largest field-level groups on the large app
-are <code>MethodInfo</code> structs (92 MB across 232 K distinct methods at 400 B
-each), parameter vectors (51 MB across 191 K vectors holding 325 K
-parameters at 136 B each), <code>PhpType</code> heap payloads (~33 MB), and
-<code>method_index</code> (21 MB).</p>
+are <code>MethodInfo</code> structs (78 MB across 232 K distinct methods at 336 B
+each), parameter vectors (36 MB across 191 K vectors holding 325 K
+parameters at 88 B each), member docblock text (13 MB), and
+<code>method_index</code> (12 MB). Type payloads no longer register: interning
+collapsed 856 K live type occurrences on that app to 51 K distinct
+nodes, so the whole type representation now costs under 4 MB.</p>
 <p>Two findings from the baseline are worth recording because they close
 off obvious-looking ideas:</p>
 <ul>
@@ -3524,99 +3491,6 @@ off obvious-looking ideas:</p>
   vectors are empty. Worth folding into another change that touches
   <code>SharedVec</code>, not worth a commit by itself.</li>
 </ul>
-<hr />
-<h2 id="p38-resolved-type-values-are-duplicated-34x">P38. Resolved type values are duplicated ~34x<a class="headerlink" href="#p38-resolved-type-values-are-duplicated-34x" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Effort: High</strong></p>
-<p>The memory audit renders every live <code>PhpType</code> and counts distinct
-forms: <strong>1.76 M values collapse to 51,272 distinct rendered types</strong> on
-the large Laravel app, and 1.07 M to 31,074 on the mid-size one. Both
-are almost exactly <strong>34x duplication</strong>. Every <code>string</code>, <code>?Carbon</code>,
-<code>Collection&lt;User&gt;</code>, and <code>Builder&lt;TModel&gt;</code> is re-allocated per method,
-per parameter, per class that inherits it.</p>
-<p>Interning types the way <code>Atom</code> interns names would collapse both halves
-of the remaining cost at once: each slot becomes a pointer-or-index
-handle (24 B down to 8 B, worth another ~24 MB of slot bytes on the
-large app on its own), and each distinct type is allocated once instead
-of ~34 times. The audit's "PhpType 24→16 B" projection covers only the
-slot half; the duplicate payloads are the larger share.</p>
-<p>This is a much larger change than the slot shrink that preceded it:
-<code>PhpType</code> is a value that substitution paths mutate in place, so
-interning means moving fully to a construct-and-intern API (the
-<code>PhpType::union(...)</code> / <code>PhpType::generic(...)</code> constructors added by
-the slot shrink are the beginning of that surface) and auditing every
-site that builds or rewrites a type.</p>
-<p>Take care not to feed the interner unbounded text: <code>Raw</code> holds
-free-text parse fallbacks and <code>Literal</code> holds source literals, so those
-should keep owned payloads or use a separate bounded cache.</p>
-<hr />
-<h2 id="p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead">P41. 3.8 M live allocations cost ~170 MB in allocator overhead<a class="headerlink" href="#p41-38-m-live-allocations-cost-170-mb-in-allocator-overhead" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
-<p>Independent of what we store, <em>how many</em> allocations we hold costs
-real memory. On the large Laravel app, mimalloc (the allocator every
-shipped Linux binary runs — see the "Memory baseline" note above)
-reports 514 MB live across 3.81 M allocations (average 142 B), while
-peak RSS is 706 MB. The 172 MB difference (25% of RSS; 28% on the
-mid-size app) is mimalloc's per-size-class page and slot rounding —
-roughly 45 B per live allocation.</p>
-<p>This is <em>after</em> the existing <code>configure_allocator</code> tuning (a short
-purge delay plus a per-process transparent-huge-pages opt-out — see
-<code>src/lib.rs</code>), which already earns back real RSS: the same run under
-plain glibc <code>malloc</code> peaks <em>higher</em> (622 MB / 855 MB) despite a lower
-overhead percentage (19% / 17%), because glibc holds freed arena
-pages far more readily than mimalloc does once tuned. So the
-allocator swap this item used to propose is already done — mimalloc is
-the shipped allocator and it is outperforming the alternative on
-absolute peak RSS. <code>MALLOC_ARENA_MAX</code> capping under plain glibc moves
-peak RSS (622 MB to 516 MB on the mid-size app) but barely moves the
-trimmed live figure, confirming arena count was never the lever.</p>
-<p>What is left is allocation <em>count</em> itself: at ~45 B of overhead per
-live allocation, each allocation avoided is worth more than its own
-<code>size_of</code>. P39 removed hundreds of thousands of allocations as a side
-effect (interning <code>SymbolKind</code> strings).</p>
-<p><strong>2026-07-27 re-measurement.</strong> With P39 landed, re-running the
-<code>mem-audit</code> walk turned up a genuine leak in the assertion-narrowing
-path (<code>src/type_engine/types/narrowing/assertions.rs</code>): every
-<code>@phpstan-assert</code>/<code>@psalm-assert</code> call-site evaluation <code>Box::leak</code>ed a
-cloned <code>FunctionInfo</code> or <code>MethodInfo</code> to get a stable reference for
-<code>CallAssertionInfo</code>, and neither clone was ever freed. Narrowing runs
-on every conditional the forward walker visits, so this leaked once
-per asserting call touched during a pass, for the life of the
-process — worse in a long-running LSP session (re-run on every
-keystroke) than in one-shot <code>analyze</code>. Fixed by having
-<code>CallAssertionInfo</code> own the four fields it actually needs (an
-<code>Arc</code>-shared parameter vector plus three small <code>Vec</code>s) instead of
-leaking the whole clone.</p>
-<p>Re-measured on four real projects (one small, two mid-size, one
-large) with the fixed build: live allocations dropped 7-12% on the
-three larger projects and 53% on the small one, which spends
-proportionally more of its pass time in narrowing relative to its
-total symbol count. Live bytes dropped correspondingly (tens of MB on
-the larger projects). The allocator-overhead <em>percentage</em> barely
-moved — mimalloc's rounding overhead per allocation is roughly
-constant regardless of which allocations are removed, so cutting
-count shrinks both the overhead and the total footprint by a similar
-proportion. This confirms the mechanism above without yet closing the
-gap enough to retire this item.</p>
-<p>While re-measuring, the audit's drop-and-measure probes (<code>src/mem_audit.rs</code>)
-were extended to cover every remaining <code>Backend</code> store (the phar
-archive cache, autoload/stub indexes, workspace PSR-4/vendor paths,
-diagnostic pull-model caches, and more). Previously 18-26% of live
-heap was an unattributed gap between the field-level walk and the
-allocator's own count; the probes now account for nearly all of it, so
-future passes on this item measure against a real residual (dominated
-by the <code>ustr</code> name interner and short-lived per-request state) instead
-of an unexplained shortfall. One find from the newly-covered stores:
-<code>phar_archives</code> (raw phar bytes plus a byte-offset index, kept for lazy
-re-extraction of phar-embedded PHP files such as vendor-shipped
-PHPStan) held on the order of 25 MB on projects with a phar-shaped
-dependency, previously invisible to the audit.</p>
-<p>If a meaningful gap remains once other in-flight allocation-count
-reductions land, the next lever is arena-allocating the member
-metadata (bump-allocate <code>MethodInfo</code>/<code>PropertyInfo</code>/<code>ParameterInfo</code> per
-resolved class instead of one <code>Box</code>/<code>Arc</code> per member) — a much larger
-change than anything else in this list, and today's re-measurement
-does not yet show the overhead percentage moving enough to justify it
-on its own.</p>
 <hr />
 <h2 id="p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there">P42. Reference index is built during the headless <code>analyze</code> pipeline but never queried there<a class="headerlink" href="#p42-reference-index-is-built-during-the-headless-analyze-pipeline-but-never-queried-there" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Effort: Low</strong></p>
