@@ -2954,31 +2954,58 @@ because it did not address that hang's dominant cost (uncached
 body-return inference, since fixed by memoization).</p>
 <hr />
 <h2 id="p29-migrate-to-mago-phpdoc-syntax">P29. Migrate to <code>mago-phpdoc-syntax</code><a class="headerlink" href="#p29-migrate-to-mago-phpdoc-syntax" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Effort: Medium</strong></p>
+<p><strong>Impact: Medium · Effort: High</strong></p>
 <p>As of the 1.42/1.43 mago releases, <code>mago-docblock</code> and
 <code>mago-type-syntax</code> are both deprecated and frozen at 1.42.0. Upstream
 folded them into a single unified crate, <code>mago-phpdoc-syntax</code>, which
 parses docblock comments and their embedded type and constant
-expressions in one pass and is meant to replace both. The deprecation
-notices point at <code>mago_phpdoc_syntax::PHPDocParser</code> (for
-<code>parse_phpdoc_with_span</code>) and <code>mago_phpdoc_syntax::parse_type</code> (for
-<code>parse_str</code>).</p>
-<p>We currently call the deprecated functions at four sites, each wrapped
-in <code>#[allow(deprecated)]</code>:</p>
-<ul>
-<li><code>src/docblock/parser.rs</code> — <code>mago_docblock::parse_phpdoc_with_span</code></li>
-<li><code>src/php_type.rs</code> — <code>mago_type_syntax::parse_str</code> (type-string parse
-  and the round-trip test helper)</li>
-<li><code>src/symbol_map/docblock.rs</code> — <code>mago_type_syntax::parse_str</code></li>
-</ul>
-<p><code>mago-phpdoc-syntax</code> first shipped at 1.44.0, so this migration is
-coupled to bumping the rest of the mago toolchain from 1.43.0 to
-1.44.0 (mixing 1.43 and 1.44 would pull two incompatible copies of the
-shared <code>mago-span</code> types). Do the version bump and the API migration
-together, drop <code>mago-docblock</code> and <code>mago-type-syntax</code> from
-<code>Cargo.toml</code>, and remove the <code>#[allow(deprecated)]</code> wrappers. The
-unified single-pass parser should also be a small win on the docblock
-parse hot path.</p>
+expressions in one pass and is meant to replace both.</p>
+<p>This is <strong>not</strong> a same-shaped API rename. The deprecation notices
+point at <code>mago_phpdoc_syntax::PHPDocParser</code> (replacing
+<code>parse_phpdoc_with_span</code>) and <code>mago_phpdoc_syntax::parse_type</code>
+(replacing <code>parse_str</code>), but the new crate produces a fundamentally
+different CST: the old flat <code>mago_docblock::document::{Document, Tag,
+TagKind}</code> (one enum with <code>tags_by_kind(TagKind::X)</code> lookups) is
+replaced by a <code>TagValue</code> enum with ~60 per-tag-kind structs
+(<code>ThrowsTagValue</code>, <code>TemplateTagValue</code>, <code>ParamTagValue</code>, ...), and
+<code>mago_type_syntax::cst::Type</code> (69 variants) is replaced by an equally
+restructured type CST. Confirmed by reading both crate sources
+directly rather than relying on docs.rs.</p>
+<p>Grepping for <code>mago_docblock</code>/<code>mago_type_syntax</code> usage turns up far
+more than the three call sites in the old writeup — at last count 14
+files, including the core of the shared type engine
+(<code>src/php_type/mod.rs</code>, <code>src/php_type/parse.rs</code> build <code>PhpType</code> off
+<code>mago_type_syntax::cst::Type</code> directly) and every consumer that
+filters tags by <code>TagKind</code> (<code>src/docblock/tags.rs</code>, <code>templates.rs</code>,
+<code>conditional.rs</code>, <code>virtual_members.rs</code>, <code>completion/phpdoc/mod.rs</code>,
+<code>code_actions/update_docblock.rs</code>, <code>code_actions/phpstan/add_throws.rs</code>,
+<code>completion/source/throws_analysis/scanning.rs</code>, <code>hover/formatting.rs</code>).
+This is a full rewrite of the docblock/type parsing foundation, sized
+for several sprint items, not one.</p>
+<p><strong>Sequencing with P30:</strong> <a href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30</a>
+evaluates <code>mago-hir</code>, which — if it pans out — replaces this entire
+hand-rolled layer (docblock tag parsing and type-string parsing both)
+with a single upstream pass. Hand-migrating to <code>mago-phpdoc-syntax</code>
+now risks being thrown away if <code>mago-hir</code> is adopted later. Do not
+start the CST rewrite until P30's triggers have been evaluated one way
+or the other — either <code>mago-hir</code> is adopted (making this migration
+moot) or its triggers are judged unmet for the foreseeable future
+(making this migration the fallback worth doing).</p>
+<p>The rest of the mago toolchain (<code>mago-syntax</code>, <code>mago-allocator</code>,
+<code>mago-database</code>, <code>mago-names</code>, <code>mago-span</code>, <code>mago-formatter</code>,
+<code>mago-php-version</code>, <code>mago-composer</code>) is already on 1.44.0 — that bump
+was independent of this CST rewrite and safe to do ahead of it (see
+the <code>[Unreleased]</code> changelog entry for the one user-visible effect, a
+<code>mago-formatter</code> chain-breaking fix). <code>mago-docblock</code> and
+<code>mago-type-syntax</code> are still pinned at 1.42.0 pending this migration.
+Do not go past 1.44.0 for the rest of the toolchain until this
+migration (or P30) is underway: <code>mago-allocator</code> 1.45.0 rewrites
+<code>LocalArena</code>/<code>SharedArena</code> into a unified <code>Arena</code> trait (new
+<code>boxed.rs</code>, <code>iter.rs</code>, <code>collections.rs</code>, <code>vec.rs</code> modules) — a real
+breaking change to the arena API this codebase uses throughout the
+parse hot path (<code>src/parser/ast_update.rs</code>'s <code>with_reusable_arena</code>,
+the parse-worker threads, etc.) — and taking it piecemeal ahead of a
+real reason to touch that code would be its own unreviewed migration.</p>
 <hr />
 <h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Effort: High</strong></p>
