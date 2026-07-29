@@ -724,6 +724,9 @@ impl Backend {
         for loc in self.framework_member_reference_locations(target_member, hierarchy) {
             push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
         }
+        for loc in self.framework_property_reference_locations(target_member, hierarchy) {
+            push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
+        }
         sort_locations_for_references(&mut locations);
 
         locations

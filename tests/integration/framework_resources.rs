@@ -1960,3 +1960,281 @@ final class PlaceOrderHandler
         ) && diagnostic.message.contains("app.missing_bus")
     }));
 }
+
+#[tokio::test]
+async fn symfony_forms_and_validation_map_fields_to_entity_properties() {
+    let user_php = r#"<?php
+namespace App\Entity;
+
+final class User
+{
+    private string $email;
+    private string $name;
+}
+"#;
+    let form_php = r#"<?php
+namespace App\Form;
+
+use App\Entity\User;
+use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\OptionsResolver\OptionsResolver;
+
+final class RegistrationType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder->add('email');
+        $builder->add('name');
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefaults(['data_class' => User::class]);
+    }
+}
+"#;
+    let validation_yaml = r#"App\Entity\User:
+  properties:
+    email:
+      - NotBlank: ~
+"#;
+    let validation_xml = r#"<constraint-mapping>
+  <class name="App\Entity\User">
+    <property name="name">
+      <constraint name="Length"/>
+    </property>
+  </class>
+</constraint-mapping>
+"#;
+    let constraints_php = r#"<?php
+namespace Symfony\Component\Validator\Constraints;
+class NotBlank {}
+class Length {}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Entity/User.php", user_php),
+            ("src/Form/RegistrationType.php", form_php),
+            ("config/validator/User.yaml", validation_yaml),
+            ("config/validator/User.xml", validation_xml),
+            ("src/ValidatorConstraints.php", constraints_php),
+        ],
+    );
+    let user_uri = uri_for(&dir, "src/Entity/User.php");
+    let form_uri = uri_for(&dir, "src/Form/RegistrationType.php");
+    let yaml_uri = uri_for(&dir, "config/validator/User.yaml");
+    let xml_uri = uri_for(&dir, "config/validator/User.xml");
+    let constraints_uri = uri_for(&dir, "src/ValidatorConstraints.php");
+    open_doc(&backend, user_uri.clone(), "php", user_php).await;
+    open_doc(&backend, constraints_uri.clone(), "php", constraints_php).await;
+    open_doc(&backend, form_uri.clone(), "php", form_php).await;
+    open_doc(&backend, yaml_uri.clone(), "yaml", validation_yaml).await;
+    open_doc(&backend, xml_uri.clone(), "xml", validation_xml).await;
+
+    for (uri, content, name, inside, expected_line) in [
+        (&form_uri, form_php, "'email'", 2, 5),
+        (&yaml_uri, validation_yaml, "email:", 2, 5),
+        (&xml_uri, validation_xml, "name=\"name\"", 8, 6),
+    ] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, name, inside),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .expect("form/validation property should resolve");
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(location.uri, user_uri);
+        assert_eq!(location.range.start.line, expected_line);
+    }
+
+    for (uri, content, name) in [
+        (&yaml_uri, validation_yaml, "NotBlank"),
+        (&xml_uri, validation_xml, "Length"),
+    ] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: position_in(content, name, 2),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .expect("constraint class should resolve");
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(location.uri, constraints_uri);
+    }
+
+    let completion = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: form_uri.clone(),
+                },
+                position: position_in(form_php, "'email'", 1),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .expect("form field completion should return entity properties");
+    let items = match completion {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(items.iter().any(|item| item.label == "email"));
+    assert!(items.iter().any(|item| item.label == "name"));
+
+    let lenses = backend
+        .handle_code_lens(user_uri.as_str(), user_php)
+        .unwrap_or_default();
+    assert!(lenses.iter().any(|lens| {
+        lens.command
+            .as_ref()
+            .is_some_and(|command| command.title == "Symfony form/validation: 2 refs")
+    }));
+}
+
+#[tokio::test]
+async fn symfony_tree_builder_schema_drives_yaml_config_intelligence() {
+    let configuration_php = r#"<?php
+namespace App\DependencyInjection;
+
+use Symfony\Component\Config\Definition\Builder\TreeBuilder;
+
+final class Configuration
+{
+    public function getConfigTreeBuilder(): TreeBuilder
+    {
+        $treeBuilder = new TreeBuilder('acme_demo');
+        $rootNode = $treeBuilder->getRootNode();
+        $rootNode
+            ->children()
+                ->scalarNode('api_key')->end()
+                ->arrayNode('mailer')
+                    ->children()
+                        ->scalarNode('dsn')->end()
+                    ->end()
+                ->end()
+            ->end();
+
+        return $treeBuilder;
+    }
+}
+"#;
+    let config_yaml = r#"acme_demo:
+  api_key: secret
+  mailer:
+    dsn: smtp://localhost
+  typo: true
+"#;
+    let completion_yaml = r#"acme_demo:
+  mailer:
+    ds
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            (
+                "src/DependencyInjection/Configuration.php",
+                configuration_php,
+            ),
+            ("config/packages/acme_demo.yaml", config_yaml),
+            ("config/packages/acme_completion.yaml", completion_yaml),
+        ],
+    );
+    let schema_uri = uri_for(&dir, "src/DependencyInjection/Configuration.php");
+    let config_uri = uri_for(&dir, "config/packages/acme_demo.yaml");
+    let completion_uri = uri_for(&dir, "config/packages/acme_completion.yaml");
+    open_doc(&backend, schema_uri.clone(), "php", configuration_php).await;
+    open_doc(&backend, config_uri.clone(), "yaml", config_yaml).await;
+    open_doc(&backend, completion_uri.clone(), "yaml", completion_yaml).await;
+
+    for (name, expected_line) in [("api_key", 13), ("mailer", 14), ("dsn", 16)] {
+        let definition = backend
+            .goto_definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: config_uri.clone(),
+                    },
+                    position: position_in(config_yaml, name, 2),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("configuration key '{name}' should resolve"));
+        let location = match definition {
+            GotoDefinitionResponse::Scalar(location) => location,
+            GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
+            GotoDefinitionResponse::Link(_) => panic!("unexpected location links"),
+        };
+        assert_eq!(location.uri, schema_uri);
+        assert_eq!(location.range.start.line, expected_line);
+    }
+
+    let completion = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: completion_uri,
+                },
+                position: position_in(completion_yaml, "ds", 2),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .expect("schema completion should return child keys");
+    let items = match completion {
+        CompletionResponse::Array(items) => items,
+        CompletionResponse::List(list) => list.items,
+    };
+    assert!(items.iter().any(|item| item.label == "dsn"));
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(config_uri.as_str(), config_yaml, &mut diagnostics);
+    let config_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code == "unknown_symfony_config_key"
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(config_diagnostics.len(), 1);
+    assert!(config_diagnostics[0].message.contains("acme_demo.typo"));
+
+    let lenses = backend
+        .handle_code_lens(schema_uri.as_str(), configuration_php)
+        .unwrap_or_default();
+    assert!(lenses.iter().any(|lens| {
+        lens.command
+            .as_ref()
+            .is_some_and(|command| command.title == "Symfony configuration: 1 ref")
+    }));
+}

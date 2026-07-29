@@ -146,23 +146,43 @@ impl Backend {
                 );
             }
 
+            let mut hierarchy = HashSet::new();
+            hierarchy.insert(class_fqn.to_string());
+            hierarchy.extend(self.class_hierarchy_names(class));
             for property in &class.properties {
-                if property.name_offset == 0
-                    || property.is_virtual
-                    || property.visibility == Visibility::Private
-                {
+                if property.name_offset == 0 {
                     continue;
                 }
-                let member_name = property.name.strip_prefix('$').unwrap_or(&property.name);
-                if let Some(lens) = self.build_member_reference_lens(
-                    uri,
-                    content,
-                    property.name_offset,
-                    class_fqn,
-                    crate::atom::atom(member_name),
-                    property.is_static,
-                ) {
-                    lenses.push(lens);
+
+                if !property.is_virtual && property.visibility != Visibility::Private {
+                    let member_name = property.name.strip_prefix('$').unwrap_or(&property.name);
+                    if let Some(lens) = self.build_member_reference_lens(
+                        uri,
+                        content,
+                        property.name_offset,
+                        class_fqn,
+                        crate::atom::atom(member_name),
+                        property.is_static,
+                    ) {
+                        lenses.push(lens);
+                    }
+                }
+
+                let locations =
+                    self.framework_property_reference_locations(&property.name, Some(&hierarchy));
+                if !locations.is_empty() {
+                    self.push_locations_lens(
+                        uri,
+                        offset_to_position(content, property.name_offset as usize),
+                        format!(
+                            "Symfony form/validation: {} {}",
+                            locations.len(),
+                            if locations.len() == 1 { "ref" } else { "refs" }
+                        ),
+                        locations,
+                        &mut lenses,
+                        &mut seen,
+                    );
                 }
             }
 
@@ -596,6 +616,28 @@ impl Backend {
         };
 
         for (idx, declaration) in references.iter().enumerate() {
+            if let FrameworkReferenceKind::ConfigKey {
+                path,
+                declaration: true,
+            } = &declaration.kind
+            {
+                let usages = self.framework_config_key_locations(path, false, true);
+                if !usages.is_empty() {
+                    self.push_locations_lens(
+                        uri,
+                        offset_to_position(content, declaration.start as usize),
+                        format!(
+                            "Symfony configuration: {} {}",
+                            usages.len(),
+                            if usages.len() == 1 { "ref" } else { "refs" }
+                        ),
+                        usages,
+                        lenses,
+                        seen,
+                    );
+                }
+                continue;
+            }
             if let FrameworkReferenceKind::Translation {
                 domain,
                 name,

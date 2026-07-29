@@ -44,8 +44,19 @@ impl Backend {
             .collect::<HashSet<_>>();
         let mut translation_domains = HashSet::new();
         let mut known_translations = HashSet::new();
+        let mut config_roots = HashSet::new();
+        let mut known_config_keys = HashSet::new();
         for refs in self.framework_references.read().values() {
             for reference in refs.iter() {
+                if let FrameworkReferenceKind::ConfigKey {
+                    path,
+                    declaration: true,
+                } = &reference.kind
+                {
+                    config_roots.insert(path.split('.').next().unwrap_or_default().to_string());
+                    known_config_keys.insert(path.clone());
+                    continue;
+                }
                 let FrameworkReferenceKind::Translation {
                     domain,
                     name,
@@ -60,6 +71,29 @@ impl Backend {
         }
 
         for reference in references.iter() {
+            if let FrameworkReferenceKind::ConfigKey {
+                path,
+                declaration: false,
+            } = &reference.kind
+            {
+                let root = path.split('.').next().unwrap_or_default();
+                if config_roots.contains(root) && !known_config_keys.contains(path) {
+                    out.push(Diagnostic {
+                        range: Range {
+                            start: offset_to_position(content, reference.start as usize),
+                            end: offset_to_position(content, reference.end as usize),
+                        },
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String(
+                            "unknown_symfony_config_key".to_string(),
+                        )),
+                        source: Some("PHPantom".to_string()),
+                        message: format!("Symfony configuration key '{}' is not declared", path),
+                        ..Default::default()
+                    });
+                }
+                continue;
+            }
             if let FrameworkReferenceKind::Translation {
                 domain,
                 name,

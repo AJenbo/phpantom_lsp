@@ -30,6 +30,28 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
+        if !is_framework_resource_uri(uri)
+            && let Some(response) = self.try_symfony_form_field_completion(content, position)
+        {
+            return Some(response);
+        }
+        if is_yaml_uri(uri)
+            && let Some((parent, prefix, content_start)) =
+                yaml_config_completion_context(content, position)
+        {
+            let candidates = self.framework_config_key_children(&parent);
+            if !candidates.is_empty() {
+                return completion_response(
+                    candidates,
+                    &prefix,
+                    content,
+                    content_start,
+                    position,
+                    CompletionItemKind::FIELD,
+                    "Symfony configuration key",
+                );
+            }
+        }
         let context = if is_framework_resource_uri(uri) {
             detect_resource_context(uri, content, position)?
         } else {
@@ -86,6 +108,167 @@ impl Backend {
 
         (!items.is_empty()).then_some(CompletionResponse::Array(items))
     }
+
+    fn try_symfony_form_field_completion(
+        &self,
+        content: &str,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let cursor = position_to_offset(content, position) as usize;
+        let (quote_start, _) = opening_quote(content, cursor)?;
+        let (call_name, argument_index, _) = php_call_context(content, quote_start)?;
+        if argument_index != 0
+            || !matches!(
+                call_name.to_ascii_lowercase().as_str(),
+                "add" | "get" | "has" | "remove"
+            )
+        {
+            return None;
+        }
+        let raw_class = php_form_data_class(content)?;
+        let use_map = self.parse_use_statements(content);
+        let namespace = self.parse_namespace(content);
+        let fqn = crate::util::resolve_to_fqn(&raw_class, &use_map, &namespace);
+        let class = self.find_or_load_class(&fqn)?;
+        let mut candidates = class
+            .properties
+            .iter()
+            .map(|property| property.name.to_string())
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates.dedup();
+        completion_response(
+            candidates,
+            &content[quote_start + 1..cursor],
+            content,
+            quote_start + 1,
+            position,
+            CompletionItemKind::FIELD,
+            "Symfony form field",
+        )
+    }
+}
+
+fn completion_response(
+    candidates: Vec<String>,
+    prefix: &str,
+    content: &str,
+    content_start: usize,
+    position: Position,
+    kind: CompletionItemKind,
+    detail: &str,
+) -> Option<CompletionResponse> {
+    let prefix = prefix.to_ascii_lowercase();
+    let range = Range {
+        start: offset_to_position(content, content_start),
+        end: position,
+    };
+    let items = candidates
+        .into_iter()
+        .filter(|name| prefix.is_empty() || name.to_ascii_lowercase().starts_with(&prefix))
+        .enumerate()
+        .map(|(index, name)| CompletionItem {
+            label: name.clone(),
+            kind: Some(kind),
+            detail: Some(detail.to_string()),
+            sort_text: Some(format!("{index:05}")),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range,
+                new_text: name,
+            })),
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    (!items.is_empty()).then_some(CompletionResponse::Array(items))
+}
+
+fn php_form_data_class(content: &str) -> Option<String> {
+    let marker = content.find("data_class")?;
+    let suffix = &content[marker + "data_class".len()..];
+    let class_suffix = suffix.find("::class")?;
+    let bytes = suffix.as_bytes();
+    let mut name_end = class_suffix;
+    while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
+        name_end -= 1;
+    }
+    let mut name_start = name_end;
+    while name_start > 0
+        && (bytes[name_start - 1] == b'\\'
+            || bytes[name_start - 1] == b'_'
+            || bytes[name_start - 1].is_ascii_alphanumeric())
+    {
+        name_start -= 1;
+    }
+    let name = suffix[name_start..name_end].trim_start_matches('\\');
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn is_yaml_uri(uri: &str) -> bool {
+    uri.split('?').next().is_some_and(|path| {
+        let path = path.to_ascii_lowercase();
+        path.ends_with(".yaml") || path.ends_with(".yml")
+    })
+}
+
+fn yaml_config_completion_context(
+    content: &str,
+    position: Position,
+) -> Option<(String, String, usize)> {
+    let cursor = position_to_offset(content, position) as usize;
+    let line_start = content[..cursor].rfind('\n').map_or(0, |start| start + 1);
+    let current = &content[line_start..cursor];
+    let indent = current.bytes().take_while(|byte| *byte == b' ').count();
+    let typed = current[indent..].trim_start();
+    if typed.contains(':')
+        || !typed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return None;
+    }
+
+    let mut parents: Vec<(usize, String)> = Vec::new();
+    for line in content[..line_start].split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches(['\r', '\n']);
+        let semantic = line_without_newline
+            .split_once('#')
+            .map_or(line_without_newline, |(before, _)| before);
+        let line_indent = semantic.bytes().take_while(|byte| *byte == b' ').count();
+        let trimmed = semantic.trim();
+        if trimmed.is_empty() || trimmed.starts_with('-') {
+            continue;
+        }
+        while parents
+            .last()
+            .is_some_and(|(parent_indent, _)| *parent_indent >= line_indent)
+        {
+            parents.pop();
+        }
+        if let Some((key, value)) = trimmed.split_once(':') {
+            let key = key.trim().trim_matches(['\'', '"']);
+            if !key.is_empty()
+                && value.trim().is_empty()
+                && key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            {
+                parents.push((line_indent, key.to_string()));
+            }
+        }
+    }
+    while parents
+        .last()
+        .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
+    {
+        parents.pop();
+    }
+    let parent = parents
+        .iter()
+        .map(|(_, key)| key.as_str())
+        .collect::<Vec<_>>()
+        .join(".");
+    let content_start = line_start + current.find(typed).unwrap_or(indent);
+    Some((parent, typed.to_string(), content_start))
 }
 
 fn detect_php_context(content: &str, position: Position) -> Option<SymfonyCompletionContext> {

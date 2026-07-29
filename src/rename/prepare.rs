@@ -343,6 +343,9 @@ impl Backend {
             FrameworkReferenceKind::Method { member_name, .. } => {
                 (reference.start, reference.end, member_name)
             }
+            FrameworkReferenceKind::Property { member_name, .. } => {
+                (reference.start, reference.end, member_name)
+            }
             FrameworkReferenceKind::Namespace { prefix } => {
                 let source = content.get(reference.start as usize..reference.end as usize)?;
                 let cursor = position_to_byte_offset(content, position) as u32;
@@ -367,6 +370,7 @@ impl Backend {
             }
             FrameworkReferenceKind::Translation { .. } => return None,
             FrameworkReferenceKind::MessengerHandler { .. } => return None,
+            FrameworkReferenceKind::ConfigKey { .. } => return None,
             FrameworkReferenceKind::Path { .. } => return None,
         };
 
@@ -402,6 +406,11 @@ impl Backend {
                     self.find_framework_references_for_rename(uri, content, position, true)?;
                 build_simple_rename_edit(self, uri, content, &locations, new_name, false)
             }
+            FrameworkReferenceKind::Property { .. } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                build_simple_rename_edit(self, uri, content, &locations, new_name, false)
+            }
             FrameworkReferenceKind::Namespace { prefix } => {
                 let source = content.get(reference.start as usize..reference.end as usize)?;
                 let cursor = position_to_byte_offset(content, position) as u32;
@@ -425,6 +434,7 @@ impl Backend {
             }
             FrameworkReferenceKind::Translation { .. } => None,
             FrameworkReferenceKind::MessengerHandler { .. } => None,
+            FrameworkReferenceKind::ConfigKey { .. } => None,
             FrameworkReferenceKind::Path { .. } => None,
         }
     }

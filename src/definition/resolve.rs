@@ -104,6 +104,13 @@ impl Backend {
                 .resolve_framework_member_definition(uri, content, &class_fqn, &member_name)
                 .into_iter()
                 .collect(),
+            FrameworkReferenceKind::Property {
+                class_fqn,
+                member_name,
+            } => self
+                .resolve_framework_property_definition(uri, content, &class_fqn, &member_name)
+                .into_iter()
+                .collect(),
             FrameworkReferenceKind::SymfonySymbol {
                 kind,
                 name,
@@ -132,6 +139,10 @@ impl Backend {
                     .into_iter()
                     .collect()
             }
+            FrameworkReferenceKind::ConfigKey {
+                path,
+                declaration: false,
+            } => self.framework_config_key_locations(&path, true, false),
             FrameworkReferenceKind::Namespace { .. }
             | FrameworkReferenceKind::Path { .. }
             | FrameworkReferenceKind::SymfonySymbol {
@@ -141,6 +152,9 @@ impl Backend {
                 declaration: true, ..
             }
             | FrameworkReferenceKind::Translation {
+                declaration: true, ..
+            }
+            | FrameworkReferenceKind::ConfigKey {
                 declaration: true, ..
             } => Vec::new(),
         }
@@ -171,6 +185,35 @@ impl Backend {
             member_name,
             MemberKind::Method,
             declaring_class.member_name_offset(member_name, "method"),
+        )?;
+        Some(point_location(Url::parse(&class_uri).ok()?, position))
+    }
+
+    pub(crate) fn resolve_framework_property_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        class_fqn: &str,
+        property_name: &str,
+    ) -> Option<Location> {
+        let ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&ctx);
+        let raw_class = class_loader(class_fqn)?;
+        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &raw_class,
+            &class_loader,
+            Some(&self.resolved_class_cache),
+        );
+        let (declaring_class, declaring_fqn) =
+            Self::find_declaring_class(&resolved, property_name, &class_loader)
+                .unwrap_or_else(|| (resolved.as_ref().clone(), class_fqn.to_string()));
+        let (class_uri, class_content) =
+            self.find_class_file_content(&declaring_fqn, uri, content)?;
+        let position = Self::find_member_position(
+            &class_content,
+            property_name,
+            MemberKind::Property,
+            declaring_class.member_name_offset(property_name, "property"),
         )?;
         Some(point_location(Url::parse(&class_uri).ok()?, position))
     }

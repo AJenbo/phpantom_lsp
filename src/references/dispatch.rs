@@ -208,6 +208,19 @@ impl Backend {
                     Some(&hierarchy),
                 )
             }
+            FrameworkReferenceKind::Property {
+                class_fqn,
+                member_name,
+            } => {
+                let hierarchy = self.collect_hierarchy_for_fqns(&[class_fqn]);
+                self.find_member_references(
+                    &member_name,
+                    false,
+                    include_declaration,
+                    Some(&hierarchy),
+                    Some(&hierarchy),
+                )
+            }
             FrameworkReferenceKind::SymfonySymbol { kind, name, .. } => {
                 self.framework_symfony_symbol_locations(kind, &name, include_declaration, true)
             }
@@ -227,6 +240,9 @@ impl Backend {
                 handler_fqn,
                 ..
             } => self.framework_messenger_handler_locations(&message_fqn, &handler_fqn),
+            FrameworkReferenceKind::ConfigKey { path, .. } => {
+                self.framework_config_key_locations(&path, include_declaration, true)
+            }
             FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {
                 Vec::new()
             }

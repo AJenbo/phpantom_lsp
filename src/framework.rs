@@ -70,6 +70,11 @@ pub(crate) enum FrameworkReferenceKind {
         class_fqn: String,
         member_name: String,
     },
+    /// A property name encoded in forms or validation configuration.
+    Property {
+        class_fqn: String,
+        member_name: String,
+    },
     /// A namespace-prefix key, e.g. `App\:` in `services.yaml`.
     Namespace { prefix: String },
     /// A path-like scalar used by Symfony resource/exclude imports.
@@ -98,6 +103,8 @@ pub(crate) enum FrameworkReferenceKind {
         handler_fqn: String,
         role: MessengerHandlerRole,
     },
+    /// A dot-qualified key from a local Symfony `TreeBuilder` schema.
+    ConfigKey { path: String, declaration: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,10 +170,11 @@ struct IndexedMessengerMapping {
 struct FrameworkLookupUriKeys {
     classes: HashSet<String>,
     methods: HashSet<String>,
+    properties: HashSet<String>,
     messenger_classes: HashSet<String>,
 }
 
-/// Inverted class, method, and Messenger relations from framework resources.
+/// Inverted declaration and relation data from framework resources.
 ///
 /// The primary framework index stays keyed by URI for cursor-local features.
 /// This derived index makes cross-file lookups proportional to the matching
@@ -176,6 +184,7 @@ struct FrameworkLookupUriKeys {
 pub(crate) struct FrameworkReferenceLookupIndexInner {
     classes: HashMap<String, Vec<IndexedFrameworkLocation>>,
     methods: HashMap<String, Vec<IndexedFrameworkMemberLocation>>,
+    properties: HashMap<String, Vec<IndexedFrameworkMemberLocation>>,
     messenger_by_class: HashMap<String, Vec<IndexedMessengerMapping>>,
     uri_keys: HashMap<Arc<str>, FrameworkLookupUriKeys>,
 }
@@ -304,7 +313,10 @@ pub(crate) fn should_index_framework_php_content(uri: &str, content: &str) -> bo
             || content.contains("->dispatch(")
             || content.contains("AsMessageHandler")
             || content.contains("MessageBusInterface")
-            || content.contains("Messenger\\"))
+            || content.contains("Messenger\\")
+            || content.contains("TreeBuilder")
+            || content.contains("FormBuilderInterface")
+            || content.contains("AbstractType"))
 }
 
 fn is_skipped_resource_path(path: &Path) -> bool {
@@ -361,6 +373,20 @@ impl Backend {
                     );
                     keys.methods.insert(member_name.clone());
                 }
+                FrameworkReferenceKind::Property {
+                    class_fqn,
+                    member_name,
+                } => {
+                    lookup
+                        .properties
+                        .entry(member_name.clone())
+                        .or_default()
+                        .push(IndexedFrameworkMemberLocation {
+                            class_fqn: framework_fqn_lookup_key(class_fqn),
+                            location,
+                        });
+                    keys.properties.insert(member_name.clone());
+                }
                 FrameworkReferenceKind::MessengerHandler {
                     message_fqn,
                     handler_fqn,
@@ -389,6 +415,7 @@ impl Backend {
 
         if !keys.classes.is_empty()
             || !keys.methods.is_empty()
+            || !keys.properties.is_empty()
             || !keys.messenger_classes.is_empty()
         {
             lookup.uri_keys.insert(uri, keys);
@@ -416,6 +443,15 @@ impl Backend {
             });
             if remove_key {
                 lookup.methods.remove(&key);
+            }
+        }
+        for key in keys.properties {
+            let remove_key = lookup.properties.get_mut(&key).is_some_and(|locations| {
+                locations.retain(|entry| entry.location.uri.as_ref() != uri);
+                locations.is_empty()
+            });
+            if remove_key {
+                lookup.properties.remove(&key);
             }
         }
         for key in keys.messenger_classes {
@@ -631,6 +667,29 @@ impl Backend {
         let mut locations = lookup
             .methods
             .get(target_member)
+            .into_iter()
+            .flatten()
+            .filter(|entry| {
+                hierarchy
+                    .as_ref()
+                    .is_none_or(|hierarchy| hierarchy.contains(&entry.class_fqn))
+            })
+            .filter_map(|entry| entry.location.to_lsp())
+            .collect();
+        sort_locations(&mut locations);
+        locations
+    }
+
+    pub(crate) fn framework_property_reference_locations(
+        &self,
+        target_property: &str,
+        hierarchy: Option<&HashSet<String>>,
+    ) -> Vec<Location> {
+        let hierarchy = hierarchy.map(normalized_framework_hierarchy);
+        let lookup = self.framework_reference_lookup.read();
+        let mut locations = lookup
+            .properties
+            .get(target_property)
             .into_iter()
             .flatten()
             .filter(|entry| {
@@ -896,6 +955,81 @@ impl Backend {
         mappings
     }
 
+    pub(crate) fn framework_config_key_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for refs in self.framework_references.read().values() {
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::ConfigKey {
+                    path,
+                    declaration: true,
+                } = &reference.kind
+                else {
+                    continue;
+                };
+                push_unique_string(&mut names, path.clone());
+            }
+        }
+        names.sort_unstable();
+        names
+    }
+
+    pub(crate) fn framework_config_key_children(&self, parent: &str) -> Vec<String> {
+        let prefix = (!parent.is_empty()).then(|| format!("{parent}."));
+        let mut children = Vec::new();
+        for path in self.framework_config_key_names() {
+            let remainder = match &prefix {
+                Some(prefix) => path.strip_prefix(prefix.as_str()),
+                None => Some(path.as_str()),
+            };
+            let Some(remainder) = remainder else {
+                continue;
+            };
+            let child = remainder.split('.').next().unwrap_or_default();
+            if !child.is_empty() {
+                push_unique_string(&mut children, child.to_string());
+            }
+        }
+        children.sort_unstable();
+        children
+    }
+
+    pub(crate) fn framework_config_key_locations(
+        &self,
+        target_path: &str,
+        include_declarations: bool,
+        include_references: bool,
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+        for (uri, refs) in self.framework_references.read().iter() {
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(uri) else {
+                continue;
+            };
+            for reference in refs.iter() {
+                let FrameworkReferenceKind::ConfigKey { path, declaration } = &reference.kind
+                else {
+                    continue;
+                };
+                if path != target_path
+                    || (*declaration && !include_declarations)
+                    || (!*declaration && !include_references)
+                {
+                    continue;
+                }
+                push_unique_location(
+                    &mut locations,
+                    &parsed_uri,
+                    offset_to_position(&content, reference.start as usize),
+                    offset_to_position(&content, reference.end as usize),
+                );
+            }
+        }
+        sort_locations(&mut locations);
+        locations
+    }
+
     pub(crate) fn framework_doctrine_repository_fqns_for_entity(
         &self,
         entity_fqn: &str,
@@ -969,6 +1103,20 @@ impl Backend {
                                 .eq_ignore_ascii_case(&normalize_framework_fqn(rhs_class))
                     }
                     (
+                        FrameworkReferenceKind::Property {
+                            class_fqn: lhs_class,
+                            member_name: lhs_name,
+                        },
+                        FrameworkReferenceKind::Property {
+                            class_fqn: rhs_class,
+                            member_name: rhs_name,
+                        },
+                    ) => {
+                        lhs_name == rhs_name
+                            && normalize_framework_fqn(lhs_class)
+                                .eq_ignore_ascii_case(&normalize_framework_fqn(rhs_class))
+                    }
+                    (
                         FrameworkReferenceKind::Namespace { prefix: lhs },
                         FrameworkReferenceKind::Namespace { prefix: rhs },
                     ) => normalize_framework_fqn(lhs)
@@ -1030,6 +1178,10 @@ impl Backend {
                             && normalize_framework_fqn(lhs_handler)
                                 .eq_ignore_ascii_case(&normalize_framework_fqn(rhs_handler))
                     }
+                    (
+                        FrameworkReferenceKind::ConfigKey { path: lhs, .. },
+                        FrameworkReferenceKind::ConfigKey { path: rhs, .. },
+                    ) => lhs == rhs,
                     _ => false,
                 };
             if matched {
@@ -1261,6 +1413,8 @@ impl Backend {
         scan_php_route_parameters(uri, content, &literals, &mut refs);
         scan_php_event_listener_methods(uri, content, &literals, &namespace, &mut refs);
         scan_php_messenger_handlers(uri, content, &use_map, &namespace, &mut refs);
+        scan_php_form_fields(uri, content, &literals, &use_map, &namespace, &mut refs);
+        scan_php_config_schema(uri, content, &literals, &mut refs);
 
         if include_config_resources {
             let class_service_declarations: Vec<(u32, u32, String)> = refs
@@ -1319,11 +1473,13 @@ fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Opti
         FrameworkReferenceKind::Class { fqn } => Some(fqn),
         FrameworkReferenceKind::Namespace { prefix } => Some(prefix),
         FrameworkReferenceKind::Method { .. }
+        | FrameworkReferenceKind::Property { .. }
         | FrameworkReferenceKind::Path { .. }
         | FrameworkReferenceKind::SymfonySymbol { .. }
         | FrameworkReferenceKind::RouteParameter { .. }
         | FrameworkReferenceKind::Translation { .. }
-        | FrameworkReferenceKind::MessengerHandler { .. } => None,
+        | FrameworkReferenceKind::MessengerHandler { .. }
+        | FrameworkReferenceKind::ConfigKey { .. } => None,
     }
 }
 
@@ -1916,6 +2072,142 @@ fn php_first_parameter_type(
     valid_framework_name(&fqn).then_some((fqn, start, end))
 }
 
+fn scan_php_form_fields(
+    uri: &str,
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    refs: &mut Vec<FrameworkReference>,
+) {
+    let Some(data_class) = php_form_data_class(content, use_map, namespace) else {
+        return;
+    };
+    for literal in literals {
+        let Some(call) = php_call_context(content, literal.quote_start) else {
+            continue;
+        };
+        if call.argument_index != 0
+            || !matches!(
+                call.name.to_ascii_lowercase().as_str(),
+                "add" | "get" | "has" | "remove"
+            )
+        {
+            continue;
+        }
+        let name = php_semantic_string(literal.value.trim());
+        if !valid_framework_segment(&name) {
+            continue;
+        }
+        refs.push(FrameworkReference {
+            uri: uri.to_string(),
+            start: literal.start as u32,
+            end: literal.end as u32,
+            kind: FrameworkReferenceKind::Property {
+                class_fqn: data_class.clone(),
+                member_name: name,
+            },
+        });
+    }
+}
+
+fn php_form_data_class(
+    content: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<String> {
+    let marker = content.find("data_class")?;
+    let suffix = &content[marker + "data_class".len()..];
+    let class_suffix = suffix.find("::class")?;
+    let bytes = suffix.as_bytes();
+    let mut name_end = class_suffix;
+    skip_ascii_whitespace_backwards(bytes, &mut name_end);
+    let mut name_start = name_end;
+    while name_start > 0 && is_php_name_char(bytes[name_start - 1]) {
+        name_start -= 1;
+    }
+    let raw = &suffix[name_start..name_end];
+    let fqn = normalize_framework_fqn(&crate::util::resolve_to_fqn(raw, use_map, namespace));
+    valid_framework_name(&fqn).then_some(fqn)
+}
+
+fn scan_php_config_schema(
+    uri: &str,
+    content: &str,
+    literals: &[PhpStringLiteral<'_>],
+    refs: &mut Vec<FrameworkReference>,
+) {
+    if !content.contains("TreeBuilder") {
+        return;
+    }
+    let Some(root_literal) = literals.iter().find(|literal| {
+        php_call_context(content, literal.quote_start).is_some_and(|call| {
+            call.argument_index == 0 && call.name.eq_ignore_ascii_case("TreeBuilder")
+        })
+    }) else {
+        return;
+    };
+    let root = php_semantic_string(root_literal.value.trim());
+    if !valid_config_key_segment(&root) {
+        return;
+    }
+    push_config_key(
+        refs,
+        uri,
+        root.clone(),
+        root_literal.start,
+        root_literal.end,
+        true,
+    );
+
+    let mut parents: Vec<(usize, String)> = Vec::new();
+    for literal in literals {
+        let Some(call) = php_call_context(content, literal.quote_start) else {
+            continue;
+        };
+        let call_name = call.name.to_ascii_lowercase();
+        if call.argument_index != 0 || !is_config_tree_node_call(&call_name) {
+            continue;
+        }
+        let name = php_semantic_string(literal.value.trim());
+        if !valid_config_key_segment(&name) {
+            continue;
+        }
+        let line_start = content[..literal.quote_start]
+            .rfind('\n')
+            .map_or(0, |start| start + 1);
+        let indent = leading_spaces(&content[line_start..literal.quote_start]);
+        while parents
+            .last()
+            .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
+        {
+            parents.pop();
+        }
+        let path = std::iter::once(root.as_str())
+            .chain(parents.iter().map(|(_, parent)| parent.as_str()))
+            .chain(std::iter::once(name.as_str()))
+            .collect::<Vec<_>>()
+            .join(".");
+        push_config_key(refs, uri, path, literal.start, literal.end, true);
+        if call_name == "arraynode" {
+            parents.push((indent, name));
+        }
+    }
+}
+
+fn is_config_tree_node_call(call_name: &str) -> bool {
+    matches!(
+        call_name,
+        "arraynode"
+            | "booleannode"
+            | "enumnode"
+            | "floatnode"
+            | "integernode"
+            | "scalarnode"
+            | "variablenode"
+    )
+}
+
 fn php_call_context(content: &str, offset: usize) -> Option<PhpCallContext<'_>> {
     let prefix = content.get(..offset)?;
     let search_start = offset.saturating_sub(2048);
@@ -2498,6 +2790,8 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
         scan_symfony_yaml_container_symbols(uri, content, &mut refs);
         scan_symfony_yaml_routes(uri, content, &mut refs);
         scan_symfony_yaml_events_and_buses(uri, content, &mut refs);
+        scan_symfony_validation_yaml(uri, content, &mut refs);
+        scan_yaml_config_key_references(uri, content, &mut refs);
     } else if uri
         .split('?')
         .next()
@@ -2506,6 +2800,7 @@ fn scan_framework_references(uri: &str, content: &str) -> Vec<FrameworkReference
         scan_symfony_xml_container_symbols(uri, content, &mut refs);
         scan_symfony_xml_routes(uri, content, &mut refs);
         scan_symfony_xml_events_and_buses(uri, content, &mut refs);
+        scan_symfony_validation_xml(uri, content, &mut refs);
     }
     refs.sort_by(|a, b| a.start.cmp(&b.start).then(a.end.cmp(&b.end)));
     refs.dedup();
@@ -3223,6 +3518,223 @@ fn scan_symfony_xml_events_and_buses(uri: &str, content: &str, refs: &mut Vec<Fr
     }
 }
 
+fn scan_symfony_validation_yaml(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    if !uri.to_ascii_lowercase().contains("validat")
+        && !content.lines().any(|line| line.trim() == "properties:")
+    {
+        return;
+    }
+    let mut class: Option<(String, usize)> = None;
+    let mut properties_indent = None;
+    let mut property_indent = None;
+    for (line_start, line) in line_offsets(content) {
+        let semantic = yaml_content_before_comment(line);
+        let trimmed = semantic.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = leading_spaces(semantic);
+        if let Some((raw_key, key_start, key_end, _)) = yaml_mapping_entry(semantic, line_start) {
+            let (key, quote_adjust) = strip_yaml_quotes(raw_key);
+            let normalized = normalize_framework_fqn(key);
+            if normalized.contains('\\') && valid_framework_name(&normalized) {
+                class = Some((normalized, indent));
+                properties_indent = None;
+                property_indent = None;
+                continue;
+            }
+            let Some((class_fqn, class_indent)) = &class else {
+                continue;
+            };
+            if indent <= *class_indent {
+                class = None;
+                properties_indent = None;
+                property_indent = None;
+                continue;
+            }
+            if key == "properties" {
+                properties_indent = Some(indent);
+                property_indent = None;
+                continue;
+            }
+            if let Some(parent_indent) = properties_indent {
+                if indent <= parent_indent {
+                    properties_indent = None;
+                    property_indent = None;
+                } else {
+                    if property_indent.is_none() {
+                        property_indent = Some(indent);
+                    }
+                    if property_indent == Some(indent) && valid_framework_segment(key) {
+                        refs.push(FrameworkReference {
+                            uri: uri.to_string(),
+                            start: (key_start + quote_adjust.0) as u32,
+                            end: key_end.saturating_sub(quote_adjust.1) as u32,
+                            kind: FrameworkReferenceKind::Property {
+                                class_fqn: class_fqn.clone(),
+                                member_name: key.to_string(),
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some((constraint, start, end)) = yaml_constraint_name(semantic, line_start) {
+            let fqn = if constraint.contains('\\') {
+                normalize_framework_fqn(&constraint)
+            } else {
+                format!("Symfony\\Component\\Validator\\Constraints\\{constraint}")
+            };
+            refs.push(FrameworkReference {
+                uri: uri.to_string(),
+                start: start as u32,
+                end: end as u32,
+                kind: FrameworkReferenceKind::Class { fqn },
+            });
+        }
+    }
+}
+
+fn yaml_constraint_name(line: &str, line_start: usize) -> Option<(String, usize, usize)> {
+    let trimmed_start = line.len() - line.trim_start().len();
+    let trimmed = line.trim_start();
+    let candidate = trimmed.strip_prefix("- ")?.trim_start();
+    let adjustment = trimmed.len() - candidate.len();
+    let raw = candidate
+        .split_once(':')
+        .map_or(candidate, |(name, _)| name)
+        .trim();
+    let (name, quote_adjust) = strip_yaml_quotes(raw);
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| is_php_name_char(byte) || byte == b'-')
+    {
+        return None;
+    }
+    let start = line_start + trimmed_start + adjustment + quote_adjust.0;
+    Some((name.to_string(), start, start + name.len()))
+}
+
+fn scan_symfony_validation_xml(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    if !uri.to_ascii_lowercase().contains("validat")
+        && !content.to_ascii_lowercase().contains("<property")
+    {
+        return;
+    }
+    let lower = content.to_ascii_lowercase();
+    let mut search = 0usize;
+    while let Some(class_rel) = lower[search..].find("<class") {
+        let class_start = search + class_rel;
+        let Some(class_tag_end_rel) = content[class_start..].find('>') else {
+            break;
+        };
+        let class_tag_end = class_start + class_tag_end_rel + 1;
+        let class_tag = &content[class_start..class_tag_end];
+        let Some((class_fqn, _, _)) = xml_attr_value(class_tag, class_start, &["name", "class"])
+        else {
+            search = class_tag_end;
+            continue;
+        };
+        let class_fqn = normalize_framework_fqn(&class_fqn);
+        let class_end = lower[class_tag_end..]
+            .find("</class>")
+            .map_or(content.len(), |end| class_tag_end + end);
+        let mut child_search = class_tag_end;
+        while let Some(tag_rel) = lower[child_search..class_end].find('<') {
+            let tag_start = child_search + tag_rel;
+            let Some(tag_end_rel) = content[tag_start..class_end].find('>') else {
+                break;
+            };
+            let tag_end = tag_start + tag_end_rel + 1;
+            let tag = &content[tag_start..tag_end];
+            let tag_lower = tag.to_ascii_lowercase();
+            if tag_lower.starts_with("<property")
+                && let Some((name, start, end)) =
+                    xml_attr_value(tag, tag_start, &["name", "property"])
+            {
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start: start as u32,
+                    end: end as u32,
+                    kind: FrameworkReferenceKind::Property {
+                        class_fqn: class_fqn.clone(),
+                        member_name: name,
+                    },
+                });
+            } else if tag_lower.starts_with("<constraint")
+                && let Some((name, start, end)) = xml_attr_value(tag, tag_start, &["name", "class"])
+            {
+                let fqn = if name.contains('\\') {
+                    normalize_framework_fqn(&name)
+                } else {
+                    format!("Symfony\\Component\\Validator\\Constraints\\{name}")
+                };
+                refs.push(FrameworkReference {
+                    uri: uri.to_string(),
+                    start: start as u32,
+                    end: end as u32,
+                    kind: FrameworkReferenceKind::Class { fqn },
+                });
+            }
+            child_search = tag_end;
+        }
+        search = class_end.saturating_add("</class>".len());
+    }
+}
+
+fn scan_yaml_config_key_references(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
+    if translation_catalog_domain(uri).is_some() {
+        return;
+    }
+    let mut parents: Vec<(usize, String)> = Vec::new();
+    for (line_start, line) in line_offsets(content) {
+        let semantic = yaml_content_before_comment(line);
+        if semantic.trim().is_empty() || semantic.trim_start().starts_with('-') {
+            continue;
+        }
+        let Some((raw_key, key_start, key_end, value_start)) =
+            yaml_mapping_entry(semantic, line_start)
+        else {
+            continue;
+        };
+        let indent = leading_spaces(semantic);
+        while parents
+            .last()
+            .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
+        {
+            parents.pop();
+        }
+        let (key, quote_adjust) = strip_yaml_quotes(raw_key);
+        if !valid_config_key_segment(key) {
+            continue;
+        }
+        let path = parents
+            .iter()
+            .map(|(_, parent)| parent.as_str())
+            .chain(std::iter::once(key))
+            .collect::<Vec<_>>()
+            .join(".");
+        push_config_key(
+            refs,
+            uri,
+            path,
+            key_start + quote_adjust.0,
+            key_end.saturating_sub(quote_adjust.1),
+            false,
+        );
+        if semantic
+            .get(value_start..)
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+        {
+            parents.push((indent, key.to_string()));
+        }
+    }
+}
+
 fn scan_symfony_yaml_routes(uri: &str, content: &str, refs: &mut Vec<FrameworkReference>) {
     if !uri.to_ascii_lowercase().contains("route") && !content.contains("controller:") {
         return;
@@ -3752,6 +4264,22 @@ fn push_translation(
     });
 }
 
+fn push_config_key(
+    refs: &mut Vec<FrameworkReference>,
+    uri: &str,
+    path: String,
+    start: usize,
+    end: usize,
+    declaration: bool,
+) {
+    refs.push(FrameworkReference {
+        uri: uri.to_string(),
+        start: start as u32,
+        end: end as u32,
+        kind: FrameworkReferenceKind::ConfigKey { path, declaration },
+    });
+}
+
 fn valid_symfony_symbol_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -3768,6 +4296,13 @@ fn valid_translation_domain(domain: &str) -> bool {
         && domain
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+}
+
+fn valid_config_key_segment(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn is_symfony_symbol_char(byte: u8) -> bool {
@@ -4560,6 +5095,47 @@ final class CancelOrderHandler {
         assert!(
             backend
                 .framework_messenger_mappings_for_class("App\\Message\\CancelOrder")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn property_lookup_updates_and_removes_one_validation_resource() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/config/validator/User.yaml";
+        backend.index_framework_uri_content(
+            uri,
+            "App\\Entity\\User:\n  properties:\n    email:\n      - NotBlank: ~\n",
+        );
+
+        let hierarchy = HashSet::from(["app\\entity\\user".to_string()]);
+        assert_eq!(
+            backend
+                .framework_property_reference_locations("email", Some(&hierarchy))
+                .len(),
+            1
+        );
+
+        backend.index_framework_uri_content(
+            uri,
+            "App\\Entity\\User:\n  properties:\n    name:\n      - NotBlank: ~\n",
+        );
+        assert!(
+            backend
+                .framework_property_reference_locations("email", Some(&hierarchy))
+                .is_empty()
+        );
+        assert_eq!(
+            backend
+                .framework_property_reference_locations("name", Some(&hierarchy))
+                .len(),
+            1
+        );
+
+        backend.remove_framework_uri(uri);
+        assert!(
+            backend
+                .framework_property_reference_locations("name", Some(&hierarchy))
                 .is_empty()
         );
     }
