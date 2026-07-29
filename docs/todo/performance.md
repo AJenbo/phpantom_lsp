@@ -680,33 +680,63 @@ body-return inference, since fixed by memoization).
 
 ## P29. Migrate to `mago-phpdoc-syntax`
 
-**Impact: Medium · Effort: Medium**
+**Impact: Medium · Effort: High**
 
 As of the 1.42/1.43 mago releases, `mago-docblock` and
 `mago-type-syntax` are both deprecated and frozen at 1.42.0. Upstream
 folded them into a single unified crate, `mago-phpdoc-syntax`, which
 parses docblock comments and their embedded type and constant
-expressions in one pass and is meant to replace both. The deprecation
-notices point at `mago_phpdoc_syntax::PHPDocParser` (for
-`parse_phpdoc_with_span`) and `mago_phpdoc_syntax::parse_type` (for
-`parse_str`).
+expressions in one pass and is meant to replace both.
 
-We currently call the deprecated functions at four sites, each wrapped
-in `#[allow(deprecated)]`:
+This is **not** a same-shaped API rename. The deprecation notices
+point at `mago_phpdoc_syntax::PHPDocParser` (replacing
+`parse_phpdoc_with_span`) and `mago_phpdoc_syntax::parse_type`
+(replacing `parse_str`), but the new crate produces a fundamentally
+different CST: the old flat `mago_docblock::document::{Document, Tag,
+TagKind}` (one enum with `tags_by_kind(TagKind::X)` lookups) is
+replaced by a `TagValue` enum with ~60 per-tag-kind structs
+(`ThrowsTagValue`, `TemplateTagValue`, `ParamTagValue`, ...), and
+`mago_type_syntax::cst::Type` (69 variants) is replaced by an equally
+restructured type CST. Confirmed by reading both crate sources
+directly rather than relying on docs.rs.
 
-- `src/docblock/parser.rs` — `mago_docblock::parse_phpdoc_with_span`
-- `src/php_type.rs` — `mago_type_syntax::parse_str` (type-string parse
-  and the round-trip test helper)
-- `src/symbol_map/docblock.rs` — `mago_type_syntax::parse_str`
+Grepping for `mago_docblock`/`mago_type_syntax` usage turns up far
+more than the three call sites in the old writeup — at last count 14
+files, including the core of the shared type engine
+(`src/php_type/mod.rs`, `src/php_type/parse.rs` build `PhpType` off
+`mago_type_syntax::cst::Type` directly) and every consumer that
+filters tags by `TagKind` (`src/docblock/tags.rs`, `templates.rs`,
+`conditional.rs`, `virtual_members.rs`, `completion/phpdoc/mod.rs`,
+`code_actions/update_docblock.rs`, `code_actions/phpstan/add_throws.rs`,
+`completion/source/throws_analysis/scanning.rs`, `hover/formatting.rs`).
+This is a full rewrite of the docblock/type parsing foundation, sized
+for several sprint items, not one.
 
-`mago-phpdoc-syntax` first shipped at 1.44.0, so this migration is
-coupled to bumping the rest of the mago toolchain from 1.43.0 to
-1.44.0 (mixing 1.43 and 1.44 would pull two incompatible copies of the
-shared `mago-span` types). Do the version bump and the API migration
-together, drop `mago-docblock` and `mago-type-syntax` from
-`Cargo.toml`, and remove the `#[allow(deprecated)]` wrappers. The
-unified single-pass parser should also be a small win on the docblock
-parse hot path.
+**Sequencing with P30:** [P30](#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir)
+evaluates `mago-hir`, which — if it pans out — replaces this entire
+hand-rolled layer (docblock tag parsing and type-string parsing both)
+with a single upstream pass. Hand-migrating to `mago-phpdoc-syntax`
+now risks being thrown away if `mago-hir` is adopted later. Do not
+start the CST rewrite until P30's triggers have been evaluated one way
+or the other — either `mago-hir` is adopted (making this migration
+moot) or its triggers are judged unmet for the foreseeable future
+(making this migration the fallback worth doing).
+
+The rest of the mago toolchain (`mago-syntax`, `mago-allocator`,
+`mago-database`, `mago-names`, `mago-span`, `mago-formatter`,
+`mago-php-version`, `mago-composer`) is already on 1.44.0 — that bump
+was independent of this CST rewrite and safe to do ahead of it (see
+the `[Unreleased]` changelog entry for the one user-visible effect, a
+`mago-formatter` chain-breaking fix). `mago-docblock` and
+`mago-type-syntax` are still pinned at 1.42.0 pending this migration.
+Do not go past 1.44.0 for the rest of the toolchain until this
+migration (or P30) is underway: `mago-allocator` 1.45.0 rewrites
+`LocalArena`/`SharedArena` into a unified `Arena` trait (new
+`boxed.rs`, `iter.rs`, `collections.rs`, `vec.rs` modules) — a real
+breaking change to the arena API this codebase uses throughout the
+parse hot path (`src/parser/ast_update.rs`'s `with_reusable_arena`,
+the parse-worker threads, etc.) — and taking it piecemeal ahead of a
+real reason to touch that code would be its own unreviewed migration.
 
 ---
 
