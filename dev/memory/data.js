@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785284862528,
+  "lastUpdate": 1785324794310,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22041,6 +22041,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "909223409012eacd9cc07c71b9b39979710d5aec",
+          "message": "Improve diagnostics multi threading",
+          "timestamp": "2026-07-29T13:16:55+02:00",
+          "tree_id": "30c49f373608be2ccbf7478bc7ec0bc6f1433c32",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/909223409012eacd9cc07c71b9b39979710d5aec"
+        },
+        "date": 1785324791035,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 32.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.8,
             "unit": "MiB"
           }
         ]
